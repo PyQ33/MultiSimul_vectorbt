@@ -27,8 +27,9 @@
 <pre><code class="python">import numpy as np
 import pandas as pd
 from functools import wraps, reduce, update_wrapper
-from inspect import signature, Parameter
-import types
+import inspect
+import sys
+from types import FunctionType, MethodType
 import itertools
 from collections.abc import Iterable
 import numba
@@ -39,9 +40,10 @@ from numba.typed import List
 
 
 class Config(dict):
-    &#34;&#34;&#34;A simple dict with frozen keys.&#34;&#34;&#34;
+    &#34;&#34;&#34;A simple dict with (optionally) frozen keys.&#34;&#34;&#34;
 
-    def __init__(self, *args, **kwargs):
+    def __init__(self, *args, frozen=True, **kwargs):
+        self.frozen = frozen
         self.update(*args, **kwargs)
         self.default_config = dict(self)
         for key, value in dict.items(self):
@@ -49,7 +51,7 @@ class Config(dict):
                 dict.__setitem__(self, key, Config(value))
 
     def __setitem__(self, key, val):
-        if key not in self:
+        if self.frozen and key not in self:
             raise KeyError(f&#34;Key {key} is not a valid parameter&#34;)
         dict.__setitem__(self, key, val)
 
@@ -72,6 +74,48 @@ defaults = Config(
     drop_redundant=True,
     keep=&#39;last&#39;
 )
+
+# ############# Documentation ############# #
+
+
+def is_from_module(obj, module_name):
+    &#34;&#34;&#34;Check if `obj` is from the module named by `module_name`.&#34;&#34;&#34;
+    mod = inspect.getmodule(inspect.unwrap(obj))
+    return mod is None or mod.__name__ == module_name
+
+
+def list_pdoc_keys(module_name):
+    &#34;&#34;&#34;List all functions and classes in the module named by `module_name`.&#34;&#34;&#34;
+    return [name for name, obj in inspect.getmembers(sys.modules[module_name])
+            if not name.startswith(&#34;_&#34;)
+            and is_from_module(obj, module_name)
+            and ((inspect.isroutine(obj) and callable(obj)) or inspect.isclass(obj))]
+
+
+def generate__pdoc__(module_name, include_keys=None, exclude_keys=None):
+    &#34;&#34;&#34;Generate a new `__pdoc__` dictionary with keys that are either in `exclude_keys` or not in `include_keys`.&#34;&#34;&#34;
+    all_keys = list_pdoc_keys(module_name)
+    __pdoc__ = {}
+    if include_keys is not None:
+        for k in all_keys:
+            if k not in include_keys:
+                __pdoc__[k] = False
+    if exclude_keys is not None:
+        for k in all_keys:
+            if k in exclude_keys:
+                __pdoc__[k] = False
+    return __pdoc__
+
+def fix_class_for_pdoc(cls):
+    &#34;&#34;&#34;Make class attributes that were defined in the superclass appear in the documentation of this class.&#34;&#34;&#34;
+    for func_name in dir(cls):
+        if not func_name.startswith(&#34;_&#34;):
+            func = getattr(cls, func_name)
+            if isinstance(func, FunctionType):
+                setattr(cls, func_name, func)
+            if isinstance(func, property):
+                setattr(cls, func_name, func)
+    
 
 # ############# Checks ############# #
 
@@ -330,49 +374,56 @@ def tile_index(index, n):
     return pd.Index(np.tile(index, n), name=index.name)
 
 
-def stack_indices(index1, index2):
+def stack_indices(*indices):
     &#34;&#34;&#34;Stack indices.&#34;&#34;&#34;
-    check_same_shape(index1, index2)
-    if not isinstance(index1, pd.MultiIndex):
-        index1 = pd.MultiIndex.from_arrays([index1])
-    if not isinstance(index2, pd.MultiIndex):
-        index2 = pd.MultiIndex.from_arrays([index2])
+    new_index = indices[0]
+    for i in range(1, len(indices)):
+        index1, index2 = new_index, indices[i]
+        check_same_shape(index1, index2)
+        if not isinstance(index1, pd.MultiIndex):
+            index1 = pd.MultiIndex.from_arrays([index1])
+        if not isinstance(index2, pd.MultiIndex):
+            index2 = pd.MultiIndex.from_arrays([index2])
 
-    levels = []
-    for i in range(len(index1.names)):
-        levels.append(index1.get_level_values(i))
-    for i in range(len(index2.names)):
-        levels.append(index2.get_level_values(i))
+        levels = []
+        for i in range(len(index1.names)):
+            levels.append(index1.get_level_values(i))
+        for i in range(len(index2.names)):
+            levels.append(index2.get_level_values(i))
 
-    new_index = pd.MultiIndex.from_arrays(levels)
+        new_index = pd.MultiIndex.from_arrays(levels)
     return new_index
 
 
-def combine_indices(index1, index2):
+def combine_indices(*indices):
     &#34;&#34;&#34;Combine indices using Cartesian product.&#34;&#34;&#34;
-    if not isinstance(index1, pd.Index):
-        index1 = pd.Index(index1)
-    if not isinstance(index2, pd.Index):
-        index2 = pd.Index(index2)
+    new_index = indices[0]
+    for i in range(1, len(indices)):
+        index1, index2 = new_index, indices[i]
+        if not isinstance(index1, pd.Index):
+            index1 = pd.Index(index1)
+        if not isinstance(index2, pd.Index):
+            index2 = pd.Index(index2)
 
-    if len(index1) == 1:
-        return index2
-    elif len(index2) == 1:
-        return index1
+        if len(index1) == 1:
+            return index2
+        elif len(index2) == 1:
+            return index1
 
-    tuples1 = np.repeat(index1.to_numpy(), len(index2))
-    tuples2 = np.tile(index2.to_numpy(), len(index1))
+        tuples1 = np.repeat(index1.to_numpy(), len(index2))
+        tuples2 = np.tile(index2.to_numpy(), len(index1))
 
-    if isinstance(index1, pd.MultiIndex):
-        index1 = pd.MultiIndex.from_tuples(tuples1, names=index1.names)
-    else:
-        index1 = pd.Index(tuples1, name=index1.name)
-    if isinstance(index2, pd.MultiIndex):
-        index2 = pd.MultiIndex.from_tuples(tuples2, names=index2.names)
-    else:
-        index2 = pd.Index(tuples2, name=index2.name)
+        if isinstance(index1, pd.MultiIndex):
+            index1 = pd.MultiIndex.from_tuples(tuples1, names=index1.names)
+        else:
+            index1 = pd.Index(tuples1, name=index1.name)
+        if isinstance(index2, pd.MultiIndex):
+            index2 = pd.MultiIndex.from_tuples(tuples2, names=index2.names)
+        else:
+            index2 = pd.Index(tuples2, name=index2.name)
 
-    return stack_indices(index1, index2)
+        new_index = stack_indices(index1, index2)
+    return new_index
 
 
 def drop_levels(index, levels):
@@ -779,9 +830,9 @@ def broadcast_to_array_of(arg1, arg2):
 
 def copy_func(f):
     &#34;&#34;&#34;Based on http://stackoverflow.com/a/6528148/190597 (Glenn Maynard)&#34;&#34;&#34;
-    g = types.FunctionType(f.__code__, f.__globals__, name=f.__name__,
-                           argdefs=f.__defaults__,
-                           closure=f.__closure__)
+    g = FunctionType(f.__code__, f.__globals__, name=f.__name__,
+                     argdefs=f.__defaults__,
+                     closure=f.__closure__)
     g = update_wrapper(g, f)
     g.__kwdefaults__ = f.__kwdefaults__
     return g
@@ -789,7 +840,7 @@ def copy_func(f):
 
 def add_indexing(indexing_func):
     def wrapper(cls):
-        &#34;&#34;&#34;Add iloc, loc and plain brackets indexing to a class.
+        &#34;&#34;&#34;Add iloc, loc and __getitem__ indexing to a class.
 
         Each indexing operation is forwarded to the underlying pandas objects and
         a new instance of the class with new pandas objects is created using the indexing_func.&#34;&#34;&#34;
@@ -812,12 +863,26 @@ def add_indexing(indexing_func):
         def iloc(self):
             return self._iloc
 
+        iloc.__doc__ = f&#34;&#34;&#34;Forwards [`pandas.Series.iloc`](https://pandas.pydata.org/pandas-docs/stable/reference/api/pandas.Series.iloc.html)/
+        [`pandas.DataFrame.iloc`](https://pandas.pydata.org/pandas-docs/stable/reference/api/pandas.DataFrame.iloc.html)
+        operation to each Series/DataFrame and returns a new instance of `{cls.__name__}`&#34;&#34;&#34;
+
         @property
         def loc(self):
+            &#34;&#34;&#34;Purely label-location based indexer for selection by label.&#34;&#34;&#34;
             return self._loc
 
+        loc.__doc__ = f&#34;&#34;&#34;Forwards [`pandas.Series.loc`](https://pandas.pydata.org/pandas-docs/stable/reference/api/pandas.Series.loc.html)/
+        [`pandas.DataFrame.loc`](https://pandas.pydata.org/pandas-docs/stable/reference/api/pandas.DataFrame.loc.html)
+        operation to each Series/DataFrame and returns a new instance of `{cls.__name__}`&#34;&#34;&#34;
+
         def xs(self, *args, **kwargs):
+            &#34;&#34;&#34;Returns a cross-section (row(s) or column(s)) from the Series/DataFrame.&#34;&#34;&#34;
             return indexing_func(self, lambda x: x.xs(*args, **kwargs))
+
+        xs.__doc__ = f&#34;&#34;&#34;Forwards [`pandas.Series.xs`](https://pandas.pydata.org/pandas-docs/stable/reference/api/pandas.Series.xs.html)/
+        [`pandas.DataFrame.xs`](https://pandas.pydata.org/pandas-docs/stable/reference/api/pandas.DataFrame.xs.html)
+        operation to each Series/DataFrame and returns a new instance of `{cls.__name__}`&#34;&#34;&#34;
 
         def __getitem__(self, key):
             return indexing_func(self, lambda x: x.__getitem__(key))
@@ -907,11 +972,17 @@ def add_param_indexing(param_name, indexing_func):
         def param_loc(self):
             return getattr(self, f&#39;_{param_name}_loc&#39;)
 
+        param_loc.__doc__ = f&#34;&#34;&#34;Access a group of columns by parameter {param_name} using
+        [`pandas.Series.loc`](https://pandas.pydata.org/pandas-docs/stable/reference/api/pandas.Series.loc.html).
+        
+        Forwards this operation to each Series/DataFrame and returns a new instance of `{cls.__name__}`
+        &#34;&#34;&#34;
+
         orig_init_method = copy_func(cls.__init__)
 
         def __init__(self, *args, **kwargs):
             orig_init_method(self, *args, **kwargs)
-            mapper = getattr(self, f&#39;{param_name}_mapper&#39;)
+            mapper = getattr(self, f&#39;_{param_name}_mapper&#39;)
             setattr(self, f&#39;_{param_name}_loc&#39;, ParamLoc(self, mapper))
 
         setattr(cls, &#39;__init__&#39;, __init__)
@@ -1090,13 +1161,13 @@ def combine_multiple_nb(objs, combine_func_nb, *args):
     return result
 
 
-# ############# Numba decorators ############# #
+# ############# Class decorators ############# #
 
 def get_default_args(func):
     return {
         k: v.default
-        for k, v in signature(func).parameters.items()
-        if v.default is not Parameter.empty
+        for k, v in inspect.signature(func).parameters.items()
+        if v.default is not inspect.Parameter.empty
     }
 
 
@@ -1257,7 +1328,7 @@ class Base_Accessor():
 
     def combine_with(self, other, *args, combine_func=None, broadcast_kwargs={}, **kwargs):
         &#34;&#34;&#34;Broadcast with other and combine.
-        
+
         The returned shape is the same as broadcasted shape.&#34;&#34;&#34;
         if isinstance(other, Base_Accessor):
             other = other._obj
@@ -1271,7 +1342,7 @@ class Base_Accessor():
     def combine_with_multiple(self, others, *args, combine_func=None, concat=False,
                               broadcast_kwargs={}, as_columns=None, **kwargs):
         &#34;&#34;&#34;Broadcast with other objects to the same shape and combine them all pairwise.
-        
+
         The returned shape is the same as broadcasted shape if concat is False.
         The returned shape is concatenation of broadcasted shapes if concat is True.&#34;&#34;&#34;
         others = tuple(map(lambda x: x._obj if isinstance(x, Base_Accessor) else x, others))
@@ -1424,7 +1495,7 @@ class Base_SRAccessor(Base_Accessor):
 </summary>
 <pre><code class="python">def add_indexing(indexing_func):
     def wrapper(cls):
-        &#34;&#34;&#34;Add iloc, loc and plain brackets indexing to a class.
+        &#34;&#34;&#34;Add iloc, loc and __getitem__ indexing to a class.
 
         Each indexing operation is forwarded to the underlying pandas objects and
         a new instance of the class with new pandas objects is created using the indexing_func.&#34;&#34;&#34;
@@ -1447,12 +1518,26 @@ class Base_SRAccessor(Base_Accessor):
         def iloc(self):
             return self._iloc
 
+        iloc.__doc__ = f&#34;&#34;&#34;Forwards [`pandas.Series.iloc`](https://pandas.pydata.org/pandas-docs/stable/reference/api/pandas.Series.iloc.html)/
+        [`pandas.DataFrame.iloc`](https://pandas.pydata.org/pandas-docs/stable/reference/api/pandas.DataFrame.iloc.html)
+        operation to each Series/DataFrame and returns a new instance of `{cls.__name__}`&#34;&#34;&#34;
+
         @property
         def loc(self):
+            &#34;&#34;&#34;Purely label-location based indexer for selection by label.&#34;&#34;&#34;
             return self._loc
 
+        loc.__doc__ = f&#34;&#34;&#34;Forwards [`pandas.Series.loc`](https://pandas.pydata.org/pandas-docs/stable/reference/api/pandas.Series.loc.html)/
+        [`pandas.DataFrame.loc`](https://pandas.pydata.org/pandas-docs/stable/reference/api/pandas.DataFrame.loc.html)
+        operation to each Series/DataFrame and returns a new instance of `{cls.__name__}`&#34;&#34;&#34;
+
         def xs(self, *args, **kwargs):
+            &#34;&#34;&#34;Returns a cross-section (row(s) or column(s)) from the Series/DataFrame.&#34;&#34;&#34;
             return indexing_func(self, lambda x: x.xs(*args, **kwargs))
+
+        xs.__doc__ = f&#34;&#34;&#34;Forwards [`pandas.Series.xs`](https://pandas.pydata.org/pandas-docs/stable/reference/api/pandas.Series.xs.html)/
+        [`pandas.DataFrame.xs`](https://pandas.pydata.org/pandas-docs/stable/reference/api/pandas.DataFrame.xs.html)
+        operation to each Series/DataFrame and returns a new instance of `{cls.__name__}`&#34;&#34;&#34;
 
         def __getitem__(self, key):
             return indexing_func(self, lambda x: x.__getitem__(key))
@@ -1540,11 +1625,17 @@ class Base_SRAccessor(Base_Accessor):
         def param_loc(self):
             return getattr(self, f&#39;_{param_name}_loc&#39;)
 
+        param_loc.__doc__ = f&#34;&#34;&#34;Access a group of columns by parameter {param_name} using
+        [`pandas.Series.loc`](https://pandas.pydata.org/pandas-docs/stable/reference/api/pandas.Series.loc.html).
+        
+        Forwards this operation to each Series/DataFrame and returns a new instance of `{cls.__name__}`
+        &#34;&#34;&#34;
+
         orig_init_method = copy_func(cls.__init__)
 
         def __init__(self, *args, **kwargs):
             orig_init_method(self, *args, **kwargs)
-            mapper = getattr(self, f&#39;{param_name}_mapper&#39;)
+            mapper = getattr(self, f&#39;_{param_name}_mapper&#39;)
             setattr(self, f&#39;_{param_name}_loc&#39;, ParamLoc(self, mapper))
 
         setattr(cls, &#39;__init__&#39;, __init__)
@@ -2271,7 +2362,7 @@ def combine_and_concat_nb(obj, others, combine_func_nb, *args):
 </details>
 </dd>
 <dt id="vectorbt.utils.combine_indices"><code class="name flex">
-<span>def <span class="ident">combine_indices</span></span>(<span>index1, index2)</span>
+<span>def <span class="ident">combine_indices</span></span>(<span>*indices)</span>
 </code></dt>
 <dd>
 <div class="desc"><p>Combine indices using Cartesian product.</p></div>
@@ -2279,31 +2370,35 @@ def combine_and_concat_nb(obj, others, combine_func_nb, *args):
 <summary>
 <span>Expand source code</span>
 </summary>
-<pre><code class="python">def combine_indices(index1, index2):
+<pre><code class="python">def combine_indices(*indices):
     &#34;&#34;&#34;Combine indices using Cartesian product.&#34;&#34;&#34;
-    if not isinstance(index1, pd.Index):
-        index1 = pd.Index(index1)
-    if not isinstance(index2, pd.Index):
-        index2 = pd.Index(index2)
+    new_index = indices[0]
+    for i in range(1, len(indices)):
+        index1, index2 = new_index, indices[i]
+        if not isinstance(index1, pd.Index):
+            index1 = pd.Index(index1)
+        if not isinstance(index2, pd.Index):
+            index2 = pd.Index(index2)
 
-    if len(index1) == 1:
-        return index2
-    elif len(index2) == 1:
-        return index1
+        if len(index1) == 1:
+            return index2
+        elif len(index2) == 1:
+            return index1
 
-    tuples1 = np.repeat(index1.to_numpy(), len(index2))
-    tuples2 = np.tile(index2.to_numpy(), len(index1))
+        tuples1 = np.repeat(index1.to_numpy(), len(index2))
+        tuples2 = np.tile(index2.to_numpy(), len(index1))
 
-    if isinstance(index1, pd.MultiIndex):
-        index1 = pd.MultiIndex.from_tuples(tuples1, names=index1.names)
-    else:
-        index1 = pd.Index(tuples1, name=index1.name)
-    if isinstance(index2, pd.MultiIndex):
-        index2 = pd.MultiIndex.from_tuples(tuples2, names=index2.names)
-    else:
-        index2 = pd.Index(tuples2, name=index2.name)
+        if isinstance(index1, pd.MultiIndex):
+            index1 = pd.MultiIndex.from_tuples(tuples1, names=index1.names)
+        else:
+            index1 = pd.Index(tuples1, name=index1.name)
+        if isinstance(index2, pd.MultiIndex):
+            index2 = pd.MultiIndex.from_tuples(tuples2, names=index2.names)
+        else:
+            index2 = pd.Index(tuples2, name=index2.name)
 
-    return stack_indices(index1, index2)</code></pre>
+        new_index = stack_indices(index1, index2)
+    return new_index</code></pre>
 </details>
 </dd>
 <dt id="vectorbt.utils.combine_multiple"><code class="name flex">
@@ -2359,9 +2454,9 @@ def combine_multiple_nb(objs, combine_func_nb, *args):
 </summary>
 <pre><code class="python">def copy_func(f):
     &#34;&#34;&#34;Based on http://stackoverflow.com/a/6528148/190597 (Glenn Maynard)&#34;&#34;&#34;
-    g = types.FunctionType(f.__code__, f.__globals__, name=f.__name__,
-                           argdefs=f.__defaults__,
-                           closure=f.__closure__)
+    g = FunctionType(f.__code__, f.__globals__, name=f.__name__,
+                     argdefs=f.__defaults__,
+                     closure=f.__closure__)
     g = update_wrapper(g, f)
     g.__kwdefaults__ = f.__kwdefaults__
     return g</code></pre>
@@ -2454,6 +2549,50 @@ def combine_multiple_nb(objs, combine_func_nb, *args):
     return index</code></pre>
 </details>
 </dd>
+<dt id="vectorbt.utils.fix_class_for_pdoc"><code class="name flex">
+<span>def <span class="ident">fix_class_for_pdoc</span></span>(<span>cls)</span>
+</code></dt>
+<dd>
+<div class="desc"><p>Make class attributes that were defined in the superclass appear in the documentation of this class.</p></div>
+<details class="source">
+<summary>
+<span>Expand source code</span>
+</summary>
+<pre><code class="python">def fix_class_for_pdoc(cls):
+    &#34;&#34;&#34;Make class attributes that were defined in the superclass appear in the documentation of this class.&#34;&#34;&#34;
+    for func_name in dir(cls):
+        if not func_name.startswith(&#34;_&#34;):
+            func = getattr(cls, func_name)
+            if isinstance(func, FunctionType):
+                setattr(cls, func_name, func)
+            if isinstance(func, property):
+                setattr(cls, func_name, func)</code></pre>
+</details>
+</dd>
+<dt id="vectorbt.utils.generate__pdoc__"><code class="name flex">
+<span>def <span class="ident">generate__pdoc__</span></span>(<span>module_name, include_keys=None, exclude_keys=None)</span>
+</code></dt>
+<dd>
+<div class="desc"><p>Generate a new <code>__pdoc__</code> dictionary with keys that are either in <code>exclude_keys</code> or not in <code>include_keys</code>.</p></div>
+<details class="source">
+<summary>
+<span>Expand source code</span>
+</summary>
+<pre><code class="python">def generate__pdoc__(module_name, include_keys=None, exclude_keys=None):
+    &#34;&#34;&#34;Generate a new `__pdoc__` dictionary with keys that are either in `exclude_keys` or not in `include_keys`.&#34;&#34;&#34;
+    all_keys = list_pdoc_keys(module_name)
+    __pdoc__ = {}
+    if include_keys is not None:
+        for k in all_keys:
+            if k not in include_keys:
+                __pdoc__[k] = False
+    if exclude_keys is not None:
+        for k in all_keys:
+            if k in exclude_keys:
+                __pdoc__[k] = False
+    return __pdoc__</code></pre>
+</details>
+</dd>
 <dt id="vectorbt.utils.get_default_args"><code class="name flex">
 <span>def <span class="ident">get_default_args</span></span>(<span>func)</span>
 </code></dt>
@@ -2466,8 +2605,8 @@ def combine_multiple_nb(objs, combine_func_nb, *args):
 <pre><code class="python">def get_default_args(func):
     return {
         k: v.default
-        for k, v in signature(func).parameters.items()
-        if v.default is not Parameter.empty
+        for k, v in inspect.signature(func).parameters.items()
+        if v.default is not inspect.Parameter.empty
     }</code></pre>
 </details>
 </dd>
@@ -2555,6 +2694,21 @@ def combine_multiple_nb(objs, combine_func_nb, *args):
     return isinstance(arg, pd.DataFrame)</code></pre>
 </details>
 </dd>
+<dt id="vectorbt.utils.is_from_module"><code class="name flex">
+<span>def <span class="ident">is_from_module</span></span>(<span>obj, module_name)</span>
+</code></dt>
+<dd>
+<div class="desc"><p>Check if <code>obj</code> is from the module named by <code>module_name</code>.</p></div>
+<details class="source">
+<summary>
+<span>Expand source code</span>
+</summary>
+<pre><code class="python">def is_from_module(obj, module_name):
+    &#34;&#34;&#34;Check if `obj` is from the module named by `module_name`.&#34;&#34;&#34;
+    mod = inspect.getmodule(inspect.unwrap(obj))
+    return mod is None or mod.__name__ == module_name</code></pre>
+</details>
+</dd>
 <dt id="vectorbt.utils.is_numba_func"><code class="name flex">
 <span>def <span class="ident">is_numba_func</span></span>(<span>arg)</span>
 </code></dt>
@@ -2592,6 +2746,23 @@ def combine_multiple_nb(objs, combine_func_nb, *args):
 </summary>
 <pre><code class="python">def is_series(arg):
     return isinstance(arg, pd.Series)</code></pre>
+</details>
+</dd>
+<dt id="vectorbt.utils.list_pdoc_keys"><code class="name flex">
+<span>def <span class="ident">list_pdoc_keys</span></span>(<span>module_name)</span>
+</code></dt>
+<dd>
+<div class="desc"><p>List all functions and classes in the module named by <code>module_name</code>.</p></div>
+<details class="source">
+<summary>
+<span>Expand source code</span>
+</summary>
+<pre><code class="python">def list_pdoc_keys(module_name):
+    &#34;&#34;&#34;List all functions and classes in the module named by `module_name`.&#34;&#34;&#34;
+    return [name for name, obj in inspect.getmembers(sys.modules[module_name])
+            if not name.startswith(&#34;_&#34;)
+            and is_from_module(obj, module_name)
+            and ((inspect.isroutine(obj) and callable(obj)) or inspect.isclass(obj))]</code></pre>
 </details>
 </dd>
 <dt id="vectorbt.utils.loc_mapper"><code class="name flex">
@@ -2764,7 +2935,7 @@ def select_and_combine_nb(i, obj, others, combine_func_nb, *args):
 </details>
 </dd>
 <dt id="vectorbt.utils.stack_indices"><code class="name flex">
-<span>def <span class="ident">stack_indices</span></span>(<span>index1, index2)</span>
+<span>def <span class="ident">stack_indices</span></span>(<span>*indices)</span>
 </code></dt>
 <dd>
 <div class="desc"><p>Stack indices.</p></div>
@@ -2772,21 +2943,24 @@ def select_and_combine_nb(i, obj, others, combine_func_nb, *args):
 <summary>
 <span>Expand source code</span>
 </summary>
-<pre><code class="python">def stack_indices(index1, index2):
+<pre><code class="python">def stack_indices(*indices):
     &#34;&#34;&#34;Stack indices.&#34;&#34;&#34;
-    check_same_shape(index1, index2)
-    if not isinstance(index1, pd.MultiIndex):
-        index1 = pd.MultiIndex.from_arrays([index1])
-    if not isinstance(index2, pd.MultiIndex):
-        index2 = pd.MultiIndex.from_arrays([index2])
+    new_index = indices[0]
+    for i in range(1, len(indices)):
+        index1, index2 = new_index, indices[i]
+        check_same_shape(index1, index2)
+        if not isinstance(index1, pd.MultiIndex):
+            index1 = pd.MultiIndex.from_arrays([index1])
+        if not isinstance(index2, pd.MultiIndex):
+            index2 = pd.MultiIndex.from_arrays([index2])
 
-    levels = []
-    for i in range(len(index1.names)):
-        levels.append(index1.get_level_values(i))
-    for i in range(len(index2.names)):
-        levels.append(index2.get_level_values(i))
+        levels = []
+        for i in range(len(index1.names)):
+            levels.append(index1.get_level_values(i))
+        for i in range(len(index2.names)):
+            levels.append(index2.get_level_values(i))
 
-    new_index = pd.MultiIndex.from_arrays(levels)
+        new_index = pd.MultiIndex.from_arrays(levels)
     return new_index</code></pre>
 </details>
 </dd>
@@ -3197,7 +3371,7 @@ def to_2d_one_nb(a):
 
     def combine_with(self, other, *args, combine_func=None, broadcast_kwargs={}, **kwargs):
         &#34;&#34;&#34;Broadcast with other and combine.
-        
+
         The returned shape is the same as broadcasted shape.&#34;&#34;&#34;
         if isinstance(other, Base_Accessor):
             other = other._obj
@@ -3211,7 +3385,7 @@ def to_2d_one_nb(a):
     def combine_with_multiple(self, others, *args, combine_func=None, concat=False,
                               broadcast_kwargs={}, as_columns=None, **kwargs):
         &#34;&#34;&#34;Broadcast with other objects to the same shape and combine them all pairwise.
-        
+
         The returned shape is the same as broadcasted shape if concat is False.
         The returned shape is concatenation of broadcasted shapes if concat is True.&#34;&#34;&#34;
         others = tuple(map(lambda x: x._obj if isinstance(x, Base_Accessor) else x, others))
@@ -3438,7 +3612,7 @@ def empty_like(cls, *args, **kwargs):
 </summary>
 <pre><code class="python">def combine_with(self, other, *args, combine_func=None, broadcast_kwargs={}, **kwargs):
     &#34;&#34;&#34;Broadcast with other and combine.
-    
+
     The returned shape is the same as broadcasted shape.&#34;&#34;&#34;
     if isinstance(other, Base_Accessor):
         other = other._obj
@@ -3464,7 +3638,7 @@ The returned shape is concatenation of broadcasted shapes if concat is True.</p>
 <pre><code class="python">def combine_with_multiple(self, others, *args, combine_func=None, concat=False,
                           broadcast_kwargs={}, as_columns=None, **kwargs):
     &#34;&#34;&#34;Broadcast with other objects to the same shape and combine them all pairwise.
-    
+
     The returned shape is the same as broadcasted shape if concat is False.
     The returned shape is concatenation of broadcasted shapes if concat is True.&#34;&#34;&#34;
     others = tuple(map(lambda x: x._obj if isinstance(x, Base_Accessor) else x, others))
@@ -3695,8 +3869,8 @@ The returned shape is concatenation of broadcasted shapes if concat is True.</p>
 <h3>Subclasses</h3>
 <ul class="hlist">
 <li><a title="vectorbt.accessors.Vbt_DFAccessor" href="accessors.html#vectorbt.accessors.Vbt_DFAccessor">Vbt_DFAccessor</a></li>
-<li>vectorbt.signals.Signals_DFAccessor</li>
-<li>vectorbt.timeseries.TimeSeries_DFAccessor</li>
+<li><a title="vectorbt.signals.Signals_DFAccessor" href="signals.html#vectorbt.signals.Signals_DFAccessor">Signals_DFAccessor</a></li>
+<li><a title="vectorbt.timeseries.TimeSeries_DFAccessor" href="timeseries.html#vectorbt.timeseries.TimeSeries_DFAccessor">TimeSeries_DFAccessor</a></li>
 </ul>
 <h3>Static methods</h3>
 <dl>
@@ -3741,6 +3915,36 @@ def empty_like(cls, df, fill_value=np.nan):
 </dl>
 <h3>Methods</h3>
 <dl>
+<dt id="vectorbt.utils.Base_DFAccessor.apply_and_concat"><code class="name flex">
+<span>def <span class="ident">apply_and_concat</span></span>(<span>self, ntimes, *args, apply_func=None, as_columns=None, **kwargs)</span>
+</code></dt>
+<dd>
+<p class="inheritance">
+<em>Inherited from:</em>
+<code><a title="vectorbt.utils.Base_Accessor" href="#vectorbt.utils.Base_Accessor">Base_Accessor</a></code>.<code><a title="vectorbt.utils.Base_Accessor.apply_and_concat" href="#vectorbt.utils.Base_Accessor.apply_and_concat">apply_and_concat</a></code>
+</p>
+<div class="desc inherited"><p>Apply a function n times and concatenate results into a single dataframe.</p></div>
+</dd>
+<dt id="vectorbt.utils.Base_DFAccessor.combine_with"><code class="name flex">
+<span>def <span class="ident">combine_with</span></span>(<span>self, other, *args, combine_func=None, broadcast_kwargs={}, **kwargs)</span>
+</code></dt>
+<dd>
+<p class="inheritance">
+<em>Inherited from:</em>
+<code><a title="vectorbt.utils.Base_Accessor" href="#vectorbt.utils.Base_Accessor">Base_Accessor</a></code>.<code><a title="vectorbt.utils.Base_Accessor.combine_with" href="#vectorbt.utils.Base_Accessor.combine_with">combine_with</a></code>
+</p>
+<div class="desc inherited"><p>Broadcast with other and combine …</p></div>
+</dd>
+<dt id="vectorbt.utils.Base_DFAccessor.combine_with_multiple"><code class="name flex">
+<span>def <span class="ident">combine_with_multiple</span></span>(<span>self, others, *args, combine_func=None, concat=False, broadcast_kwargs={}, as_columns=None, **kwargs)</span>
+</code></dt>
+<dd>
+<p class="inheritance">
+<em>Inherited from:</em>
+<code><a title="vectorbt.utils.Base_Accessor" href="#vectorbt.utils.Base_Accessor">Base_Accessor</a></code>.<code><a title="vectorbt.utils.Base_Accessor.combine_with_multiple" href="#vectorbt.utils.Base_Accessor.combine_with_multiple">combine_with_multiple</a></code>
+</p>
+<div class="desc inherited"><p>Broadcast with other objects to the same shape and combine them all pairwise …</p></div>
+</dd>
 <dt id="vectorbt.utils.Base_DFAccessor.wrap_array"><code class="name flex">
 <span>def <span class="ident">wrap_array</span></span>(<span>self, a, index=None, columns=None, dtype=None)</span>
 </code></dt>
@@ -3761,16 +3965,6 @@ def empty_like(cls, df, fill_value=np.nan):
 </details>
 </dd>
 </dl>
-<h3>Inherited members</h3>
-<ul class="hlist">
-<li><code><b><a title="vectorbt.utils.Base_Accessor" href="#vectorbt.utils.Base_Accessor">Base_Accessor</a></b></code>:
-<ul class="hlist">
-<li><code><a title="vectorbt.utils.Base_Accessor.apply_and_concat" href="#vectorbt.utils.Base_Accessor.apply_and_concat">apply_and_concat</a></code></li>
-<li><code><a title="vectorbt.utils.Base_Accessor.combine_with" href="#vectorbt.utils.Base_Accessor.combine_with">combine_with</a></code></li>
-<li><code><a title="vectorbt.utils.Base_Accessor.combine_with_multiple" href="#vectorbt.utils.Base_Accessor.combine_with_multiple">combine_with_multiple</a></code></li>
-</ul>
-</li>
-</ul>
 </dd>
 <dt id="vectorbt.utils.Base_SRAccessor"><code class="flex name class">
 <span>class <span class="ident">Base_SRAccessor</span></span>
@@ -3823,8 +4017,8 @@ def empty_like(cls, df, fill_value=np.nan):
 <h3>Subclasses</h3>
 <ul class="hlist">
 <li><a title="vectorbt.accessors.Vbt_SRAccessor" href="accessors.html#vectorbt.accessors.Vbt_SRAccessor">Vbt_SRAccessor</a></li>
-<li>vectorbt.signals.Signals_SRAccessor</li>
-<li>vectorbt.timeseries.TimeSeries_SRAccessor</li>
+<li><a title="vectorbt.signals.Signals_SRAccessor" href="signals.html#vectorbt.signals.Signals_SRAccessor">Signals_SRAccessor</a></li>
+<li><a title="vectorbt.timeseries.TimeSeries_SRAccessor" href="timeseries.html#vectorbt.timeseries.TimeSeries_SRAccessor">TimeSeries_SRAccessor</a></li>
 </ul>
 <h3>Static methods</h3>
 <dl>
@@ -3869,6 +4063,36 @@ def empty_like(cls, sr, fill_value=np.nan):
 </dl>
 <h3>Methods</h3>
 <dl>
+<dt id="vectorbt.utils.Base_SRAccessor.apply_and_concat"><code class="name flex">
+<span>def <span class="ident">apply_and_concat</span></span>(<span>self, ntimes, *args, apply_func=None, as_columns=None, **kwargs)</span>
+</code></dt>
+<dd>
+<p class="inheritance">
+<em>Inherited from:</em>
+<code><a title="vectorbt.utils.Base_Accessor" href="#vectorbt.utils.Base_Accessor">Base_Accessor</a></code>.<code><a title="vectorbt.utils.Base_Accessor.apply_and_concat" href="#vectorbt.utils.Base_Accessor.apply_and_concat">apply_and_concat</a></code>
+</p>
+<div class="desc inherited"><p>Apply a function n times and concatenate results into a single dataframe.</p></div>
+</dd>
+<dt id="vectorbt.utils.Base_SRAccessor.combine_with"><code class="name flex">
+<span>def <span class="ident">combine_with</span></span>(<span>self, other, *args, combine_func=None, broadcast_kwargs={}, **kwargs)</span>
+</code></dt>
+<dd>
+<p class="inheritance">
+<em>Inherited from:</em>
+<code><a title="vectorbt.utils.Base_Accessor" href="#vectorbt.utils.Base_Accessor">Base_Accessor</a></code>.<code><a title="vectorbt.utils.Base_Accessor.combine_with" href="#vectorbt.utils.Base_Accessor.combine_with">combine_with</a></code>
+</p>
+<div class="desc inherited"><p>Broadcast with other and combine …</p></div>
+</dd>
+<dt id="vectorbt.utils.Base_SRAccessor.combine_with_multiple"><code class="name flex">
+<span>def <span class="ident">combine_with_multiple</span></span>(<span>self, others, *args, combine_func=None, concat=False, broadcast_kwargs={}, as_columns=None, **kwargs)</span>
+</code></dt>
+<dd>
+<p class="inheritance">
+<em>Inherited from:</em>
+<code><a title="vectorbt.utils.Base_Accessor" href="#vectorbt.utils.Base_Accessor">Base_Accessor</a></code>.<code><a title="vectorbt.utils.Base_Accessor.combine_with_multiple" href="#vectorbt.utils.Base_Accessor.combine_with_multiple">combine_with_multiple</a></code>
+</p>
+<div class="desc inherited"><p>Broadcast with other objects to the same shape and combine them all pairwise …</p></div>
+</dd>
 <dt id="vectorbt.utils.Base_SRAccessor.wrap_array"><code class="name flex">
 <span>def <span class="ident">wrap_array</span></span>(<span>self, a, index=None, columns=None, dtype=None)</span>
 </code></dt>
@@ -3889,31 +4113,22 @@ def empty_like(cls, sr, fill_value=np.nan):
 </details>
 </dd>
 </dl>
-<h3>Inherited members</h3>
-<ul class="hlist">
-<li><code><b><a title="vectorbt.utils.Base_Accessor" href="#vectorbt.utils.Base_Accessor">Base_Accessor</a></b></code>:
-<ul class="hlist">
-<li><code><a title="vectorbt.utils.Base_Accessor.apply_and_concat" href="#vectorbt.utils.Base_Accessor.apply_and_concat">apply_and_concat</a></code></li>
-<li><code><a title="vectorbt.utils.Base_Accessor.combine_with" href="#vectorbt.utils.Base_Accessor.combine_with">combine_with</a></code></li>
-<li><code><a title="vectorbt.utils.Base_Accessor.combine_with_multiple" href="#vectorbt.utils.Base_Accessor.combine_with_multiple">combine_with_multiple</a></code></li>
-</ul>
-</li>
-</ul>
 </dd>
 <dt id="vectorbt.utils.Config"><code class="flex name class">
 <span>class <span class="ident">Config</span></span>
-<span>(</span><span>*args, **kwargs)</span>
+<span>(</span><span>*args, frozen=True, **kwargs)</span>
 </code></dt>
 <dd>
-<div class="desc"><p>A simple dict with frozen keys.</p></div>
+<div class="desc"><p>A simple dict with (optionally) frozen keys.</p></div>
 <details class="source">
 <summary>
 <span>Expand source code</span>
 </summary>
 <pre><code class="python">class Config(dict):
-    &#34;&#34;&#34;A simple dict with frozen keys.&#34;&#34;&#34;
+    &#34;&#34;&#34;A simple dict with (optionally) frozen keys.&#34;&#34;&#34;
 
-    def __init__(self, *args, **kwargs):
+    def __init__(self, *args, frozen=True, **kwargs):
+        self.frozen = frozen
         self.update(*args, **kwargs)
         self.default_config = dict(self)
         for key, value in dict.items(self):
@@ -3921,7 +4136,7 @@ def empty_like(cls, sr, fill_value=np.nan):
                 dict.__setitem__(self, key, Config(value))
 
     def __setitem__(self, key, val):
-        if key not in self:
+        if self.frozen and key not in self:
             raise KeyError(f&#34;Key {key} is not a valid parameter&#34;)
         dict.__setitem__(self, key, val)
 
@@ -4039,15 +4254,19 @@ If you want those, see the staticmethod builtin.</p></div>
 <li><code><a title="vectorbt.utils.drop_duplicate_levels" href="#vectorbt.utils.drop_duplicate_levels">drop_duplicate_levels</a></code></li>
 <li><code><a title="vectorbt.utils.drop_levels" href="#vectorbt.utils.drop_levels">drop_levels</a></code></li>
 <li><code><a title="vectorbt.utils.drop_redundant_levels" href="#vectorbt.utils.drop_redundant_levels">drop_redundant_levels</a></code></li>
+<li><code><a title="vectorbt.utils.fix_class_for_pdoc" href="#vectorbt.utils.fix_class_for_pdoc">fix_class_for_pdoc</a></code></li>
+<li><code><a title="vectorbt.utils.generate__pdoc__" href="#vectorbt.utils.generate__pdoc__">generate__pdoc__</a></code></li>
 <li><code><a title="vectorbt.utils.get_default_args" href="#vectorbt.utils.get_default_args">get_default_args</a></code></li>
 <li><code><a title="vectorbt.utils.index_from_values" href="#vectorbt.utils.index_from_values">index_from_values</a></code></li>
 <li><code><a title="vectorbt.utils.is_array" href="#vectorbt.utils.is_array">is_array</a></code></li>
 <li><code><a title="vectorbt.utils.is_array_like" href="#vectorbt.utils.is_array_like">is_array_like</a></code></li>
 <li><code><a title="vectorbt.utils.is_broadcasting_needed" href="#vectorbt.utils.is_broadcasting_needed">is_broadcasting_needed</a></code></li>
 <li><code><a title="vectorbt.utils.is_frame" href="#vectorbt.utils.is_frame">is_frame</a></code></li>
+<li><code><a title="vectorbt.utils.is_from_module" href="#vectorbt.utils.is_from_module">is_from_module</a></code></li>
 <li><code><a title="vectorbt.utils.is_numba_func" href="#vectorbt.utils.is_numba_func">is_numba_func</a></code></li>
 <li><code><a title="vectorbt.utils.is_pandas" href="#vectorbt.utils.is_pandas">is_pandas</a></code></li>
 <li><code><a title="vectorbt.utils.is_series" href="#vectorbt.utils.is_series">is_series</a></code></li>
+<li><code><a title="vectorbt.utils.list_pdoc_keys" href="#vectorbt.utils.list_pdoc_keys">list_pdoc_keys</a></code></li>
 <li><code><a title="vectorbt.utils.loc_mapper" href="#vectorbt.utils.loc_mapper">loc_mapper</a></code></li>
 <li><code><a title="vectorbt.utils.make_symmetric" href="#vectorbt.utils.make_symmetric">make_symmetric</a></code></li>
 <li><code><a title="vectorbt.utils.rename_levels" href="#vectorbt.utils.rename_levels">rename_levels</a></code></li>
@@ -4099,6 +4318,9 @@ If you want those, see the staticmethod builtin.</p></div>
 <li>
 <h4><code><a title="vectorbt.utils.Base_DFAccessor" href="#vectorbt.utils.Base_DFAccessor">Base_DFAccessor</a></code></h4>
 <ul class="">
+<li><code><a title="vectorbt.utils.Base_DFAccessor.apply_and_concat" href="#vectorbt.utils.Base_DFAccessor.apply_and_concat">apply_and_concat</a></code></li>
+<li><code><a title="vectorbt.utils.Base_DFAccessor.combine_with" href="#vectorbt.utils.Base_DFAccessor.combine_with">combine_with</a></code></li>
+<li><code><a title="vectorbt.utils.Base_DFAccessor.combine_with_multiple" href="#vectorbt.utils.Base_DFAccessor.combine_with_multiple">combine_with_multiple</a></code></li>
 <li><code><a title="vectorbt.utils.Base_DFAccessor.empty" href="#vectorbt.utils.Base_DFAccessor.empty">empty</a></code></li>
 <li><code><a title="vectorbt.utils.Base_DFAccessor.empty_like" href="#vectorbt.utils.Base_DFAccessor.empty_like">empty_like</a></code></li>
 <li><code><a title="vectorbt.utils.Base_DFAccessor.wrap_array" href="#vectorbt.utils.Base_DFAccessor.wrap_array">wrap_array</a></code></li>
@@ -4107,6 +4329,9 @@ If you want those, see the staticmethod builtin.</p></div>
 <li>
 <h4><code><a title="vectorbt.utils.Base_SRAccessor" href="#vectorbt.utils.Base_SRAccessor">Base_SRAccessor</a></code></h4>
 <ul class="">
+<li><code><a title="vectorbt.utils.Base_SRAccessor.apply_and_concat" href="#vectorbt.utils.Base_SRAccessor.apply_and_concat">apply_and_concat</a></code></li>
+<li><code><a title="vectorbt.utils.Base_SRAccessor.combine_with" href="#vectorbt.utils.Base_SRAccessor.combine_with">combine_with</a></code></li>
+<li><code><a title="vectorbt.utils.Base_SRAccessor.combine_with_multiple" href="#vectorbt.utils.Base_SRAccessor.combine_with_multiple">combine_with_multiple</a></code></li>
 <li><code><a title="vectorbt.utils.Base_SRAccessor.empty" href="#vectorbt.utils.Base_SRAccessor.empty">empty</a></code></li>
 <li><code><a title="vectorbt.utils.Base_SRAccessor.empty_like" href="#vectorbt.utils.Base_SRAccessor.empty_like">empty_like</a></code></li>
 <li><code><a title="vectorbt.utils.Base_SRAccessor.wrap_array" href="#vectorbt.utils.Base_SRAccessor.wrap_array">wrap_array</a></code></li>
