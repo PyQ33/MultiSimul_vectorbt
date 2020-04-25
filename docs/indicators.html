@@ -5,12 +5,8 @@
 <meta name="viewport" content="width=device-width, initial-scale=1, minimum-scale=1" />
 <meta name="generator" content="pdoc 0.8.1" />
 <title>vectorbt.indicators API documentation</title>
-<meta name="description" content="Before running examples, import the following libraries:
-```py
-import numpy as np
-import pandas as pd
-from datetime import datetime, timedelta
-from …" />
+<meta name="description" content="Technical indicators are used to see past trends and anticipate future moves. This module provides a collection
+of such indicators, but also a …" />
 <link href='https://cdnjs.cloudflare.com/ajax/libs/normalize/8.0.0/normalize.min.css' rel='stylesheet'>
 <link href='https://cdnjs.cloudflare.com/ajax/libs/10up-sanitize.css/8.0.0/sanitize.min.css' rel='stylesheet'>
 <link href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/9.12.0/styles/github.min.css" rel="stylesheet">
@@ -25,28 +21,51 @@ from …" />
 <h1 class="title">Module <code>vectorbt.indicators</code></h1>
 </header>
 <section id="section-intro">
+<p>Technical indicators are used to see past trends and anticipate future moves. This module provides a collection
+of such indicators, but also a comprehensive <code><a title="vectorbt.indicators.IndicatorFactory" href="#vectorbt.indicators.IndicatorFactory">IndicatorFactory</a></code> for building new indicators
+with ease.</p>
 <p>Before running examples, import the following libraries:</p>
 <pre><code class="py">import numpy as np
 import pandas as pd
 from datetime import datetime, timedelta
+import itertools
 from numba import njit
 
 import vectorbt as vbt
+
+np.random.seed(0)
+price = pd.Series(np.cumsum(np.random.uniform(-0.8, 1, size=(100,))), 
+    index=[datetime(2018, 1, 1) + timedelta(days=i) for i in range(100)])
+
+price.vbt.plot()
 </code></pre>
+<p><img alt="" src="img/Indicators_price.png"></p>
 <details class="source">
 <summary>
 <span>Expand source code</span>
 </summary>
 <pre><code class="python">&#34;&#34;&#34;
+Technical indicators are used to see past trends and anticipate future moves. This module provides a collection
+of such indicators, but also a comprehensive `vectorbt.indicators.IndicatorFactory` for building new indicators
+with ease.
+
 Before running examples, import the following libraries:
 ```py
 import numpy as np
 import pandas as pd
 from datetime import datetime, timedelta
+import itertools
 from numba import njit
 
 import vectorbt as vbt
+
+np.random.seed(0)
+price = pd.Series(np.cumsum(np.random.uniform(-0.8, 1, size=(100,))), 
+    index=[datetime(2018, 1, 1) + timedelta(days=i) for i in range(100)])
+
+price.vbt.plot()
 ```
+![](img/Indicators_price.png)
 &#34;&#34;&#34;
 import pandas as pd
 import numpy as np
@@ -104,7 +123,7 @@ def broadcast_ts(ts, params_len, new_columns):
 
 
 def from_params_pipeline(ts_list, param_list, level_names, num_outputs, custom_func, *args, pass_lists=False,
-                         param_product=False, broadcast_kwargs={}, **kwargs):
+                         param_product=False, broadcast_kwargs={}, return_raw=False, **kwargs):
     &#34;&#34;&#34;A pipeline for calculating an indicator, used by `vectorbt.indicators.IndicatorFactory`.
 
     Does the following:
@@ -171,12 +190,12 @@ def from_params_pipeline(ts_list, param_list, level_names, num_outputs, custom_f
 
     &gt;&gt;&gt; output_df = pd.DataFrame(output, columns=new_columns)
     &gt;&gt;&gt; print(output_df)
-    p1                                        1                        
-    p2            2             3             4    
-    p3        False         False         False    
-           a      b      a      b      a      b
-    0      6      7      7      8      8      9
-    1      9     10     10     11     11     12
+    p1      1      1      1      1      1      1                        
+    p2      2      2      3      3      4      4    
+    p3  False  False  False  False  False  False    
+            a      b      a      b      a      b
+    0       6      7      7      8      8      9
+    1       9     10     10     11     11     12
     ```
 
     * Broadcasts objects in `ts_list` to match the shape of objects in `output_list` through tiling.
@@ -189,12 +208,12 @@ def from_params_pipeline(ts_list, param_list, level_names, num_outputs, custom_f
     ...     ts_list[1].vbt.tile(len(param_list[0]), as_columns=p_columns)
     ... ]
     &gt;&gt;&gt; print(new_ts_list[0])
-    p1                                        1                        
-    p2            2             3             4    
-    p3        False         False         False    
-           a      b      a      b      a      b
-    0      1      1      1      1      1      1
-    1      2      2      2      2      2      2
+    p1      1      1      1      1      1      1                        
+    p2      2      2      3      3      4      4    
+    p3  False  False  False  False  False  False     
+            a      b      a      b      a      b
+    0       1      1      1      1      1      1
+    1       2      2      2      2      2      2
     ```
 
     * Builds parameter mappers that will link parameters from `param_list` to columns in 
@@ -211,7 +230,12 @@ def from_params_pipeline(ts_list, param_list, level_names, num_outputs, custom_f
         pass_lists (bool): If True, arguments are passed to the `custom_func` as lists. Defaults to False.
         param_product (bool): If True, builds a Cartesian product out of all parameters. Defaults to False.
         broadcast_kwargs (dict, optional): Keyword arguments passed to the `vectorbt.utils.broadcast` on time series objects.
-        **kwargs: Keyword arguments passed to the `custom_func`. But only if `custom_func` is not Numba-compiled.
+        return_raw (bool): If True, returns the raw output without post-processing. Defaults to False.
+        **kwargs: Keyword arguments passed to the `custom_func`.
+
+            Some common arguments include `return_cache` to return cache and `cache` to pass cache. 
+            Those are only applicable to `custom_func` that supports it (`custom_func` created using
+            `IndicatorFactory.from_apply_func` are supported by default).
     Returns:
         A list of transformed inputs (`pandas_like`), a list of generated outputs (`pandas_like`), 
         a list of parameter arrays (`numpy.ndarray`), a list of parameter mappers (`pandas.Series`),
@@ -247,6 +271,8 @@ def from_params_pipeline(ts_list, param_list, level_names, num_outputs, custom_f
         output_list = custom_func(ts_list, param_list, *args, **kwargs)
     else:
         output_list = custom_func(*ts_list, *param_list, *args, **kwargs)
+    if return_raw or kwargs.get(&#39;return_cache&#39;, False):
+        return output_list  # return raw cache outputs
     if not isinstance(output_list, (tuple, list, List)):
         output_list = [output_list]
     else:
@@ -258,11 +284,6 @@ def from_params_pipeline(ts_list, param_list, level_names, num_outputs, custom_f
         other_list = []
     # Process only the num_outputs outputs
     output_list = output_list[:num_outputs]
-    if len(param_list) &gt; 0:
-        for output in output_list:
-            if output.shape[1] != to_2d(ts_list[0]).shape[1] * len(param_list[0]):
-                raise ValueError(f&#34;The number of output columns {output.shape[1]} doesn&#39;t match with the \
-number of input columns {to_2d(ts_list[0]).shape[1]} * the number of parameter values {len(param_list[0])}.&#34;)
     if len(param_list) &gt; 0:
         # Build new column levels on top of time series levels
         new_columns = build_column_hierarchy(param_list, level_names, to_2d(ts_list[0]).columns)
@@ -297,23 +318,26 @@ def perform_init_checks(ts_list, output_list, param_list, mapper_list, name):
     check_type(name, str)
 
 
-def is_equal(obj, other, multiple=False, name=&#39;is_equal&#39;, **kwargs):
+def is_equal(obj, other, multiple=False, name=&#39;is_equal&#39;, as_columns=None, **kwargs):
     if multiple:
-        as_columns = index_from_values(other, name=name)
+        if as_columns is None:
+            as_columns = index_from_values(other, name=name)
         return obj.vbt.combine_with_multiple(other, combine_func=np.equal, as_columns=as_columns, concat=True, **kwargs)
     return obj.vbt.combine_with(other, combine_func=np.equal, **kwargs)
 
 
-def is_above(obj, other, multiple=False, name=&#39;is_above&#39;, **kwargs):
+def is_above(obj, other, multiple=False, name=&#39;is_above&#39;, as_columns=None, **kwargs):
     if multiple:
-        as_columns = index_from_values(other, name=name)
+        if as_columns is None:
+            as_columns = index_from_values(other, name=name)
         return obj.vbt.combine_with_multiple(other, combine_func=np.greater, as_columns=as_columns, concat=True, **kwargs)
     return obj.vbt.combine_with(other, combine_func=np.greater, **kwargs)
 
 
-def is_below(obj, other, multiple=False, name=&#39;is_below&#39;, **kwargs):
+def is_below(obj, other, multiple=False, name=&#39;is_below&#39;, as_columns=None, **kwargs):
     if multiple:
-        as_columns = index_from_values(other, name=name)
+        if as_columns is None:
+            as_columns = index_from_values(other, name=name)
         return obj.vbt.combine_with_multiple(other, combine_func=np.less, as_columns=as_columns, concat=True, **kwargs)
     return obj.vbt.combine_with(other, combine_func=np.less, **kwargs)
 
@@ -364,7 +388,7 @@ class IndicatorFactory():
         * Adds user-defined properties
         * Adds common comparison methods for all inputs, outputs and properties, e.g., crossovers
 
-        Consider the following dataframe:
+        Consider the following smaller price dataframe `price_sm`:
 
         ```python-repl
         &gt;&gt;&gt; index = pd.Index([
@@ -374,10 +398,10 @@ class IndicatorFactory():
         ...     datetime(2018, 1, 4),
         ...     datetime(2018, 1, 5),
         ... ])
-        &gt;&gt;&gt; price = pd.DataFrame({
+        &gt;&gt;&gt; price_sm = pd.DataFrame({
         ...     &#39;a&#39;: [1, 2, 3, 4, 5], 
         ...     &#39;b&#39;: [5, 4, 3, 2, 1]}, index=index).astype(float)
-        &gt;&gt;&gt; print(price)
+        &gt;&gt;&gt; print(price_sm)
                       a    b
         2018-01-01  1.0  5.0
         2018-01-02  2.0  4.0
@@ -393,11 +417,11 @@ class IndicatorFactory():
 
         ```python-repl
         &gt;&gt;&gt; ma_df = pd.DataFrame.vbt.concat(
-        ...     price.rolling(window=2).mean(), 
-        ...     price.rolling(window=3).mean(), 
+        ...     price_sm.rolling(window=2).mean(), 
+        ...     price_sm.rolling(window=3).mean(), 
         ...     as_columns=pd.Index([2, 3], name=&#39;ma_window&#39;))
         &gt;&gt;&gt; print(ma_df)
-        ma_window     2         3     
+        ma_window     2    2    3    3
                       a    b    a    b
         2018-01-01  NaN  NaN  NaN  NaN
         2018-01-02  1.5  4.5  NaN  NaN
@@ -405,10 +429,10 @@ class IndicatorFactory():
         2018-01-04  3.5  2.5  3.0  3.0
         2018-01-05  4.5  1.5  4.0  2.0
 
-        &gt;&gt;&gt; above_signals = (price.vbt.tile(2).vbt &gt; ma_df)
+        &gt;&gt;&gt; above_signals = (price_sm.vbt.tile(2).vbt &gt; ma_df)
         &gt;&gt;&gt; above_signals = above_signals.vbt.signals.first(after_false=True)
         &gt;&gt;&gt; print(above_signals)
-        ma_window       2             3       
+        ma_window       2      2      3      3
                         a      b      a      b
         2018-01-01  False  False  False  False
         2018-01-02   True  False  False  False
@@ -416,10 +440,10 @@ class IndicatorFactory():
         2018-01-04  False  False  False  False
         2018-01-05  False  False  False  False
 
-        &gt;&gt;&gt; below_signals = (price.vbt.tile(2).vbt &lt; ma_df)
+        &gt;&gt;&gt; below_signals = (price_sm.vbt.tile(2).vbt &lt; ma_df)
         &gt;&gt;&gt; below_signals = below_signals.vbt.signals.first(after_false=True)
         &gt;&gt;&gt; print(below_signals)
-        ma_window       2             3       
+        ma_window       2      2      3      3
                         a      b      a      b
         2018-01-01  False  False  False  False
         2018-01-02  False   True  False  False
@@ -432,15 +456,15 @@ class IndicatorFactory():
 
         ```python-repl
         &gt;&gt;&gt; MyMA = vbt.IndicatorFactory(
-        ...     ts_names=[&#39;price&#39;],
+        ...     ts_names=[&#39;price_sm&#39;],
         ...     param_names=[&#39;window&#39;],
         ...     output_names=[&#39;ma&#39;],
         ...     name=&#39;myma&#39;
         ... ).from_apply_func(vbt.timeseries.rolling_mean_nb)
 
-        &gt;&gt;&gt; myma = MyMA.from_params(price, [2, 3])
-        &gt;&gt;&gt; above_signals = myma.price_above(myma.ma, crossover=True)
-        &gt;&gt;&gt; below_signals = myma.price_below(myma.ma, crossover=True)
+        &gt;&gt;&gt; myma = MyMA.from_params(price_sm, [2, 3])
+        &gt;&gt;&gt; above_signals = myma.price_sm_above(myma.ma, crossover=True)
+        &gt;&gt;&gt; below_signals = myma.price_sm_below(myma.ma, crossover=True)
         ```
 
         It not only produced the handy `from_params` method, but generated a whole infrastructure to be run with
@@ -453,9 +477,9 @@ class IndicatorFactory():
         &#39;ma_above&#39;
         &#39;ma_below&#39;
         &#39;ma_equal&#39;
-        &#39;price_above&#39;
-        &#39;price_below&#39;
-        &#39;price_equal&#39;
+        &#39;price_sm_above&#39;
+        &#39;price_sm_below&#39;
+        &#39;price_sm_equal&#39;
         ```
 
         Each of these methods uses vectorbt&#39;s own broadcasting, so you can compare time-series objects with an 
@@ -464,8 +488,8 @@ class IndicatorFactory():
 
         ```python-repl
         &gt;&gt;&gt; myma.ma_above([1.5, 2.5], multiple=True)
-        myma_ma_above    1.5                         2.5                     
-        myma_window        2             3             2             3       
+        myma_ma_above    1.5    1.5    1.5    1.5    2.5    2.5    2.5    2.5
+        myma_window        2      2      3      3      2      2      3      3
                            a      b      a      b      a      b      a      b
         2018-01-01     False  False  False  False  False  False  False  False
         2018-01-02     False   True  False  False  False   True  False  False
@@ -490,27 +514,28 @@ class IndicatorFactory():
         * Passing multiple time-series objects will broadcast them to the same shape and index/columns
 
         ```python-repl
-        &gt;&gt;&gt; price1 = price
-        &gt;&gt;&gt; price2 = price.copy() + 1
-        &gt;&gt;&gt; price2.columns = [&#39;a2&#39;, &#39;b2&#39;]
+        &gt;&gt;&gt; price_sm2 = price_sm.copy() + 1
+        &gt;&gt;&gt; price_sm2.columns = [&#39;a2&#39;, &#39;b2&#39;]
 
         &gt;&gt;&gt; MyInd = vbt.IndicatorFactory(
-        ...     ts_names=[&#39;price1&#39;, &#39;price2&#39;],
+        ...     ts_names=[&#39;price_sm&#39;, &#39;price_sm2&#39;],
         ...     param_names=[&#39;p1&#39;, &#39;p2&#39;]
-        ... ).from_apply_func(lambda price1, price2, p1, p2: price1 * p1 + price2 * p2)
+        ... ).from_apply_func(
+        ...     lambda price_sm, price_sm2, p1, p2: price_sm * p1 + price_sm2 * p2
+        ... )
 
-        &gt;&gt;&gt; myInd = MyInd.from_params(price1, price2, 1, 2)
-        &gt;&gt;&gt; print(myInd.price1)
-                    a    b
-                    a2   b2
+        &gt;&gt;&gt; myInd = MyInd.from_params(price_sm, price_sm2, 1, 2)
+        &gt;&gt;&gt; print(myInd.price_sm)
+                      a    b
+                     a2   b2
         2018-01-01  1.0  5.0
         2018-01-02  2.0  4.0
         2018-01-03  3.0  3.0
         2018-01-04  4.0  2.0
         2018-01-05  5.0  1.0
-        &gt;&gt;&gt; print(myInd.price2)
-                    a    b
-                    a2   b2
+        &gt;&gt;&gt; print(myInd.price_sm2)
+                      a    b
+                     a2   b2
         2018-01-01  2.0  6.0
         2018-01-02  3.0  5.0
         2018-01-03  4.0  4.0
@@ -521,19 +546,19 @@ class IndicatorFactory():
         * Passing multiple parameters will broadcast them to arrays of the same shape
 
         ```python-repl
-        &gt;&gt;&gt; myInd = MyInd.from_params(price1, price2, 1, 2)
+        &gt;&gt;&gt; myInd = MyInd.from_params(price_sm, price_sm2, 1, 2)
         &gt;&gt;&gt; print(myInd._p1_array)
         &gt;&gt;&gt; print(myInd._p2_array)
         [1]
         [2]
 
-        &gt;&gt;&gt; myInd = MyInd.from_params(price1, price2, 1, [2, 3])
+        &gt;&gt;&gt; myInd = MyInd.from_params(price_sm, price_sm2, 1, [2, 3])
         &gt;&gt;&gt; print(myInd._p1_array)
         &gt;&gt;&gt; print(myInd._p2_array)
         [1 1]
         [2 3]
 
-        &gt;&gt;&gt; myInd = MyInd.from_params(price1, price2, [1, 2], [3, 4], param_product=True)
+        &gt;&gt;&gt; myInd = MyInd.from_params(price_sm, price_sm2, [1, 2], [3, 4], param_product=True)
         &gt;&gt;&gt; print(myInd._p1_array)
         &gt;&gt;&gt; print(myInd._p2_array)
         [1 1 2 2]
@@ -556,19 +581,18 @@ class IndicatorFactory():
             Instead, define your `custom_func` as a regular Python function where you should
             convert all inputs into NumPy arrays, and then pass them to your Numba-compiled function.
 
-            Also, in contrast to `IndicatorFactory.from_apply_func`, it&#39;s up to you to concatenate 
-            columns for each parameter. For example, by using `vectorbt.utils.apply_and_concat_one`.
-            Each output array must have the number of columns that equals to the number of columns
-            in input multiplied by the number of parameter values in each parameter array.
+            Also, in contrast to `IndicatorFactory.from_apply_func`, it&#39;s up to you to handle caching
+            and concatenate columns for each parameter (for example, by using `vectorbt.utils.apply_and_concat_one`).
+            Also, you must ensure that each output array has an appropriate number of columns, which
+            is the number of columns in input time series multiplied by the number of parameter values.
 
         Args:
             custom_func (function): A function that takes broadcasted time series corresponding 
                 to `ts_names`, broadcasted parameter arrays corresponding to `param_names`, and other 
                 arguments and keyword arguments, and returns outputs corresponding to `output_names` 
                 and other objects that are then returned with the indicator class instance.
-            pass_lists (bool): If True, passes `ts_list`, `param_list`, `*args`, `**kwargs` to 
-                `custom_func`. If False, passes `*ts_list`, `*param_list`, `*args`, `**kwargs`.
-                Defaults to False.
+            pass_lists (bool): If True, passes arguments as lists. Otherwise, passes them using 
+                starred expression. Defaults to False.
         Returns:
             `CustomIndicator`, and optionally other objects that are returned by `custom_func`
             and exceed `output_names`.
@@ -590,10 +614,10 @@ class IndicatorFactory():
             ...     output_names=[&#39;o1&#39;, &#39;o2&#39;]
             ... ).from_custom_func(custom_func)
 
-            &gt;&gt;&gt; myInd = MyInd.from_params(price, price * 2, [1, 2], [3, 4], 100)
+            &gt;&gt;&gt; myInd = MyInd.from_params(price_sm, price_sm * 2, [1, 2], [3, 4], 100)
             &gt;&gt;&gt; print(myInd.o1)
-            custom_p1       1             2       
-            custom_p2       3             4       
+            custom_p1       1      1      2      2
+            custom_p2       3      3      4      4
                             a      b      a      b
             2018-01-01  101.0  105.0  102.0  110.0
             2018-01-02  102.0  104.0  104.0  108.0
@@ -601,8 +625,8 @@ class IndicatorFactory():
             2018-01-04  104.0  102.0  108.0  104.0
             2018-01-05  105.0  101.0  110.0  102.0
             &gt;&gt;&gt; print(myInd.o2)
-            custom_p1       1             2       
-            custom_p2       3             4       
+            custom_p1       1      1      2      2
+            custom_p2       3      3      4      4
                             a      b      a      b
             2018-01-01  106.0  130.0  108.0  140.0
             2018-01-02  112.0  124.0  116.0  132.0
@@ -640,6 +664,7 @@ class IndicatorFactory():
 
         # Add __init__ method
         def __init__(self, ts_list, output_list, param_list, mapper_list, name):
+            &#34;&#34;&#34;Performs checks on pipeline artifacts and stores them as instance attributes.&#34;&#34;&#34;
             perform_init_checks(ts_list, output_list, param_list, mapper_list, name)
 
             for i, ts_name in enumerate(ts_names):
@@ -657,21 +682,24 @@ class IndicatorFactory():
 
         # Add from_params method
         @classmethod
-        def from_params(cls, *args, name=name.lower(), **kwargs):
+        def from_params(cls, *args, name=name.lower(), return_raw=False, **kwargs):
+            &#34;&#34;&#34;Runs the pipeline and initializes the class.&#34;&#34;&#34;
             level_names = tuple([name + &#39;_&#39; + param_name for param_name in param_names])
             args = list(args)
             ts_list = args[:len(ts_names)]
             param_list = args[len(ts_names):len(ts_names)+len(param_names)]
             new_args = args[len(ts_names)+len(param_names):]
-            new_ts_list, output_list, new_param_list, mapper_list, other_list = from_params_pipeline(
+            results = from_params_pipeline(
                 ts_list, param_list, level_names, len(output_names),
-                custom_func, *new_args, pass_lists=pass_lists, **kwargs)
+                custom_func, *new_args, pass_lists=pass_lists, return_raw=return_raw, **kwargs)
+            if return_raw or kwargs.get(&#39;return_cache&#39;, False):
+                return results
+            new_ts_list, output_list, new_param_list, mapper_list, other_list = results
             obj = cls(new_ts_list, output_list, new_param_list, mapper_list, name)
             if len(other_list) &gt; 0:
                 return (obj,) + other_list
             return obj
 
-        # Create private method
         setattr(CustomIndicator, &#39;from_params&#39;, from_params)
 
         # Add indexing methods
@@ -729,9 +757,8 @@ class IndicatorFactory():
                 Set `crossover` to True to return the first True after crossover. Specify `wait` to return 
                 True only when `{attr}` is {func_name} for a number of time steps in a row after crossover.
                 
-                Both will be broadcasted together. Set `multiple` to True to combine with multiple arguments; 
-                in this case a new column level will be created with name `name`. For more keyword arguments, 
-                see `pandas.vbt.combine_with`.&#34;&#34;&#34;
+                Both will be broadcasted together. Set `multiple` to True to combine with multiple arguments. 
+                For more keyword arguments, see `vectorbt.utils.Base_Accessor.combine_with`.&#34;&#34;&#34;
                 setattr(CustomIndicator, f&#39;{attr}_{func_name}&#39;, comparison_method)
 
             assign_comparison_method(&#39;above&#39;, is_above)
@@ -743,9 +770,14 @@ class IndicatorFactory():
     def from_apply_func(self, apply_func, caching_func=None):
         &#34;&#34;&#34;Build indicator class around a custom apply function.
 
-        `apply_func` is performed on each parameter individually and the results are then concatenated.
-        This is a much simpler approach than `IndicatorFactory.from_custom_func`, but less flexible,
-        since you can only work with one parameter selection at a time, and can&#39;t view all parameters.
+        In contrast to `IndicatorFactory.from_custom_func`, this method handles a lot of things for you,
+        such as caching, parameter selection, and concatenation. All you have to do is to write `apply_func`
+        that accepts a selection of parameters (single values as opposed to multiple values in 
+        `IndicatorFactory.from_custom_func`) and does the calculation. It then automatically concatenates
+        the results into a single array per output.
+        
+        While this approach is much more simpler, it is also less flexible, since you can only work with 
+        one parameter selection at a time, and can&#39;t view all parameters.
 
         !!! note
             If `apply_func` is a Numba-compiled function: 
@@ -776,10 +808,10 @@ class IndicatorFactory():
             ...     output_names=[&#39;o1&#39;, &#39;o2&#39;]
             ... ).from_apply_func(apply_func_nb)
 
-            &gt;&gt;&gt; myInd = MyInd.from_params(price, price * 2, [1, 2], [3, 4], 100)
+            &gt;&gt;&gt; myInd = MyInd.from_params(price_sm, price_sm * 2, [1, 2], [3, 4], 100)
             &gt;&gt;&gt; print(myInd.o1)
-            custom_p1       1             2       
-            custom_p2       3             4       
+            custom_p1       1      1      2      2
+            custom_p2       3      3      4      4
                             a      b      a      b
             2018-01-01  101.0  105.0  102.0  110.0
             2018-01-02  102.0  104.0  104.0  108.0
@@ -787,8 +819,8 @@ class IndicatorFactory():
             2018-01-04  104.0  102.0  108.0  104.0
             2018-01-05  105.0  101.0  110.0  102.0
             &gt;&gt;&gt; print(myInd.o2)
-            custom_p1       1             2       
-            custom_p2       3             4       
+            custom_p1       1      1      2      2
+            custom_p2       3      3      4      4
                             a      b      a      b
             2018-01-01  106.0  130.0  108.0  140.0
             2018-01-02  112.0  124.0  116.0  132.0
@@ -809,20 +841,22 @@ class IndicatorFactory():
                 # Select the next tuple of parameters
                 return apply_func(*ts_list, *param_tuples[i], *args)
 
-            def custom_func(ts_list, param_list, *args):
+            def custom_func(ts_list, param_list, *args, return_cache=False, cache=None):
                 # avoid deprecation warnings
                 typed_ts_list = tuple(map(lambda x: x.vbt.to_2d_array(), ts_list))
                 typed_param_tuples = List()
                 for param_tuple in list(zip(*param_list)):
                     typed_param_tuples.append(param_tuple)
-
-                # User-defined preprocessing function (useful for caching)
-                if caching_func is not None:
-                    more_args = caching_func(*typed_ts_list, *param_list, *args)
-                    if not isinstance(more_args, (tuple, list, List)):
-                        more_args = (more_args,)
-                else:
-                    more_args = ()
+                
+                # Caching
+                if cache is None and caching_func is not None:
+                    cache = caching_func(*typed_ts_list, *param_list, *args)
+                if return_cache:
+                    return cache
+                if cache is None:
+                    cache = ()
+                if not isinstance(cache, (tuple, list, List)):
+                    cache = (cache,)
 
                 return apply_and_concat_func(
                     param_list[0].shape[0],
@@ -831,7 +865,7 @@ class IndicatorFactory():
                     typed_ts_list,
                     typed_param_tuples,
                     *args,
-                    *more_args)
+                    *cache)
         else:
             apply_and_concat_func = apply_and_concat_multiple if num_outputs &gt; 1 else apply_and_concat_one
 
@@ -840,14 +874,16 @@ class IndicatorFactory():
                 param_is = list(map(lambda x: x[i], param_list))
                 return apply_func(*ts_list, *param_is, *args, **kwargs)
 
-            def custom_func(ts_list, param_list, *args, **kwargs):
-                # User-defined preprocessing function (useful for caching)
-                if caching_func is not None:
-                    more_args = caching_func(*ts_list, *param_list, *args)
-                    if not isinstance(more_args, (tuple, list)):
-                        more_args = (more_args,)
-                else:
-                    more_args = ()
+            def custom_func(ts_list, param_list, *args, return_cache=False, **kwargs):
+                # Caching
+                if cache is None and caching_func is not None:
+                    cache = caching_func(*typed_ts_list, *param_list, *args, **kwargs)
+                if return_cache:
+                    return cache
+                if cache is None:
+                    cache = ()
+                if not isinstance(cache, (tuple, list, List)):
+                    cache = (cache,)
 
                 return apply_and_concat_func(
                     param_list[0].shape[0],
@@ -856,7 +892,7 @@ class IndicatorFactory():
                     ts_list,
                     param_list,
                     *args,
-                    *more_args,
+                    *cache,
                     **kwargs)
 
         return self.from_custom_func(custom_func, pass_lists=True)
@@ -896,7 +932,7 @@ class MA(MA):
 
     See [Moving Average (MA)](https://www.investopedia.com/terms/m/movingaverage.asp).
 
-    Use `MA.from_params` method to run the indicator.&#34;&#34;&#34;
+    Use `MA.from_params` or `MA.from_combinations` methods to run the indicator.&#34;&#34;&#34;
 
     @classmethod
     def from_params(cls, ts, window, ewm=False, **kwargs):
@@ -910,29 +946,121 @@ class MA(MA):
             **kwargs: Keyword arguments passed to `vectorbt.indicators.from_params_pipeline.`
         Examples:
             ```python-repl
-            &gt;&gt;&gt; price = pd.Series(np.cumsum(np.random.uniform(-0.8, 1, size=(100,))), 
-            ...     index=[datetime(2018, 1, 1) + timedelta(days=i) for i in range(100)])
-
             &gt;&gt;&gt; ma = vbt.MA.from_params(price, [10, 20], ewm=[False, True])
+
             &gt;&gt;&gt; print(ma.ma)
-            ma_window          10        20
-            ma_ewm          False      True
-            2018-01-01        NaN       NaN
-            2018-01-02        NaN       NaN
-            2018-01-03        NaN       NaN
-            2018-01-04        NaN       NaN
-            2018-01-05        NaN       NaN
-            ...               ...       ...
-            2018-04-06  10.154594  8.871905
-            2018-04-07  10.419654  9.152381
-            2018-04-08  10.814717  9.487052
-            2018-04-09  11.099483  9.751123
-            2018-04-10  11.267478  9.920390
+            ma_window         10        20
+            ma_ewm         False      True 
+            2018-01-01       NaN       NaN
+            2018-01-02       NaN       NaN
+            2018-01-03       NaN       NaN
+            ...              ...       ...
+            2018-04-08  5.999866  6.141290
+            2018-04-09  6.040747  6.117779
+            2018-04-10  5.915199  6.021119
 
             [100 rows x 2 columns]
             ```
         &#34;&#34;&#34;
         return super().from_params(ts, window, ewm, **kwargs)
+
+    @classmethod
+    def from_combinations(cls, ts, windows, r, ewm=False, names=None, **kwargs):
+        &#34;&#34;&#34;Calculate multiple moving averages according to `itertools.combinations`.
+
+        Args:
+            ts (pandas_like): Time series (such as price).
+            windows (array_like of int): Size of the moving window. Must be multiple.
+            r (int): The number of `vectorbt.indicators.MA` instances to combine.
+            ewm (bool or array_like of bool): If True, uses exponential moving average, otherwise 
+                simple moving average. Can be one or more values. Defaults to False.
+            names (list of str, optional): A list of names for each `vectorbt.indicators.MA` instance.
+            **kwargs: Keyword arguments passed to `vectorbt.indicators.from_params_pipeline.`
+        Examples:
+            ```python-repl
+            &gt;&gt;&gt; fast_ma, slow_ma = vbt.MA.from_combinations(price, 
+            ...     [10, 20, 30], 2, ewm=[False, False, True], names=[&#39;fast&#39;, &#39;slow&#39;])
+
+            &gt;&gt;&gt; print(fast_ma.ma)
+            
+            fast_window        10        10        20
+            fast_ewm        False     False     False
+            2018-01-01        NaN       NaN       NaN
+            2018-01-02        NaN       NaN       NaN
+            2018-01-03        NaN       NaN       NaN
+            ...               ...       ...       ...
+            2018-04-08   5.999866  5.999866  5.983928
+            2018-04-09   6.040747  6.040747  5.931313
+            2018-04-10   5.915199  5.915199  5.868436
+
+            [100 rows x 3 columns]
+
+            &gt;&gt;&gt; print(slow_ma.ma)
+            slow_window        20        30        30
+            slow_ewm        False      True      True 
+            2018-01-01        NaN       NaN       NaN
+            2018-01-02        NaN       NaN       NaN
+            2018-01-03        NaN       NaN       NaN
+            ...               ...       ...       ...
+            2018-04-08   5.983928  6.356696  6.356696
+            2018-04-09   5.931313  6.326833  6.326833
+            2018-04-10   5.868436  6.247768  6.247768
+
+            [100 rows x 3 columns]
+            ```
+
+            The naive way without caching is the follows:
+            ```py
+            window_combs = itertools.combinations([10, 20, 30], 2)
+            ewm_combs = itertools.combinations([False, False, True], 2)
+            fast_windows, slow_windows = np.asarray(list(window_combs)).transpose()
+            fast_ewms, slow_ewms = np.asarray(list(ewm_combs)).transpose()
+
+            fast_ma = vbt.MA.from_params(price, fast_windows, fast_ewms, name=&#39;fast&#39;)
+            slow_ma = vbt.MA.from_params(price, slow_windows, slow_ewms, name=&#39;slow&#39;)
+            ```
+
+            Having this, you can then compare those `vectorbt.indicators.MA` instances together:
+            ```python-repl
+            &gt;&gt;&gt; entry_signals = fast_ma.ma_above(slow_ma, crossover=True)
+            &gt;&gt;&gt; exit_signals = fast_ma.ma_below(slow_ma, crossover=True)
+
+            &gt;&gt;&gt; print(fast_signals)
+            fast_window     10     10     20
+            fast_ewm     False  False  False
+            slow_window     20     30     30
+            slow_ewm     False  True   True 
+            2018-01-01   False  False  False
+            2018-01-02   False  False  False
+            2018-01-03   False  False  False
+            ...            ...    ...    ...
+            2018-04-08   False  False  False
+            2018-04-09   False  False  False
+            2018-04-10   False  False  False
+
+            [100 rows x 3 columns]
+            ```
+
+            Notice the new column hierarchy the `MA.ma_above` method created for you. You can use
+            it for indexing as follows:
+
+            ```
+            fig = entry_signals[(10, False, 20, False)].vbt.signals.plot(name=&#39;Entries&#39;)
+            exit_signals[(10, False, 20, False)].vbt.signals.plot(name=&#39;Exits&#39;, fig=fig)
+            ```
+            ![](img/MA_from_combinations.png)
+        &#34;&#34;&#34;
+
+        if names is None:
+            names = [&#39;ma&#39; + str(i+1) for i in range(r)]
+        windows, ewm = broadcast(windows, ewm, writeable=True)
+        cache_dict = cls.from_params(ts, windows, ewm=ewm, return_cache=True, **kwargs)
+        param_lists = zip(*itertools.combinations(zip(windows, ewm), r))
+        mas = []
+        for i, param_list in enumerate(param_lists):
+            i_windows, i_ewm = zip(*param_list)
+            mas.append(cls.from_params(ts, i_windows, ewm=i_ewm, cache=cache_dict, name=names[i], **kwargs))
+        return tuple(mas)
 
     def plot(self,
              ts_name=None,
@@ -971,106 +1099,6 @@ class MA(MA):
 
 
 fix_class_for_pdoc(MA)
-
-# ############# DMAC ############# #
-
-
-@njit(DictType(UniTuple(i8, 2), f8[:, :])(f8[:, :], i8[:], b1[:], i8[:], b1[:]), cache=True)
-def dmac_caching_nb(ts, fast_windows, fast_ewms, slow_windows, slow_ewms):
-    return ma_caching_nb(ts, np.concatenate((fast_windows, slow_windows)), np.concatenate((fast_ewms, slow_ewms)))
-
-
-@njit(UniTuple(f8[:, :], 2)(f8[:, :], i8, b1, i8, b1, DictType(UniTuple(i8, 2), f8[:, :])), cache=True)
-def dmac_apply_func_nb(ts, fast_window, fast_ewm, slow_window, slow_ewm, cache_dict):
-    return cache_dict[(fast_window, int(fast_ewm))], cache_dict[(slow_window, int(slow_ewm))]
-
-
-DMAC = IndicatorFactory(
-    ts_names=[&#39;ts&#39;],
-    param_names=[&#39;fast_window&#39;, &#39;fast_ewm&#39;, &#39;slow_window&#39;, &#39;slow_ewm&#39;],
-    output_names=[&#39;fast_ma&#39;, &#39;slow_ma&#39;],
-    name=&#39;dmac&#39;
-).from_apply_func(dmac_apply_func_nb, caching_func=dmac_caching_nb)
-
-
-class DMAC(DMAC):
-    @classmethod
-    def from_params(cls, ts, fast_window, slow_window, fast_ewm=False, slow_ewm=False, **kwargs):
-        return super().from_params(ts, fast_window, fast_ewm, slow_window, slow_ewm, **kwargs)
-
-    @classmethod
-    def from_combinations(cls, ts, windows, ewm=False, **kwargs):
-        windows, ewm = broadcast(windows, ewm, writeable=True)
-        param_lists = tuple(zip(*itertools.combinations(zip(windows, ewm), 2)))
-        fast_windows, fast_ewms = zip(*param_lists[0])
-        slow_windows, slow_ewms = zip(*param_lists[1])
-        return cls.from_params(ts, fast_windows, slow_windows, fast_ewm=fast_ewms, slow_ewm=slow_ewms, **kwargs)
-
-    def crossover(self, **kwargs):
-        above_signals = self.fast_ma_above(self.slow_ma, crossover=True, **kwargs)
-        below_signals = self.fast_ma_below(self.slow_ma, crossover=True, **kwargs)
-        return above_signals, below_signals
-
-    def plot(self,
-             crossover_kwargs={},
-             ts_name=None,
-             fast_ma_name=None,
-             slow_ma_name=None,
-             ts_trace_kwargs={},
-             fast_ma_trace_kwargs={},
-             slow_ma_trace_kwargs={},
-             entry_trace_kwargs={},
-             exit_trace_kwargs={},
-             fig=None,
-             **layout_kwargs):
-        check_type(self.ts, pd.Series)
-        check_type(self.fast_ma, pd.Series)
-        check_type(self.slow_ma, pd.Series)
-
-        if ts_name is None:
-            ts_name = f&#39;Price ({self.name})&#39;
-        if fast_ma_name is None:
-            fast_ma_name = f&#39;Fast MA ({self.name})&#39;
-        if slow_ma_name is None:
-            slow_ma_name = f&#39;Slow MA ({self.name})&#39;
-
-        fig = self.ts.vbt.timeseries.plot(name=ts_name, trace_kwargs=ts_trace_kwargs, fig=fig, **layout_kwargs)
-        fig = self.fast_ma.vbt.timeseries.plot(name=fast_ma_name, trace_kwargs=fast_ma_trace_kwargs, fig=fig)
-        fig = self.slow_ma.vbt.timeseries.plot(name=slow_ma_name, trace_kwargs=slow_ma_trace_kwargs, fig=fig)
-
-        # Plot markets
-        entries, exits = self.crossover(**crossover_kwargs)
-        entry_scatter = go.Scatter(
-            x=self.ts.index[entries],
-            y=self.ts[entries],
-            mode=&#39;markers&#39;,
-            marker=dict(
-                symbol=&#39;triangle-up&#39;,
-                color=&#39;limegreen&#39;,
-                size=10
-            ),
-            name=&#39;Entry&#39;
-        )
-        entry_scatter.update(**entry_trace_kwargs)
-        fig.add_trace(entry_scatter)
-        exit_scatter = go.Scatter(
-            x=self.ts.index[exits],
-            y=self.ts[exits],
-            mode=&#39;markers&#39;,
-            marker=dict(
-                symbol=&#39;triangle-down&#39;,
-                color=&#39;orangered&#39;,
-                size=10
-            ),
-            name=&#39;Exit&#39;
-        )
-        exit_scatter.update(**exit_trace_kwargs)
-        fig.add_trace(exit_scatter)
-
-        return fig
-
-
-fix_class_for_pdoc(DMAC)
 
 # ############# MSTD ############# #
 
@@ -1465,7 +1493,7 @@ fix_class_for_pdoc(OBV)</code></pre>
 <h2 class="section-title" id="header-functions">Functions</h2>
 <dl>
 <dt id="vectorbt.indicators.from_params_pipeline"><code class="name flex">
-<span>def <span class="ident">from_params_pipeline</span></span>(<span>ts_list, param_list, level_names, num_outputs, custom_func, *args, pass_lists=False, param_product=False, broadcast_kwargs={}, **kwargs)</span>
+<span>def <span class="ident">from_params_pipeline</span></span>(<span>ts_list, param_list, level_names, num_outputs, custom_func, *args, pass_lists=False, param_product=False, broadcast_kwargs={}, return_raw=False, **kwargs)</span>
 </code></dt>
 <dd>
 <div class="desc"><p>A pipeline for calculating an indicator, used by <code><a title="vectorbt.indicators.IndicatorFactory" href="#vectorbt.indicators.IndicatorFactory">IndicatorFactory</a></code>.</p>
@@ -1529,12 +1557,12 @@ array([[ 6,  7,  7,  8,  8,  9],
 
 &gt;&gt;&gt; output_df = pd.DataFrame(output, columns=new_columns)
 &gt;&gt;&gt; print(output_df)
-p1                                        1                        
-p2            2             3             4    
-p3        False         False         False    
-       a      b      a      b      a      b
-0      6      7      7      8      8      9
-1      9     10     10     11     11     12
+p1      1      1      1      1      1      1                        
+p2      2      2      3      3      4      4    
+p3  False  False  False  False  False  False    
+        a      b      a      b      a      b
+0       6      7      7      8      8      9
+1       9     10     10     11     11     12
 </code></pre>
 <ul>
 <li>Broadcasts objects in <code>ts_list</code> to match the shape of objects in <code>output_list</code> through tiling.
@@ -1546,12 +1574,12 @@ arrays that have totally different shapes, such as (2, 2) and (2, 6).</li>
 ...     ts_list[1].vbt.tile(len(param_list[0]), as_columns=p_columns)
 ... ]
 &gt;&gt;&gt; print(new_ts_list[0])
-p1                                        1                        
-p2            2             3             4    
-p3        False         False         False    
-       a      b      a      b      a      b
-0      1      1      1      1      1      1
-1      2      2      2      2      2      2
+p1      1      1      1      1      1      1                        
+p2      2      2      3      3      4      4    
+p3  False  False  False  False  False  False     
+        a      b      a      b      a      b
+0       1      1      1      1      1      1
+1       2      2      2      2      2      2
 </code></pre>
 <ul>
 <li>Builds parameter mappers that will link parameters from <code>param_list</code> to columns in
@@ -1578,8 +1606,15 @@ or a single value of any type.</dd>
 <dd>If True, builds a Cartesian product out of all parameters. Defaults to False.</dd>
 <dt><strong><code>broadcast_kwargs</code></strong> :&ensp;<code>dict</code>, optional</dt>
 <dd>Keyword arguments passed to the <code><a title="vectorbt.utils.broadcast" href="utils.html#vectorbt.utils.broadcast">broadcast()</a></code> on time series objects.</dd>
+<dt><strong><code>return_raw</code></strong> :&ensp;<code>bool</code></dt>
+<dd>If True, returns the raw output without post-processing. Defaults to False.</dd>
 <dt><strong><code>**kwargs</code></strong></dt>
-<dd>Keyword arguments passed to the <code>custom_func</code>. But only if <code>custom_func</code> is not Numba-compiled.</dd>
+<dd>
+<p>Keyword arguments passed to the <code>custom_func</code>.</p>
+<p>Some common arguments include <code>return_cache</code> to return cache and <code>cache</code> to pass cache.
+Those are only applicable to <code>custom_func</code> that supports it (<code>custom_func</code> created using
+<code><a title="vectorbt.indicators.IndicatorFactory.from_apply_func" href="#vectorbt.indicators.IndicatorFactory.from_apply_func">IndicatorFactory.from_apply_func()</a></code> are supported by default).</p>
+</dd>
 </dl>
 <h2 id="returns">Returns</h2>
 <p>A list of transformed inputs (<code>pandas_like</code>), a list of generated outputs (<code>pandas_like</code>),
@@ -1591,7 +1626,7 @@ a list of other generated outputs that are outside of
 <span>Expand source code</span>
 </summary>
 <pre><code class="python">def from_params_pipeline(ts_list, param_list, level_names, num_outputs, custom_func, *args, pass_lists=False,
-                         param_product=False, broadcast_kwargs={}, **kwargs):
+                         param_product=False, broadcast_kwargs={}, return_raw=False, **kwargs):
     &#34;&#34;&#34;A pipeline for calculating an indicator, used by `vectorbt.indicators.IndicatorFactory`.
 
     Does the following:
@@ -1658,12 +1693,12 @@ a list of other generated outputs that are outside of
 
     &gt;&gt;&gt; output_df = pd.DataFrame(output, columns=new_columns)
     &gt;&gt;&gt; print(output_df)
-    p1                                        1                        
-    p2            2             3             4    
-    p3        False         False         False    
-           a      b      a      b      a      b
-    0      6      7      7      8      8      9
-    1      9     10     10     11     11     12
+    p1      1      1      1      1      1      1                        
+    p2      2      2      3      3      4      4    
+    p3  False  False  False  False  False  False    
+            a      b      a      b      a      b
+    0       6      7      7      8      8      9
+    1       9     10     10     11     11     12
     ```
 
     * Broadcasts objects in `ts_list` to match the shape of objects in `output_list` through tiling.
@@ -1676,12 +1711,12 @@ a list of other generated outputs that are outside of
     ...     ts_list[1].vbt.tile(len(param_list[0]), as_columns=p_columns)
     ... ]
     &gt;&gt;&gt; print(new_ts_list[0])
-    p1                                        1                        
-    p2            2             3             4    
-    p3        False         False         False    
-           a      b      a      b      a      b
-    0      1      1      1      1      1      1
-    1      2      2      2      2      2      2
+    p1      1      1      1      1      1      1                        
+    p2      2      2      3      3      4      4    
+    p3  False  False  False  False  False  False     
+            a      b      a      b      a      b
+    0       1      1      1      1      1      1
+    1       2      2      2      2      2      2
     ```
 
     * Builds parameter mappers that will link parameters from `param_list` to columns in 
@@ -1698,7 +1733,12 @@ a list of other generated outputs that are outside of
         pass_lists (bool): If True, arguments are passed to the `custom_func` as lists. Defaults to False.
         param_product (bool): If True, builds a Cartesian product out of all parameters. Defaults to False.
         broadcast_kwargs (dict, optional): Keyword arguments passed to the `vectorbt.utils.broadcast` on time series objects.
-        **kwargs: Keyword arguments passed to the `custom_func`. But only if `custom_func` is not Numba-compiled.
+        return_raw (bool): If True, returns the raw output without post-processing. Defaults to False.
+        **kwargs: Keyword arguments passed to the `custom_func`.
+
+            Some common arguments include `return_cache` to return cache and `cache` to pass cache. 
+            Those are only applicable to `custom_func` that supports it (`custom_func` created using
+            `IndicatorFactory.from_apply_func` are supported by default).
     Returns:
         A list of transformed inputs (`pandas_like`), a list of generated outputs (`pandas_like`), 
         a list of parameter arrays (`numpy.ndarray`), a list of parameter mappers (`pandas.Series`),
@@ -1734,6 +1774,8 @@ a list of other generated outputs that are outside of
         output_list = custom_func(ts_list, param_list, *args, **kwargs)
     else:
         output_list = custom_func(*ts_list, *param_list, *args, **kwargs)
+    if return_raw or kwargs.get(&#39;return_cache&#39;, False):
+        return output_list  # return raw cache outputs
     if not isinstance(output_list, (tuple, list, List)):
         output_list = [output_list]
     else:
@@ -1745,11 +1787,6 @@ a list of other generated outputs that are outside of
         other_list = []
     # Process only the num_outputs outputs
     output_list = output_list[:num_outputs]
-    if len(param_list) &gt; 0:
-        for output in output_list:
-            if output.shape[1] != to_2d(ts_list[0]).shape[1] * len(param_list[0]):
-                raise ValueError(f&#34;The number of output columns {output.shape[1]} doesn&#39;t match with the \
-number of input columns {to_2d(ts_list[0]).shape[1]} * the number of parameter values {len(param_list[0])}.&#34;)
     if len(param_list) &gt; 0:
         # Build new column levels on top of time series levels
         new_columns = build_column_hierarchy(param_list, level_names, to_2d(ts_list[0]).columns)
@@ -1841,7 +1878,7 @@ number of input columns {to_2d(ts_list[0]).shape[1]} * the number of parameter v
 <span>def <span class="ident">from_params</span></span>(<span>ts, window=20, ewm=False, alpha=2, **kwargs)</span>
 </code></dt>
 <dd>
-<div class="desc"></div>
+<div class="desc"><p>Runs the pipeline and initializes the class.</p></div>
 <details class="source">
 <summary>
 <span>Expand source code</span>
@@ -2020,9 +2057,8 @@ def param_loc(self):
 <div class="desc"><p>Returns True when <code>bandwidth</code> is above <code>other</code>. </p>
 <p>Set <code>crossover</code> to True to return the first True after crossover. Specify <code>wait</code> to return
 True only when <code>bandwidth</code> is above for a number of time steps in a row after crossover.</p>
-<p>Both will be broadcasted together. Set <code>multiple</code> to True to combine with multiple arguments;
-in this case a new column level will be created with name <code>name</code>. For more keyword arguments,
-see <code>pandas.vbt.combine_with</code>.</p></div>
+<p>Both will be broadcasted together. Set <code>multiple</code> to True to combine with multiple arguments.
+For more keyword arguments, see <code><a title="vectorbt.utils.Base_Accessor.combine_with" href="utils.html#vectorbt.utils.Base_Accessor.combine_with">Base_Accessor.combine_with()</a></code>.</p></div>
 <details class="source">
 <summary>
 <span>Expand source code</span>
@@ -2048,9 +2084,8 @@ see <code>pandas.vbt.combine_with</code>.</p></div>
 <div class="desc"><p>Returns True when <code>bandwidth</code> is below <code>other</code>. </p>
 <p>Set <code>crossover</code> to True to return the first True after crossover. Specify <code>wait</code> to return
 True only when <code>bandwidth</code> is below for a number of time steps in a row after crossover.</p>
-<p>Both will be broadcasted together. Set <code>multiple</code> to True to combine with multiple arguments;
-in this case a new column level will be created with name <code>name</code>. For more keyword arguments,
-see <code>pandas.vbt.combine_with</code>.</p></div>
+<p>Both will be broadcasted together. Set <code>multiple</code> to True to combine with multiple arguments.
+For more keyword arguments, see <code><a title="vectorbt.utils.Base_Accessor.combine_with" href="utils.html#vectorbt.utils.Base_Accessor.combine_with">Base_Accessor.combine_with()</a></code>.</p></div>
 <details class="source">
 <summary>
 <span>Expand source code</span>
@@ -2076,9 +2111,8 @@ see <code>pandas.vbt.combine_with</code>.</p></div>
 <div class="desc"><p>Returns True when <code>bandwidth</code> is equal <code>other</code>. </p>
 <p>Set <code>crossover</code> to True to return the first True after crossover. Specify <code>wait</code> to return
 True only when <code>bandwidth</code> is equal for a number of time steps in a row after crossover.</p>
-<p>Both will be broadcasted together. Set <code>multiple</code> to True to combine with multiple arguments;
-in this case a new column level will be created with name <code>name</code>. For more keyword arguments,
-see <code>pandas.vbt.combine_with</code>.</p></div>
+<p>Both will be broadcasted together. Set <code>multiple</code> to True to combine with multiple arguments.
+For more keyword arguments, see <code><a title="vectorbt.utils.Base_Accessor.combine_with" href="utils.html#vectorbt.utils.Base_Accessor.combine_with">Base_Accessor.combine_with()</a></code>.</p></div>
 <details class="source">
 <summary>
 <span>Expand source code</span>
@@ -2104,9 +2138,8 @@ see <code>pandas.vbt.combine_with</code>.</p></div>
 <div class="desc"><p>Returns True when <code>lower_band</code> is above <code>other</code>. </p>
 <p>Set <code>crossover</code> to True to return the first True after crossover. Specify <code>wait</code> to return
 True only when <code>lower_band</code> is above for a number of time steps in a row after crossover.</p>
-<p>Both will be broadcasted together. Set <code>multiple</code> to True to combine with multiple arguments;
-in this case a new column level will be created with name <code>name</code>. For more keyword arguments,
-see <code>pandas.vbt.combine_with</code>.</p></div>
+<p>Both will be broadcasted together. Set <code>multiple</code> to True to combine with multiple arguments.
+For more keyword arguments, see <code><a title="vectorbt.utils.Base_Accessor.combine_with" href="utils.html#vectorbt.utils.Base_Accessor.combine_with">Base_Accessor.combine_with()</a></code>.</p></div>
 <details class="source">
 <summary>
 <span>Expand source code</span>
@@ -2132,9 +2165,8 @@ see <code>pandas.vbt.combine_with</code>.</p></div>
 <div class="desc"><p>Returns True when <code>lower_band</code> is below <code>other</code>. </p>
 <p>Set <code>crossover</code> to True to return the first True after crossover. Specify <code>wait</code> to return
 True only when <code>lower_band</code> is below for a number of time steps in a row after crossover.</p>
-<p>Both will be broadcasted together. Set <code>multiple</code> to True to combine with multiple arguments;
-in this case a new column level will be created with name <code>name</code>. For more keyword arguments,
-see <code>pandas.vbt.combine_with</code>.</p></div>
+<p>Both will be broadcasted together. Set <code>multiple</code> to True to combine with multiple arguments.
+For more keyword arguments, see <code><a title="vectorbt.utils.Base_Accessor.combine_with" href="utils.html#vectorbt.utils.Base_Accessor.combine_with">Base_Accessor.combine_with()</a></code>.</p></div>
 <details class="source">
 <summary>
 <span>Expand source code</span>
@@ -2160,9 +2192,8 @@ see <code>pandas.vbt.combine_with</code>.</p></div>
 <div class="desc"><p>Returns True when <code>lower_band</code> is equal <code>other</code>. </p>
 <p>Set <code>crossover</code> to True to return the first True after crossover. Specify <code>wait</code> to return
 True only when <code>lower_band</code> is equal for a number of time steps in a row after crossover.</p>
-<p>Both will be broadcasted together. Set <code>multiple</code> to True to combine with multiple arguments;
-in this case a new column level will be created with name <code>name</code>. For more keyword arguments,
-see <code>pandas.vbt.combine_with</code>.</p></div>
+<p>Both will be broadcasted together. Set <code>multiple</code> to True to combine with multiple arguments.
+For more keyword arguments, see <code><a title="vectorbt.utils.Base_Accessor.combine_with" href="utils.html#vectorbt.utils.Base_Accessor.combine_with">Base_Accessor.combine_with()</a></code>.</p></div>
 <details class="source">
 <summary>
 <span>Expand source code</span>
@@ -2188,9 +2219,8 @@ see <code>pandas.vbt.combine_with</code>.</p></div>
 <div class="desc"><p>Returns True when <code>middle_band</code> is above <code>other</code>. </p>
 <p>Set <code>crossover</code> to True to return the first True after crossover. Specify <code>wait</code> to return
 True only when <code>middle_band</code> is above for a number of time steps in a row after crossover.</p>
-<p>Both will be broadcasted together. Set <code>multiple</code> to True to combine with multiple arguments;
-in this case a new column level will be created with name <code>name</code>. For more keyword arguments,
-see <code>pandas.vbt.combine_with</code>.</p></div>
+<p>Both will be broadcasted together. Set <code>multiple</code> to True to combine with multiple arguments.
+For more keyword arguments, see <code><a title="vectorbt.utils.Base_Accessor.combine_with" href="utils.html#vectorbt.utils.Base_Accessor.combine_with">Base_Accessor.combine_with()</a></code>.</p></div>
 <details class="source">
 <summary>
 <span>Expand source code</span>
@@ -2216,9 +2246,8 @@ see <code>pandas.vbt.combine_with</code>.</p></div>
 <div class="desc"><p>Returns True when <code>middle_band</code> is below <code>other</code>. </p>
 <p>Set <code>crossover</code> to True to return the first True after crossover. Specify <code>wait</code> to return
 True only when <code>middle_band</code> is below for a number of time steps in a row after crossover.</p>
-<p>Both will be broadcasted together. Set <code>multiple</code> to True to combine with multiple arguments;
-in this case a new column level will be created with name <code>name</code>. For more keyword arguments,
-see <code>pandas.vbt.combine_with</code>.</p></div>
+<p>Both will be broadcasted together. Set <code>multiple</code> to True to combine with multiple arguments.
+For more keyword arguments, see <code><a title="vectorbt.utils.Base_Accessor.combine_with" href="utils.html#vectorbt.utils.Base_Accessor.combine_with">Base_Accessor.combine_with()</a></code>.</p></div>
 <details class="source">
 <summary>
 <span>Expand source code</span>
@@ -2244,9 +2273,8 @@ see <code>pandas.vbt.combine_with</code>.</p></div>
 <div class="desc"><p>Returns True when <code>middle_band</code> is equal <code>other</code>. </p>
 <p>Set <code>crossover</code> to True to return the first True after crossover. Specify <code>wait</code> to return
 True only when <code>middle_band</code> is equal for a number of time steps in a row after crossover.</p>
-<p>Both will be broadcasted together. Set <code>multiple</code> to True to combine with multiple arguments;
-in this case a new column level will be created with name <code>name</code>. For more keyword arguments,
-see <code>pandas.vbt.combine_with</code>.</p></div>
+<p>Both will be broadcasted together. Set <code>multiple</code> to True to combine with multiple arguments.
+For more keyword arguments, see <code><a title="vectorbt.utils.Base_Accessor.combine_with" href="utils.html#vectorbt.utils.Base_Accessor.combine_with">Base_Accessor.combine_with()</a></code>.</p></div>
 <details class="source">
 <summary>
 <span>Expand source code</span>
@@ -2272,9 +2300,8 @@ see <code>pandas.vbt.combine_with</code>.</p></div>
 <div class="desc"><p>Returns True when <code>percent_b</code> is above <code>other</code>. </p>
 <p>Set <code>crossover</code> to True to return the first True after crossover. Specify <code>wait</code> to return
 True only when <code>percent_b</code> is above for a number of time steps in a row after crossover.</p>
-<p>Both will be broadcasted together. Set <code>multiple</code> to True to combine with multiple arguments;
-in this case a new column level will be created with name <code>name</code>. For more keyword arguments,
-see <code>pandas.vbt.combine_with</code>.</p></div>
+<p>Both will be broadcasted together. Set <code>multiple</code> to True to combine with multiple arguments.
+For more keyword arguments, see <code><a title="vectorbt.utils.Base_Accessor.combine_with" href="utils.html#vectorbt.utils.Base_Accessor.combine_with">Base_Accessor.combine_with()</a></code>.</p></div>
 <details class="source">
 <summary>
 <span>Expand source code</span>
@@ -2300,9 +2327,8 @@ see <code>pandas.vbt.combine_with</code>.</p></div>
 <div class="desc"><p>Returns True when <code>percent_b</code> is below <code>other</code>. </p>
 <p>Set <code>crossover</code> to True to return the first True after crossover. Specify <code>wait</code> to return
 True only when <code>percent_b</code> is below for a number of time steps in a row after crossover.</p>
-<p>Both will be broadcasted together. Set <code>multiple</code> to True to combine with multiple arguments;
-in this case a new column level will be created with name <code>name</code>. For more keyword arguments,
-see <code>pandas.vbt.combine_with</code>.</p></div>
+<p>Both will be broadcasted together. Set <code>multiple</code> to True to combine with multiple arguments.
+For more keyword arguments, see <code><a title="vectorbt.utils.Base_Accessor.combine_with" href="utils.html#vectorbt.utils.Base_Accessor.combine_with">Base_Accessor.combine_with()</a></code>.</p></div>
 <details class="source">
 <summary>
 <span>Expand source code</span>
@@ -2328,9 +2354,8 @@ see <code>pandas.vbt.combine_with</code>.</p></div>
 <div class="desc"><p>Returns True when <code>percent_b</code> is equal <code>other</code>. </p>
 <p>Set <code>crossover</code> to True to return the first True after crossover. Specify <code>wait</code> to return
 True only when <code>percent_b</code> is equal for a number of time steps in a row after crossover.</p>
-<p>Both will be broadcasted together. Set <code>multiple</code> to True to combine with multiple arguments;
-in this case a new column level will be created with name <code>name</code>. For more keyword arguments,
-see <code>pandas.vbt.combine_with</code>.</p></div>
+<p>Both will be broadcasted together. Set <code>multiple</code> to True to combine with multiple arguments.
+For more keyword arguments, see <code><a title="vectorbt.utils.Base_Accessor.combine_with" href="utils.html#vectorbt.utils.Base_Accessor.combine_with">Base_Accessor.combine_with()</a></code>.</p></div>
 <details class="source">
 <summary>
 <span>Expand source code</span>
@@ -2406,9 +2431,8 @@ see <code>pandas.vbt.combine_with</code>.</p></div>
 <div class="desc"><p>Returns True when <code>ts</code> is above <code>other</code>. </p>
 <p>Set <code>crossover</code> to True to return the first True after crossover. Specify <code>wait</code> to return
 True only when <code>ts</code> is above for a number of time steps in a row after crossover.</p>
-<p>Both will be broadcasted together. Set <code>multiple</code> to True to combine with multiple arguments;
-in this case a new column level will be created with name <code>name</code>. For more keyword arguments,
-see <code>pandas.vbt.combine_with</code>.</p></div>
+<p>Both will be broadcasted together. Set <code>multiple</code> to True to combine with multiple arguments.
+For more keyword arguments, see <code><a title="vectorbt.utils.Base_Accessor.combine_with" href="utils.html#vectorbt.utils.Base_Accessor.combine_with">Base_Accessor.combine_with()</a></code>.</p></div>
 <details class="source">
 <summary>
 <span>Expand source code</span>
@@ -2434,9 +2458,8 @@ see <code>pandas.vbt.combine_with</code>.</p></div>
 <div class="desc"><p>Returns True when <code>ts</code> is below <code>other</code>. </p>
 <p>Set <code>crossover</code> to True to return the first True after crossover. Specify <code>wait</code> to return
 True only when <code>ts</code> is below for a number of time steps in a row after crossover.</p>
-<p>Both will be broadcasted together. Set <code>multiple</code> to True to combine with multiple arguments;
-in this case a new column level will be created with name <code>name</code>. For more keyword arguments,
-see <code>pandas.vbt.combine_with</code>.</p></div>
+<p>Both will be broadcasted together. Set <code>multiple</code> to True to combine with multiple arguments.
+For more keyword arguments, see <code><a title="vectorbt.utils.Base_Accessor.combine_with" href="utils.html#vectorbt.utils.Base_Accessor.combine_with">Base_Accessor.combine_with()</a></code>.</p></div>
 <details class="source">
 <summary>
 <span>Expand source code</span>
@@ -2462,9 +2485,8 @@ see <code>pandas.vbt.combine_with</code>.</p></div>
 <div class="desc"><p>Returns True when <code>ts</code> is equal <code>other</code>. </p>
 <p>Set <code>crossover</code> to True to return the first True after crossover. Specify <code>wait</code> to return
 True only when <code>ts</code> is equal for a number of time steps in a row after crossover.</p>
-<p>Both will be broadcasted together. Set <code>multiple</code> to True to combine with multiple arguments;
-in this case a new column level will be created with name <code>name</code>. For more keyword arguments,
-see <code>pandas.vbt.combine_with</code>.</p></div>
+<p>Both will be broadcasted together. Set <code>multiple</code> to True to combine with multiple arguments.
+For more keyword arguments, see <code><a title="vectorbt.utils.Base_Accessor.combine_with" href="utils.html#vectorbt.utils.Base_Accessor.combine_with">Base_Accessor.combine_with()</a></code>.</p></div>
 <details class="source">
 <summary>
 <span>Expand source code</span>
@@ -2490,9 +2512,8 @@ see <code>pandas.vbt.combine_with</code>.</p></div>
 <div class="desc"><p>Returns True when <code>upper_band</code> is above <code>other</code>. </p>
 <p>Set <code>crossover</code> to True to return the first True after crossover. Specify <code>wait</code> to return
 True only when <code>upper_band</code> is above for a number of time steps in a row after crossover.</p>
-<p>Both will be broadcasted together. Set <code>multiple</code> to True to combine with multiple arguments;
-in this case a new column level will be created with name <code>name</code>. For more keyword arguments,
-see <code>pandas.vbt.combine_with</code>.</p></div>
+<p>Both will be broadcasted together. Set <code>multiple</code> to True to combine with multiple arguments.
+For more keyword arguments, see <code><a title="vectorbt.utils.Base_Accessor.combine_with" href="utils.html#vectorbt.utils.Base_Accessor.combine_with">Base_Accessor.combine_with()</a></code>.</p></div>
 <details class="source">
 <summary>
 <span>Expand source code</span>
@@ -2518,9 +2539,8 @@ see <code>pandas.vbt.combine_with</code>.</p></div>
 <div class="desc"><p>Returns True when <code>upper_band</code> is below <code>other</code>. </p>
 <p>Set <code>crossover</code> to True to return the first True after crossover. Specify <code>wait</code> to return
 True only when <code>upper_band</code> is below for a number of time steps in a row after crossover.</p>
-<p>Both will be broadcasted together. Set <code>multiple</code> to True to combine with multiple arguments;
-in this case a new column level will be created with name <code>name</code>. For more keyword arguments,
-see <code>pandas.vbt.combine_with</code>.</p></div>
+<p>Both will be broadcasted together. Set <code>multiple</code> to True to combine with multiple arguments.
+For more keyword arguments, see <code><a title="vectorbt.utils.Base_Accessor.combine_with" href="utils.html#vectorbt.utils.Base_Accessor.combine_with">Base_Accessor.combine_with()</a></code>.</p></div>
 <details class="source">
 <summary>
 <span>Expand source code</span>
@@ -2546,9 +2566,8 @@ see <code>pandas.vbt.combine_with</code>.</p></div>
 <div class="desc"><p>Returns True when <code>upper_band</code> is equal <code>other</code>. </p>
 <p>Set <code>crossover</code> to True to return the first True after crossover. Specify <code>wait</code> to return
 True only when <code>upper_band</code> is equal for a number of time steps in a row after crossover.</p>
-<p>Both will be broadcasted together. Set <code>multiple</code> to True to combine with multiple arguments;
-in this case a new column level will be created with name <code>name</code>. For more keyword arguments,
-see <code>pandas.vbt.combine_with</code>.</p></div>
+<p>Both will be broadcasted together. Set <code>multiple</code> to True to combine with multiple arguments.
+For more keyword arguments, see <code><a title="vectorbt.utils.Base_Accessor.combine_with" href="utils.html#vectorbt.utils.Base_Accessor.combine_with">Base_Accessor.combine_with()</a></code>.</p></div>
 <details class="source">
 <summary>
 <span>Expand source code</span>
@@ -2635,7 +2654,7 @@ a new indicator object with newly indexed attributes.</p>
 <li>Adds user-defined properties</li>
 <li>Adds common comparison methods for all inputs, outputs and properties, e.g., crossovers</li>
 </ul>
-<p>Consider the following dataframe:</p>
+<p>Consider the following smaller price dataframe <code>price_sm</code>:</p>
 <pre><code class="python-repl">&gt;&gt;&gt; index = pd.Index([
 ...     datetime(2018, 1, 1),
 ...     datetime(2018, 1, 2),
@@ -2643,10 +2662,10 @@ a new indicator object with newly indexed attributes.</p>
 ...     datetime(2018, 1, 4),
 ...     datetime(2018, 1, 5),
 ... ])
-&gt;&gt;&gt; price = pd.DataFrame({
+&gt;&gt;&gt; price_sm = pd.DataFrame({
 ...     'a': [1, 2, 3, 4, 5], 
 ...     'b': [5, 4, 3, 2, 1]}, index=index).astype(float)
-&gt;&gt;&gt; print(price)
+&gt;&gt;&gt; print(price_sm)
               a    b
 2018-01-01  1.0  5.0
 2018-01-02  2.0  4.0
@@ -2658,11 +2677,11 @@ a new indicator object with newly indexed attributes.</p>
 of price crossing it. In particular, we want to test two different window sizes: 2 and 3.</p>
 <p>A naive way of doing this:</p>
 <pre><code class="python-repl">&gt;&gt;&gt; ma_df = pd.DataFrame.vbt.concat(
-...     price.rolling(window=2).mean(), 
-...     price.rolling(window=3).mean(), 
+...     price_sm.rolling(window=2).mean(), 
+...     price_sm.rolling(window=3).mean(), 
 ...     as_columns=pd.Index([2, 3], name='ma_window'))
 &gt;&gt;&gt; print(ma_df)
-ma_window     2         3     
+ma_window     2    2    3    3
               a    b    a    b
 2018-01-01  NaN  NaN  NaN  NaN
 2018-01-02  1.5  4.5  NaN  NaN
@@ -2670,10 +2689,10 @@ ma_window     2         3
 2018-01-04  3.5  2.5  3.0  3.0
 2018-01-05  4.5  1.5  4.0  2.0
 
-&gt;&gt;&gt; above_signals = (price.vbt.tile(2).vbt &gt; ma_df)
+&gt;&gt;&gt; above_signals = (price_sm.vbt.tile(2).vbt &gt; ma_df)
 &gt;&gt;&gt; above_signals = above_signals.vbt.signals.first(after_false=True)
 &gt;&gt;&gt; print(above_signals)
-ma_window       2             3       
+ma_window       2      2      3      3
                 a      b      a      b
 2018-01-01  False  False  False  False
 2018-01-02   True  False  False  False
@@ -2681,10 +2700,10 @@ ma_window       2             3
 2018-01-04  False  False  False  False
 2018-01-05  False  False  False  False
 
-&gt;&gt;&gt; below_signals = (price.vbt.tile(2).vbt &lt; ma_df)
+&gt;&gt;&gt; below_signals = (price_sm.vbt.tile(2).vbt &lt; ma_df)
 &gt;&gt;&gt; below_signals = below_signals.vbt.signals.first(after_false=True)
 &gt;&gt;&gt; print(below_signals)
-ma_window       2             3       
+ma_window       2      2      3      3
                 a      b      a      b
 2018-01-01  False  False  False  False
 2018-01-02  False   True  False  False
@@ -2694,15 +2713,15 @@ ma_window       2             3
 </code></pre>
 <p>Now the same using <code><a title="vectorbt.indicators.IndicatorFactory" href="#vectorbt.indicators.IndicatorFactory">IndicatorFactory</a></code>:</p>
 <pre><code class="python-repl">&gt;&gt;&gt; MyMA = vbt.IndicatorFactory(
-...     ts_names=['price'],
+...     ts_names=['price_sm'],
 ...     param_names=['window'],
 ...     output_names=['ma'],
 ...     name='myma'
 ... ).from_apply_func(vbt.timeseries.rolling_mean_nb)
 
-&gt;&gt;&gt; myma = MyMA.from_params(price, [2, 3])
-&gt;&gt;&gt; above_signals = myma.price_above(myma.ma, crossover=True)
-&gt;&gt;&gt; below_signals = myma.price_below(myma.ma, crossover=True)
+&gt;&gt;&gt; myma = MyMA.from_params(price_sm, [2, 3])
+&gt;&gt;&gt; above_signals = myma.price_sm_above(myma.ma, crossover=True)
+&gt;&gt;&gt; below_signals = myma.price_sm_below(myma.ma, crossover=True)
 </code></pre>
 <p>It not only produced the handy <code>from_params</code> method, but generated a whole infrastructure to be run with
 an arbitrary number of windows. </p>
@@ -2711,16 +2730,16 @@ for generating signals, such as <code>above</code>, <code>below</code> and <code
 <pre><code class="python-repl">'ma_above'
 'ma_below'
 'ma_equal'
-'price_above'
-'price_below'
-'price_equal'
+'price_sm_above'
+'price_sm_below'
+'price_sm_equal'
 </code></pre>
 <p>Each of these methods uses vectorbt's own broadcasting, so you can compare time-series objects with an
 arbitrary array-like object, given their shapes can be broadcasted together. You can also compare them
 to multiple objects at once, for example:</p>
 <pre><code class="python-repl">&gt;&gt;&gt; myma.ma_above([1.5, 2.5], multiple=True)
-myma_ma_above    1.5                         2.5                     
-myma_window        2             3             2             3       
+myma_ma_above    1.5    1.5    1.5    1.5    2.5    2.5    2.5    2.5
+myma_window        2      2      3      3      2      2      3      3
                    a      b      a      b      a      b      a      b
 2018-01-01     False  False  False  False  False  False  False  False
 2018-01-02     False   True  False  False  False   True  False  False
@@ -2739,27 +2758,28 @@ myma_window        2             3             2             3
 <ul>
 <li>Passing multiple time-series objects will broadcast them to the same shape and index/columns</li>
 </ul>
-<pre><code class="python-repl">&gt;&gt;&gt; price1 = price
-&gt;&gt;&gt; price2 = price.copy() + 1
-&gt;&gt;&gt; price2.columns = ['a2', 'b2']
+<pre><code class="python-repl">&gt;&gt;&gt; price_sm2 = price_sm.copy() + 1
+&gt;&gt;&gt; price_sm2.columns = ['a2', 'b2']
 
 &gt;&gt;&gt; MyInd = vbt.IndicatorFactory(
-...     ts_names=['price1', 'price2'],
+...     ts_names=['price_sm', 'price_sm2'],
 ...     param_names=['p1', 'p2']
-... ).from_apply_func(lambda price1, price2, p1, p2: price1 * p1 + price2 * p2)
+... ).from_apply_func(
+...     lambda price_sm, price_sm2, p1, p2: price_sm * p1 + price_sm2 * p2
+... )
 
-&gt;&gt;&gt; myInd = MyInd.from_params(price1, price2, 1, 2)
-&gt;&gt;&gt; print(myInd.price1)
-            a    b
-            a2   b2
+&gt;&gt;&gt; myInd = MyInd.from_params(price_sm, price_sm2, 1, 2)
+&gt;&gt;&gt; print(myInd.price_sm)
+              a    b
+             a2   b2
 2018-01-01  1.0  5.0
 2018-01-02  2.0  4.0
 2018-01-03  3.0  3.0
 2018-01-04  4.0  2.0
 2018-01-05  5.0  1.0
-&gt;&gt;&gt; print(myInd.price2)
-            a    b
-            a2   b2
+&gt;&gt;&gt; print(myInd.price_sm2)
+              a    b
+             a2   b2
 2018-01-01  2.0  6.0
 2018-01-02  3.0  5.0
 2018-01-03  4.0  4.0
@@ -2769,19 +2789,19 @@ myma_window        2             3             2             3
 <ul>
 <li>Passing multiple parameters will broadcast them to arrays of the same shape</li>
 </ul>
-<pre><code class="python-repl">&gt;&gt;&gt; myInd = MyInd.from_params(price1, price2, 1, 2)
+<pre><code class="python-repl">&gt;&gt;&gt; myInd = MyInd.from_params(price_sm, price_sm2, 1, 2)
 &gt;&gt;&gt; print(myInd._p1_array)
 &gt;&gt;&gt; print(myInd._p2_array)
 [1]
 [2]
 
-&gt;&gt;&gt; myInd = MyInd.from_params(price1, price2, 1, [2, 3])
+&gt;&gt;&gt; myInd = MyInd.from_params(price_sm, price_sm2, 1, [2, 3])
 &gt;&gt;&gt; print(myInd._p1_array)
 &gt;&gt;&gt; print(myInd._p2_array)
 [1 1]
 [2 3]
 
-&gt;&gt;&gt; myInd = MyInd.from_params(price1, price2, [1, 2], [3, 4], param_product=True)
+&gt;&gt;&gt; myInd = MyInd.from_params(price_sm, price_sm2, [1, 2], [3, 4], param_product=True)
 &gt;&gt;&gt; print(myInd._p1_array)
 &gt;&gt;&gt; print(myInd._p2_array)
 [1 1 2 2]
@@ -2838,7 +2858,7 @@ myma_window        2             3             2             3
         * Adds user-defined properties
         * Adds common comparison methods for all inputs, outputs and properties, e.g., crossovers
 
-        Consider the following dataframe:
+        Consider the following smaller price dataframe `price_sm`:
 
         ```python-repl
         &gt;&gt;&gt; index = pd.Index([
@@ -2848,10 +2868,10 @@ myma_window        2             3             2             3
         ...     datetime(2018, 1, 4),
         ...     datetime(2018, 1, 5),
         ... ])
-        &gt;&gt;&gt; price = pd.DataFrame({
+        &gt;&gt;&gt; price_sm = pd.DataFrame({
         ...     &#39;a&#39;: [1, 2, 3, 4, 5], 
         ...     &#39;b&#39;: [5, 4, 3, 2, 1]}, index=index).astype(float)
-        &gt;&gt;&gt; print(price)
+        &gt;&gt;&gt; print(price_sm)
                       a    b
         2018-01-01  1.0  5.0
         2018-01-02  2.0  4.0
@@ -2867,11 +2887,11 @@ myma_window        2             3             2             3
 
         ```python-repl
         &gt;&gt;&gt; ma_df = pd.DataFrame.vbt.concat(
-        ...     price.rolling(window=2).mean(), 
-        ...     price.rolling(window=3).mean(), 
+        ...     price_sm.rolling(window=2).mean(), 
+        ...     price_sm.rolling(window=3).mean(), 
         ...     as_columns=pd.Index([2, 3], name=&#39;ma_window&#39;))
         &gt;&gt;&gt; print(ma_df)
-        ma_window     2         3     
+        ma_window     2    2    3    3
                       a    b    a    b
         2018-01-01  NaN  NaN  NaN  NaN
         2018-01-02  1.5  4.5  NaN  NaN
@@ -2879,10 +2899,10 @@ myma_window        2             3             2             3
         2018-01-04  3.5  2.5  3.0  3.0
         2018-01-05  4.5  1.5  4.0  2.0
 
-        &gt;&gt;&gt; above_signals = (price.vbt.tile(2).vbt &gt; ma_df)
+        &gt;&gt;&gt; above_signals = (price_sm.vbt.tile(2).vbt &gt; ma_df)
         &gt;&gt;&gt; above_signals = above_signals.vbt.signals.first(after_false=True)
         &gt;&gt;&gt; print(above_signals)
-        ma_window       2             3       
+        ma_window       2      2      3      3
                         a      b      a      b
         2018-01-01  False  False  False  False
         2018-01-02   True  False  False  False
@@ -2890,10 +2910,10 @@ myma_window        2             3             2             3
         2018-01-04  False  False  False  False
         2018-01-05  False  False  False  False
 
-        &gt;&gt;&gt; below_signals = (price.vbt.tile(2).vbt &lt; ma_df)
+        &gt;&gt;&gt; below_signals = (price_sm.vbt.tile(2).vbt &lt; ma_df)
         &gt;&gt;&gt; below_signals = below_signals.vbt.signals.first(after_false=True)
         &gt;&gt;&gt; print(below_signals)
-        ma_window       2             3       
+        ma_window       2      2      3      3
                         a      b      a      b
         2018-01-01  False  False  False  False
         2018-01-02  False   True  False  False
@@ -2906,15 +2926,15 @@ myma_window        2             3             2             3
 
         ```python-repl
         &gt;&gt;&gt; MyMA = vbt.IndicatorFactory(
-        ...     ts_names=[&#39;price&#39;],
+        ...     ts_names=[&#39;price_sm&#39;],
         ...     param_names=[&#39;window&#39;],
         ...     output_names=[&#39;ma&#39;],
         ...     name=&#39;myma&#39;
         ... ).from_apply_func(vbt.timeseries.rolling_mean_nb)
 
-        &gt;&gt;&gt; myma = MyMA.from_params(price, [2, 3])
-        &gt;&gt;&gt; above_signals = myma.price_above(myma.ma, crossover=True)
-        &gt;&gt;&gt; below_signals = myma.price_below(myma.ma, crossover=True)
+        &gt;&gt;&gt; myma = MyMA.from_params(price_sm, [2, 3])
+        &gt;&gt;&gt; above_signals = myma.price_sm_above(myma.ma, crossover=True)
+        &gt;&gt;&gt; below_signals = myma.price_sm_below(myma.ma, crossover=True)
         ```
 
         It not only produced the handy `from_params` method, but generated a whole infrastructure to be run with
@@ -2927,9 +2947,9 @@ myma_window        2             3             2             3
         &#39;ma_above&#39;
         &#39;ma_below&#39;
         &#39;ma_equal&#39;
-        &#39;price_above&#39;
-        &#39;price_below&#39;
-        &#39;price_equal&#39;
+        &#39;price_sm_above&#39;
+        &#39;price_sm_below&#39;
+        &#39;price_sm_equal&#39;
         ```
 
         Each of these methods uses vectorbt&#39;s own broadcasting, so you can compare time-series objects with an 
@@ -2938,8 +2958,8 @@ myma_window        2             3             2             3
 
         ```python-repl
         &gt;&gt;&gt; myma.ma_above([1.5, 2.5], multiple=True)
-        myma_ma_above    1.5                         2.5                     
-        myma_window        2             3             2             3       
+        myma_ma_above    1.5    1.5    1.5    1.5    2.5    2.5    2.5    2.5
+        myma_window        2      2      3      3      2      2      3      3
                            a      b      a      b      a      b      a      b
         2018-01-01     False  False  False  False  False  False  False  False
         2018-01-02     False   True  False  False  False   True  False  False
@@ -2964,27 +2984,28 @@ myma_window        2             3             2             3
         * Passing multiple time-series objects will broadcast them to the same shape and index/columns
 
         ```python-repl
-        &gt;&gt;&gt; price1 = price
-        &gt;&gt;&gt; price2 = price.copy() + 1
-        &gt;&gt;&gt; price2.columns = [&#39;a2&#39;, &#39;b2&#39;]
+        &gt;&gt;&gt; price_sm2 = price_sm.copy() + 1
+        &gt;&gt;&gt; price_sm2.columns = [&#39;a2&#39;, &#39;b2&#39;]
 
         &gt;&gt;&gt; MyInd = vbt.IndicatorFactory(
-        ...     ts_names=[&#39;price1&#39;, &#39;price2&#39;],
+        ...     ts_names=[&#39;price_sm&#39;, &#39;price_sm2&#39;],
         ...     param_names=[&#39;p1&#39;, &#39;p2&#39;]
-        ... ).from_apply_func(lambda price1, price2, p1, p2: price1 * p1 + price2 * p2)
+        ... ).from_apply_func(
+        ...     lambda price_sm, price_sm2, p1, p2: price_sm * p1 + price_sm2 * p2
+        ... )
 
-        &gt;&gt;&gt; myInd = MyInd.from_params(price1, price2, 1, 2)
-        &gt;&gt;&gt; print(myInd.price1)
-                    a    b
-                    a2   b2
+        &gt;&gt;&gt; myInd = MyInd.from_params(price_sm, price_sm2, 1, 2)
+        &gt;&gt;&gt; print(myInd.price_sm)
+                      a    b
+                     a2   b2
         2018-01-01  1.0  5.0
         2018-01-02  2.0  4.0
         2018-01-03  3.0  3.0
         2018-01-04  4.0  2.0
         2018-01-05  5.0  1.0
-        &gt;&gt;&gt; print(myInd.price2)
-                    a    b
-                    a2   b2
+        &gt;&gt;&gt; print(myInd.price_sm2)
+                      a    b
+                     a2   b2
         2018-01-01  2.0  6.0
         2018-01-02  3.0  5.0
         2018-01-03  4.0  4.0
@@ -2995,19 +3016,19 @@ myma_window        2             3             2             3
         * Passing multiple parameters will broadcast them to arrays of the same shape
 
         ```python-repl
-        &gt;&gt;&gt; myInd = MyInd.from_params(price1, price2, 1, 2)
+        &gt;&gt;&gt; myInd = MyInd.from_params(price_sm, price_sm2, 1, 2)
         &gt;&gt;&gt; print(myInd._p1_array)
         &gt;&gt;&gt; print(myInd._p2_array)
         [1]
         [2]
 
-        &gt;&gt;&gt; myInd = MyInd.from_params(price1, price2, 1, [2, 3])
+        &gt;&gt;&gt; myInd = MyInd.from_params(price_sm, price_sm2, 1, [2, 3])
         &gt;&gt;&gt; print(myInd._p1_array)
         &gt;&gt;&gt; print(myInd._p2_array)
         [1 1]
         [2 3]
 
-        &gt;&gt;&gt; myInd = MyInd.from_params(price1, price2, [1, 2], [3, 4], param_product=True)
+        &gt;&gt;&gt; myInd = MyInd.from_params(price_sm, price_sm2, [1, 2], [3, 4], param_product=True)
         &gt;&gt;&gt; print(myInd._p1_array)
         &gt;&gt;&gt; print(myInd._p2_array)
         [1 1 2 2]
@@ -3030,19 +3051,18 @@ myma_window        2             3             2             3
             Instead, define your `custom_func` as a regular Python function where you should
             convert all inputs into NumPy arrays, and then pass them to your Numba-compiled function.
 
-            Also, in contrast to `IndicatorFactory.from_apply_func`, it&#39;s up to you to concatenate 
-            columns for each parameter. For example, by using `vectorbt.utils.apply_and_concat_one`.
-            Each output array must have the number of columns that equals to the number of columns
-            in input multiplied by the number of parameter values in each parameter array.
+            Also, in contrast to `IndicatorFactory.from_apply_func`, it&#39;s up to you to handle caching
+            and concatenate columns for each parameter (for example, by using `vectorbt.utils.apply_and_concat_one`).
+            Also, you must ensure that each output array has an appropriate number of columns, which
+            is the number of columns in input time series multiplied by the number of parameter values.
 
         Args:
             custom_func (function): A function that takes broadcasted time series corresponding 
                 to `ts_names`, broadcasted parameter arrays corresponding to `param_names`, and other 
                 arguments and keyword arguments, and returns outputs corresponding to `output_names` 
                 and other objects that are then returned with the indicator class instance.
-            pass_lists (bool): If True, passes `ts_list`, `param_list`, `*args`, `**kwargs` to 
-                `custom_func`. If False, passes `*ts_list`, `*param_list`, `*args`, `**kwargs`.
-                Defaults to False.
+            pass_lists (bool): If True, passes arguments as lists. Otherwise, passes them using 
+                starred expression. Defaults to False.
         Returns:
             `CustomIndicator`, and optionally other objects that are returned by `custom_func`
             and exceed `output_names`.
@@ -3064,10 +3084,10 @@ myma_window        2             3             2             3
             ...     output_names=[&#39;o1&#39;, &#39;o2&#39;]
             ... ).from_custom_func(custom_func)
 
-            &gt;&gt;&gt; myInd = MyInd.from_params(price, price * 2, [1, 2], [3, 4], 100)
+            &gt;&gt;&gt; myInd = MyInd.from_params(price_sm, price_sm * 2, [1, 2], [3, 4], 100)
             &gt;&gt;&gt; print(myInd.o1)
-            custom_p1       1             2       
-            custom_p2       3             4       
+            custom_p1       1      1      2      2
+            custom_p2       3      3      4      4
                             a      b      a      b
             2018-01-01  101.0  105.0  102.0  110.0
             2018-01-02  102.0  104.0  104.0  108.0
@@ -3075,8 +3095,8 @@ myma_window        2             3             2             3
             2018-01-04  104.0  102.0  108.0  104.0
             2018-01-05  105.0  101.0  110.0  102.0
             &gt;&gt;&gt; print(myInd.o2)
-            custom_p1       1             2       
-            custom_p2       3             4       
+            custom_p1       1      1      2      2
+            custom_p2       3      3      4      4
                             a      b      a      b
             2018-01-01  106.0  130.0  108.0  140.0
             2018-01-02  112.0  124.0  116.0  132.0
@@ -3114,6 +3134,7 @@ myma_window        2             3             2             3
 
         # Add __init__ method
         def __init__(self, ts_list, output_list, param_list, mapper_list, name):
+            &#34;&#34;&#34;Performs checks on pipeline artifacts and stores them as instance attributes.&#34;&#34;&#34;
             perform_init_checks(ts_list, output_list, param_list, mapper_list, name)
 
             for i, ts_name in enumerate(ts_names):
@@ -3131,21 +3152,24 @@ myma_window        2             3             2             3
 
         # Add from_params method
         @classmethod
-        def from_params(cls, *args, name=name.lower(), **kwargs):
+        def from_params(cls, *args, name=name.lower(), return_raw=False, **kwargs):
+            &#34;&#34;&#34;Runs the pipeline and initializes the class.&#34;&#34;&#34;
             level_names = tuple([name + &#39;_&#39; + param_name for param_name in param_names])
             args = list(args)
             ts_list = args[:len(ts_names)]
             param_list = args[len(ts_names):len(ts_names)+len(param_names)]
             new_args = args[len(ts_names)+len(param_names):]
-            new_ts_list, output_list, new_param_list, mapper_list, other_list = from_params_pipeline(
+            results = from_params_pipeline(
                 ts_list, param_list, level_names, len(output_names),
-                custom_func, *new_args, pass_lists=pass_lists, **kwargs)
+                custom_func, *new_args, pass_lists=pass_lists, return_raw=return_raw, **kwargs)
+            if return_raw or kwargs.get(&#39;return_cache&#39;, False):
+                return results
+            new_ts_list, output_list, new_param_list, mapper_list, other_list = results
             obj = cls(new_ts_list, output_list, new_param_list, mapper_list, name)
             if len(other_list) &gt; 0:
                 return (obj,) + other_list
             return obj
 
-        # Create private method
         setattr(CustomIndicator, &#39;from_params&#39;, from_params)
 
         # Add indexing methods
@@ -3203,9 +3227,8 @@ myma_window        2             3             2             3
                 Set `crossover` to True to return the first True after crossover. Specify `wait` to return 
                 True only when `{attr}` is {func_name} for a number of time steps in a row after crossover.
                 
-                Both will be broadcasted together. Set `multiple` to True to combine with multiple arguments; 
-                in this case a new column level will be created with name `name`. For more keyword arguments, 
-                see `pandas.vbt.combine_with`.&#34;&#34;&#34;
+                Both will be broadcasted together. Set `multiple` to True to combine with multiple arguments. 
+                For more keyword arguments, see `vectorbt.utils.Base_Accessor.combine_with`.&#34;&#34;&#34;
                 setattr(CustomIndicator, f&#39;{attr}_{func_name}&#39;, comparison_method)
 
             assign_comparison_method(&#39;above&#39;, is_above)
@@ -3217,9 +3240,14 @@ myma_window        2             3             2             3
     def from_apply_func(self, apply_func, caching_func=None):
         &#34;&#34;&#34;Build indicator class around a custom apply function.
 
-        `apply_func` is performed on each parameter individually and the results are then concatenated.
-        This is a much simpler approach than `IndicatorFactory.from_custom_func`, but less flexible,
-        since you can only work with one parameter selection at a time, and can&#39;t view all parameters.
+        In contrast to `IndicatorFactory.from_custom_func`, this method handles a lot of things for you,
+        such as caching, parameter selection, and concatenation. All you have to do is to write `apply_func`
+        that accepts a selection of parameters (single values as opposed to multiple values in 
+        `IndicatorFactory.from_custom_func`) and does the calculation. It then automatically concatenates
+        the results into a single array per output.
+        
+        While this approach is much more simpler, it is also less flexible, since you can only work with 
+        one parameter selection at a time, and can&#39;t view all parameters.
 
         !!! note
             If `apply_func` is a Numba-compiled function: 
@@ -3250,10 +3278,10 @@ myma_window        2             3             2             3
             ...     output_names=[&#39;o1&#39;, &#39;o2&#39;]
             ... ).from_apply_func(apply_func_nb)
 
-            &gt;&gt;&gt; myInd = MyInd.from_params(price, price * 2, [1, 2], [3, 4], 100)
+            &gt;&gt;&gt; myInd = MyInd.from_params(price_sm, price_sm * 2, [1, 2], [3, 4], 100)
             &gt;&gt;&gt; print(myInd.o1)
-            custom_p1       1             2       
-            custom_p2       3             4       
+            custom_p1       1      1      2      2
+            custom_p2       3      3      4      4
                             a      b      a      b
             2018-01-01  101.0  105.0  102.0  110.0
             2018-01-02  102.0  104.0  104.0  108.0
@@ -3261,8 +3289,8 @@ myma_window        2             3             2             3
             2018-01-04  104.0  102.0  108.0  104.0
             2018-01-05  105.0  101.0  110.0  102.0
             &gt;&gt;&gt; print(myInd.o2)
-            custom_p1       1             2       
-            custom_p2       3             4       
+            custom_p1       1      1      2      2
+            custom_p2       3      3      4      4
                             a      b      a      b
             2018-01-01  106.0  130.0  108.0  140.0
             2018-01-02  112.0  124.0  116.0  132.0
@@ -3283,20 +3311,22 @@ myma_window        2             3             2             3
                 # Select the next tuple of parameters
                 return apply_func(*ts_list, *param_tuples[i], *args)
 
-            def custom_func(ts_list, param_list, *args):
+            def custom_func(ts_list, param_list, *args, return_cache=False, cache=None):
                 # avoid deprecation warnings
                 typed_ts_list = tuple(map(lambda x: x.vbt.to_2d_array(), ts_list))
                 typed_param_tuples = List()
                 for param_tuple in list(zip(*param_list)):
                     typed_param_tuples.append(param_tuple)
-
-                # User-defined preprocessing function (useful for caching)
-                if caching_func is not None:
-                    more_args = caching_func(*typed_ts_list, *param_list, *args)
-                    if not isinstance(more_args, (tuple, list, List)):
-                        more_args = (more_args,)
-                else:
-                    more_args = ()
+                
+                # Caching
+                if cache is None and caching_func is not None:
+                    cache = caching_func(*typed_ts_list, *param_list, *args)
+                if return_cache:
+                    return cache
+                if cache is None:
+                    cache = ()
+                if not isinstance(cache, (tuple, list, List)):
+                    cache = (cache,)
 
                 return apply_and_concat_func(
                     param_list[0].shape[0],
@@ -3305,7 +3335,7 @@ myma_window        2             3             2             3
                     typed_ts_list,
                     typed_param_tuples,
                     *args,
-                    *more_args)
+                    *cache)
         else:
             apply_and_concat_func = apply_and_concat_multiple if num_outputs &gt; 1 else apply_and_concat_one
 
@@ -3314,14 +3344,16 @@ myma_window        2             3             2             3
                 param_is = list(map(lambda x: x[i], param_list))
                 return apply_func(*ts_list, *param_is, *args, **kwargs)
 
-            def custom_func(ts_list, param_list, *args, **kwargs):
-                # User-defined preprocessing function (useful for caching)
-                if caching_func is not None:
-                    more_args = caching_func(*ts_list, *param_list, *args)
-                    if not isinstance(more_args, (tuple, list)):
-                        more_args = (more_args,)
-                else:
-                    more_args = ()
+            def custom_func(ts_list, param_list, *args, return_cache=False, **kwargs):
+                # Caching
+                if cache is None and caching_func is not None:
+                    cache = caching_func(*typed_ts_list, *param_list, *args, **kwargs)
+                if return_cache:
+                    return cache
+                if cache is None:
+                    cache = ()
+                if not isinstance(cache, (tuple, list, List)):
+                    cache = (cache,)
 
                 return apply_and_concat_func(
                     param_list[0].shape[0],
@@ -3330,7 +3362,7 @@ myma_window        2             3             2             3
                     ts_list,
                     param_list,
                     *args,
-                    *more_args,
+                    *cache,
                     **kwargs)
 
         return self.from_custom_func(custom_func, pass_lists=True)</code></pre>
@@ -3342,9 +3374,13 @@ myma_window        2             3             2             3
 </code></dt>
 <dd>
 <div class="desc"><p>Build indicator class around a custom apply function.</p>
-<p><code>apply_func</code> is performed on each parameter individually and the results are then concatenated.
-This is a much simpler approach than <code><a title="vectorbt.indicators.IndicatorFactory.from_custom_func" href="#vectorbt.indicators.IndicatorFactory.from_custom_func">IndicatorFactory.from_custom_func()</a></code>, but less flexible,
-since you can only work with one parameter selection at a time, and can't view all parameters.</p>
+<p>In contrast to <code><a title="vectorbt.indicators.IndicatorFactory.from_custom_func" href="#vectorbt.indicators.IndicatorFactory.from_custom_func">IndicatorFactory.from_custom_func()</a></code>, this method handles a lot of things for you,
+such as caching, parameter selection, and concatenation. All you have to do is to write <code>apply_func</code>
+that accepts a selection of parameters (single values as opposed to multiple values in
+<code><a title="vectorbt.indicators.IndicatorFactory.from_custom_func" href="#vectorbt.indicators.IndicatorFactory.from_custom_func">IndicatorFactory.from_custom_func()</a></code>) and does the calculation. It then automatically concatenates
+the results into a single array per output.</p>
+<p>While this approach is much more simpler, it is also less flexible, since you can only work with
+one parameter selection at a time, and can't view all parameters.</p>
 <div class="admonition note">
 <p class="admonition-title">Note</p>
 <p>If <code>apply_func</code> is a Numba-compiled function: </p>
@@ -3379,10 +3415,10 @@ All returned objects will be passed as additional arguments to <code>apply_func<
 ...     output_names=['o1', 'o2']
 ... ).from_apply_func(apply_func_nb)
 
-&gt;&gt;&gt; myInd = MyInd.from_params(price, price * 2, [1, 2], [3, 4], 100)
+&gt;&gt;&gt; myInd = MyInd.from_params(price_sm, price_sm * 2, [1, 2], [3, 4], 100)
 &gt;&gt;&gt; print(myInd.o1)
-custom_p1       1             2       
-custom_p2       3             4       
+custom_p1       1      1      2      2
+custom_p2       3      3      4      4
                 a      b      a      b
 2018-01-01  101.0  105.0  102.0  110.0
 2018-01-02  102.0  104.0  104.0  108.0
@@ -3390,8 +3426,8 @@ custom_p2       3             4
 2018-01-04  104.0  102.0  108.0  104.0
 2018-01-05  105.0  101.0  110.0  102.0
 &gt;&gt;&gt; print(myInd.o2)
-custom_p1       1             2       
-custom_p2       3             4       
+custom_p1       1      1      2      2
+custom_p2       3      3      4      4
                 a      b      a      b
 2018-01-01  106.0  130.0  108.0  140.0
 2018-01-02  112.0  124.0  116.0  132.0
@@ -3406,9 +3442,14 @@ custom_p2       3             4
 <pre><code class="python">def from_apply_func(self, apply_func, caching_func=None):
     &#34;&#34;&#34;Build indicator class around a custom apply function.
 
-    `apply_func` is performed on each parameter individually and the results are then concatenated.
-    This is a much simpler approach than `IndicatorFactory.from_custom_func`, but less flexible,
-    since you can only work with one parameter selection at a time, and can&#39;t view all parameters.
+    In contrast to `IndicatorFactory.from_custom_func`, this method handles a lot of things for you,
+    such as caching, parameter selection, and concatenation. All you have to do is to write `apply_func`
+    that accepts a selection of parameters (single values as opposed to multiple values in 
+    `IndicatorFactory.from_custom_func`) and does the calculation. It then automatically concatenates
+    the results into a single array per output.
+    
+    While this approach is much more simpler, it is also less flexible, since you can only work with 
+    one parameter selection at a time, and can&#39;t view all parameters.
 
     !!! note
         If `apply_func` is a Numba-compiled function: 
@@ -3439,10 +3480,10 @@ custom_p2       3             4
         ...     output_names=[&#39;o1&#39;, &#39;o2&#39;]
         ... ).from_apply_func(apply_func_nb)
 
-        &gt;&gt;&gt; myInd = MyInd.from_params(price, price * 2, [1, 2], [3, 4], 100)
+        &gt;&gt;&gt; myInd = MyInd.from_params(price_sm, price_sm * 2, [1, 2], [3, 4], 100)
         &gt;&gt;&gt; print(myInd.o1)
-        custom_p1       1             2       
-        custom_p2       3             4       
+        custom_p1       1      1      2      2
+        custom_p2       3      3      4      4
                         a      b      a      b
         2018-01-01  101.0  105.0  102.0  110.0
         2018-01-02  102.0  104.0  104.0  108.0
@@ -3450,8 +3491,8 @@ custom_p2       3             4
         2018-01-04  104.0  102.0  108.0  104.0
         2018-01-05  105.0  101.0  110.0  102.0
         &gt;&gt;&gt; print(myInd.o2)
-        custom_p1       1             2       
-        custom_p2       3             4       
+        custom_p1       1      1      2      2
+        custom_p2       3      3      4      4
                         a      b      a      b
         2018-01-01  106.0  130.0  108.0  140.0
         2018-01-02  112.0  124.0  116.0  132.0
@@ -3472,20 +3513,22 @@ custom_p2       3             4
             # Select the next tuple of parameters
             return apply_func(*ts_list, *param_tuples[i], *args)
 
-        def custom_func(ts_list, param_list, *args):
+        def custom_func(ts_list, param_list, *args, return_cache=False, cache=None):
             # avoid deprecation warnings
             typed_ts_list = tuple(map(lambda x: x.vbt.to_2d_array(), ts_list))
             typed_param_tuples = List()
             for param_tuple in list(zip(*param_list)):
                 typed_param_tuples.append(param_tuple)
-
-            # User-defined preprocessing function (useful for caching)
-            if caching_func is not None:
-                more_args = caching_func(*typed_ts_list, *param_list, *args)
-                if not isinstance(more_args, (tuple, list, List)):
-                    more_args = (more_args,)
-            else:
-                more_args = ()
+            
+            # Caching
+            if cache is None and caching_func is not None:
+                cache = caching_func(*typed_ts_list, *param_list, *args)
+            if return_cache:
+                return cache
+            if cache is None:
+                cache = ()
+            if not isinstance(cache, (tuple, list, List)):
+                cache = (cache,)
 
             return apply_and_concat_func(
                 param_list[0].shape[0],
@@ -3494,7 +3537,7 @@ custom_p2       3             4
                 typed_ts_list,
                 typed_param_tuples,
                 *args,
-                *more_args)
+                *cache)
     else:
         apply_and_concat_func = apply_and_concat_multiple if num_outputs &gt; 1 else apply_and_concat_one
 
@@ -3503,14 +3546,16 @@ custom_p2       3             4
             param_is = list(map(lambda x: x[i], param_list))
             return apply_func(*ts_list, *param_is, *args, **kwargs)
 
-        def custom_func(ts_list, param_list, *args, **kwargs):
-            # User-defined preprocessing function (useful for caching)
-            if caching_func is not None:
-                more_args = caching_func(*ts_list, *param_list, *args)
-                if not isinstance(more_args, (tuple, list)):
-                    more_args = (more_args,)
-            else:
-                more_args = ()
+        def custom_func(ts_list, param_list, *args, return_cache=False, **kwargs):
+            # Caching
+            if cache is None and caching_func is not None:
+                cache = caching_func(*typed_ts_list, *param_list, *args, **kwargs)
+            if return_cache:
+                return cache
+            if cache is None:
+                cache = ()
+            if not isinstance(cache, (tuple, list, List)):
+                cache = (cache,)
 
             return apply_and_concat_func(
                 param_list[0].shape[0],
@@ -3519,7 +3564,7 @@ custom_p2       3             4
                 ts_list,
                 param_list,
                 *args,
-                *more_args,
+                *cache,
                 **kwargs)
 
     return self.from_custom_func(custom_func, pass_lists=True)</code></pre>
@@ -3535,10 +3580,10 @@ custom_p2       3             4
 <p><code>custom_func</code> shouldn't be Numba-compiled, since passed time series are all pandas objects.
 Instead, define your <code>custom_func</code> as a regular Python function where you should
 convert all inputs into NumPy arrays, and then pass them to your Numba-compiled function.</p>
-<p>Also, in contrast to <code><a title="vectorbt.indicators.IndicatorFactory.from_apply_func" href="#vectorbt.indicators.IndicatorFactory.from_apply_func">IndicatorFactory.from_apply_func()</a></code>, it's up to you to concatenate
-columns for each parameter. For example, by using <code><a title="vectorbt.utils.apply_and_concat_one" href="utils.html#vectorbt.utils.apply_and_concat_one">apply_and_concat_one()</a></code>.
-Each output array must have the number of columns that equals to the number of columns
-in input multiplied by the number of parameter values in each parameter array.</p>
+<p>Also, in contrast to <code><a title="vectorbt.indicators.IndicatorFactory.from_apply_func" href="#vectorbt.indicators.IndicatorFactory.from_apply_func">IndicatorFactory.from_apply_func()</a></code>, it's up to you to handle caching
+and concatenate columns for each parameter (for example, by using <code><a title="vectorbt.utils.apply_and_concat_one" href="utils.html#vectorbt.utils.apply_and_concat_one">apply_and_concat_one()</a></code>).
+Also, you must ensure that each output array has an appropriate number of columns, which
+is the number of columns in input time series multiplied by the number of parameter values.</p>
 </div>
 <h2 id="args">Args</h2>
 <dl>
@@ -3548,9 +3593,8 @@ to <code>ts_names</code>, broadcasted parameter arrays corresponding to <code>pa
 arguments and keyword arguments, and returns outputs corresponding to <code>output_names</code>
 and other objects that are then returned with the indicator class instance.</dd>
 <dt><strong><code>pass_lists</code></strong> :&ensp;<code>bool</code></dt>
-<dd>If True, passes <code>ts_list</code>, <code>param_list</code>, <code>*args</code>, <code>**kwargs</code> to
-<code>custom_func</code>. If False, passes <code>*ts_list</code>, <code>*param_list</code>, <code>*args</code>, <code>**kwargs</code>.
-Defaults to False.</dd>
+<dd>If True, passes arguments as lists. Otherwise, passes them using
+starred expression. Defaults to False.</dd>
 </dl>
 <h2 id="returns">Returns</h2>
 <p><code>CustomIndicator</code>, and optionally other objects that are returned by <code>custom_func</code>
@@ -3571,10 +3615,10 @@ and exceed <code>output_names</code>.</p>
 ...     output_names=['o1', 'o2']
 ... ).from_custom_func(custom_func)
 
-&gt;&gt;&gt; myInd = MyInd.from_params(price, price * 2, [1, 2], [3, 4], 100)
+&gt;&gt;&gt; myInd = MyInd.from_params(price_sm, price_sm * 2, [1, 2], [3, 4], 100)
 &gt;&gt;&gt; print(myInd.o1)
-custom_p1       1             2       
-custom_p2       3             4       
+custom_p1       1      1      2      2
+custom_p2       3      3      4      4
                 a      b      a      b
 2018-01-01  101.0  105.0  102.0  110.0
 2018-01-02  102.0  104.0  104.0  108.0
@@ -3582,8 +3626,8 @@ custom_p2       3             4
 2018-01-04  104.0  102.0  108.0  104.0
 2018-01-05  105.0  101.0  110.0  102.0
 &gt;&gt;&gt; print(myInd.o2)
-custom_p1       1             2       
-custom_p2       3             4       
+custom_p1       1      1      2      2
+custom_p2       3      3      4      4
                 a      b      a      b
 2018-01-01  106.0  130.0  108.0  140.0
 2018-01-02  112.0  124.0  116.0  132.0
@@ -3603,19 +3647,18 @@ custom_p2       3             4
         Instead, define your `custom_func` as a regular Python function where you should
         convert all inputs into NumPy arrays, and then pass them to your Numba-compiled function.
 
-        Also, in contrast to `IndicatorFactory.from_apply_func`, it&#39;s up to you to concatenate 
-        columns for each parameter. For example, by using `vectorbt.utils.apply_and_concat_one`.
-        Each output array must have the number of columns that equals to the number of columns
-        in input multiplied by the number of parameter values in each parameter array.
+        Also, in contrast to `IndicatorFactory.from_apply_func`, it&#39;s up to you to handle caching
+        and concatenate columns for each parameter (for example, by using `vectorbt.utils.apply_and_concat_one`).
+        Also, you must ensure that each output array has an appropriate number of columns, which
+        is the number of columns in input time series multiplied by the number of parameter values.
 
     Args:
         custom_func (function): A function that takes broadcasted time series corresponding 
             to `ts_names`, broadcasted parameter arrays corresponding to `param_names`, and other 
             arguments and keyword arguments, and returns outputs corresponding to `output_names` 
             and other objects that are then returned with the indicator class instance.
-        pass_lists (bool): If True, passes `ts_list`, `param_list`, `*args`, `**kwargs` to 
-            `custom_func`. If False, passes `*ts_list`, `*param_list`, `*args`, `**kwargs`.
-            Defaults to False.
+        pass_lists (bool): If True, passes arguments as lists. Otherwise, passes them using 
+            starred expression. Defaults to False.
     Returns:
         `CustomIndicator`, and optionally other objects that are returned by `custom_func`
         and exceed `output_names`.
@@ -3637,10 +3680,10 @@ custom_p2       3             4
         ...     output_names=[&#39;o1&#39;, &#39;o2&#39;]
         ... ).from_custom_func(custom_func)
 
-        &gt;&gt;&gt; myInd = MyInd.from_params(price, price * 2, [1, 2], [3, 4], 100)
+        &gt;&gt;&gt; myInd = MyInd.from_params(price_sm, price_sm * 2, [1, 2], [3, 4], 100)
         &gt;&gt;&gt; print(myInd.o1)
-        custom_p1       1             2       
-        custom_p2       3             4       
+        custom_p1       1      1      2      2
+        custom_p2       3      3      4      4
                         a      b      a      b
         2018-01-01  101.0  105.0  102.0  110.0
         2018-01-02  102.0  104.0  104.0  108.0
@@ -3648,8 +3691,8 @@ custom_p2       3             4
         2018-01-04  104.0  102.0  108.0  104.0
         2018-01-05  105.0  101.0  110.0  102.0
         &gt;&gt;&gt; print(myInd.o2)
-        custom_p1       1             2       
-        custom_p2       3             4       
+        custom_p1       1      1      2      2
+        custom_p2       3      3      4      4
                         a      b      a      b
         2018-01-01  106.0  130.0  108.0  140.0
         2018-01-02  112.0  124.0  116.0  132.0
@@ -3687,6 +3730,7 @@ custom_p2       3             4
 
     # Add __init__ method
     def __init__(self, ts_list, output_list, param_list, mapper_list, name):
+        &#34;&#34;&#34;Performs checks on pipeline artifacts and stores them as instance attributes.&#34;&#34;&#34;
         perform_init_checks(ts_list, output_list, param_list, mapper_list, name)
 
         for i, ts_name in enumerate(ts_names):
@@ -3704,21 +3748,24 @@ custom_p2       3             4
 
     # Add from_params method
     @classmethod
-    def from_params(cls, *args, name=name.lower(), **kwargs):
+    def from_params(cls, *args, name=name.lower(), return_raw=False, **kwargs):
+        &#34;&#34;&#34;Runs the pipeline and initializes the class.&#34;&#34;&#34;
         level_names = tuple([name + &#39;_&#39; + param_name for param_name in param_names])
         args = list(args)
         ts_list = args[:len(ts_names)]
         param_list = args[len(ts_names):len(ts_names)+len(param_names)]
         new_args = args[len(ts_names)+len(param_names):]
-        new_ts_list, output_list, new_param_list, mapper_list, other_list = from_params_pipeline(
+        results = from_params_pipeline(
             ts_list, param_list, level_names, len(output_names),
-            custom_func, *new_args, pass_lists=pass_lists, **kwargs)
+            custom_func, *new_args, pass_lists=pass_lists, return_raw=return_raw, **kwargs)
+        if return_raw or kwargs.get(&#39;return_cache&#39;, False):
+            return results
+        new_ts_list, output_list, new_param_list, mapper_list, other_list = results
         obj = cls(new_ts_list, output_list, new_param_list, mapper_list, name)
         if len(other_list) &gt; 0:
             return (obj,) + other_list
         return obj
 
-    # Create private method
     setattr(CustomIndicator, &#39;from_params&#39;, from_params)
 
     # Add indexing methods
@@ -3776,9 +3823,8 @@ custom_p2       3             4
             Set `crossover` to True to return the first True after crossover. Specify `wait` to return 
             True only when `{attr}` is {func_name} for a number of time steps in a row after crossover.
             
-            Both will be broadcasted together. Set `multiple` to True to combine with multiple arguments; 
-            in this case a new column level will be created with name `name`. For more keyword arguments, 
-            see `pandas.vbt.combine_with`.&#34;&#34;&#34;
+            Both will be broadcasted together. Set `multiple` to True to combine with multiple arguments. 
+            For more keyword arguments, see `vectorbt.utils.Base_Accessor.combine_with`.&#34;&#34;&#34;
             setattr(CustomIndicator, f&#39;{attr}_{func_name}&#39;, comparison_method)
 
         assign_comparison_method(&#39;above&#39;, is_above)
@@ -3798,7 +3844,7 @@ custom_p2       3             4
 <div class="desc"><p>A moving average (MA) is a widely used indicator in technical analysis that helps smooth out
 price action by filtering out the “noise” from random short-term price fluctuations. </p>
 <p>See <a href="https://www.investopedia.com/terms/m/movingaverage.asp">Moving Average (MA)</a>.</p>
-<p>Use <code><a title="vectorbt.indicators.MA.from_params" href="#vectorbt.indicators.MA.from_params">MA.from_params()</a></code> method to run the indicator.</p></div>
+<p>Use <code><a title="vectorbt.indicators.MA.from_params" href="#vectorbt.indicators.MA.from_params">MA.from_params()</a></code> or <code><a title="vectorbt.indicators.MA.from_combinations" href="#vectorbt.indicators.MA.from_combinations">MA.from_combinations()</a></code> methods to run the indicator.</p></div>
 <details class="source">
 <summary>
 <span>Expand source code</span>
@@ -3809,7 +3855,7 @@ price action by filtering out the “noise” from random short-term price fluct
 
     See [Moving Average (MA)](https://www.investopedia.com/terms/m/movingaverage.asp).
 
-    Use `MA.from_params` method to run the indicator.&#34;&#34;&#34;
+    Use `MA.from_params` or `MA.from_combinations` methods to run the indicator.&#34;&#34;&#34;
 
     @classmethod
     def from_params(cls, ts, window, ewm=False, **kwargs):
@@ -3823,29 +3869,121 @@ price action by filtering out the “noise” from random short-term price fluct
             **kwargs: Keyword arguments passed to `vectorbt.indicators.from_params_pipeline.`
         Examples:
             ```python-repl
-            &gt;&gt;&gt; price = pd.Series(np.cumsum(np.random.uniform(-0.8, 1, size=(100,))), 
-            ...     index=[datetime(2018, 1, 1) + timedelta(days=i) for i in range(100)])
-
             &gt;&gt;&gt; ma = vbt.MA.from_params(price, [10, 20], ewm=[False, True])
+
             &gt;&gt;&gt; print(ma.ma)
-            ma_window          10        20
-            ma_ewm          False      True
-            2018-01-01        NaN       NaN
-            2018-01-02        NaN       NaN
-            2018-01-03        NaN       NaN
-            2018-01-04        NaN       NaN
-            2018-01-05        NaN       NaN
-            ...               ...       ...
-            2018-04-06  10.154594  8.871905
-            2018-04-07  10.419654  9.152381
-            2018-04-08  10.814717  9.487052
-            2018-04-09  11.099483  9.751123
-            2018-04-10  11.267478  9.920390
+            ma_window         10        20
+            ma_ewm         False      True 
+            2018-01-01       NaN       NaN
+            2018-01-02       NaN       NaN
+            2018-01-03       NaN       NaN
+            ...              ...       ...
+            2018-04-08  5.999866  6.141290
+            2018-04-09  6.040747  6.117779
+            2018-04-10  5.915199  6.021119
 
             [100 rows x 2 columns]
             ```
         &#34;&#34;&#34;
         return super().from_params(ts, window, ewm, **kwargs)
+
+    @classmethod
+    def from_combinations(cls, ts, windows, r, ewm=False, names=None, **kwargs):
+        &#34;&#34;&#34;Calculate multiple moving averages according to `itertools.combinations`.
+
+        Args:
+            ts (pandas_like): Time series (such as price).
+            windows (array_like of int): Size of the moving window. Must be multiple.
+            r (int): The number of `vectorbt.indicators.MA` instances to combine.
+            ewm (bool or array_like of bool): If True, uses exponential moving average, otherwise 
+                simple moving average. Can be one or more values. Defaults to False.
+            names (list of str, optional): A list of names for each `vectorbt.indicators.MA` instance.
+            **kwargs: Keyword arguments passed to `vectorbt.indicators.from_params_pipeline.`
+        Examples:
+            ```python-repl
+            &gt;&gt;&gt; fast_ma, slow_ma = vbt.MA.from_combinations(price, 
+            ...     [10, 20, 30], 2, ewm=[False, False, True], names=[&#39;fast&#39;, &#39;slow&#39;])
+
+            &gt;&gt;&gt; print(fast_ma.ma)
+            
+            fast_window        10        10        20
+            fast_ewm        False     False     False
+            2018-01-01        NaN       NaN       NaN
+            2018-01-02        NaN       NaN       NaN
+            2018-01-03        NaN       NaN       NaN
+            ...               ...       ...       ...
+            2018-04-08   5.999866  5.999866  5.983928
+            2018-04-09   6.040747  6.040747  5.931313
+            2018-04-10   5.915199  5.915199  5.868436
+
+            [100 rows x 3 columns]
+
+            &gt;&gt;&gt; print(slow_ma.ma)
+            slow_window        20        30        30
+            slow_ewm        False      True      True 
+            2018-01-01        NaN       NaN       NaN
+            2018-01-02        NaN       NaN       NaN
+            2018-01-03        NaN       NaN       NaN
+            ...               ...       ...       ...
+            2018-04-08   5.983928  6.356696  6.356696
+            2018-04-09   5.931313  6.326833  6.326833
+            2018-04-10   5.868436  6.247768  6.247768
+
+            [100 rows x 3 columns]
+            ```
+
+            The naive way without caching is the follows:
+            ```py
+            window_combs = itertools.combinations([10, 20, 30], 2)
+            ewm_combs = itertools.combinations([False, False, True], 2)
+            fast_windows, slow_windows = np.asarray(list(window_combs)).transpose()
+            fast_ewms, slow_ewms = np.asarray(list(ewm_combs)).transpose()
+
+            fast_ma = vbt.MA.from_params(price, fast_windows, fast_ewms, name=&#39;fast&#39;)
+            slow_ma = vbt.MA.from_params(price, slow_windows, slow_ewms, name=&#39;slow&#39;)
+            ```
+
+            Having this, you can then compare those `vectorbt.indicators.MA` instances together:
+            ```python-repl
+            &gt;&gt;&gt; entry_signals = fast_ma.ma_above(slow_ma, crossover=True)
+            &gt;&gt;&gt; exit_signals = fast_ma.ma_below(slow_ma, crossover=True)
+
+            &gt;&gt;&gt; print(fast_signals)
+            fast_window     10     10     20
+            fast_ewm     False  False  False
+            slow_window     20     30     30
+            slow_ewm     False  True   True 
+            2018-01-01   False  False  False
+            2018-01-02   False  False  False
+            2018-01-03   False  False  False
+            ...            ...    ...    ...
+            2018-04-08   False  False  False
+            2018-04-09   False  False  False
+            2018-04-10   False  False  False
+
+            [100 rows x 3 columns]
+            ```
+
+            Notice the new column hierarchy the `MA.ma_above` method created for you. You can use
+            it for indexing as follows:
+
+            ```
+            fig = entry_signals[(10, False, 20, False)].vbt.signals.plot(name=&#39;Entries&#39;)
+            exit_signals[(10, False, 20, False)].vbt.signals.plot(name=&#39;Exits&#39;, fig=fig)
+            ```
+            ![](img/MA_from_combinations.png)
+        &#34;&#34;&#34;
+
+        if names is None:
+            names = [&#39;ma&#39; + str(i+1) for i in range(r)]
+        windows, ewm = broadcast(windows, ewm, writeable=True)
+        cache_dict = cls.from_params(ts, windows, ewm=ewm, return_cache=True, **kwargs)
+        param_lists = zip(*itertools.combinations(zip(windows, ewm), r))
+        mas = []
+        for i, param_list in enumerate(param_lists):
+            i_windows, i_ewm = zip(*param_list)
+            mas.append(cls.from_params(ts, i_windows, ewm=i_ewm, cache=cache_dict, name=names[i], **kwargs))
+        return tuple(mas)
 
     def plot(self,
              ts_name=None,
@@ -3888,6 +4026,195 @@ price action by filtering out the “noise” from random short-term price fluct
 </ul>
 <h3>Static methods</h3>
 <dl>
+<dt id="vectorbt.indicators.MA.from_combinations"><code class="name flex">
+<span>def <span class="ident">from_combinations</span></span>(<span>ts, windows, r, ewm=False, names=None, **kwargs)</span>
+</code></dt>
+<dd>
+<div class="desc"><p>Calculate multiple moving averages according to <code>itertools.combinations</code>.</p>
+<h2 id="args">Args</h2>
+<dl>
+<dt><strong><code>ts</code></strong> :&ensp;<code>pandas_like</code></dt>
+<dd>Time series (such as price).</dd>
+<dt><strong><code>windows</code></strong> :&ensp;<code>array_like</code> of <code>int</code></dt>
+<dd>Size of the moving window. Must be multiple.</dd>
+<dt><strong><code>r</code></strong> :&ensp;<code>int</code></dt>
+<dd>The number of <code><a title="vectorbt.indicators.MA" href="#vectorbt.indicators.MA">MA</a></code> instances to combine.</dd>
+<dt><strong><code>ewm</code></strong> :&ensp;<code>bool</code> or <code>array_like</code> of <code>bool</code></dt>
+<dd>If True, uses exponential moving average, otherwise
+simple moving average. Can be one or more values. Defaults to False.</dd>
+<dt><strong><code>names</code></strong> :&ensp;<code>list</code> of <code>str</code>, optional</dt>
+<dd>A list of names for each <code><a title="vectorbt.indicators.MA" href="#vectorbt.indicators.MA">MA</a></code> instance.</dd>
+<dt><strong><code>**kwargs</code></strong></dt>
+<dd>Keyword arguments passed to <code><a title="vectorbt.indicators.from_params_pipeline" href="#vectorbt.indicators.from_params_pipeline">from_params_pipeline()</a>.</code></dd>
+</dl>
+<h2 id="examples">Examples</h2>
+<pre><code class="python-repl">&gt;&gt;&gt; fast_ma, slow_ma = vbt.MA.from_combinations(price, 
+...     [10, 20, 30], 2, ewm=[False, False, True], names=['fast', 'slow'])
+
+&gt;&gt;&gt; print(fast_ma.ma)
+
+fast_window        10        10        20
+fast_ewm        False     False     False
+2018-01-01        NaN       NaN       NaN
+2018-01-02        NaN       NaN       NaN
+2018-01-03        NaN       NaN       NaN
+...               ...       ...       ...
+2018-04-08   5.999866  5.999866  5.983928
+2018-04-09   6.040747  6.040747  5.931313
+2018-04-10   5.915199  5.915199  5.868436
+
+[100 rows x 3 columns]
+
+&gt;&gt;&gt; print(slow_ma.ma)
+slow_window        20        30        30
+slow_ewm        False      True      True 
+2018-01-01        NaN       NaN       NaN
+2018-01-02        NaN       NaN       NaN
+2018-01-03        NaN       NaN       NaN
+...               ...       ...       ...
+2018-04-08   5.983928  6.356696  6.356696
+2018-04-09   5.931313  6.326833  6.326833
+2018-04-10   5.868436  6.247768  6.247768
+
+[100 rows x 3 columns]
+</code></pre>
+<p>The naive way without caching is the follows:</p>
+<pre><code class="py">window_combs = itertools.combinations([10, 20, 30], 2)
+ewm_combs = itertools.combinations([False, False, True], 2)
+fast_windows, slow_windows = np.asarray(list(window_combs)).transpose()
+fast_ewms, slow_ewms = np.asarray(list(ewm_combs)).transpose()
+
+fast_ma = vbt.MA.from_params(price, fast_windows, fast_ewms, name='fast')
+slow_ma = vbt.MA.from_params(price, slow_windows, slow_ewms, name='slow')
+</code></pre>
+<p>Having this, you can then compare those <code><a title="vectorbt.indicators.MA" href="#vectorbt.indicators.MA">MA</a></code> instances together:</p>
+<pre><code class="python-repl">&gt;&gt;&gt; entry_signals = fast_ma.ma_above(slow_ma, crossover=True)
+&gt;&gt;&gt; exit_signals = fast_ma.ma_below(slow_ma, crossover=True)
+
+&gt;&gt;&gt; print(fast_signals)
+fast_window     10     10     20
+fast_ewm     False  False  False
+slow_window     20     30     30
+slow_ewm     False  True   True 
+2018-01-01   False  False  False
+2018-01-02   False  False  False
+2018-01-03   False  False  False
+...            ...    ...    ...
+2018-04-08   False  False  False
+2018-04-09   False  False  False
+2018-04-10   False  False  False
+
+[100 rows x 3 columns]
+</code></pre>
+<p>Notice the new column hierarchy the <code><a title="vectorbt.indicators.MA.ma_above" href="#vectorbt.indicators.MA.ma_above">IndicatorFactory.from_custom_func.<locals>.assign_comparison_method.<locals>.comparison_method()</a></code> method created for you. You can use
+it for indexing as follows:</p>
+<pre><code>fig = entry_signals[(10, False, 20, False)].vbt.signals.plot(name='Entries')
+exit_signals[(10, False, 20, False)].vbt.signals.plot(name='Exits', fig=fig)
+</code></pre>
+<p><img alt="" src="img/MA_from_combinations.png"></p></div>
+<details class="source">
+<summary>
+<span>Expand source code</span>
+</summary>
+<pre><code class="python">@classmethod
+def from_combinations(cls, ts, windows, r, ewm=False, names=None, **kwargs):
+    &#34;&#34;&#34;Calculate multiple moving averages according to `itertools.combinations`.
+
+    Args:
+        ts (pandas_like): Time series (such as price).
+        windows (array_like of int): Size of the moving window. Must be multiple.
+        r (int): The number of `vectorbt.indicators.MA` instances to combine.
+        ewm (bool or array_like of bool): If True, uses exponential moving average, otherwise 
+            simple moving average. Can be one or more values. Defaults to False.
+        names (list of str, optional): A list of names for each `vectorbt.indicators.MA` instance.
+        **kwargs: Keyword arguments passed to `vectorbt.indicators.from_params_pipeline.`
+    Examples:
+        ```python-repl
+        &gt;&gt;&gt; fast_ma, slow_ma = vbt.MA.from_combinations(price, 
+        ...     [10, 20, 30], 2, ewm=[False, False, True], names=[&#39;fast&#39;, &#39;slow&#39;])
+
+        &gt;&gt;&gt; print(fast_ma.ma)
+        
+        fast_window        10        10        20
+        fast_ewm        False     False     False
+        2018-01-01        NaN       NaN       NaN
+        2018-01-02        NaN       NaN       NaN
+        2018-01-03        NaN       NaN       NaN
+        ...               ...       ...       ...
+        2018-04-08   5.999866  5.999866  5.983928
+        2018-04-09   6.040747  6.040747  5.931313
+        2018-04-10   5.915199  5.915199  5.868436
+
+        [100 rows x 3 columns]
+
+        &gt;&gt;&gt; print(slow_ma.ma)
+        slow_window        20        30        30
+        slow_ewm        False      True      True 
+        2018-01-01        NaN       NaN       NaN
+        2018-01-02        NaN       NaN       NaN
+        2018-01-03        NaN       NaN       NaN
+        ...               ...       ...       ...
+        2018-04-08   5.983928  6.356696  6.356696
+        2018-04-09   5.931313  6.326833  6.326833
+        2018-04-10   5.868436  6.247768  6.247768
+
+        [100 rows x 3 columns]
+        ```
+
+        The naive way without caching is the follows:
+        ```py
+        window_combs = itertools.combinations([10, 20, 30], 2)
+        ewm_combs = itertools.combinations([False, False, True], 2)
+        fast_windows, slow_windows = np.asarray(list(window_combs)).transpose()
+        fast_ewms, slow_ewms = np.asarray(list(ewm_combs)).transpose()
+
+        fast_ma = vbt.MA.from_params(price, fast_windows, fast_ewms, name=&#39;fast&#39;)
+        slow_ma = vbt.MA.from_params(price, slow_windows, slow_ewms, name=&#39;slow&#39;)
+        ```
+
+        Having this, you can then compare those `vectorbt.indicators.MA` instances together:
+        ```python-repl
+        &gt;&gt;&gt; entry_signals = fast_ma.ma_above(slow_ma, crossover=True)
+        &gt;&gt;&gt; exit_signals = fast_ma.ma_below(slow_ma, crossover=True)
+
+        &gt;&gt;&gt; print(fast_signals)
+        fast_window     10     10     20
+        fast_ewm     False  False  False
+        slow_window     20     30     30
+        slow_ewm     False  True   True 
+        2018-01-01   False  False  False
+        2018-01-02   False  False  False
+        2018-01-03   False  False  False
+        ...            ...    ...    ...
+        2018-04-08   False  False  False
+        2018-04-09   False  False  False
+        2018-04-10   False  False  False
+
+        [100 rows x 3 columns]
+        ```
+
+        Notice the new column hierarchy the `MA.ma_above` method created for you. You can use
+        it for indexing as follows:
+
+        ```
+        fig = entry_signals[(10, False, 20, False)].vbt.signals.plot(name=&#39;Entries&#39;)
+        exit_signals[(10, False, 20, False)].vbt.signals.plot(name=&#39;Exits&#39;, fig=fig)
+        ```
+        ![](img/MA_from_combinations.png)
+    &#34;&#34;&#34;
+
+    if names is None:
+        names = [&#39;ma&#39; + str(i+1) for i in range(r)]
+    windows, ewm = broadcast(windows, ewm, writeable=True)
+    cache_dict = cls.from_params(ts, windows, ewm=ewm, return_cache=True, **kwargs)
+    param_lists = zip(*itertools.combinations(zip(windows, ewm), r))
+    mas = []
+    for i, param_list in enumerate(param_lists):
+        i_windows, i_ewm = zip(*param_list)
+        mas.append(cls.from_params(ts, i_windows, ewm=i_ewm, cache=cache_dict, name=names[i], **kwargs))
+    return tuple(mas)</code></pre>
+</details>
+</dd>
 <dt id="vectorbt.indicators.MA.from_params"><code class="name flex">
 <span>def <span class="ident">from_params</span></span>(<span>ts, window, ewm=False, **kwargs)</span>
 </code></dt>
@@ -3906,24 +4233,18 @@ simple moving average. Can be one or more values. Defaults to False.</dd>
 <dd>Keyword arguments passed to <code><a title="vectorbt.indicators.from_params_pipeline" href="#vectorbt.indicators.from_params_pipeline">from_params_pipeline()</a>.</code></dd>
 </dl>
 <h2 id="examples">Examples</h2>
-<pre><code class="python-repl">&gt;&gt;&gt; price = pd.Series(np.cumsum(np.random.uniform(-0.8, 1, size=(100,))), 
-...     index=[datetime(2018, 1, 1) + timedelta(days=i) for i in range(100)])
+<pre><code class="python-repl">&gt;&gt;&gt; ma = vbt.MA.from_params(price, [10, 20], ewm=[False, True])
 
-&gt;&gt;&gt; ma = vbt.MA.from_params(price, [10, 20], ewm=[False, True])
 &gt;&gt;&gt; print(ma.ma)
-ma_window          10        20
-ma_ewm          False      True
-2018-01-01        NaN       NaN
-2018-01-02        NaN       NaN
-2018-01-03        NaN       NaN
-2018-01-04        NaN       NaN
-2018-01-05        NaN       NaN
-...               ...       ...
-2018-04-06  10.154594  8.871905
-2018-04-07  10.419654  9.152381
-2018-04-08  10.814717  9.487052
-2018-04-09  11.099483  9.751123
-2018-04-10  11.267478  9.920390
+ma_window         10        20
+ma_ewm         False      True 
+2018-01-01       NaN       NaN
+2018-01-02       NaN       NaN
+2018-01-03       NaN       NaN
+...              ...       ...
+2018-04-08  5.999866  6.141290
+2018-04-09  6.040747  6.117779
+2018-04-10  5.915199  6.021119
 
 [100 rows x 2 columns]
 </code></pre></div>
@@ -3943,24 +4264,18 @@ def from_params(cls, ts, window, ewm=False, **kwargs):
         **kwargs: Keyword arguments passed to `vectorbt.indicators.from_params_pipeline.`
     Examples:
         ```python-repl
-        &gt;&gt;&gt; price = pd.Series(np.cumsum(np.random.uniform(-0.8, 1, size=(100,))), 
-        ...     index=[datetime(2018, 1, 1) + timedelta(days=i) for i in range(100)])
-
         &gt;&gt;&gt; ma = vbt.MA.from_params(price, [10, 20], ewm=[False, True])
+
         &gt;&gt;&gt; print(ma.ma)
-        ma_window          10        20
-        ma_ewm          False      True
-        2018-01-01        NaN       NaN
-        2018-01-02        NaN       NaN
-        2018-01-03        NaN       NaN
-        2018-01-04        NaN       NaN
-        2018-01-05        NaN       NaN
-        ...               ...       ...
-        2018-04-06  10.154594  8.871905
-        2018-04-07  10.419654  9.152381
-        2018-04-08  10.814717  9.487052
-        2018-04-09  11.099483  9.751123
-        2018-04-10  11.267478  9.920390
+        ma_window         10        20
+        ma_ewm         False      True 
+        2018-01-01       NaN       NaN
+        2018-01-02       NaN       NaN
+        2018-01-03       NaN       NaN
+        ...              ...       ...
+        2018-04-08  5.999866  6.141290
+        2018-04-09  6.040747  6.117779
+        2018-04-10  5.915199  6.021119
 
         [100 rows x 2 columns]
         ```
@@ -4082,9 +4397,8 @@ def param_loc(self):
 <div class="desc"><p>Returns True when <code>ma</code> is above <code>other</code>. </p>
 <p>Set <code>crossover</code> to True to return the first True after crossover. Specify <code>wait</code> to return
 True only when <code>ma</code> is above for a number of time steps in a row after crossover.</p>
-<p>Both will be broadcasted together. Set <code>multiple</code> to True to combine with multiple arguments;
-in this case a new column level will be created with name <code>name</code>. For more keyword arguments,
-see <code>pandas.vbt.combine_with</code>.</p></div>
+<p>Both will be broadcasted together. Set <code>multiple</code> to True to combine with multiple arguments.
+For more keyword arguments, see <code><a title="vectorbt.utils.Base_Accessor.combine_with" href="utils.html#vectorbt.utils.Base_Accessor.combine_with">Base_Accessor.combine_with()</a></code>.</p></div>
 <details class="source">
 <summary>
 <span>Expand source code</span>
@@ -4110,9 +4424,8 @@ see <code>pandas.vbt.combine_with</code>.</p></div>
 <div class="desc"><p>Returns True when <code>ma</code> is below <code>other</code>. </p>
 <p>Set <code>crossover</code> to True to return the first True after crossover. Specify <code>wait</code> to return
 True only when <code>ma</code> is below for a number of time steps in a row after crossover.</p>
-<p>Both will be broadcasted together. Set <code>multiple</code> to True to combine with multiple arguments;
-in this case a new column level will be created with name <code>name</code>. For more keyword arguments,
-see <code>pandas.vbt.combine_with</code>.</p></div>
+<p>Both will be broadcasted together. Set <code>multiple</code> to True to combine with multiple arguments.
+For more keyword arguments, see <code><a title="vectorbt.utils.Base_Accessor.combine_with" href="utils.html#vectorbt.utils.Base_Accessor.combine_with">Base_Accessor.combine_with()</a></code>.</p></div>
 <details class="source">
 <summary>
 <span>Expand source code</span>
@@ -4138,9 +4451,8 @@ see <code>pandas.vbt.combine_with</code>.</p></div>
 <div class="desc"><p>Returns True when <code>ma</code> is equal <code>other</code>. </p>
 <p>Set <code>crossover</code> to True to return the first True after crossover. Specify <code>wait</code> to return
 True only when <code>ma</code> is equal for a number of time steps in a row after crossover.</p>
-<p>Both will be broadcasted together. Set <code>multiple</code> to True to combine with multiple arguments;
-in this case a new column level will be created with name <code>name</code>. For more keyword arguments,
-see <code>pandas.vbt.combine_with</code>.</p></div>
+<p>Both will be broadcasted together. Set <code>multiple</code> to True to combine with multiple arguments.
+For more keyword arguments, see <code><a title="vectorbt.utils.Base_Accessor.combine_with" href="utils.html#vectorbt.utils.Base_Accessor.combine_with">Base_Accessor.combine_with()</a></code>.</p></div>
 <details class="source">
 <summary>
 <span>Expand source code</span>
@@ -4230,9 +4542,8 @@ see <code>pandas.vbt.combine_with</code>.</p></div>
 <div class="desc"><p>Returns True when <code>ts</code> is above <code>other</code>. </p>
 <p>Set <code>crossover</code> to True to return the first True after crossover. Specify <code>wait</code> to return
 True only when <code>ts</code> is above for a number of time steps in a row after crossover.</p>
-<p>Both will be broadcasted together. Set <code>multiple</code> to True to combine with multiple arguments;
-in this case a new column level will be created with name <code>name</code>. For more keyword arguments,
-see <code>pandas.vbt.combine_with</code>.</p></div>
+<p>Both will be broadcasted together. Set <code>multiple</code> to True to combine with multiple arguments.
+For more keyword arguments, see <code><a title="vectorbt.utils.Base_Accessor.combine_with" href="utils.html#vectorbt.utils.Base_Accessor.combine_with">Base_Accessor.combine_with()</a></code>.</p></div>
 <details class="source">
 <summary>
 <span>Expand source code</span>
@@ -4258,9 +4569,8 @@ see <code>pandas.vbt.combine_with</code>.</p></div>
 <div class="desc"><p>Returns True when <code>ts</code> is below <code>other</code>. </p>
 <p>Set <code>crossover</code> to True to return the first True after crossover. Specify <code>wait</code> to return
 True only when <code>ts</code> is below for a number of time steps in a row after crossover.</p>
-<p>Both will be broadcasted together. Set <code>multiple</code> to True to combine with multiple arguments;
-in this case a new column level will be created with name <code>name</code>. For more keyword arguments,
-see <code>pandas.vbt.combine_with</code>.</p></div>
+<p>Both will be broadcasted together. Set <code>multiple</code> to True to combine with multiple arguments.
+For more keyword arguments, see <code><a title="vectorbt.utils.Base_Accessor.combine_with" href="utils.html#vectorbt.utils.Base_Accessor.combine_with">Base_Accessor.combine_with()</a></code>.</p></div>
 <details class="source">
 <summary>
 <span>Expand source code</span>
@@ -4286,9 +4596,8 @@ see <code>pandas.vbt.combine_with</code>.</p></div>
 <div class="desc"><p>Returns True when <code>ts</code> is equal <code>other</code>. </p>
 <p>Set <code>crossover</code> to True to return the first True after crossover. Specify <code>wait</code> to return
 True only when <code>ts</code> is equal for a number of time steps in a row after crossover.</p>
-<p>Both will be broadcasted together. Set <code>multiple</code> to True to combine with multiple arguments;
-in this case a new column level will be created with name <code>name</code>. For more keyword arguments,
-see <code>pandas.vbt.combine_with</code>.</p></div>
+<p>Both will be broadcasted together. Set <code>multiple</code> to True to combine with multiple arguments.
+For more keyword arguments, see <code><a title="vectorbt.utils.Base_Accessor.combine_with" href="utils.html#vectorbt.utils.Base_Accessor.combine_with">Base_Accessor.combine_with()</a></code>.</p></div>
 <details class="source">
 <summary>
 <span>Expand source code</span>
@@ -4376,7 +4685,7 @@ operation to each Series/DataFrame and returns a new instance of <code>CustomInd
 <span>def <span class="ident">from_params</span></span>(<span>ts, fast_window=26, slow_window=12, signal_window=9, ewm=True, **kwargs)</span>
 </code></dt>
 <dd>
-<div class="desc"></div>
+<div class="desc"><p>Runs the pipeline and initializes the class.</p></div>
 <details class="source">
 <summary>
 <span>Expand source code</span>
@@ -4583,9 +4892,8 @@ def param_loc(self):
 <div class="desc"><p>Returns True when <code>fast_ma</code> is above <code>other</code>. </p>
 <p>Set <code>crossover</code> to True to return the first True after crossover. Specify <code>wait</code> to return
 True only when <code>fast_ma</code> is above for a number of time steps in a row after crossover.</p>
-<p>Both will be broadcasted together. Set <code>multiple</code> to True to combine with multiple arguments;
-in this case a new column level will be created with name <code>name</code>. For more keyword arguments,
-see <code>pandas.vbt.combine_with</code>.</p></div>
+<p>Both will be broadcasted together. Set <code>multiple</code> to True to combine with multiple arguments.
+For more keyword arguments, see <code><a title="vectorbt.utils.Base_Accessor.combine_with" href="utils.html#vectorbt.utils.Base_Accessor.combine_with">Base_Accessor.combine_with()</a></code>.</p></div>
 <details class="source">
 <summary>
 <span>Expand source code</span>
@@ -4611,9 +4919,8 @@ see <code>pandas.vbt.combine_with</code>.</p></div>
 <div class="desc"><p>Returns True when <code>fast_ma</code> is below <code>other</code>. </p>
 <p>Set <code>crossover</code> to True to return the first True after crossover. Specify <code>wait</code> to return
 True only when <code>fast_ma</code> is below for a number of time steps in a row after crossover.</p>
-<p>Both will be broadcasted together. Set <code>multiple</code> to True to combine with multiple arguments;
-in this case a new column level will be created with name <code>name</code>. For more keyword arguments,
-see <code>pandas.vbt.combine_with</code>.</p></div>
+<p>Both will be broadcasted together. Set <code>multiple</code> to True to combine with multiple arguments.
+For more keyword arguments, see <code><a title="vectorbt.utils.Base_Accessor.combine_with" href="utils.html#vectorbt.utils.Base_Accessor.combine_with">Base_Accessor.combine_with()</a></code>.</p></div>
 <details class="source">
 <summary>
 <span>Expand source code</span>
@@ -4639,9 +4946,8 @@ see <code>pandas.vbt.combine_with</code>.</p></div>
 <div class="desc"><p>Returns True when <code>fast_ma</code> is equal <code>other</code>. </p>
 <p>Set <code>crossover</code> to True to return the first True after crossover. Specify <code>wait</code> to return
 True only when <code>fast_ma</code> is equal for a number of time steps in a row after crossover.</p>
-<p>Both will be broadcasted together. Set <code>multiple</code> to True to combine with multiple arguments;
-in this case a new column level will be created with name <code>name</code>. For more keyword arguments,
-see <code>pandas.vbt.combine_with</code>.</p></div>
+<p>Both will be broadcasted together. Set <code>multiple</code> to True to combine with multiple arguments.
+For more keyword arguments, see <code><a title="vectorbt.utils.Base_Accessor.combine_with" href="utils.html#vectorbt.utils.Base_Accessor.combine_with">Base_Accessor.combine_with()</a></code>.</p></div>
 <details class="source">
 <summary>
 <span>Expand source code</span>
@@ -4667,9 +4973,8 @@ see <code>pandas.vbt.combine_with</code>.</p></div>
 <div class="desc"><p>Returns True when <code>histogram</code> is above <code>other</code>. </p>
 <p>Set <code>crossover</code> to True to return the first True after crossover. Specify <code>wait</code> to return
 True only when <code>histogram</code> is above for a number of time steps in a row after crossover.</p>
-<p>Both will be broadcasted together. Set <code>multiple</code> to True to combine with multiple arguments;
-in this case a new column level will be created with name <code>name</code>. For more keyword arguments,
-see <code>pandas.vbt.combine_with</code>.</p></div>
+<p>Both will be broadcasted together. Set <code>multiple</code> to True to combine with multiple arguments.
+For more keyword arguments, see <code><a title="vectorbt.utils.Base_Accessor.combine_with" href="utils.html#vectorbt.utils.Base_Accessor.combine_with">Base_Accessor.combine_with()</a></code>.</p></div>
 <details class="source">
 <summary>
 <span>Expand source code</span>
@@ -4695,9 +5000,8 @@ see <code>pandas.vbt.combine_with</code>.</p></div>
 <div class="desc"><p>Returns True when <code>histogram</code> is below <code>other</code>. </p>
 <p>Set <code>crossover</code> to True to return the first True after crossover. Specify <code>wait</code> to return
 True only when <code>histogram</code> is below for a number of time steps in a row after crossover.</p>
-<p>Both will be broadcasted together. Set <code>multiple</code> to True to combine with multiple arguments;
-in this case a new column level will be created with name <code>name</code>. For more keyword arguments,
-see <code>pandas.vbt.combine_with</code>.</p></div>
+<p>Both will be broadcasted together. Set <code>multiple</code> to True to combine with multiple arguments.
+For more keyword arguments, see <code><a title="vectorbt.utils.Base_Accessor.combine_with" href="utils.html#vectorbt.utils.Base_Accessor.combine_with">Base_Accessor.combine_with()</a></code>.</p></div>
 <details class="source">
 <summary>
 <span>Expand source code</span>
@@ -4723,9 +5027,8 @@ see <code>pandas.vbt.combine_with</code>.</p></div>
 <div class="desc"><p>Returns True when <code>histogram</code> is equal <code>other</code>. </p>
 <p>Set <code>crossover</code> to True to return the first True after crossover. Specify <code>wait</code> to return
 True only when <code>histogram</code> is equal for a number of time steps in a row after crossover.</p>
-<p>Both will be broadcasted together. Set <code>multiple</code> to True to combine with multiple arguments;
-in this case a new column level will be created with name <code>name</code>. For more keyword arguments,
-see <code>pandas.vbt.combine_with</code>.</p></div>
+<p>Both will be broadcasted together. Set <code>multiple</code> to True to combine with multiple arguments.
+For more keyword arguments, see <code><a title="vectorbt.utils.Base_Accessor.combine_with" href="utils.html#vectorbt.utils.Base_Accessor.combine_with">Base_Accessor.combine_with()</a></code>.</p></div>
 <details class="source">
 <summary>
 <span>Expand source code</span>
@@ -4751,9 +5054,8 @@ see <code>pandas.vbt.combine_with</code>.</p></div>
 <div class="desc"><p>Returns True when <code>macd</code> is above <code>other</code>. </p>
 <p>Set <code>crossover</code> to True to return the first True after crossover. Specify <code>wait</code> to return
 True only when <code>macd</code> is above for a number of time steps in a row after crossover.</p>
-<p>Both will be broadcasted together. Set <code>multiple</code> to True to combine with multiple arguments;
-in this case a new column level will be created with name <code>name</code>. For more keyword arguments,
-see <code>pandas.vbt.combine_with</code>.</p></div>
+<p>Both will be broadcasted together. Set <code>multiple</code> to True to combine with multiple arguments.
+For more keyword arguments, see <code><a title="vectorbt.utils.Base_Accessor.combine_with" href="utils.html#vectorbt.utils.Base_Accessor.combine_with">Base_Accessor.combine_with()</a></code>.</p></div>
 <details class="source">
 <summary>
 <span>Expand source code</span>
@@ -4779,9 +5081,8 @@ see <code>pandas.vbt.combine_with</code>.</p></div>
 <div class="desc"><p>Returns True when <code>macd</code> is below <code>other</code>. </p>
 <p>Set <code>crossover</code> to True to return the first True after crossover. Specify <code>wait</code> to return
 True only when <code>macd</code> is below for a number of time steps in a row after crossover.</p>
-<p>Both will be broadcasted together. Set <code>multiple</code> to True to combine with multiple arguments;
-in this case a new column level will be created with name <code>name</code>. For more keyword arguments,
-see <code>pandas.vbt.combine_with</code>.</p></div>
+<p>Both will be broadcasted together. Set <code>multiple</code> to True to combine with multiple arguments.
+For more keyword arguments, see <code><a title="vectorbt.utils.Base_Accessor.combine_with" href="utils.html#vectorbt.utils.Base_Accessor.combine_with">Base_Accessor.combine_with()</a></code>.</p></div>
 <details class="source">
 <summary>
 <span>Expand source code</span>
@@ -4807,9 +5108,8 @@ see <code>pandas.vbt.combine_with</code>.</p></div>
 <div class="desc"><p>Returns True when <code>macd</code> is equal <code>other</code>. </p>
 <p>Set <code>crossover</code> to True to return the first True after crossover. Specify <code>wait</code> to return
 True only when <code>macd</code> is equal for a number of time steps in a row after crossover.</p>
-<p>Both will be broadcasted together. Set <code>multiple</code> to True to combine with multiple arguments;
-in this case a new column level will be created with name <code>name</code>. For more keyword arguments,
-see <code>pandas.vbt.combine_with</code>.</p></div>
+<p>Both will be broadcasted together. Set <code>multiple</code> to True to combine with multiple arguments.
+For more keyword arguments, see <code><a title="vectorbt.utils.Base_Accessor.combine_with" href="utils.html#vectorbt.utils.Base_Accessor.combine_with">Base_Accessor.combine_with()</a></code>.</p></div>
 <details class="source">
 <summary>
 <span>Expand source code</span>
@@ -4866,9 +5166,8 @@ see <code>pandas.vbt.combine_with</code>.</p></div>
 <div class="desc"><p>Returns True when <code>signal</code> is above <code>other</code>. </p>
 <p>Set <code>crossover</code> to True to return the first True after crossover. Specify <code>wait</code> to return
 True only when <code>signal</code> is above for a number of time steps in a row after crossover.</p>
-<p>Both will be broadcasted together. Set <code>multiple</code> to True to combine with multiple arguments;
-in this case a new column level will be created with name <code>name</code>. For more keyword arguments,
-see <code>pandas.vbt.combine_with</code>.</p></div>
+<p>Both will be broadcasted together. Set <code>multiple</code> to True to combine with multiple arguments.
+For more keyword arguments, see <code><a title="vectorbt.utils.Base_Accessor.combine_with" href="utils.html#vectorbt.utils.Base_Accessor.combine_with">Base_Accessor.combine_with()</a></code>.</p></div>
 <details class="source">
 <summary>
 <span>Expand source code</span>
@@ -4894,9 +5193,8 @@ see <code>pandas.vbt.combine_with</code>.</p></div>
 <div class="desc"><p>Returns True when <code>signal</code> is below <code>other</code>. </p>
 <p>Set <code>crossover</code> to True to return the first True after crossover. Specify <code>wait</code> to return
 True only when <code>signal</code> is below for a number of time steps in a row after crossover.</p>
-<p>Both will be broadcasted together. Set <code>multiple</code> to True to combine with multiple arguments;
-in this case a new column level will be created with name <code>name</code>. For more keyword arguments,
-see <code>pandas.vbt.combine_with</code>.</p></div>
+<p>Both will be broadcasted together. Set <code>multiple</code> to True to combine with multiple arguments.
+For more keyword arguments, see <code><a title="vectorbt.utils.Base_Accessor.combine_with" href="utils.html#vectorbt.utils.Base_Accessor.combine_with">Base_Accessor.combine_with()</a></code>.</p></div>
 <details class="source">
 <summary>
 <span>Expand source code</span>
@@ -4922,9 +5220,8 @@ see <code>pandas.vbt.combine_with</code>.</p></div>
 <div class="desc"><p>Returns True when <code>signal</code> is equal <code>other</code>. </p>
 <p>Set <code>crossover</code> to True to return the first True after crossover. Specify <code>wait</code> to return
 True only when <code>signal</code> is equal for a number of time steps in a row after crossover.</p>
-<p>Both will be broadcasted together. Set <code>multiple</code> to True to combine with multiple arguments;
-in this case a new column level will be created with name <code>name</code>. For more keyword arguments,
-see <code>pandas.vbt.combine_with</code>.</p></div>
+<p>Both will be broadcasted together. Set <code>multiple</code> to True to combine with multiple arguments.
+For more keyword arguments, see <code><a title="vectorbt.utils.Base_Accessor.combine_with" href="utils.html#vectorbt.utils.Base_Accessor.combine_with">Base_Accessor.combine_with()</a></code>.</p></div>
 <details class="source">
 <summary>
 <span>Expand source code</span>
@@ -4950,9 +5247,8 @@ see <code>pandas.vbt.combine_with</code>.</p></div>
 <div class="desc"><p>Returns True when <code>slow_ma</code> is above <code>other</code>. </p>
 <p>Set <code>crossover</code> to True to return the first True after crossover. Specify <code>wait</code> to return
 True only when <code>slow_ma</code> is above for a number of time steps in a row after crossover.</p>
-<p>Both will be broadcasted together. Set <code>multiple</code> to True to combine with multiple arguments;
-in this case a new column level will be created with name <code>name</code>. For more keyword arguments,
-see <code>pandas.vbt.combine_with</code>.</p></div>
+<p>Both will be broadcasted together. Set <code>multiple</code> to True to combine with multiple arguments.
+For more keyword arguments, see <code><a title="vectorbt.utils.Base_Accessor.combine_with" href="utils.html#vectorbt.utils.Base_Accessor.combine_with">Base_Accessor.combine_with()</a></code>.</p></div>
 <details class="source">
 <summary>
 <span>Expand source code</span>
@@ -4978,9 +5274,8 @@ see <code>pandas.vbt.combine_with</code>.</p></div>
 <div class="desc"><p>Returns True when <code>slow_ma</code> is below <code>other</code>. </p>
 <p>Set <code>crossover</code> to True to return the first True after crossover. Specify <code>wait</code> to return
 True only when <code>slow_ma</code> is below for a number of time steps in a row after crossover.</p>
-<p>Both will be broadcasted together. Set <code>multiple</code> to True to combine with multiple arguments;
-in this case a new column level will be created with name <code>name</code>. For more keyword arguments,
-see <code>pandas.vbt.combine_with</code>.</p></div>
+<p>Both will be broadcasted together. Set <code>multiple</code> to True to combine with multiple arguments.
+For more keyword arguments, see <code><a title="vectorbt.utils.Base_Accessor.combine_with" href="utils.html#vectorbt.utils.Base_Accessor.combine_with">Base_Accessor.combine_with()</a></code>.</p></div>
 <details class="source">
 <summary>
 <span>Expand source code</span>
@@ -5006,9 +5301,8 @@ see <code>pandas.vbt.combine_with</code>.</p></div>
 <div class="desc"><p>Returns True when <code>slow_ma</code> is equal <code>other</code>. </p>
 <p>Set <code>crossover</code> to True to return the first True after crossover. Specify <code>wait</code> to return
 True only when <code>slow_ma</code> is equal for a number of time steps in a row after crossover.</p>
-<p>Both will be broadcasted together. Set <code>multiple</code> to True to combine with multiple arguments;
-in this case a new column level will be created with name <code>name</code>. For more keyword arguments,
-see <code>pandas.vbt.combine_with</code>.</p></div>
+<p>Both will be broadcasted together. Set <code>multiple</code> to True to combine with multiple arguments.
+For more keyword arguments, see <code><a title="vectorbt.utils.Base_Accessor.combine_with" href="utils.html#vectorbt.utils.Base_Accessor.combine_with">Base_Accessor.combine_with()</a></code>.</p></div>
 <details class="source">
 <summary>
 <span>Expand source code</span>
@@ -5034,9 +5328,8 @@ see <code>pandas.vbt.combine_with</code>.</p></div>
 <div class="desc"><p>Returns True when <code>ts</code> is above <code>other</code>. </p>
 <p>Set <code>crossover</code> to True to return the first True after crossover. Specify <code>wait</code> to return
 True only when <code>ts</code> is above for a number of time steps in a row after crossover.</p>
-<p>Both will be broadcasted together. Set <code>multiple</code> to True to combine with multiple arguments;
-in this case a new column level will be created with name <code>name</code>. For more keyword arguments,
-see <code>pandas.vbt.combine_with</code>.</p></div>
+<p>Both will be broadcasted together. Set <code>multiple</code> to True to combine with multiple arguments.
+For more keyword arguments, see <code><a title="vectorbt.utils.Base_Accessor.combine_with" href="utils.html#vectorbt.utils.Base_Accessor.combine_with">Base_Accessor.combine_with()</a></code>.</p></div>
 <details class="source">
 <summary>
 <span>Expand source code</span>
@@ -5062,9 +5355,8 @@ see <code>pandas.vbt.combine_with</code>.</p></div>
 <div class="desc"><p>Returns True when <code>ts</code> is below <code>other</code>. </p>
 <p>Set <code>crossover</code> to True to return the first True after crossover. Specify <code>wait</code> to return
 True only when <code>ts</code> is below for a number of time steps in a row after crossover.</p>
-<p>Both will be broadcasted together. Set <code>multiple</code> to True to combine with multiple arguments;
-in this case a new column level will be created with name <code>name</code>. For more keyword arguments,
-see <code>pandas.vbt.combine_with</code>.</p></div>
+<p>Both will be broadcasted together. Set <code>multiple</code> to True to combine with multiple arguments.
+For more keyword arguments, see <code><a title="vectorbt.utils.Base_Accessor.combine_with" href="utils.html#vectorbt.utils.Base_Accessor.combine_with">Base_Accessor.combine_with()</a></code>.</p></div>
 <details class="source">
 <summary>
 <span>Expand source code</span>
@@ -5090,9 +5382,8 @@ see <code>pandas.vbt.combine_with</code>.</p></div>
 <div class="desc"><p>Returns True when <code>ts</code> is equal <code>other</code>. </p>
 <p>Set <code>crossover</code> to True to return the first True after crossover. Specify <code>wait</code> to return
 True only when <code>ts</code> is equal for a number of time steps in a row after crossover.</p>
-<p>Both will be broadcasted together. Set <code>multiple</code> to True to combine with multiple arguments;
-in this case a new column level will be created with name <code>name</code>. For more keyword arguments,
-see <code>pandas.vbt.combine_with</code>.</p></div>
+<p>Both will be broadcasted together. Set <code>multiple</code> to True to combine with multiple arguments.
+For more keyword arguments, see <code><a title="vectorbt.utils.Base_Accessor.combine_with" href="utils.html#vectorbt.utils.Base_Accessor.combine_with">Base_Accessor.combine_with()</a></code>.</p></div>
 <details class="source">
 <summary>
 <span>Expand source code</span>
@@ -5168,7 +5459,7 @@ operation to each Series/DataFrame and returns a new instance of <code>CustomInd
 <span>def <span class="ident">from_params</span></span>(<span>ts, window, ewm=False, **kwargs)</span>
 </code></dt>
 <dd>
-<div class="desc"></div>
+<div class="desc"><p>Runs the pipeline and initializes the class.</p></div>
 <details class="source">
 <summary>
 <span>Expand source code</span>
@@ -5292,9 +5583,8 @@ def param_loc(self):
 <div class="desc"><p>Returns True when <code>mstd</code> is above <code>other</code>. </p>
 <p>Set <code>crossover</code> to True to return the first True after crossover. Specify <code>wait</code> to return
 True only when <code>mstd</code> is above for a number of time steps in a row after crossover.</p>
-<p>Both will be broadcasted together. Set <code>multiple</code> to True to combine with multiple arguments;
-in this case a new column level will be created with name <code>name</code>. For more keyword arguments,
-see <code>pandas.vbt.combine_with</code>.</p></div>
+<p>Both will be broadcasted together. Set <code>multiple</code> to True to combine with multiple arguments.
+For more keyword arguments, see <code><a title="vectorbt.utils.Base_Accessor.combine_with" href="utils.html#vectorbt.utils.Base_Accessor.combine_with">Base_Accessor.combine_with()</a></code>.</p></div>
 <details class="source">
 <summary>
 <span>Expand source code</span>
@@ -5320,9 +5610,8 @@ see <code>pandas.vbt.combine_with</code>.</p></div>
 <div class="desc"><p>Returns True when <code>mstd</code> is below <code>other</code>. </p>
 <p>Set <code>crossover</code> to True to return the first True after crossover. Specify <code>wait</code> to return
 True only when <code>mstd</code> is below for a number of time steps in a row after crossover.</p>
-<p>Both will be broadcasted together. Set <code>multiple</code> to True to combine with multiple arguments;
-in this case a new column level will be created with name <code>name</code>. For more keyword arguments,
-see <code>pandas.vbt.combine_with</code>.</p></div>
+<p>Both will be broadcasted together. Set <code>multiple</code> to True to combine with multiple arguments.
+For more keyword arguments, see <code><a title="vectorbt.utils.Base_Accessor.combine_with" href="utils.html#vectorbt.utils.Base_Accessor.combine_with">Base_Accessor.combine_with()</a></code>.</p></div>
 <details class="source">
 <summary>
 <span>Expand source code</span>
@@ -5348,9 +5637,8 @@ see <code>pandas.vbt.combine_with</code>.</p></div>
 <div class="desc"><p>Returns True when <code>mstd</code> is equal <code>other</code>. </p>
 <p>Set <code>crossover</code> to True to return the first True after crossover. Specify <code>wait</code> to return
 True only when <code>mstd</code> is equal for a number of time steps in a row after crossover.</p>
-<p>Both will be broadcasted together. Set <code>multiple</code> to True to combine with multiple arguments;
-in this case a new column level will be created with name <code>name</code>. For more keyword arguments,
-see <code>pandas.vbt.combine_with</code>.</p></div>
+<p>Both will be broadcasted together. Set <code>multiple</code> to True to combine with multiple arguments.
+For more keyword arguments, see <code><a title="vectorbt.utils.Base_Accessor.combine_with" href="utils.html#vectorbt.utils.Base_Accessor.combine_with">Base_Accessor.combine_with()</a></code>.</p></div>
 <details class="source">
 <summary>
 <span>Expand source code</span>
@@ -5400,9 +5688,8 @@ see <code>pandas.vbt.combine_with</code>.</p></div>
 <div class="desc"><p>Returns True when <code>ts</code> is above <code>other</code>. </p>
 <p>Set <code>crossover</code> to True to return the first True after crossover. Specify <code>wait</code> to return
 True only when <code>ts</code> is above for a number of time steps in a row after crossover.</p>
-<p>Both will be broadcasted together. Set <code>multiple</code> to True to combine with multiple arguments;
-in this case a new column level will be created with name <code>name</code>. For more keyword arguments,
-see <code>pandas.vbt.combine_with</code>.</p></div>
+<p>Both will be broadcasted together. Set <code>multiple</code> to True to combine with multiple arguments.
+For more keyword arguments, see <code><a title="vectorbt.utils.Base_Accessor.combine_with" href="utils.html#vectorbt.utils.Base_Accessor.combine_with">Base_Accessor.combine_with()</a></code>.</p></div>
 <details class="source">
 <summary>
 <span>Expand source code</span>
@@ -5428,9 +5715,8 @@ see <code>pandas.vbt.combine_with</code>.</p></div>
 <div class="desc"><p>Returns True when <code>ts</code> is below <code>other</code>. </p>
 <p>Set <code>crossover</code> to True to return the first True after crossover. Specify <code>wait</code> to return
 True only when <code>ts</code> is below for a number of time steps in a row after crossover.</p>
-<p>Both will be broadcasted together. Set <code>multiple</code> to True to combine with multiple arguments;
-in this case a new column level will be created with name <code>name</code>. For more keyword arguments,
-see <code>pandas.vbt.combine_with</code>.</p></div>
+<p>Both will be broadcasted together. Set <code>multiple</code> to True to combine with multiple arguments.
+For more keyword arguments, see <code><a title="vectorbt.utils.Base_Accessor.combine_with" href="utils.html#vectorbt.utils.Base_Accessor.combine_with">Base_Accessor.combine_with()</a></code>.</p></div>
 <details class="source">
 <summary>
 <span>Expand source code</span>
@@ -5456,9 +5742,8 @@ see <code>pandas.vbt.combine_with</code>.</p></div>
 <div class="desc"><p>Returns True when <code>ts</code> is equal <code>other</code>. </p>
 <p>Set <code>crossover</code> to True to return the first True after crossover. Specify <code>wait</code> to return
 True only when <code>ts</code> is equal for a number of time steps in a row after crossover.</p>
-<p>Both will be broadcasted together. Set <code>multiple</code> to True to combine with multiple arguments;
-in this case a new column level will be created with name <code>name</code>. For more keyword arguments,
-see <code>pandas.vbt.combine_with</code>.</p></div>
+<p>Both will be broadcasted together. Set <code>multiple</code> to True to combine with multiple arguments.
+For more keyword arguments, see <code><a title="vectorbt.utils.Base_Accessor.combine_with" href="utils.html#vectorbt.utils.Base_Accessor.combine_with">Base_Accessor.combine_with()</a></code>.</p></div>
 <details class="source">
 <summary>
 <span>Expand source code</span>
@@ -5534,7 +5819,7 @@ operation to each Series/DataFrame and returns a new instance of <code>CustomInd
 <span>def <span class="ident">from_params</span></span>(<span>close_ts, volume_ts)</span>
 </code></dt>
 <dd>
-<div class="desc"></div>
+<div class="desc"><p>Runs the pipeline and initializes the class.</p></div>
 <details class="source">
 <summary>
 <span>Expand source code</span>
@@ -5626,9 +5911,8 @@ def loc(self):
 <div class="desc"><p>Returns True when <code>close_ts</code> is above <code>other</code>. </p>
 <p>Set <code>crossover</code> to True to return the first True after crossover. Specify <code>wait</code> to return
 True only when <code>close_ts</code> is above for a number of time steps in a row after crossover.</p>
-<p>Both will be broadcasted together. Set <code>multiple</code> to True to combine with multiple arguments;
-in this case a new column level will be created with name <code>name</code>. For more keyword arguments,
-see <code>pandas.vbt.combine_with</code>.</p></div>
+<p>Both will be broadcasted together. Set <code>multiple</code> to True to combine with multiple arguments.
+For more keyword arguments, see <code><a title="vectorbt.utils.Base_Accessor.combine_with" href="utils.html#vectorbt.utils.Base_Accessor.combine_with">Base_Accessor.combine_with()</a></code>.</p></div>
 <details class="source">
 <summary>
 <span>Expand source code</span>
@@ -5654,9 +5938,8 @@ see <code>pandas.vbt.combine_with</code>.</p></div>
 <div class="desc"><p>Returns True when <code>close_ts</code> is below <code>other</code>. </p>
 <p>Set <code>crossover</code> to True to return the first True after crossover. Specify <code>wait</code> to return
 True only when <code>close_ts</code> is below for a number of time steps in a row after crossover.</p>
-<p>Both will be broadcasted together. Set <code>multiple</code> to True to combine with multiple arguments;
-in this case a new column level will be created with name <code>name</code>. For more keyword arguments,
-see <code>pandas.vbt.combine_with</code>.</p></div>
+<p>Both will be broadcasted together. Set <code>multiple</code> to True to combine with multiple arguments.
+For more keyword arguments, see <code><a title="vectorbt.utils.Base_Accessor.combine_with" href="utils.html#vectorbt.utils.Base_Accessor.combine_with">Base_Accessor.combine_with()</a></code>.</p></div>
 <details class="source">
 <summary>
 <span>Expand source code</span>
@@ -5682,9 +5965,8 @@ see <code>pandas.vbt.combine_with</code>.</p></div>
 <div class="desc"><p>Returns True when <code>close_ts</code> is equal <code>other</code>. </p>
 <p>Set <code>crossover</code> to True to return the first True after crossover. Specify <code>wait</code> to return
 True only when <code>close_ts</code> is equal for a number of time steps in a row after crossover.</p>
-<p>Both will be broadcasted together. Set <code>multiple</code> to True to combine with multiple arguments;
-in this case a new column level will be created with name <code>name</code>. For more keyword arguments,
-see <code>pandas.vbt.combine_with</code>.</p></div>
+<p>Both will be broadcasted together. Set <code>multiple</code> to True to combine with multiple arguments.
+For more keyword arguments, see <code><a title="vectorbt.utils.Base_Accessor.combine_with" href="utils.html#vectorbt.utils.Base_Accessor.combine_with">Base_Accessor.combine_with()</a></code>.</p></div>
 <details class="source">
 <summary>
 <span>Expand source code</span>
@@ -5710,9 +5992,8 @@ see <code>pandas.vbt.combine_with</code>.</p></div>
 <div class="desc"><p>Returns True when <code>obv</code> is above <code>other</code>. </p>
 <p>Set <code>crossover</code> to True to return the first True after crossover. Specify <code>wait</code> to return
 True only when <code>obv</code> is above for a number of time steps in a row after crossover.</p>
-<p>Both will be broadcasted together. Set <code>multiple</code> to True to combine with multiple arguments;
-in this case a new column level will be created with name <code>name</code>. For more keyword arguments,
-see <code>pandas.vbt.combine_with</code>.</p></div>
+<p>Both will be broadcasted together. Set <code>multiple</code> to True to combine with multiple arguments.
+For more keyword arguments, see <code><a title="vectorbt.utils.Base_Accessor.combine_with" href="utils.html#vectorbt.utils.Base_Accessor.combine_with">Base_Accessor.combine_with()</a></code>.</p></div>
 <details class="source">
 <summary>
 <span>Expand source code</span>
@@ -5738,9 +6019,8 @@ see <code>pandas.vbt.combine_with</code>.</p></div>
 <div class="desc"><p>Returns True when <code>obv</code> is below <code>other</code>. </p>
 <p>Set <code>crossover</code> to True to return the first True after crossover. Specify <code>wait</code> to return
 True only when <code>obv</code> is below for a number of time steps in a row after crossover.</p>
-<p>Both will be broadcasted together. Set <code>multiple</code> to True to combine with multiple arguments;
-in this case a new column level will be created with name <code>name</code>. For more keyword arguments,
-see <code>pandas.vbt.combine_with</code>.</p></div>
+<p>Both will be broadcasted together. Set <code>multiple</code> to True to combine with multiple arguments.
+For more keyword arguments, see <code><a title="vectorbt.utils.Base_Accessor.combine_with" href="utils.html#vectorbt.utils.Base_Accessor.combine_with">Base_Accessor.combine_with()</a></code>.</p></div>
 <details class="source">
 <summary>
 <span>Expand source code</span>
@@ -5766,9 +6046,8 @@ see <code>pandas.vbt.combine_with</code>.</p></div>
 <div class="desc"><p>Returns True when <code>obv</code> is equal <code>other</code>. </p>
 <p>Set <code>crossover</code> to True to return the first True after crossover. Specify <code>wait</code> to return
 True only when <code>obv</code> is equal for a number of time steps in a row after crossover.</p>
-<p>Both will be broadcasted together. Set <code>multiple</code> to True to combine with multiple arguments;
-in this case a new column level will be created with name <code>name</code>. For more keyword arguments,
-see <code>pandas.vbt.combine_with</code>.</p></div>
+<p>Both will be broadcasted together. Set <code>multiple</code> to True to combine with multiple arguments.
+For more keyword arguments, see <code><a title="vectorbt.utils.Base_Accessor.combine_with" href="utils.html#vectorbt.utils.Base_Accessor.combine_with">Base_Accessor.combine_with()</a></code>.</p></div>
 <details class="source">
 <summary>
 <span>Expand source code</span>
@@ -5818,9 +6097,8 @@ see <code>pandas.vbt.combine_with</code>.</p></div>
 <div class="desc"><p>Returns True when <code>volume_ts</code> is above <code>other</code>. </p>
 <p>Set <code>crossover</code> to True to return the first True after crossover. Specify <code>wait</code> to return
 True only when <code>volume_ts</code> is above for a number of time steps in a row after crossover.</p>
-<p>Both will be broadcasted together. Set <code>multiple</code> to True to combine with multiple arguments;
-in this case a new column level will be created with name <code>name</code>. For more keyword arguments,
-see <code>pandas.vbt.combine_with</code>.</p></div>
+<p>Both will be broadcasted together. Set <code>multiple</code> to True to combine with multiple arguments.
+For more keyword arguments, see <code><a title="vectorbt.utils.Base_Accessor.combine_with" href="utils.html#vectorbt.utils.Base_Accessor.combine_with">Base_Accessor.combine_with()</a></code>.</p></div>
 <details class="source">
 <summary>
 <span>Expand source code</span>
@@ -5846,9 +6124,8 @@ see <code>pandas.vbt.combine_with</code>.</p></div>
 <div class="desc"><p>Returns True when <code>volume_ts</code> is below <code>other</code>. </p>
 <p>Set <code>crossover</code> to True to return the first True after crossover. Specify <code>wait</code> to return
 True only when <code>volume_ts</code> is below for a number of time steps in a row after crossover.</p>
-<p>Both will be broadcasted together. Set <code>multiple</code> to True to combine with multiple arguments;
-in this case a new column level will be created with name <code>name</code>. For more keyword arguments,
-see <code>pandas.vbt.combine_with</code>.</p></div>
+<p>Both will be broadcasted together. Set <code>multiple</code> to True to combine with multiple arguments.
+For more keyword arguments, see <code><a title="vectorbt.utils.Base_Accessor.combine_with" href="utils.html#vectorbt.utils.Base_Accessor.combine_with">Base_Accessor.combine_with()</a></code>.</p></div>
 <details class="source">
 <summary>
 <span>Expand source code</span>
@@ -5874,9 +6151,8 @@ see <code>pandas.vbt.combine_with</code>.</p></div>
 <div class="desc"><p>Returns True when <code>volume_ts</code> is equal <code>other</code>. </p>
 <p>Set <code>crossover</code> to True to return the first True after crossover. Specify <code>wait</code> to return
 True only when <code>volume_ts</code> is equal for a number of time steps in a row after crossover.</p>
-<p>Both will be broadcasted together. Set <code>multiple</code> to True to combine with multiple arguments;
-in this case a new column level will be created with name <code>name</code>. For more keyword arguments,
-see <code>pandas.vbt.combine_with</code>.</p></div>
+<p>Both will be broadcasted together. Set <code>multiple</code> to True to combine with multiple arguments.
+For more keyword arguments, see <code><a title="vectorbt.utils.Base_Accessor.combine_with" href="utils.html#vectorbt.utils.Base_Accessor.combine_with">Base_Accessor.combine_with()</a></code>.</p></div>
 <details class="source">
 <summary>
 <span>Expand source code</span>
@@ -5952,7 +6228,7 @@ operation to each Series/DataFrame and returns a new instance of <code>CustomInd
 <span>def <span class="ident">from_params</span></span>(<span>ts, window=14, ewm=False, **kwargs)</span>
 </code></dt>
 <dd>
-<div class="desc"></div>
+<div class="desc"><p>Runs the pipeline and initializes the class.</p></div>
 <details class="source">
 <summary>
 <span>Expand source code</span>
@@ -6100,9 +6376,8 @@ def param_loc(self):
 <div class="desc"><p>Returns True when <code>rsi</code> is above <code>other</code>. </p>
 <p>Set <code>crossover</code> to True to return the first True after crossover. Specify <code>wait</code> to return
 True only when <code>rsi</code> is above for a number of time steps in a row after crossover.</p>
-<p>Both will be broadcasted together. Set <code>multiple</code> to True to combine with multiple arguments;
-in this case a new column level will be created with name <code>name</code>. For more keyword arguments,
-see <code>pandas.vbt.combine_with</code>.</p></div>
+<p>Both will be broadcasted together. Set <code>multiple</code> to True to combine with multiple arguments.
+For more keyword arguments, see <code><a title="vectorbt.utils.Base_Accessor.combine_with" href="utils.html#vectorbt.utils.Base_Accessor.combine_with">Base_Accessor.combine_with()</a></code>.</p></div>
 <details class="source">
 <summary>
 <span>Expand source code</span>
@@ -6128,9 +6403,8 @@ see <code>pandas.vbt.combine_with</code>.</p></div>
 <div class="desc"><p>Returns True when <code>rsi</code> is below <code>other</code>. </p>
 <p>Set <code>crossover</code> to True to return the first True after crossover. Specify <code>wait</code> to return
 True only when <code>rsi</code> is below for a number of time steps in a row after crossover.</p>
-<p>Both will be broadcasted together. Set <code>multiple</code> to True to combine with multiple arguments;
-in this case a new column level will be created with name <code>name</code>. For more keyword arguments,
-see <code>pandas.vbt.combine_with</code>.</p></div>
+<p>Both will be broadcasted together. Set <code>multiple</code> to True to combine with multiple arguments.
+For more keyword arguments, see <code><a title="vectorbt.utils.Base_Accessor.combine_with" href="utils.html#vectorbt.utils.Base_Accessor.combine_with">Base_Accessor.combine_with()</a></code>.</p></div>
 <details class="source">
 <summary>
 <span>Expand source code</span>
@@ -6156,9 +6430,8 @@ see <code>pandas.vbt.combine_with</code>.</p></div>
 <div class="desc"><p>Returns True when <code>rsi</code> is equal <code>other</code>. </p>
 <p>Set <code>crossover</code> to True to return the first True after crossover. Specify <code>wait</code> to return
 True only when <code>rsi</code> is equal for a number of time steps in a row after crossover.</p>
-<p>Both will be broadcasted together. Set <code>multiple</code> to True to combine with multiple arguments;
-in this case a new column level will be created with name <code>name</code>. For more keyword arguments,
-see <code>pandas.vbt.combine_with</code>.</p></div>
+<p>Both will be broadcasted together. Set <code>multiple</code> to True to combine with multiple arguments.
+For more keyword arguments, see <code><a title="vectorbt.utils.Base_Accessor.combine_with" href="utils.html#vectorbt.utils.Base_Accessor.combine_with">Base_Accessor.combine_with()</a></code>.</p></div>
 <details class="source">
 <summary>
 <span>Expand source code</span>
@@ -6184,9 +6457,8 @@ see <code>pandas.vbt.combine_with</code>.</p></div>
 <div class="desc"><p>Returns True when <code>ts</code> is above <code>other</code>. </p>
 <p>Set <code>crossover</code> to True to return the first True after crossover. Specify <code>wait</code> to return
 True only when <code>ts</code> is above for a number of time steps in a row after crossover.</p>
-<p>Both will be broadcasted together. Set <code>multiple</code> to True to combine with multiple arguments;
-in this case a new column level will be created with name <code>name</code>. For more keyword arguments,
-see <code>pandas.vbt.combine_with</code>.</p></div>
+<p>Both will be broadcasted together. Set <code>multiple</code> to True to combine with multiple arguments.
+For more keyword arguments, see <code><a title="vectorbt.utils.Base_Accessor.combine_with" href="utils.html#vectorbt.utils.Base_Accessor.combine_with">Base_Accessor.combine_with()</a></code>.</p></div>
 <details class="source">
 <summary>
 <span>Expand source code</span>
@@ -6212,9 +6484,8 @@ see <code>pandas.vbt.combine_with</code>.</p></div>
 <div class="desc"><p>Returns True when <code>ts</code> is below <code>other</code>. </p>
 <p>Set <code>crossover</code> to True to return the first True after crossover. Specify <code>wait</code> to return
 True only when <code>ts</code> is below for a number of time steps in a row after crossover.</p>
-<p>Both will be broadcasted together. Set <code>multiple</code> to True to combine with multiple arguments;
-in this case a new column level will be created with name <code>name</code>. For more keyword arguments,
-see <code>pandas.vbt.combine_with</code>.</p></div>
+<p>Both will be broadcasted together. Set <code>multiple</code> to True to combine with multiple arguments.
+For more keyword arguments, see <code><a title="vectorbt.utils.Base_Accessor.combine_with" href="utils.html#vectorbt.utils.Base_Accessor.combine_with">Base_Accessor.combine_with()</a></code>.</p></div>
 <details class="source">
 <summary>
 <span>Expand source code</span>
@@ -6240,9 +6511,8 @@ see <code>pandas.vbt.combine_with</code>.</p></div>
 <div class="desc"><p>Returns True when <code>ts</code> is equal <code>other</code>. </p>
 <p>Set <code>crossover</code> to True to return the first True after crossover. Specify <code>wait</code> to return
 True only when <code>ts</code> is equal for a number of time steps in a row after crossover.</p>
-<p>Both will be broadcasted together. Set <code>multiple</code> to True to combine with multiple arguments;
-in this case a new column level will be created with name <code>name</code>. For more keyword arguments,
-see <code>pandas.vbt.combine_with</code>.</p></div>
+<p>Both will be broadcasted together. Set <code>multiple</code> to True to combine with multiple arguments.
+For more keyword arguments, see <code><a title="vectorbt.utils.Base_Accessor.combine_with" href="utils.html#vectorbt.utils.Base_Accessor.combine_with">Base_Accessor.combine_with()</a></code>.</p></div>
 <details class="source">
 <summary>
 <span>Expand source code</span>
@@ -6334,7 +6604,7 @@ operation to each Series/DataFrame and returns a new instance of <code>CustomInd
 <span>def <span class="ident">from_params</span></span>(<span>close_ts, high_ts=None, low_ts=None, k_window=14, d_window=3, ewm=False, **kwargs)</span>
 </code></dt>
 <dd>
-<div class="desc"></div>
+<div class="desc"><p>Runs the pipeline and initializes the class.</p></div>
 <details class="source">
 <summary>
 <span>Expand source code</span>
@@ -6506,9 +6776,8 @@ def param_loc(self):
 <div class="desc"><p>Returns True when <code>close_ts</code> is above <code>other</code>. </p>
 <p>Set <code>crossover</code> to True to return the first True after crossover. Specify <code>wait</code> to return
 True only when <code>close_ts</code> is above for a number of time steps in a row after crossover.</p>
-<p>Both will be broadcasted together. Set <code>multiple</code> to True to combine with multiple arguments;
-in this case a new column level will be created with name <code>name</code>. For more keyword arguments,
-see <code>pandas.vbt.combine_with</code>.</p></div>
+<p>Both will be broadcasted together. Set <code>multiple</code> to True to combine with multiple arguments.
+For more keyword arguments, see <code><a title="vectorbt.utils.Base_Accessor.combine_with" href="utils.html#vectorbt.utils.Base_Accessor.combine_with">Base_Accessor.combine_with()</a></code>.</p></div>
 <details class="source">
 <summary>
 <span>Expand source code</span>
@@ -6534,9 +6803,8 @@ see <code>pandas.vbt.combine_with</code>.</p></div>
 <div class="desc"><p>Returns True when <code>close_ts</code> is below <code>other</code>. </p>
 <p>Set <code>crossover</code> to True to return the first True after crossover. Specify <code>wait</code> to return
 True only when <code>close_ts</code> is below for a number of time steps in a row after crossover.</p>
-<p>Both will be broadcasted together. Set <code>multiple</code> to True to combine with multiple arguments;
-in this case a new column level will be created with name <code>name</code>. For more keyword arguments,
-see <code>pandas.vbt.combine_with</code>.</p></div>
+<p>Both will be broadcasted together. Set <code>multiple</code> to True to combine with multiple arguments.
+For more keyword arguments, see <code><a title="vectorbt.utils.Base_Accessor.combine_with" href="utils.html#vectorbt.utils.Base_Accessor.combine_with">Base_Accessor.combine_with()</a></code>.</p></div>
 <details class="source">
 <summary>
 <span>Expand source code</span>
@@ -6562,9 +6830,8 @@ see <code>pandas.vbt.combine_with</code>.</p></div>
 <div class="desc"><p>Returns True when <code>close_ts</code> is equal <code>other</code>. </p>
 <p>Set <code>crossover</code> to True to return the first True after crossover. Specify <code>wait</code> to return
 True only when <code>close_ts</code> is equal for a number of time steps in a row after crossover.</p>
-<p>Both will be broadcasted together. Set <code>multiple</code> to True to combine with multiple arguments;
-in this case a new column level will be created with name <code>name</code>. For more keyword arguments,
-see <code>pandas.vbt.combine_with</code>.</p></div>
+<p>Both will be broadcasted together. Set <code>multiple</code> to True to combine with multiple arguments.
+For more keyword arguments, see <code><a title="vectorbt.utils.Base_Accessor.combine_with" href="utils.html#vectorbt.utils.Base_Accessor.combine_with">Base_Accessor.combine_with()</a></code>.</p></div>
 <details class="source">
 <summary>
 <span>Expand source code</span>
@@ -6605,9 +6872,8 @@ see <code>pandas.vbt.combine_with</code>.</p></div>
 <div class="desc"><p>Returns True when <code>high_ts</code> is above <code>other</code>. </p>
 <p>Set <code>crossover</code> to True to return the first True after crossover. Specify <code>wait</code> to return
 True only when <code>high_ts</code> is above for a number of time steps in a row after crossover.</p>
-<p>Both will be broadcasted together. Set <code>multiple</code> to True to combine with multiple arguments;
-in this case a new column level will be created with name <code>name</code>. For more keyword arguments,
-see <code>pandas.vbt.combine_with</code>.</p></div>
+<p>Both will be broadcasted together. Set <code>multiple</code> to True to combine with multiple arguments.
+For more keyword arguments, see <code><a title="vectorbt.utils.Base_Accessor.combine_with" href="utils.html#vectorbt.utils.Base_Accessor.combine_with">Base_Accessor.combine_with()</a></code>.</p></div>
 <details class="source">
 <summary>
 <span>Expand source code</span>
@@ -6633,9 +6899,8 @@ see <code>pandas.vbt.combine_with</code>.</p></div>
 <div class="desc"><p>Returns True when <code>high_ts</code> is below <code>other</code>. </p>
 <p>Set <code>crossover</code> to True to return the first True after crossover. Specify <code>wait</code> to return
 True only when <code>high_ts</code> is below for a number of time steps in a row after crossover.</p>
-<p>Both will be broadcasted together. Set <code>multiple</code> to True to combine with multiple arguments;
-in this case a new column level will be created with name <code>name</code>. For more keyword arguments,
-see <code>pandas.vbt.combine_with</code>.</p></div>
+<p>Both will be broadcasted together. Set <code>multiple</code> to True to combine with multiple arguments.
+For more keyword arguments, see <code><a title="vectorbt.utils.Base_Accessor.combine_with" href="utils.html#vectorbt.utils.Base_Accessor.combine_with">Base_Accessor.combine_with()</a></code>.</p></div>
 <details class="source">
 <summary>
 <span>Expand source code</span>
@@ -6661,9 +6926,8 @@ see <code>pandas.vbt.combine_with</code>.</p></div>
 <div class="desc"><p>Returns True when <code>high_ts</code> is equal <code>other</code>. </p>
 <p>Set <code>crossover</code> to True to return the first True after crossover. Specify <code>wait</code> to return
 True only when <code>high_ts</code> is equal for a number of time steps in a row after crossover.</p>
-<p>Both will be broadcasted together. Set <code>multiple</code> to True to combine with multiple arguments;
-in this case a new column level will be created with name <code>name</code>. For more keyword arguments,
-see <code>pandas.vbt.combine_with</code>.</p></div>
+<p>Both will be broadcasted together. Set <code>multiple</code> to True to combine with multiple arguments.
+For more keyword arguments, see <code><a title="vectorbt.utils.Base_Accessor.combine_with" href="utils.html#vectorbt.utils.Base_Accessor.combine_with">Base_Accessor.combine_with()</a></code>.</p></div>
 <details class="source">
 <summary>
 <span>Expand source code</span>
@@ -6689,9 +6953,8 @@ see <code>pandas.vbt.combine_with</code>.</p></div>
 <div class="desc"><p>Returns True when <code>low_ts</code> is above <code>other</code>. </p>
 <p>Set <code>crossover</code> to True to return the first True after crossover. Specify <code>wait</code> to return
 True only when <code>low_ts</code> is above for a number of time steps in a row after crossover.</p>
-<p>Both will be broadcasted together. Set <code>multiple</code> to True to combine with multiple arguments;
-in this case a new column level will be created with name <code>name</code>. For more keyword arguments,
-see <code>pandas.vbt.combine_with</code>.</p></div>
+<p>Both will be broadcasted together. Set <code>multiple</code> to True to combine with multiple arguments.
+For more keyword arguments, see <code><a title="vectorbt.utils.Base_Accessor.combine_with" href="utils.html#vectorbt.utils.Base_Accessor.combine_with">Base_Accessor.combine_with()</a></code>.</p></div>
 <details class="source">
 <summary>
 <span>Expand source code</span>
@@ -6717,9 +6980,8 @@ see <code>pandas.vbt.combine_with</code>.</p></div>
 <div class="desc"><p>Returns True when <code>low_ts</code> is below <code>other</code>. </p>
 <p>Set <code>crossover</code> to True to return the first True after crossover. Specify <code>wait</code> to return
 True only when <code>low_ts</code> is below for a number of time steps in a row after crossover.</p>
-<p>Both will be broadcasted together. Set <code>multiple</code> to True to combine with multiple arguments;
-in this case a new column level will be created with name <code>name</code>. For more keyword arguments,
-see <code>pandas.vbt.combine_with</code>.</p></div>
+<p>Both will be broadcasted together. Set <code>multiple</code> to True to combine with multiple arguments.
+For more keyword arguments, see <code><a title="vectorbt.utils.Base_Accessor.combine_with" href="utils.html#vectorbt.utils.Base_Accessor.combine_with">Base_Accessor.combine_with()</a></code>.</p></div>
 <details class="source">
 <summary>
 <span>Expand source code</span>
@@ -6745,9 +7007,8 @@ see <code>pandas.vbt.combine_with</code>.</p></div>
 <div class="desc"><p>Returns True when <code>low_ts</code> is equal <code>other</code>. </p>
 <p>Set <code>crossover</code> to True to return the first True after crossover. Specify <code>wait</code> to return
 True only when <code>low_ts</code> is equal for a number of time steps in a row after crossover.</p>
-<p>Both will be broadcasted together. Set <code>multiple</code> to True to combine with multiple arguments;
-in this case a new column level will be created with name <code>name</code>. For more keyword arguments,
-see <code>pandas.vbt.combine_with</code>.</p></div>
+<p>Both will be broadcasted together. Set <code>multiple</code> to True to combine with multiple arguments.
+For more keyword arguments, see <code><a title="vectorbt.utils.Base_Accessor.combine_with" href="utils.html#vectorbt.utils.Base_Accessor.combine_with">Base_Accessor.combine_with()</a></code>.</p></div>
 <details class="source">
 <summary>
 <span>Expand source code</span>
@@ -6773,9 +7034,8 @@ see <code>pandas.vbt.combine_with</code>.</p></div>
 <div class="desc"><p>Returns True when <code>percent_d</code> is above <code>other</code>. </p>
 <p>Set <code>crossover</code> to True to return the first True after crossover. Specify <code>wait</code> to return
 True only when <code>percent_d</code> is above for a number of time steps in a row after crossover.</p>
-<p>Both will be broadcasted together. Set <code>multiple</code> to True to combine with multiple arguments;
-in this case a new column level will be created with name <code>name</code>. For more keyword arguments,
-see <code>pandas.vbt.combine_with</code>.</p></div>
+<p>Both will be broadcasted together. Set <code>multiple</code> to True to combine with multiple arguments.
+For more keyword arguments, see <code><a title="vectorbt.utils.Base_Accessor.combine_with" href="utils.html#vectorbt.utils.Base_Accessor.combine_with">Base_Accessor.combine_with()</a></code>.</p></div>
 <details class="source">
 <summary>
 <span>Expand source code</span>
@@ -6801,9 +7061,8 @@ see <code>pandas.vbt.combine_with</code>.</p></div>
 <div class="desc"><p>Returns True when <code>percent_d</code> is below <code>other</code>. </p>
 <p>Set <code>crossover</code> to True to return the first True after crossover. Specify <code>wait</code> to return
 True only when <code>percent_d</code> is below for a number of time steps in a row after crossover.</p>
-<p>Both will be broadcasted together. Set <code>multiple</code> to True to combine with multiple arguments;
-in this case a new column level will be created with name <code>name</code>. For more keyword arguments,
-see <code>pandas.vbt.combine_with</code>.</p></div>
+<p>Both will be broadcasted together. Set <code>multiple</code> to True to combine with multiple arguments.
+For more keyword arguments, see <code><a title="vectorbt.utils.Base_Accessor.combine_with" href="utils.html#vectorbt.utils.Base_Accessor.combine_with">Base_Accessor.combine_with()</a></code>.</p></div>
 <details class="source">
 <summary>
 <span>Expand source code</span>
@@ -6829,9 +7088,8 @@ see <code>pandas.vbt.combine_with</code>.</p></div>
 <div class="desc"><p>Returns True when <code>percent_d</code> is equal <code>other</code>. </p>
 <p>Set <code>crossover</code> to True to return the first True after crossover. Specify <code>wait</code> to return
 True only when <code>percent_d</code> is equal for a number of time steps in a row after crossover.</p>
-<p>Both will be broadcasted together. Set <code>multiple</code> to True to combine with multiple arguments;
-in this case a new column level will be created with name <code>name</code>. For more keyword arguments,
-see <code>pandas.vbt.combine_with</code>.</p></div>
+<p>Both will be broadcasted together. Set <code>multiple</code> to True to combine with multiple arguments.
+For more keyword arguments, see <code><a title="vectorbt.utils.Base_Accessor.combine_with" href="utils.html#vectorbt.utils.Base_Accessor.combine_with">Base_Accessor.combine_with()</a></code>.</p></div>
 <details class="source">
 <summary>
 <span>Expand source code</span>
@@ -6857,9 +7115,8 @@ see <code>pandas.vbt.combine_with</code>.</p></div>
 <div class="desc"><p>Returns True when <code>percent_k</code> is above <code>other</code>. </p>
 <p>Set <code>crossover</code> to True to return the first True after crossover. Specify <code>wait</code> to return
 True only when <code>percent_k</code> is above for a number of time steps in a row after crossover.</p>
-<p>Both will be broadcasted together. Set <code>multiple</code> to True to combine with multiple arguments;
-in this case a new column level will be created with name <code>name</code>. For more keyword arguments,
-see <code>pandas.vbt.combine_with</code>.</p></div>
+<p>Both will be broadcasted together. Set <code>multiple</code> to True to combine with multiple arguments.
+For more keyword arguments, see <code><a title="vectorbt.utils.Base_Accessor.combine_with" href="utils.html#vectorbt.utils.Base_Accessor.combine_with">Base_Accessor.combine_with()</a></code>.</p></div>
 <details class="source">
 <summary>
 <span>Expand source code</span>
@@ -6885,9 +7142,8 @@ see <code>pandas.vbt.combine_with</code>.</p></div>
 <div class="desc"><p>Returns True when <code>percent_k</code> is below <code>other</code>. </p>
 <p>Set <code>crossover</code> to True to return the first True after crossover. Specify <code>wait</code> to return
 True only when <code>percent_k</code> is below for a number of time steps in a row after crossover.</p>
-<p>Both will be broadcasted together. Set <code>multiple</code> to True to combine with multiple arguments;
-in this case a new column level will be created with name <code>name</code>. For more keyword arguments,
-see <code>pandas.vbt.combine_with</code>.</p></div>
+<p>Both will be broadcasted together. Set <code>multiple</code> to True to combine with multiple arguments.
+For more keyword arguments, see <code><a title="vectorbt.utils.Base_Accessor.combine_with" href="utils.html#vectorbt.utils.Base_Accessor.combine_with">Base_Accessor.combine_with()</a></code>.</p></div>
 <details class="source">
 <summary>
 <span>Expand source code</span>
@@ -6913,9 +7169,8 @@ see <code>pandas.vbt.combine_with</code>.</p></div>
 <div class="desc"><p>Returns True when <code>percent_k</code> is equal <code>other</code>. </p>
 <p>Set <code>crossover</code> to True to return the first True after crossover. Specify <code>wait</code> to return
 True only when <code>percent_k</code> is equal for a number of time steps in a row after crossover.</p>
-<p>Both will be broadcasted together. Set <code>multiple</code> to True to combine with multiple arguments;
-in this case a new column level will be created with name <code>name</code>. For more keyword arguments,
-see <code>pandas.vbt.combine_with</code>.</p></div>
+<p>Both will be broadcasted together. Set <code>multiple</code> to True to combine with multiple arguments.
+For more keyword arguments, see <code><a title="vectorbt.utils.Base_Accessor.combine_with" href="utils.html#vectorbt.utils.Base_Accessor.combine_with">Base_Accessor.combine_with()</a></code>.</p></div>
 <details class="source">
 <summary>
 <span>Expand source code</span>
@@ -7054,6 +7309,7 @@ operation to each Series/DataFrame and returns a new instance of <code>CustomInd
 <h4><code><a title="vectorbt.indicators.MA" href="#vectorbt.indicators.MA">MA</a></code></h4>
 <ul class="two-column">
 <li><code><a title="vectorbt.indicators.MA.ewm_loc" href="#vectorbt.indicators.MA.ewm_loc">ewm_loc</a></code></li>
+<li><code><a title="vectorbt.indicators.MA.from_combinations" href="#vectorbt.indicators.MA.from_combinations">from_combinations</a></code></li>
 <li><code><a title="vectorbt.indicators.MA.from_params" href="#vectorbt.indicators.MA.from_params">from_params</a></code></li>
 <li><code><a title="vectorbt.indicators.MA.iloc" href="#vectorbt.indicators.MA.iloc">iloc</a></code></li>
 <li><code><a title="vectorbt.indicators.MA.loc" href="#vectorbt.indicators.MA.loc">loc</a></code></li>
