@@ -591,7 +591,7 @@ class IndicatorFactory():
                 to `ts_names`, broadcasted parameter arrays corresponding to `param_names`, and other 
                 arguments and keyword arguments, and returns outputs corresponding to `output_names` 
                 and other objects that are then returned with the indicator class instance.
-            pass_lists (bool): If True, passes arguments as lists. Otherwise, passes them using 
+            pass_lists (bool): If True, passes arguments as lists, otherwise passes them using 
                 starred expression. Defaults to False.
         Returns:
             `CustomIndicator`, and optionally other objects that are returned by `custom_func`
@@ -941,8 +941,8 @@ class MA(MA):
 
         Args:
             ts (pandas_like): Time series (such as price).
-            window (int or array_like of int): Size of the moving window. Can be one or more values.
-            ewm (bool or array_like of bool): If True, uses exponential moving average, otherwise 
+            window (int or array_like): Size of the moving window. Can be one or more values.
+            ewm (bool or array_like): If True, uses exponential moving average, otherwise 
                 simple moving average. Can be one or more values. Defaults to False.
             **kwargs: Keyword arguments passed to `vectorbt.indicators.from_params_pipeline.`
         Examples:
@@ -975,7 +975,7 @@ class MA(MA):
             windows (array_like of int): Size of the moving window. Must be multiple.
             r (int): The number of `vectorbt.indicators.MA` instances to combine.
             ewm (bool or array_like of bool): If True, uses exponential moving average, otherwise 
-                simple moving average. Can be one or more values. Defaults to False.
+                uses simple moving average. Can be one or more values. Defaults to False.
             names (list of str, optional): A list of names for each `vectorbt.indicators.MA` instance.
             **kwargs: Keyword arguments passed to `vectorbt.indicators.from_params_pipeline.`
         Examples:
@@ -1150,9 +1150,10 @@ class MSTD(MSTD):
 
         Args:
             ts (pandas_like): Time series (such as price).
-            window (int or array_like of int): Size of the moving window. Can be one or more values.
-            ewm (bool or array_like of bool): If True, uses exponential moving STD, otherwise 
-                simple moving STD. Can be one or more values. Defaults to False.
+            window (int or array_like): Size of the moving window. Can be one or more values.
+            ewm (bool or array_like): If True, uses exponential moving standard deviation, 
+                otherwise uses simple moving standard deviation. Can be one or more values. 
+                Defaults to False.
             **kwargs: Keyword arguments passed to `vectorbt.indicators.from_params_pipeline.`
         Examples:
             ```python-repl
@@ -1221,49 +1222,175 @@ def bb_apply_func_nb(ts, window, ewm, alpha, ma_cache_dict, mstd_cache_dict):
     ma = np.copy(ma_cache_dict[(window, int(ewm))])
     mstd = np.copy(mstd_cache_dict[(window, int(ewm))])
     # # (MA + Kσ), MA, (MA - Kσ)
-    return ma + alpha * mstd, ma, ma - alpha * mstd
+    return ma, ma + alpha * mstd, ma - alpha * mstd
 
 
 BollingerBands = IndicatorFactory(
     ts_names=[&#39;ts&#39;],
     param_names=[&#39;window&#39;, &#39;ewm&#39;, &#39;alpha&#39;],
-    output_names=[&#39;upper_band&#39;, &#39;middle_band&#39;, &#39;lower_band&#39;],
+    output_names=[&#39;ma&#39;, &#39;upper_band&#39;, &#39;lower_band&#39;],
     name=&#39;bb&#39;,
     custom_properties=dict(
         percent_b=lambda self: (self.ts - self.lower_band) / (self.upper_band - self.lower_band),
-        bandwidth=lambda self: (self.upper_band - self.lower_band) / self.middle_band
+        bandwidth=lambda self: (self.upper_band - self.lower_band) / self.ma
     )
 ).from_apply_func(bb_apply_func_nb, caching_func=bb_caching_nb)
 
 
 class BollingerBands(BollingerBands):
+    &#34;&#34;&#34;A Bollinger Band® is a technical analysis tool defined by a set of lines plotted two standard 
+    deviations (positively and negatively) away from a simple moving average (SMA) of the security&#39;s 
+    price, but can be adjusted to user preferences.
+
+    See [Bollinger Band® Definition](https://www.investopedia.com/terms/b/bollingerbands.asp).
+
+    Use `BollingerBands.from_params` method to run the indicator.&#34;&#34;&#34;
+    
     @classmethod
     def from_params(cls, ts, window=20, ewm=False, alpha=2, **kwargs):
+        &#34;&#34;&#34;Calculate the moving average `BollingerBands.ma`, the upper Bollinger Band `BollingerBands.upper_band`,
+        the lower Bollinger Band `BollingerBands.lower_band`, the %b `BollingerBands.percent_b` and 
+        the bandwidth `BollingerBands.bandwidth` from time series `ts` and parameters `window`, `ewm` and `alpha`.
+
+        Args:
+            ts (pandas_like): Time series (such as price).
+            window (int or array_like): Size of the moving window. Can be one or more values.
+                Defaults to 20.
+            ewm (bool or array_like): If True, uses exponential moving average and standard deviation, 
+                otherwise uses simple moving average and standard deviation. Can be one or more values. 
+                Defaults to False.
+            alpha (int, float or array_like): Number of standard deviations. Can be one or more values. Defaults to 2.
+            **kwargs: Keyword arguments passed to `vectorbt.indicators.from_params_pipeline.`
+        Examples:
+            ```python-repl
+            &gt;&gt;&gt; bb = vbt.BollingerBands.from_params(price, 
+            ...     window=[10, 20], alpha=[2, 3], ewm=[False, True])
+
+            &gt;&gt;&gt; print(bb.ma)
+            bb_window         10           20
+            bb_ewm         False         True
+            bb_alpha         2.0          3.0
+            Date                             
+            2018-12-31       NaN          NaN
+            2019-01-01       NaN          NaN
+            2019-01-02       NaN          NaN
+            ...              ...          ...
+            2019-12-29  7314.459  7313.283227
+            2019-12-30  7321.877  7311.351491
+            2019-12-31  7322.121  7300.137063
+
+            [366 rows x 2 columns]
+
+            &gt;&gt;&gt; print(bb.upper_band)
+            bb_window            10           20
+            bb_ewm            False         True
+            bb_alpha            2.0          3.0
+            Date                                
+            2018-12-31          NaN          NaN
+            2019-01-01          NaN          NaN
+            2019-01-02          NaN          NaN
+            ...                 ...          ...
+            2019-12-29  7508.280102  8115.293989
+            2019-12-30  7504.801754  8074.435981
+            2019-12-31  7504.275704  8033.730750
+
+            [366 rows x 2 columns]
+
+            &gt;&gt;&gt; print(bb.lower_band)
+            bb_window            10           20
+            bb_ewm            False         True
+            bb_alpha            2.0          3.0
+            Date                                
+            2018-12-31          NaN          NaN
+            2019-01-01          NaN          NaN
+            2019-01-02          NaN          NaN
+            ...                 ...          ...
+            2019-12-29  7120.637898  6511.272465
+            2019-12-30  7138.952246  6548.267001
+            2019-12-31  7139.966296  6566.543376
+
+            [366 rows x 2 columns]
+
+            &gt;&gt;&gt; print(bb.percent_b)
+            bb_window         10        20
+            bb_ewm         False      True
+            bb_alpha         2.0       3.0
+            Date                          
+            2018-12-31       NaN       NaN
+            2019-01-01       NaN       NaN
+            2019-01-02       NaN       NaN
+            ...              ...       ...
+            2019-12-29  0.779100  0.568183
+            2019-12-30  0.421069  0.487975
+            2019-12-31  0.147220  0.427387
+
+            [366 rows x 2 columns]
+
+            &gt;&gt;&gt; print(bb.bandwidth)
+            bb_window         10        20
+            bb_ewm         False      True
+            bb_alpha         2.0       3.0
+            Date                          
+            2018-12-31       NaN       NaN
+            2019-01-01       NaN       NaN
+            2019-01-02       NaN       NaN
+            ...              ...       ...
+            2019-12-29  0.779100  0.568183
+            2019-12-30  0.421069  0.487975
+            2019-12-31  0.147220  0.427387
+
+            [366 rows x 2 columns]
+            ```
+        &#34;&#34;&#34;
         alpha = np.asarray(alpha).astype(np.float64)
         return super().from_params(ts, window, ewm, alpha, **kwargs)
 
     def plot(self,
              ts_name=None,
+             ma_name=None,
              upper_band_name=None,
-             middle_band_name=None,
              lower_band_name=None,
              ts_trace_kwargs={},
+             ma_trace_kwargs={},
              upper_band_trace_kwargs={},
-             middle_band_trace_kwargs={},
              lower_band_trace_kwargs={},
              fig=None,
              **layout_kwargs):
+        &#34;&#34;&#34;Plot `BollingerBands.ma`, `BollingerBands.upper_band` and `BollingerBands.lower_band` against 
+        `BollingerBands.ts`.
+
+        Args:
+            ts_name (str): Name of trace for `BollingerBands.ts`.
+            ma_name (str): Name of trace for `BollingerBands.ma`.
+            upper_band_name (str): Name of trace for `BollingerBands.upper_band`.
+            lower_band_name (str): Name of trace for `BollingerBands.lower_band`.
+            ts_trace_kwargs (dict, optional): Keyword arguments passed to `pandas.vbt.timeseries` of 
+                `BollingerBands.ts`.
+            ma_trace_kwargs (dict, optional): Keyword arguments passed to `pandas.vbt.timeseries` of 
+                `BollingerBands.ma`.
+            upper_band_trace_kwargs (dict, optional): Keyword arguments passed to `pandas.vbt.timeseries` of 
+                `BollingerBands.upper_band`.
+            lower_band_trace_kwargs (dict, optional): Keyword arguments passed to `pandas.vbt.timeseries` of 
+                `BollingerBands.lower_band`.
+            fig (plotly.graph_objects.Figure, optional): Figure to add traces to.
+            **layout_kwargs: Keyword arguments for layout.
+        Examples:
+            ```py
+            bb[(10, False, 2)].plot()
+            ```
+
+            ![](img/BollingerBands.png)&#34;&#34;&#34;
         check_type(self.ts, pd.Series)
+        check_type(self.ma, pd.Series)
         check_type(self.upper_band, pd.Series)
-        check_type(self.middle_band, pd.Series)
         check_type(self.lower_band, pd.Series)
 
         if ts_name is None:
             ts_name = f&#39;Price ({self.name})&#39;
+        if ma_name is None:
+            ma_name = f&#39;MA ({self.name})&#39;
         if upper_band_name is None:
             upper_band_name = f&#39;Upper Band ({self.name})&#39;
-        if middle_band_name is None:
-            middle_band_name = f&#39;Middle Band ({self.name})&#39;
         if lower_band_name is None:
             lower_band_name = f&#39;Lower Band ({self.name})&#39;
 
@@ -1272,10 +1399,10 @@ class BollingerBands(BollingerBands):
 
         fig = self.ts.vbt.timeseries.plot(
             name=ts_name, trace_kwargs=ts_trace_kwargs, fig=fig, **layout_kwargs)
+        fig = self.ma.vbt.timeseries.plot(
+            name=ma_name, trace_kwargs=ma_trace_kwargs, fig=fig)
         fig = self.upper_band.vbt.timeseries.plot(
             name=upper_band_name, trace_kwargs=upper_band_trace_kwargs, fig=fig)
-        fig = self.middle_band.vbt.timeseries.plot(
-            name=middle_band_name, trace_kwargs=middle_band_trace_kwargs, fig=fig)
         fig = self.lower_band.vbt.timeseries.plot(
             name=lower_band_name, trace_kwargs=lower_band_trace_kwargs, fig=fig)
 
@@ -1872,39 +1999,169 @@ a list of other generated outputs that are outside of
 <span>(</span><span>*args, **kwargs)</span>
 </code></dt>
 <dd>
-<div class="desc"></div>
+<div class="desc"><p>A Bollinger Band® is a technical analysis tool defined by a set of lines plotted two standard
+deviations (positively and negatively) away from a simple moving average (SMA) of the security's
+price, but can be adjusted to user preferences.</p>
+<p>See <a href="https://www.investopedia.com/terms/b/bollingerbands.asp">Bollinger Band® Definition</a>.</p>
+<p>Use <code><a title="vectorbt.indicators.BollingerBands.from_params" href="#vectorbt.indicators.BollingerBands.from_params">BollingerBands.from_params()</a></code> method to run the indicator.</p></div>
 <details class="source">
 <summary>
 <span>Expand source code</span>
 </summary>
 <pre><code class="python">class BollingerBands(BollingerBands):
+    &#34;&#34;&#34;A Bollinger Band® is a technical analysis tool defined by a set of lines plotted two standard 
+    deviations (positively and negatively) away from a simple moving average (SMA) of the security&#39;s 
+    price, but can be adjusted to user preferences.
+
+    See [Bollinger Band® Definition](https://www.investopedia.com/terms/b/bollingerbands.asp).
+
+    Use `BollingerBands.from_params` method to run the indicator.&#34;&#34;&#34;
+    
     @classmethod
     def from_params(cls, ts, window=20, ewm=False, alpha=2, **kwargs):
+        &#34;&#34;&#34;Calculate the moving average `BollingerBands.ma`, the upper Bollinger Band `BollingerBands.upper_band`,
+        the lower Bollinger Band `BollingerBands.lower_band`, the %b `BollingerBands.percent_b` and 
+        the bandwidth `BollingerBands.bandwidth` from time series `ts` and parameters `window`, `ewm` and `alpha`.
+
+        Args:
+            ts (pandas_like): Time series (such as price).
+            window (int or array_like): Size of the moving window. Can be one or more values.
+                Defaults to 20.
+            ewm (bool or array_like): If True, uses exponential moving average and standard deviation, 
+                otherwise uses simple moving average and standard deviation. Can be one or more values. 
+                Defaults to False.
+            alpha (int, float or array_like): Number of standard deviations. Can be one or more values. Defaults to 2.
+            **kwargs: Keyword arguments passed to `vectorbt.indicators.from_params_pipeline.`
+        Examples:
+            ```python-repl
+            &gt;&gt;&gt; bb = vbt.BollingerBands.from_params(price, 
+            ...     window=[10, 20], alpha=[2, 3], ewm=[False, True])
+
+            &gt;&gt;&gt; print(bb.ma)
+            bb_window         10           20
+            bb_ewm         False         True
+            bb_alpha         2.0          3.0
+            Date                             
+            2018-12-31       NaN          NaN
+            2019-01-01       NaN          NaN
+            2019-01-02       NaN          NaN
+            ...              ...          ...
+            2019-12-29  7314.459  7313.283227
+            2019-12-30  7321.877  7311.351491
+            2019-12-31  7322.121  7300.137063
+
+            [366 rows x 2 columns]
+
+            &gt;&gt;&gt; print(bb.upper_band)
+            bb_window            10           20
+            bb_ewm            False         True
+            bb_alpha            2.0          3.0
+            Date                                
+            2018-12-31          NaN          NaN
+            2019-01-01          NaN          NaN
+            2019-01-02          NaN          NaN
+            ...                 ...          ...
+            2019-12-29  7508.280102  8115.293989
+            2019-12-30  7504.801754  8074.435981
+            2019-12-31  7504.275704  8033.730750
+
+            [366 rows x 2 columns]
+
+            &gt;&gt;&gt; print(bb.lower_band)
+            bb_window            10           20
+            bb_ewm            False         True
+            bb_alpha            2.0          3.0
+            Date                                
+            2018-12-31          NaN          NaN
+            2019-01-01          NaN          NaN
+            2019-01-02          NaN          NaN
+            ...                 ...          ...
+            2019-12-29  7120.637898  6511.272465
+            2019-12-30  7138.952246  6548.267001
+            2019-12-31  7139.966296  6566.543376
+
+            [366 rows x 2 columns]
+
+            &gt;&gt;&gt; print(bb.percent_b)
+            bb_window         10        20
+            bb_ewm         False      True
+            bb_alpha         2.0       3.0
+            Date                          
+            2018-12-31       NaN       NaN
+            2019-01-01       NaN       NaN
+            2019-01-02       NaN       NaN
+            ...              ...       ...
+            2019-12-29  0.779100  0.568183
+            2019-12-30  0.421069  0.487975
+            2019-12-31  0.147220  0.427387
+
+            [366 rows x 2 columns]
+
+            &gt;&gt;&gt; print(bb.bandwidth)
+            bb_window         10        20
+            bb_ewm         False      True
+            bb_alpha         2.0       3.0
+            Date                          
+            2018-12-31       NaN       NaN
+            2019-01-01       NaN       NaN
+            2019-01-02       NaN       NaN
+            ...              ...       ...
+            2019-12-29  0.779100  0.568183
+            2019-12-30  0.421069  0.487975
+            2019-12-31  0.147220  0.427387
+
+            [366 rows x 2 columns]
+            ```
+        &#34;&#34;&#34;
         alpha = np.asarray(alpha).astype(np.float64)
         return super().from_params(ts, window, ewm, alpha, **kwargs)
 
     def plot(self,
              ts_name=None,
+             ma_name=None,
              upper_band_name=None,
-             middle_band_name=None,
              lower_band_name=None,
              ts_trace_kwargs={},
+             ma_trace_kwargs={},
              upper_band_trace_kwargs={},
-             middle_band_trace_kwargs={},
              lower_band_trace_kwargs={},
              fig=None,
              **layout_kwargs):
+        &#34;&#34;&#34;Plot `BollingerBands.ma`, `BollingerBands.upper_band` and `BollingerBands.lower_band` against 
+        `BollingerBands.ts`.
+
+        Args:
+            ts_name (str): Name of trace for `BollingerBands.ts`.
+            ma_name (str): Name of trace for `BollingerBands.ma`.
+            upper_band_name (str): Name of trace for `BollingerBands.upper_band`.
+            lower_band_name (str): Name of trace for `BollingerBands.lower_band`.
+            ts_trace_kwargs (dict, optional): Keyword arguments passed to `pandas.vbt.timeseries` of 
+                `BollingerBands.ts`.
+            ma_trace_kwargs (dict, optional): Keyword arguments passed to `pandas.vbt.timeseries` of 
+                `BollingerBands.ma`.
+            upper_band_trace_kwargs (dict, optional): Keyword arguments passed to `pandas.vbt.timeseries` of 
+                `BollingerBands.upper_band`.
+            lower_band_trace_kwargs (dict, optional): Keyword arguments passed to `pandas.vbt.timeseries` of 
+                `BollingerBands.lower_band`.
+            fig (plotly.graph_objects.Figure, optional): Figure to add traces to.
+            **layout_kwargs: Keyword arguments for layout.
+        Examples:
+            ```py
+            bb[(10, False, 2)].plot()
+            ```
+
+            ![](img/BollingerBands.png)&#34;&#34;&#34;
         check_type(self.ts, pd.Series)
+        check_type(self.ma, pd.Series)
         check_type(self.upper_band, pd.Series)
-        check_type(self.middle_band, pd.Series)
         check_type(self.lower_band, pd.Series)
 
         if ts_name is None:
             ts_name = f&#39;Price ({self.name})&#39;
+        if ma_name is None:
+            ma_name = f&#39;MA ({self.name})&#39;
         if upper_band_name is None:
             upper_band_name = f&#39;Upper Band ({self.name})&#39;
-        if middle_band_name is None:
-            middle_band_name = f&#39;Middle Band ({self.name})&#39;
         if lower_band_name is None:
             lower_band_name = f&#39;Lower Band ({self.name})&#39;
 
@@ -1913,10 +2170,10 @@ a list of other generated outputs that are outside of
 
         fig = self.ts.vbt.timeseries.plot(
             name=ts_name, trace_kwargs=ts_trace_kwargs, fig=fig, **layout_kwargs)
+        fig = self.ma.vbt.timeseries.plot(
+            name=ma_name, trace_kwargs=ma_trace_kwargs, fig=fig)
         fig = self.upper_band.vbt.timeseries.plot(
             name=upper_band_name, trace_kwargs=upper_band_trace_kwargs, fig=fig)
-        fig = self.middle_band.vbt.timeseries.plot(
-            name=middle_band_name, trace_kwargs=middle_band_trace_kwargs, fig=fig)
         fig = self.lower_band.vbt.timeseries.plot(
             name=lower_band_name, trace_kwargs=lower_band_trace_kwargs, fig=fig)
 
@@ -1932,13 +2189,204 @@ a list of other generated outputs that are outside of
 <span>def <span class="ident">from_params</span></span>(<span>ts, window=20, ewm=False, alpha=2, **kwargs)</span>
 </code></dt>
 <dd>
-<div class="desc"><p>Runs the pipeline and initializes the class.</p></div>
+<div class="desc"><p>Calculate the moving average <code><a title="vectorbt.indicators.BollingerBands.ma" href="#vectorbt.indicators.BollingerBands.ma">BollingerBands.ma</a></code>, the upper Bollinger Band <code><a title="vectorbt.indicators.BollingerBands.upper_band" href="#vectorbt.indicators.BollingerBands.upper_band">BollingerBands.upper_band</a></code>,
+the lower Bollinger Band <code><a title="vectorbt.indicators.BollingerBands.lower_band" href="#vectorbt.indicators.BollingerBands.lower_band">BollingerBands.lower_band</a></code>, the %b <code><a title="vectorbt.indicators.BollingerBands.percent_b" href="#vectorbt.indicators.BollingerBands.percent_b">BollingerBands.percent_b</a></code> and
+the bandwidth <code><a title="vectorbt.indicators.BollingerBands.bandwidth" href="#vectorbt.indicators.BollingerBands.bandwidth">BollingerBands.bandwidth</a></code> from time series <code>ts</code> and parameters <code>window</code>, <code>ewm</code> and <code>alpha</code>.</p>
+<h2 id="args">Args</h2>
+<dl>
+<dt><strong><code>ts</code></strong> :&ensp;<code>pandas_like</code></dt>
+<dd>Time series (such as price).</dd>
+<dt><strong><code>window</code></strong> :&ensp;<code>int</code> or <code>array_like</code></dt>
+<dd>Size of the moving window. Can be one or more values.
+Defaults to 20.</dd>
+<dt><strong><code>ewm</code></strong> :&ensp;<code>bool</code> or <code>array_like</code></dt>
+<dd>If True, uses exponential moving average and standard deviation,
+otherwise uses simple moving average and standard deviation. Can be one or more values.
+Defaults to False.</dd>
+<dt><strong><code>alpha</code></strong> :&ensp;<code>int, float</code> or <code>array_like</code></dt>
+<dd>Number of standard deviations. Can be one or more values. Defaults to 2.</dd>
+<dt><strong><code>**kwargs</code></strong></dt>
+<dd>Keyword arguments passed to <code><a title="vectorbt.indicators.from_params_pipeline" href="#vectorbt.indicators.from_params_pipeline">from_params_pipeline()</a>.</code></dd>
+</dl>
+<h2 id="examples">Examples</h2>
+<pre><code class="python-repl">&gt;&gt;&gt; bb = vbt.BollingerBands.from_params(price, 
+...     window=[10, 20], alpha=[2, 3], ewm=[False, True])
+
+&gt;&gt;&gt; print(bb.ma)
+bb_window         10           20
+bb_ewm         False         True
+bb_alpha         2.0          3.0
+Date                             
+2018-12-31       NaN          NaN
+2019-01-01       NaN          NaN
+2019-01-02       NaN          NaN
+...              ...          ...
+2019-12-29  7314.459  7313.283227
+2019-12-30  7321.877  7311.351491
+2019-12-31  7322.121  7300.137063
+
+[366 rows x 2 columns]
+
+&gt;&gt;&gt; print(bb.upper_band)
+bb_window            10           20
+bb_ewm            False         True
+bb_alpha            2.0          3.0
+Date                                
+2018-12-31          NaN          NaN
+2019-01-01          NaN          NaN
+2019-01-02          NaN          NaN
+...                 ...          ...
+2019-12-29  7508.280102  8115.293989
+2019-12-30  7504.801754  8074.435981
+2019-12-31  7504.275704  8033.730750
+
+[366 rows x 2 columns]
+
+&gt;&gt;&gt; print(bb.lower_band)
+bb_window            10           20
+bb_ewm            False         True
+bb_alpha            2.0          3.0
+Date                                
+2018-12-31          NaN          NaN
+2019-01-01          NaN          NaN
+2019-01-02          NaN          NaN
+...                 ...          ...
+2019-12-29  7120.637898  6511.272465
+2019-12-30  7138.952246  6548.267001
+2019-12-31  7139.966296  6566.543376
+
+[366 rows x 2 columns]
+
+&gt;&gt;&gt; print(bb.percent_b)
+bb_window         10        20
+bb_ewm         False      True
+bb_alpha         2.0       3.0
+Date                          
+2018-12-31       NaN       NaN
+2019-01-01       NaN       NaN
+2019-01-02       NaN       NaN
+...              ...       ...
+2019-12-29  0.779100  0.568183
+2019-12-30  0.421069  0.487975
+2019-12-31  0.147220  0.427387
+
+[366 rows x 2 columns]
+
+&gt;&gt;&gt; print(bb.bandwidth)
+bb_window         10        20
+bb_ewm         False      True
+bb_alpha         2.0       3.0
+Date                          
+2018-12-31       NaN       NaN
+2019-01-01       NaN       NaN
+2019-01-02       NaN       NaN
+...              ...       ...
+2019-12-29  0.779100  0.568183
+2019-12-30  0.421069  0.487975
+2019-12-31  0.147220  0.427387
+
+[366 rows x 2 columns]
+</code></pre></div>
 <details class="source">
 <summary>
 <span>Expand source code</span>
 </summary>
 <pre><code class="python">@classmethod
 def from_params(cls, ts, window=20, ewm=False, alpha=2, **kwargs):
+    &#34;&#34;&#34;Calculate the moving average `BollingerBands.ma`, the upper Bollinger Band `BollingerBands.upper_band`,
+    the lower Bollinger Band `BollingerBands.lower_band`, the %b `BollingerBands.percent_b` and 
+    the bandwidth `BollingerBands.bandwidth` from time series `ts` and parameters `window`, `ewm` and `alpha`.
+
+    Args:
+        ts (pandas_like): Time series (such as price).
+        window (int or array_like): Size of the moving window. Can be one or more values.
+            Defaults to 20.
+        ewm (bool or array_like): If True, uses exponential moving average and standard deviation, 
+            otherwise uses simple moving average and standard deviation. Can be one or more values. 
+            Defaults to False.
+        alpha (int, float or array_like): Number of standard deviations. Can be one or more values. Defaults to 2.
+        **kwargs: Keyword arguments passed to `vectorbt.indicators.from_params_pipeline.`
+    Examples:
+        ```python-repl
+        &gt;&gt;&gt; bb = vbt.BollingerBands.from_params(price, 
+        ...     window=[10, 20], alpha=[2, 3], ewm=[False, True])
+
+        &gt;&gt;&gt; print(bb.ma)
+        bb_window         10           20
+        bb_ewm         False         True
+        bb_alpha         2.0          3.0
+        Date                             
+        2018-12-31       NaN          NaN
+        2019-01-01       NaN          NaN
+        2019-01-02       NaN          NaN
+        ...              ...          ...
+        2019-12-29  7314.459  7313.283227
+        2019-12-30  7321.877  7311.351491
+        2019-12-31  7322.121  7300.137063
+
+        [366 rows x 2 columns]
+
+        &gt;&gt;&gt; print(bb.upper_band)
+        bb_window            10           20
+        bb_ewm            False         True
+        bb_alpha            2.0          3.0
+        Date                                
+        2018-12-31          NaN          NaN
+        2019-01-01          NaN          NaN
+        2019-01-02          NaN          NaN
+        ...                 ...          ...
+        2019-12-29  7508.280102  8115.293989
+        2019-12-30  7504.801754  8074.435981
+        2019-12-31  7504.275704  8033.730750
+
+        [366 rows x 2 columns]
+
+        &gt;&gt;&gt; print(bb.lower_band)
+        bb_window            10           20
+        bb_ewm            False         True
+        bb_alpha            2.0          3.0
+        Date                                
+        2018-12-31          NaN          NaN
+        2019-01-01          NaN          NaN
+        2019-01-02          NaN          NaN
+        ...                 ...          ...
+        2019-12-29  7120.637898  6511.272465
+        2019-12-30  7138.952246  6548.267001
+        2019-12-31  7139.966296  6566.543376
+
+        [366 rows x 2 columns]
+
+        &gt;&gt;&gt; print(bb.percent_b)
+        bb_window         10        20
+        bb_ewm         False      True
+        bb_alpha         2.0       3.0
+        Date                          
+        2018-12-31       NaN       NaN
+        2019-01-01       NaN       NaN
+        2019-01-02       NaN       NaN
+        ...              ...       ...
+        2019-12-29  0.779100  0.568183
+        2019-12-30  0.421069  0.487975
+        2019-12-31  0.147220  0.427387
+
+        [366 rows x 2 columns]
+
+        &gt;&gt;&gt; print(bb.bandwidth)
+        bb_window         10        20
+        bb_ewm         False      True
+        bb_alpha         2.0       3.0
+        Date                          
+        2018-12-31       NaN       NaN
+        2019-01-01       NaN       NaN
+        2019-01-02       NaN       NaN
+        ...              ...       ...
+        2019-12-29  0.779100  0.568183
+        2019-12-30  0.421069  0.487975
+        2019-12-31  0.147220  0.427387
+
+        [366 rows x 2 columns]
+        ```
+    &#34;&#34;&#34;
     alpha = np.asarray(alpha).astype(np.float64)
     return super().from_params(ts, window, ewm, alpha, **kwargs)</code></pre>
 </details>
@@ -1967,7 +2415,7 @@ def param_loc(self):
 <summary>
 <span>Expand source code</span>
 </summary>
-<pre><code class="python">bandwidth=lambda self: (self.upper_band - self.lower_band) / self.middle_band</code></pre>
+<pre><code class="python">bandwidth=lambda self: (self.upper_band - self.lower_band) / self.ma</code></pre>
 </details>
 </dd>
 <dt id="vectorbt.indicators.BollingerBands.ewm_loc"><code class="name">var <span class="ident">ewm_loc</span></code></dt>
@@ -2023,7 +2471,7 @@ def loc(self):
 <pre><code class="python">prop = property(lambda self, output_name=output_name: getattr(self, &#39;_&#39; + output_name))</code></pre>
 </details>
 </dd>
-<dt id="vectorbt.indicators.BollingerBands.middle_band"><code class="name">var <span class="ident">middle_band</span></code></dt>
+<dt id="vectorbt.indicators.BollingerBands.ma"><code class="name">var <span class="ident">ma</span></code></dt>
 <dd>
 <div class="desc"><p>Output time series (read-only).</p></div>
 <details class="source">
@@ -2266,13 +2714,13 @@ For more keyword arguments, see <code><a title="vectorbt.utils.Base_Accessor.com
     return result</code></pre>
 </details>
 </dd>
-<dt id="vectorbt.indicators.BollingerBands.middle_band_above"><code class="name flex">
-<span>def <span class="ident">middle_band_above</span></span>(<span>self, other, crossover=False, wait=0, name=None, **kwargs)</span>
+<dt id="vectorbt.indicators.BollingerBands.ma_above"><code class="name flex">
+<span>def <span class="ident">ma_above</span></span>(<span>self, other, crossover=False, wait=0, name=None, **kwargs)</span>
 </code></dt>
 <dd>
-<div class="desc"><p>Returns True when <code>middle_band</code> is above <code>other</code>. </p>
+<div class="desc"><p>Returns True when <code>ma</code> is above <code>other</code>. </p>
 <p>Set <code>crossover</code> to True to return the first True after crossover. Specify <code>wait</code> to return
-True only when <code>middle_band</code> is above for a number of time steps in a row after crossover.</p>
+True only when <code>ma</code> is above for a number of time steps in a row after crossover.</p>
 <p>Both will be broadcasted together. Set <code>multiple</code> to True to combine with multiple arguments.
 For more keyword arguments, see <code><a title="vectorbt.utils.Base_Accessor.combine_with" href="utils.html#vectorbt.utils.Base_Accessor.combine_with">Base_Accessor.combine_with()</a></code>.</p></div>
 <details class="source">
@@ -2293,13 +2741,13 @@ For more keyword arguments, see <code><a title="vectorbt.utils.Base_Accessor.com
     return result</code></pre>
 </details>
 </dd>
-<dt id="vectorbt.indicators.BollingerBands.middle_band_below"><code class="name flex">
-<span>def <span class="ident">middle_band_below</span></span>(<span>self, other, crossover=False, wait=0, name=None, **kwargs)</span>
+<dt id="vectorbt.indicators.BollingerBands.ma_below"><code class="name flex">
+<span>def <span class="ident">ma_below</span></span>(<span>self, other, crossover=False, wait=0, name=None, **kwargs)</span>
 </code></dt>
 <dd>
-<div class="desc"><p>Returns True when <code>middle_band</code> is below <code>other</code>. </p>
+<div class="desc"><p>Returns True when <code>ma</code> is below <code>other</code>. </p>
 <p>Set <code>crossover</code> to True to return the first True after crossover. Specify <code>wait</code> to return
-True only when <code>middle_band</code> is below for a number of time steps in a row after crossover.</p>
+True only when <code>ma</code> is below for a number of time steps in a row after crossover.</p>
 <p>Both will be broadcasted together. Set <code>multiple</code> to True to combine with multiple arguments.
 For more keyword arguments, see <code><a title="vectorbt.utils.Base_Accessor.combine_with" href="utils.html#vectorbt.utils.Base_Accessor.combine_with">Base_Accessor.combine_with()</a></code>.</p></div>
 <details class="source">
@@ -2320,13 +2768,13 @@ For more keyword arguments, see <code><a title="vectorbt.utils.Base_Accessor.com
     return result</code></pre>
 </details>
 </dd>
-<dt id="vectorbt.indicators.BollingerBands.middle_band_equal"><code class="name flex">
-<span>def <span class="ident">middle_band_equal</span></span>(<span>self, other, crossover=False, wait=0, name=None, **kwargs)</span>
+<dt id="vectorbt.indicators.BollingerBands.ma_equal"><code class="name flex">
+<span>def <span class="ident">ma_equal</span></span>(<span>self, other, crossover=False, wait=0, name=None, **kwargs)</span>
 </code></dt>
 <dd>
-<div class="desc"><p>Returns True when <code>middle_band</code> is equal <code>other</code>. </p>
+<div class="desc"><p>Returns True when <code>ma</code> is equal <code>other</code>. </p>
 <p>Set <code>crossover</code> to True to return the first True after crossover. Specify <code>wait</code> to return
-True only when <code>middle_band</code> is equal for a number of time steps in a row after crossover.</p>
+True only when <code>ma</code> is equal for a number of time steps in a row after crossover.</p>
 <p>Both will be broadcasted together. Set <code>multiple</code> to True to combine with multiple arguments.
 For more keyword arguments, see <code><a title="vectorbt.utils.Base_Accessor.combine_with" href="utils.html#vectorbt.utils.Base_Accessor.combine_with">Base_Accessor.combine_with()</a></code>.</p></div>
 <details class="source">
@@ -2429,36 +2877,92 @@ For more keyword arguments, see <code><a title="vectorbt.utils.Base_Accessor.com
 </details>
 </dd>
 <dt id="vectorbt.indicators.BollingerBands.plot"><code class="name flex">
-<span>def <span class="ident">plot</span></span>(<span>self, ts_name=None, upper_band_name=None, middle_band_name=None, lower_band_name=None, ts_trace_kwargs={}, upper_band_trace_kwargs={}, middle_band_trace_kwargs={}, lower_band_trace_kwargs={}, fig=None, **layout_kwargs)</span>
+<span>def <span class="ident">plot</span></span>(<span>self, ts_name=None, ma_name=None, upper_band_name=None, lower_band_name=None, ts_trace_kwargs={}, ma_trace_kwargs={}, upper_band_trace_kwargs={}, lower_band_trace_kwargs={}, fig=None, **layout_kwargs)</span>
 </code></dt>
 <dd>
-<div class="desc"></div>
+<div class="desc"><p>Plot <code><a title="vectorbt.indicators.BollingerBands.ma" href="#vectorbt.indicators.BollingerBands.ma">BollingerBands.ma</a></code>, <code><a title="vectorbt.indicators.BollingerBands.upper_band" href="#vectorbt.indicators.BollingerBands.upper_band">BollingerBands.upper_band</a></code> and <code><a title="vectorbt.indicators.BollingerBands.lower_band" href="#vectorbt.indicators.BollingerBands.lower_band">BollingerBands.lower_band</a></code> against
+<code><a title="vectorbt.indicators.BollingerBands.ts" href="#vectorbt.indicators.BollingerBands.ts">BollingerBands.ts</a></code>.</p>
+<h2 id="args">Args</h2>
+<dl>
+<dt><strong><code>ts_name</code></strong> :&ensp;<code>str</code></dt>
+<dd>Name of trace for <code><a title="vectorbt.indicators.BollingerBands.ts" href="#vectorbt.indicators.BollingerBands.ts">BollingerBands.ts</a></code>.</dd>
+<dt><strong><code>ma_name</code></strong> :&ensp;<code>str</code></dt>
+<dd>Name of trace for <code><a title="vectorbt.indicators.BollingerBands.ma" href="#vectorbt.indicators.BollingerBands.ma">BollingerBands.ma</a></code>.</dd>
+<dt><strong><code>upper_band_name</code></strong> :&ensp;<code>str</code></dt>
+<dd>Name of trace for <code><a title="vectorbt.indicators.BollingerBands.upper_band" href="#vectorbt.indicators.BollingerBands.upper_band">BollingerBands.upper_band</a></code>.</dd>
+<dt><strong><code>lower_band_name</code></strong> :&ensp;<code>str</code></dt>
+<dd>Name of trace for <code><a title="vectorbt.indicators.BollingerBands.lower_band" href="#vectorbt.indicators.BollingerBands.lower_band">BollingerBands.lower_band</a></code>.</dd>
+<dt><strong><code>ts_trace_kwargs</code></strong> :&ensp;<code>dict</code>, optional</dt>
+<dd>Keyword arguments passed to <code>pandas.vbt.timeseries</code> of
+<code><a title="vectorbt.indicators.BollingerBands.ts" href="#vectorbt.indicators.BollingerBands.ts">BollingerBands.ts</a></code>.</dd>
+<dt><strong><code>ma_trace_kwargs</code></strong> :&ensp;<code>dict</code>, optional</dt>
+<dd>Keyword arguments passed to <code>pandas.vbt.timeseries</code> of
+<code><a title="vectorbt.indicators.BollingerBands.ma" href="#vectorbt.indicators.BollingerBands.ma">BollingerBands.ma</a></code>.</dd>
+<dt><strong><code>upper_band_trace_kwargs</code></strong> :&ensp;<code>dict</code>, optional</dt>
+<dd>Keyword arguments passed to <code>pandas.vbt.timeseries</code> of
+<code><a title="vectorbt.indicators.BollingerBands.upper_band" href="#vectorbt.indicators.BollingerBands.upper_band">BollingerBands.upper_band</a></code>.</dd>
+<dt><strong><code>lower_band_trace_kwargs</code></strong> :&ensp;<code>dict</code>, optional</dt>
+<dd>Keyword arguments passed to <code>pandas.vbt.timeseries</code> of
+<code><a title="vectorbt.indicators.BollingerBands.lower_band" href="#vectorbt.indicators.BollingerBands.lower_band">BollingerBands.lower_band</a></code>.</dd>
+<dt><strong><code>fig</code></strong> :&ensp;<code>plotly.graph_objects.Figure</code>, optional</dt>
+<dd>Figure to add traces to.</dd>
+<dt><strong><code>**layout_kwargs</code></strong></dt>
+<dd>Keyword arguments for layout.</dd>
+</dl>
+<h2 id="examples">Examples</h2>
+<pre><code class="py">bb[(10, False, 2)].plot()
+</code></pre>
+<p><img alt="" src="img/BollingerBands.png"></p></div>
 <details class="source">
 <summary>
 <span>Expand source code</span>
 </summary>
 <pre><code class="python">def plot(self,
          ts_name=None,
+         ma_name=None,
          upper_band_name=None,
-         middle_band_name=None,
          lower_band_name=None,
          ts_trace_kwargs={},
+         ma_trace_kwargs={},
          upper_band_trace_kwargs={},
-         middle_band_trace_kwargs={},
          lower_band_trace_kwargs={},
          fig=None,
          **layout_kwargs):
+    &#34;&#34;&#34;Plot `BollingerBands.ma`, `BollingerBands.upper_band` and `BollingerBands.lower_band` against 
+    `BollingerBands.ts`.
+
+    Args:
+        ts_name (str): Name of trace for `BollingerBands.ts`.
+        ma_name (str): Name of trace for `BollingerBands.ma`.
+        upper_band_name (str): Name of trace for `BollingerBands.upper_band`.
+        lower_band_name (str): Name of trace for `BollingerBands.lower_band`.
+        ts_trace_kwargs (dict, optional): Keyword arguments passed to `pandas.vbt.timeseries` of 
+            `BollingerBands.ts`.
+        ma_trace_kwargs (dict, optional): Keyword arguments passed to `pandas.vbt.timeseries` of 
+            `BollingerBands.ma`.
+        upper_band_trace_kwargs (dict, optional): Keyword arguments passed to `pandas.vbt.timeseries` of 
+            `BollingerBands.upper_band`.
+        lower_band_trace_kwargs (dict, optional): Keyword arguments passed to `pandas.vbt.timeseries` of 
+            `BollingerBands.lower_band`.
+        fig (plotly.graph_objects.Figure, optional): Figure to add traces to.
+        **layout_kwargs: Keyword arguments for layout.
+    Examples:
+        ```py
+        bb[(10, False, 2)].plot()
+        ```
+
+        ![](img/BollingerBands.png)&#34;&#34;&#34;
     check_type(self.ts, pd.Series)
+    check_type(self.ma, pd.Series)
     check_type(self.upper_band, pd.Series)
-    check_type(self.middle_band, pd.Series)
     check_type(self.lower_band, pd.Series)
 
     if ts_name is None:
         ts_name = f&#39;Price ({self.name})&#39;
+    if ma_name is None:
+        ma_name = f&#39;MA ({self.name})&#39;
     if upper_band_name is None:
         upper_band_name = f&#39;Upper Band ({self.name})&#39;
-    if middle_band_name is None:
-        middle_band_name = f&#39;Middle Band ({self.name})&#39;
     if lower_band_name is None:
         lower_band_name = f&#39;Lower Band ({self.name})&#39;
 
@@ -2467,10 +2971,10 @@ For more keyword arguments, see <code><a title="vectorbt.utils.Base_Accessor.com
 
     fig = self.ts.vbt.timeseries.plot(
         name=ts_name, trace_kwargs=ts_trace_kwargs, fig=fig, **layout_kwargs)
+    fig = self.ma.vbt.timeseries.plot(
+        name=ma_name, trace_kwargs=ma_trace_kwargs, fig=fig)
     fig = self.upper_band.vbt.timeseries.plot(
         name=upper_band_name, trace_kwargs=upper_band_trace_kwargs, fig=fig)
-    fig = self.middle_band.vbt.timeseries.plot(
-        name=middle_band_name, trace_kwargs=middle_band_trace_kwargs, fig=fig)
     fig = self.lower_band.vbt.timeseries.plot(
         name=lower_band_name, trace_kwargs=lower_band_trace_kwargs, fig=fig)
 
@@ -3114,7 +3618,7 @@ myma_window        2      2      3      3      2      2      3      3
                 to `ts_names`, broadcasted parameter arrays corresponding to `param_names`, and other 
                 arguments and keyword arguments, and returns outputs corresponding to `output_names` 
                 and other objects that are then returned with the indicator class instance.
-            pass_lists (bool): If True, passes arguments as lists. Otherwise, passes them using 
+            pass_lists (bool): If True, passes arguments as lists, otherwise passes them using 
                 starred expression. Defaults to False.
         Returns:
             `CustomIndicator`, and optionally other objects that are returned by `custom_func`
@@ -3647,7 +4151,7 @@ to <code>ts_names</code>, broadcasted parameter arrays corresponding to <code>pa
 arguments and keyword arguments, and returns outputs corresponding to <code>output_names</code>
 and other objects that are then returned with the indicator class instance.</dd>
 <dt><strong><code>pass_lists</code></strong> :&ensp;<code>bool</code></dt>
-<dd>If True, passes arguments as lists. Otherwise, passes them using
+<dd>If True, passes arguments as lists, otherwise passes them using
 starred expression. Defaults to False.</dd>
 </dl>
 <h2 id="returns">Returns</h2>
@@ -3711,7 +4215,7 @@ custom_p2       3      3      4      4
             to `ts_names`, broadcasted parameter arrays corresponding to `param_names`, and other 
             arguments and keyword arguments, and returns outputs corresponding to `output_names` 
             and other objects that are then returned with the indicator class instance.
-        pass_lists (bool): If True, passes arguments as lists. Otherwise, passes them using 
+        pass_lists (bool): If True, passes arguments as lists, otherwise passes them using 
             starred expression. Defaults to False.
     Returns:
         `CustomIndicator`, and optionally other objects that are returned by `custom_func`
@@ -3918,8 +4422,8 @@ price action by filtering out the “noise” from random short-term price fluct
 
         Args:
             ts (pandas_like): Time series (such as price).
-            window (int or array_like of int): Size of the moving window. Can be one or more values.
-            ewm (bool or array_like of bool): If True, uses exponential moving average, otherwise 
+            window (int or array_like): Size of the moving window. Can be one or more values.
+            ewm (bool or array_like): If True, uses exponential moving average, otherwise 
                 simple moving average. Can be one or more values. Defaults to False.
             **kwargs: Keyword arguments passed to `vectorbt.indicators.from_params_pipeline.`
         Examples:
@@ -3952,7 +4456,7 @@ price action by filtering out the “noise” from random short-term price fluct
             windows (array_like of int): Size of the moving window. Must be multiple.
             r (int): The number of `vectorbt.indicators.MA` instances to combine.
             ewm (bool or array_like of bool): If True, uses exponential moving average, otherwise 
-                simple moving average. Can be one or more values. Defaults to False.
+                uses simple moving average. Can be one or more values. Defaults to False.
             names (list of str, optional): A list of names for each `vectorbt.indicators.MA` instance.
             **kwargs: Keyword arguments passed to `vectorbt.indicators.from_params_pipeline.`
         Examples:
@@ -4104,7 +4608,7 @@ price action by filtering out the “noise” from random short-term price fluct
 <dd>The number of <code><a title="vectorbt.indicators.MA" href="#vectorbt.indicators.MA">MA</a></code> instances to combine.</dd>
 <dt><strong><code>ewm</code></strong> :&ensp;<code>bool</code> or <code>array_like</code> of <code>bool</code></dt>
 <dd>If True, uses exponential moving average, otherwise
-simple moving average. Can be one or more values. Defaults to False.</dd>
+uses simple moving average. Can be one or more values. Defaults to False.</dd>
 <dt><strong><code>names</code></strong> :&ensp;<code>list</code> of <code>str</code>, optional</dt>
 <dd>A list of names for each <code><a title="vectorbt.indicators.MA" href="#vectorbt.indicators.MA">MA</a></code> instance.</dd>
 <dt><strong><code>**kwargs</code></strong></dt>
@@ -4193,7 +4697,7 @@ def from_combinations(cls, ts, windows, r, ewm=False, names=None, **kwargs):
         windows (array_like of int): Size of the moving window. Must be multiple.
         r (int): The number of `vectorbt.indicators.MA` instances to combine.
         ewm (bool or array_like of bool): If True, uses exponential moving average, otherwise 
-            simple moving average. Can be one or more values. Defaults to False.
+            uses simple moving average. Can be one or more values. Defaults to False.
         names (list of str, optional): A list of names for each `vectorbt.indicators.MA` instance.
         **kwargs: Keyword arguments passed to `vectorbt.indicators.from_params_pipeline.`
     Examples:
@@ -4299,9 +4803,9 @@ def from_combinations(cls, ts, windows, r, ewm=False, names=None, **kwargs):
 <dl>
 <dt><strong><code>ts</code></strong> :&ensp;<code>pandas_like</code></dt>
 <dd>Time series (such as price).</dd>
-<dt><strong><code>window</code></strong> :&ensp;<code>int</code> or <code>array_like</code> of <code>int</code></dt>
+<dt><strong><code>window</code></strong> :&ensp;<code>int</code> or <code>array_like</code></dt>
 <dd>Size of the moving window. Can be one or more values.</dd>
-<dt><strong><code>ewm</code></strong> :&ensp;<code>bool</code> or <code>array_like</code> of <code>bool</code></dt>
+<dt><strong><code>ewm</code></strong> :&ensp;<code>bool</code> or <code>array_like</code></dt>
 <dd>If True, uses exponential moving average, otherwise
 simple moving average. Can be one or more values. Defaults to False.</dd>
 <dt><strong><code>**kwargs</code></strong></dt>
@@ -4334,8 +4838,8 @@ def from_params(cls, ts, window, ewm=False, **kwargs):
 
     Args:
         ts (pandas_like): Time series (such as price).
-        window (int or array_like of int): Size of the moving window. Can be one or more values.
-        ewm (bool or array_like of bool): If True, uses exponential moving average, otherwise 
+        window (int or array_like): Size of the moving window. Can be one or more values.
+        ewm (bool or array_like): If True, uses exponential moving average, otherwise 
             simple moving average. Can be one or more values. Defaults to False.
         **kwargs: Keyword arguments passed to `vectorbt.indicators.from_params_pipeline.`
     Examples:
@@ -5523,9 +6027,10 @@ in order to predict how volatile the price may be in the future.</p>
 
         Args:
             ts (pandas_like): Time series (such as price).
-            window (int or array_like of int): Size of the moving window. Can be one or more values.
-            ewm (bool or array_like of bool): If True, uses exponential moving STD, otherwise 
-                simple moving STD. Can be one or more values. Defaults to False.
+            window (int or array_like): Size of the moving window. Can be one or more values.
+            ewm (bool or array_like): If True, uses exponential moving standard deviation, 
+                otherwise uses simple moving standard deviation. Can be one or more values. 
+                Defaults to False.
             **kwargs: Keyword arguments passed to `vectorbt.indicators.from_params_pipeline.`
         Examples:
             ```python-repl
@@ -5590,11 +6095,12 @@ in order to predict how volatile the price may be in the future.</p>
 <dl>
 <dt><strong><code>ts</code></strong> :&ensp;<code>pandas_like</code></dt>
 <dd>Time series (such as price).</dd>
-<dt><strong><code>window</code></strong> :&ensp;<code>int</code> or <code>array_like</code> of <code>int</code></dt>
+<dt><strong><code>window</code></strong> :&ensp;<code>int</code> or <code>array_like</code></dt>
 <dd>Size of the moving window. Can be one or more values.</dd>
-<dt><strong><code>ewm</code></strong> :&ensp;<code>bool</code> or <code>array_like</code> of <code>bool</code></dt>
-<dd>If True, uses exponential moving STD, otherwise
-simple moving STD. Can be one or more values. Defaults to False.</dd>
+<dt><strong><code>ewm</code></strong> :&ensp;<code>bool</code> or <code>array_like</code></dt>
+<dd>If True, uses exponential moving standard deviation,
+otherwise uses simple moving standard deviation. Can be one or more values.
+Defaults to False.</dd>
 <dt><strong><code>**kwargs</code></strong></dt>
 <dd>Keyword arguments passed to <code><a title="vectorbt.indicators.from_params_pipeline" href="#vectorbt.indicators.from_params_pipeline">from_params_pipeline()</a>.</code></dd>
 </dl>
@@ -5625,9 +6131,10 @@ def from_params(cls, ts, window, ewm=False, **kwargs):
 
     Args:
         ts (pandas_like): Time series (such as price).
-        window (int or array_like of int): Size of the moving window. Can be one or more values.
-        ewm (bool or array_like of bool): If True, uses exponential moving STD, otherwise 
-            simple moving STD. Can be one or more values. Defaults to False.
+        window (int or array_like): Size of the moving window. Can be one or more values.
+        ewm (bool or array_like): If True, uses exponential moving standard deviation, 
+            otherwise uses simple moving standard deviation. Can be one or more values. 
+            Defaults to False.
         **kwargs: Keyword arguments passed to `vectorbt.indicators.from_params_pipeline.`
     Examples:
         ```python-repl
@@ -7487,10 +7994,10 @@ operation to each Series/DataFrame and returns a new instance of <code>CustomInd
 <li><code><a title="vectorbt.indicators.BollingerBands.lower_band_above" href="#vectorbt.indicators.BollingerBands.lower_band_above">lower_band_above</a></code></li>
 <li><code><a title="vectorbt.indicators.BollingerBands.lower_band_below" href="#vectorbt.indicators.BollingerBands.lower_band_below">lower_band_below</a></code></li>
 <li><code><a title="vectorbt.indicators.BollingerBands.lower_band_equal" href="#vectorbt.indicators.BollingerBands.lower_band_equal">lower_band_equal</a></code></li>
-<li><code><a title="vectorbt.indicators.BollingerBands.middle_band" href="#vectorbt.indicators.BollingerBands.middle_band">middle_band</a></code></li>
-<li><code><a title="vectorbt.indicators.BollingerBands.middle_band_above" href="#vectorbt.indicators.BollingerBands.middle_band_above">middle_band_above</a></code></li>
-<li><code><a title="vectorbt.indicators.BollingerBands.middle_band_below" href="#vectorbt.indicators.BollingerBands.middle_band_below">middle_band_below</a></code></li>
-<li><code><a title="vectorbt.indicators.BollingerBands.middle_band_equal" href="#vectorbt.indicators.BollingerBands.middle_band_equal">middle_band_equal</a></code></li>
+<li><code><a title="vectorbt.indicators.BollingerBands.ma" href="#vectorbt.indicators.BollingerBands.ma">ma</a></code></li>
+<li><code><a title="vectorbt.indicators.BollingerBands.ma_above" href="#vectorbt.indicators.BollingerBands.ma_above">ma_above</a></code></li>
+<li><code><a title="vectorbt.indicators.BollingerBands.ma_below" href="#vectorbt.indicators.BollingerBands.ma_below">ma_below</a></code></li>
+<li><code><a title="vectorbt.indicators.BollingerBands.ma_equal" href="#vectorbt.indicators.BollingerBands.ma_equal">ma_equal</a></code></li>
 <li><code><a title="vectorbt.indicators.BollingerBands.name" href="#vectorbt.indicators.BollingerBands.name">name</a></code></li>
 <li><code><a title="vectorbt.indicators.BollingerBands.percent_b" href="#vectorbt.indicators.BollingerBands.percent_b">percent_b</a></code></li>
 <li><code><a title="vectorbt.indicators.BollingerBands.percent_b_above" href="#vectorbt.indicators.BollingerBands.percent_b_above">percent_b_above</a></code></li>
