@@ -80,7 +80,8 @@ import types
 from vectorbt.utils import *
 from vectorbt.accessors import *
 from vectorbt.timeseries import rolling_mean_nb, rolling_std_nb, ewm_mean_nb, \
-    ewm_std_nb, diff_nb, set_by_mask_nb, prepend_nb, rolling_min_nb, rolling_max_nb
+    ewm_std_nb, diff_1d_nb, diff_nb, set_by_mask_nb, prepend_nb, rolling_min_nb, rolling_max_nb
+from vectorbt.widgets import layout_defaults
 
 # ############# Indicator factory ############# #
 
@@ -1076,8 +1077,6 @@ class MA(MA):
         return tuple(mas)
 
     def plot(self,
-             ts_name=None,
-             ma_name=None,
              ts_trace_kwargs={},
              ma_trace_kwargs={},
              fig=None,
@@ -1085,8 +1084,6 @@ class MA(MA):
         &#34;&#34;&#34;Plot `MA.ma` against `MA.ts`.
 
         Args:
-            ts_name (str): Name of the trace for `MA.ts`.
-            ma_name (str): Name of the trace for `MA.ma`.
             ts_trace_kwargs (dict, optional): Keyword arguments passed to [`plotly.graph_objects.Scatter`](https://plotly.com/python-api-reference/generated/plotly.graph_objects.Scatter.html) of `MA.ts`.
             ma_trace_kwargs (dict, optional): Keyword arguments passed to [`plotly.graph_objects.Scatter`](https://plotly.com/python-api-reference/generated/plotly.graph_objects.Scatter.html) of `MA.ma`.
             fig (plotly.graph_objects.Figure, optional): Figure to add traces to.
@@ -1100,13 +1097,15 @@ class MA(MA):
         check_type(self.ts, pd.Series)
         check_type(self.ma, pd.Series)
 
-        if ts_name is None:
-            ts_name = f&#39;Price ({self.name})&#39;
-        if ma_name is None:
-            ma_name = f&#39;MA ({self.name})&#39;
+        ts_trace_kwargs = {**dict(
+            name=f&#39;Price ({self.name})&#39;
+        ), **ts_trace_kwargs}
+        ma_trace_kwargs = {**dict(
+            name=f&#39;MA ({self.name})&#39;
+        ), **ma_trace_kwargs}
 
-        fig = self.ts.vbt.timeseries.plot(name=ts_name, trace_kwargs=ts_trace_kwargs, fig=fig, **layout_kwargs)
-        fig = self.ma.vbt.timeseries.plot(name=ma_name, trace_kwargs=ma_trace_kwargs, fig=fig)
+        fig = self.ts.vbt.timeseries.plot(trace_kwargs=ts_trace_kwargs, fig=fig, **layout_kwargs)
+        fig = self.ma.vbt.timeseries.plot(trace_kwargs=ma_trace_kwargs, fig=fig, **layout_kwargs)
 
         return fig
 
@@ -1182,15 +1181,13 @@ class MSTD(MSTD):
         return super().from_params(ts, window, ewm, **kwargs)
 
     def plot(self,
-             name=None,
-             trace_kwargs={},
+             mstd_trace_kwargs={},
              fig=None,
              **layout_kwargs):
         &#34;&#34;&#34;Plot `MSTD.mstd`.
 
         Args:
-            name (str): Name of the trace.
-            trace_kwargs (dict, optional): Keyword arguments passed to [`plotly.graph_objects.Scatter`](https://plotly.com/python-api-reference/generated/plotly.graph_objects.Scatter.html).
+            mstd_trace_kwargs (dict, optional): Keyword arguments passed to [`plotly.graph_objects.Scatter`](https://plotly.com/python-api-reference/generated/plotly.graph_objects.Scatter.html).
             fig (plotly.graph_objects.Figure, optional): Figure to add traces to.
             **layout_kwargs: Keyword arguments for layout.
         Examples:
@@ -1201,10 +1198,11 @@ class MSTD(MSTD):
             ![](img/MSTD.png)&#34;&#34;&#34;
         check_type(self.mstd, pd.Series)
 
-        if name is None:
-            name = f&#39;MSTD ({self.name})&#39;
+        mstd_trace_kwargs = {**dict(
+            name=f&#39;MSTD ({self.name})&#39;
+        ), **mstd_trace_kwargs}
 
-        fig = self.mstd.vbt.timeseries.plot(name=name, trace_kwargs=trace_kwargs, fig=fig, **layout_kwargs)
+        fig = self.mstd.vbt.timeseries.plot(trace_kwargs=mstd_trace_kwargs, fig=fig, **layout_kwargs)
 
         return fig
 
@@ -1236,8 +1234,8 @@ BollingerBands = IndicatorFactory(
     output_names=[&#39;ma&#39;, &#39;upper_band&#39;, &#39;lower_band&#39;],
     name=&#39;bb&#39;,
     custom_properties=dict(
-        percent_b=lambda self: (self.ts - self.lower_band) / (self.upper_band - self.lower_band),
-        bandwidth=lambda self: (self.upper_band - self.lower_band) / self.ma
+        percent_b=lambda self: self.ts.vbt.wrap_array((self.ts.values - self.lower_band.values) / (self.upper_band.values - self.lower_band.values)),
+        bandwidth=lambda self: self.ts.vbt.wrap_array((self.upper_band.values - self.lower_band.values) / self.ma.values)
     )
 ).from_apply_func(bb_apply_func_nb, caching_func=bb_caching_nb)
 
@@ -1247,7 +1245,7 @@ class BollingerBands(BollingerBands):
     deviations (positively and negatively) away from a simple moving average (SMA) of the security&#39;s 
     price, but can be adjusted to user preferences.
 
-    See [Bollinger Band® Definition](https://www.investopedia.com/terms/b/bollingerbands.asp).
+    See [Bollinger Band®](https://www.investopedia.com/terms/b/bollingerbands.asp).
 
     Use `BollingerBands.from_params` method to run the indicator.&#34;&#34;&#34;
     
@@ -1355,10 +1353,6 @@ class BollingerBands(BollingerBands):
         return super().from_params(ts, window, ewm, alpha, **kwargs)
 
     def plot(self,
-             ts_name=None,
-             ma_name=None,
-             upper_band_name=None,
-             lower_band_name=None,
              ts_trace_kwargs={},
              ma_trace_kwargs={},
              upper_band_trace_kwargs={},
@@ -1369,10 +1363,6 @@ class BollingerBands(BollingerBands):
         `BollingerBands.ts`.
 
         Args:
-            ts_name (str): Name of the trace for `BollingerBands.ts`.
-            ma_name (str): Name of the trace for `BollingerBands.ma`.
-            upper_band_name (str): Name of the trace for `BollingerBands.upper_band`.
-            lower_band_name (str): Name of the trace for `BollingerBands.lower_band`.
             ts_trace_kwargs (dict, optional): Keyword arguments passed to [`plotly.graph_objects.Scatter`](https://plotly.com/python-api-reference/generated/plotly.graph_objects.Scatter.html) of 
                 `BollingerBands.ts`.
             ma_trace_kwargs (dict, optional): Keyword arguments passed to [`plotly.graph_objects.Scatter`](https://plotly.com/python-api-reference/generated/plotly.graph_objects.Scatter.html) of 
@@ -1394,26 +1384,31 @@ class BollingerBands(BollingerBands):
         check_type(self.upper_band, pd.Series)
         check_type(self.lower_band, pd.Series)
 
-        if ts_name is None:
-            ts_name = f&#39;Price ({self.name})&#39;
-        if ma_name is None:
-            ma_name = f&#39;MA ({self.name})&#39;
-        if upper_band_name is None:
-            upper_band_name = f&#39;Upper Band ({self.name})&#39;
-        if lower_band_name is None:
-            lower_band_name = f&#39;Lower Band ({self.name})&#39;
+        lower_band_trace_kwargs = {**dict(
+            name=f&#39;Lower Band ({self.name})&#39;,
+            line=dict(color=&#39;grey&#39;, width=0), 
+            showlegend=False
+        ), **lower_band_trace_kwargs}
+        upper_band_trace_kwargs = {**dict(
+            name=f&#39;Upper Band ({self.name})&#39;,
+            line=dict(color=&#39;grey&#39;, width=0), 
+            fill=&#39;tonexty&#39;, 
+            fillcolor=&#39;rgba(128, 128, 128, 0.25)&#39;, 
+            showlegend=False
+        ), **upper_band_trace_kwargs}  # default kwargs
+        ma_trace_kwargs = {**dict(
+            name=f&#39;MA ({self.name})&#39;,
+            line=dict(color=layout_defaults[&#39;colorway&#39;][1])
+        ), **ma_trace_kwargs}
+        ts_trace_kwargs = {**dict(
+            name=f&#39;Price ({self.name})&#39;,
+            line=dict(color=layout_defaults[&#39;colorway&#39;][0])
+        ), **ts_trace_kwargs}
 
-        upper_band_trace_kwargs = {**dict(line=dict(color=&#39;grey&#39;)), **upper_band_trace_kwargs}  # default kwargs
-        lower_band_trace_kwargs = {**dict(line=dict(color=&#39;grey&#39;)), **lower_band_trace_kwargs}
-
-        fig = self.ts.vbt.timeseries.plot(
-            name=ts_name, trace_kwargs=ts_trace_kwargs, fig=fig, **layout_kwargs)
-        fig = self.ma.vbt.timeseries.plot(
-            name=ma_name, trace_kwargs=ma_trace_kwargs, fig=fig)
-        fig = self.upper_band.vbt.timeseries.plot(
-            name=upper_band_name, trace_kwargs=upper_band_trace_kwargs, fig=fig)
-        fig = self.lower_band.vbt.timeseries.plot(
-            name=lower_band_name, trace_kwargs=lower_band_trace_kwargs, fig=fig)
+        fig = self.lower_band.vbt.timeseries.plot(trace_kwargs=lower_band_trace_kwargs, fig=fig, **layout_kwargs)
+        fig = self.upper_band.vbt.timeseries.plot(trace_kwargs=upper_band_trace_kwargs, fig=fig, **layout_kwargs)
+        fig = self.ma.vbt.timeseries.plot(trace_kwargs=ma_trace_kwargs, fig=fig, **layout_kwargs)
+        fig = self.ts.vbt.timeseries.plot(trace_kwargs=ts_trace_kwargs, fig=fig, **layout_kwargs)
 
         return fig
 
@@ -1502,14 +1497,12 @@ class RSI(RSI):
 
     def plot(self,
              levels=(30, 70),
-             name=None,
-             trace_kwargs={},
+             rsi_trace_kwargs={},
              fig=None,
              **layout_kwargs):
         &#34;&#34;&#34;Plot `RSI.rsi`.
 
         Args:
-            name (str): Name of the trace.
             trace_kwargs (dict, optional): Keyword arguments passed to [`plotly.graph_objects.Scatter`](https://plotly.com/python-api-reference/generated/plotly.graph_objects.Scatter.html).
             fig (plotly.graph_objects.Figure, optional): Figure to add traces to.
             **layout_kwargs: Keyword arguments for layout.
@@ -1521,23 +1514,27 @@ class RSI(RSI):
             ![](img/RSI.png)&#34;&#34;&#34;
         check_type(self.rsi, pd.Series)
 
-        if name is None:
-            name = f&#39;RSI ({self.name})&#39;
+        rsi_trace_kwargs = {**dict(
+            name=f&#39;RSI ({self.name})&#39;
+        ), **rsi_trace_kwargs}
 
         layout_kwargs = {**dict(yaxis=dict(range=[-5, 105])), **layout_kwargs}
-        fig = self.rsi.vbt.timeseries.plot(name=name, trace_kwargs=trace_kwargs, fig=fig, **layout_kwargs)
-        for level in levels:
-            fig.add_shape(
-                type=&#34;line&#34;,
-                x0=self.rsi.index[0],
-                y0=level,
-                x1=self.rsi.index[-1],
-                y1=level,
-                line=dict(
-                    color=&#34;grey&#34;,
-                    dash=&#34;dash&#34;,
-                ),
-            )
+        fig = self.rsi.vbt.timeseries.plot(trace_kwargs=rsi_trace_kwargs, fig=fig, **layout_kwargs)
+
+        # Fill void between levels
+        fig.add_shape(
+            type=&#34;rect&#34;,
+            xref=&#34;x&#34;,
+            yref=&#34;y&#34;,
+            x0=self.rsi.index[0],
+            y0=levels[0],
+            x1=self.rsi.index[-1],
+            y1=levels[1],
+            fillcolor=&#34;purple&#34;,
+            opacity=0.1,
+            layer=&#34;below&#34;,
+            line_width=0,
+        )
 
         return fig
 
@@ -1584,7 +1581,7 @@ class Stochastic(Stochastic):
     to a range of its prices over a certain period of time. It is used to generate overbought and oversold 
     trading signals, utilizing a 0-100 bounded range of values.
 
-    See [Stochastic Oscillator Definition](https://www.investopedia.com/terms/s/stochasticoscillator.asp).
+    See [Stochastic Oscillator](https://www.investopedia.com/terms/s/stochasticoscillator.asp).
 
     Use `Stochastic.from_params` methods to run the indicator.&#34;&#34;&#34;
 
@@ -1647,19 +1644,8 @@ class Stochastic(Stochastic):
             low_ts = close_ts
         return super().from_params(close_ts, high_ts, low_ts, k_window, d_window, d_ewm, **kwargs)
 
-    def crossover(self, **kwargs):
-        &#34;&#34;&#34;Generate crossover signals between `Stochastic.percent_k` and `Stochastic.percent_d`.
-        
-        For `**kwargs`, see `Stochastic.percent_k_above` and `Stochastic.percent_k_below`.
-        &#34;&#34;&#34;
-        above_signals = self.percent_k_above(self.percent_d, crossover=True, **kwargs)
-        below_signals = self.percent_k_below(self.percent_d, crossover=True, **kwargs)
-        return above_signals, below_signals
-
     def plot(self,
              levels=(30, 70),
-             percent_k_name=None,
-             percent_d_name=None,
              percent_k_trace_kwargs={},
              percent_d_trace_kwargs={},
              fig=None,
@@ -1667,8 +1653,6 @@ class Stochastic(Stochastic):
         &#34;&#34;&#34;Plot `Stochastic.percent_k` and `Stochastic.percent_d`.
 
         Args:
-            percent_k_name (str): Name of the trace for `Stochastic.percent_k`.
-            percent_d_name (str): Name of the trace for `Stochastic.percent_d`.
             percent_k_trace_kwargs (dict, optional): Keyword arguments passed to [`plotly.graph_objects.Scatter`](https://plotly.com/python-api-reference/generated/plotly.graph_objects.Scatter.html) of 
                 `Stochastic.percent_k`.
             percent_d_trace_kwargs (dict, optional): Keyword arguments passed to [`plotly.graph_objects.Scatter`](https://plotly.com/python-api-reference/generated/plotly.graph_objects.Scatter.html) of 
@@ -1684,28 +1668,32 @@ class Stochastic(Stochastic):
         check_type(self.percent_k, pd.Series)
         check_type(self.percent_d, pd.Series)
 
-        if percent_k_name is None:
-            percent_k_name = f&#39;%K ({self.name})&#39;
-        if percent_d_name is None:
-            percent_d_name = f&#39;%D ({self.name})&#39;
+        percent_k_trace_kwargs = {**dict(
+            name=f&#39;%K ({self.name})&#39;
+        ), **percent_k_trace_kwargs}
+        percent_d_trace_kwargs = {**dict(
+            name=f&#39;%D ({self.name})&#39;
+        ), **percent_d_trace_kwargs}
 
         layout_kwargs = {**dict(yaxis=dict(range=[-5, 105])), **layout_kwargs}
-        fig = self.percent_k.vbt.timeseries.plot(
-            name=percent_k_name, trace_kwargs=percent_k_trace_kwargs, fig=fig, **layout_kwargs)
-        fig = self.percent_d.vbt.timeseries.plot(
-            name=percent_d_name, trace_kwargs=percent_d_trace_kwargs, fig=fig, **layout_kwargs)
-        for level in levels:
-            fig.add_shape(
-                type=&#34;line&#34;,
-                x0=self.percent_k.index[0],
-                y0=level,
-                x1=self.percent_k.index[-1],
-                y1=level,
-                line=dict(
-                    color=&#34;grey&#34;,
-                    dash=&#34;dash&#34;,
-                ),
-            )
+        fig = self.percent_k.vbt.timeseries.plot(trace_kwargs=percent_k_trace_kwargs, fig=fig, **layout_kwargs)
+        fig = self.percent_d.vbt.timeseries.plot(trace_kwargs=percent_d_trace_kwargs, fig=fig, **layout_kwargs)
+
+        # Plot levels
+        # Fill void between levels
+        fig.add_shape(
+            type=&#34;rect&#34;,
+            xref=&#34;x&#34;,
+            yref=&#34;y&#34;,
+            x0=self.percent_k.index[0],
+            y0=levels[0],
+            x1=self.percent_k.index[-1],
+            y1=levels[1],
+            fillcolor=&#34;purple&#34;,
+            opacity=0.1,
+            layer=&#34;below&#34;,
+            line_width=0,
+        )
 
         return fig
 
@@ -1715,17 +1703,17 @@ fix_class_for_pdoc(Stochastic)
 
 # ############# MACD ############# #
 
-@njit(DictType(UniTuple(i8, 2), f8[:, :])(f8[:, :], i8[:], i8[:], i8[:], b1[:]), cache=True)
-def macd_caching_nb(ts, fast_windows, slow_windows, signal_windows, ewms):
-    return ma_caching_nb(ts, np.concatenate((fast_windows, slow_windows)), np.concatenate((ewms, ewms)))
+@njit(DictType(UniTuple(i8, 2), f8[:, :])(f8[:, :], i8[:], i8[:], i8[:], b1[:], b1[:]), cache=True)
+def macd_caching_nb(ts, fast_windows, slow_windows, signal_windows, macd_ewms, signal_ewms):
+    return ma_caching_nb(ts, np.concatenate((fast_windows, slow_windows)), np.concatenate((macd_ewms, macd_ewms)))
 
 
-@njit(UniTuple(f8[:, :], 4)(f8[:, :], i8, i8, i8, b1, DictType(UniTuple(i8, 2), f8[:, :])), cache=True)
-def macd_apply_func_nb(ts, fast_window, slow_window, signal_window, ewm, cache_dict):
-    fast_ma = cache_dict[(fast_window, int(ewm))]
-    slow_ma = cache_dict[(slow_window, int(ewm))]
+@njit(UniTuple(f8[:, :], 4)(f8[:, :], i8, i8, i8, b1, b1, DictType(UniTuple(i8, 2), f8[:, :])), cache=True)
+def macd_apply_func_nb(ts, fast_window, slow_window, signal_window, macd_ewm, signal_ewm, cache_dict):
+    fast_ma = cache_dict[(fast_window, int(macd_ewm))]
+    slow_ma = cache_dict[(slow_window, int(macd_ewm))]
     macd_ts = fast_ma - slow_ma
-    if ewm:
+    if signal_ewm:
         signal_ts = ewm_mean_nb(macd_ts, signal_window)
     else:
         signal_ts = rolling_mean_nb(macd_ts, signal_window)
@@ -1735,11 +1723,11 @@ def macd_apply_func_nb(ts, fast_window, slow_window, signal_window, ewm, cache_d
 
 MACD = IndicatorFactory(
     ts_names=[&#39;ts&#39;],
-    param_names=[&#39;fast_window&#39;, &#39;slow_window&#39;, &#39;signal_window&#39;, &#39;ewm&#39;],
+    param_names=[&#39;fast_window&#39;, &#39;slow_window&#39;, &#39;signal_window&#39;, &#39;macd_ewm&#39;, &#39;signal_ewm&#39;],
     output_names=[&#39;fast_ma&#39;, &#39;slow_ma&#39;, &#39;macd&#39;, &#39;signal&#39;],
     name=&#39;macd&#39;,
     custom_properties=dict(
-        histogram=lambda self: self.macd - self.signal,
+        histogram=lambda self: self.ts.vbt.wrap_array(self.macd.values - self.signal.values),
     )
 ).from_apply_func(macd_apply_func_nb, caching_func=macd_caching_nb)
 
@@ -1753,33 +1741,177 @@ class MACD(MACD):
     Use `MACD.from_params` methods to run the indicator.&#34;&#34;&#34;
 
     @classmethod
-    def from_params(cls, ts, fast_window=26, slow_window=12, signal_window=9, ewm=True, **kwargs):
-        return super().from_params(ts, fast_window, slow_window, signal_window, ewm, **kwargs)
+    def from_params(cls, ts, fast_window=26, slow_window=12, signal_window=9, macd_ewm=True, signal_ewm=True, **kwargs):
+        &#34;&#34;&#34;Calculate fast moving average `MACD.fast_ma`, slow moving average `MACD.slow_ma`, MACD `MACD.macd`, 
+        signal `MACD.signal` and histogram `MACD.histogram` from time series `ts` and parameters `fast_window`, 
+        `slow_window`, `signal_window`, `macd_ewm` and `signal_ewm`.
 
-    def crossover(self, **kwargs):
-        above_signals = self.macd_above(self.signal, crossover=True, **kwargs)
-        below_signals = self.macd_below(self.signal, crossover=True, **kwargs)
-        return above_signals, below_signals
+        Args:
+            ts (pandas_like): Time series (such as price).
+            fast_window (int or array_like): Size of the fast moving window for MACD. Can be one or more values.
+                Defaults to 26.
+            slow_window (int or array_like): Size of the slow moving window for MACD. Can be one or more values.
+                Defaults to 12.
+            signal_window (int or array_like): Size of the moving window for signal. Can be one or more values.
+                Defaults to 9.
+            macd_ewm (bool or array_like): If True, uses exponential moving average for MACD, otherwise uses 
+                simple moving average. Can be one or more values. Defaults to True.
+            signal_ewm (bool or array_like): If True, uses exponential moving average for signal, otherwise uses 
+                simple moving average. Can be one or more values. Defaults to True.
+            **kwargs: Keyword arguments passed to `vectorbt.indicators.from_params_pipeline.`
+        Examples:
+            ```python-repl
+            &gt;&gt;&gt; macd = vbt.MACD.from_params(price[&#39;Close&#39;], 
+            ...     fast_window=[10, 20], slow_window=[20, 30], signal_window=[30, 40], 
+            ...     macd_ewm=[False, True], signal_ewm=[True, False])
+
+            &gt;&gt;&gt; print(macd.fast_ma)
+            macd_fast_window           10            20
+            macd_slow_window           20            30
+            macd_signal_window         30            40
+            macd_macd_ewm           False          True
+            macd_signal_ewm          True         False
+            Date                                       
+            2019-02-28                NaN           NaN
+            2019-03-01                NaN           NaN
+            2019-03-02                NaN           NaN
+            ...                       ...           ...
+            2019-08-29          10155.972  10330.457140
+            2019-08-30          10039.466  10260.715507
+            2019-08-31           9988.727  10200.710220
+
+            [185 rows x 2 columns]
+
+            &gt;&gt;&gt; print(macd.slow_ma)
+            macd_fast_window            10            20
+            macd_slow_window            20            30
+            macd_signal_window          30            40
+            macd_macd_ewm            False          True
+            macd_signal_ewm           True         False
+            Date                                        
+            2019-02-28                 NaN           NaN
+            2019-03-01                 NaN           NaN
+            2019-03-02                 NaN           NaN
+            ...                        ...           ...
+            2019-08-29          10447.3480  10423.585970
+            2019-08-30          10359.5555  10370.333077
+            2019-08-31          10264.9095  10322.612024
+
+            [185 rows x 2 columns]
+
+            &gt;&gt;&gt; print(macd.macd)
+            macd_fast_window          10          20
+            macd_slow_window          20          30
+            macd_signal_window        30          40
+            macd_macd_ewm          False        True
+            macd_signal_ewm         True       False
+            Date                                    
+            2019-02-28               NaN         NaN
+            2019-03-01               NaN         NaN
+            2019-03-02               NaN         NaN
+            ...                      ...         ...
+            2019-08-29         -291.3760  -93.128830
+            2019-08-30         -320.0895 -109.617570
+            2019-08-31         -276.1825 -121.901804
+
+            [185 rows x 2 columns]
+
+            &gt;&gt;&gt; print(macd.signal)
+            macd_fast_window            10         20
+            macd_slow_window            20         30
+            macd_signal_window          30         40
+            macd_macd_ewm            False       True
+            macd_signal_ewm           True      False
+            Date                                     
+            2019-02-28                 NaN        NaN
+            2019-03-01                 NaN        NaN
+            2019-03-02                 NaN        NaN
+            ...                        ...        ...
+            2019-08-29         -104.032603  28.622033
+            2019-08-30         -117.971990  22.424149
+            2019-08-31         -128.179278  16.493338
+
+            [185 rows x 2 columns]
+
+            &gt;&gt;&gt; print(macd.histogram)
+            macd_fast_window            10          20
+            macd_slow_window            20          30
+            macd_signal_window          30          40
+            macd_macd_ewm            False        True
+            macd_signal_ewm           True       False
+            Date                                      
+            2019-02-28                 NaN         NaN
+            2019-03-01                 NaN         NaN
+            2019-03-02                 NaN         NaN
+            ...                        ...         ...
+            2019-08-29         -187.343397 -121.750863
+            2019-08-30         -202.117510 -132.041719
+            2019-08-31         -148.003222 -138.395142
+
+            [185 rows x 2 columns]
+            ```
+        &#34;&#34;&#34;
+        return super().from_params(ts, fast_window, slow_window, signal_window, macd_ewm, signal_ewm, **kwargs)
 
     def plot(self,
-             macd_name=None,
-             signal_name=None,
              macd_trace_kwargs={},
              signal_trace_kwargs={},
+             histogram_trace_kwargs={},
              fig=None,
              **layout_kwargs):
+        &#34;&#34;&#34;Plot `MACD.macd`, `MACD.signal` and `MACD.histogram`.
+
+        Args:
+            macd_trace_kwargs (dict, optional): Keyword arguments passed to [`plotly.graph_objects.Scatter`](https://plotly.com/python-api-reference/generated/plotly.graph_objects.Scatter.html) of 
+                `MACD.macd`.
+            signal_trace_kwargs (dict, optional): Keyword arguments passed to [`plotly.graph_objects.Scatter`](https://plotly.com/python-api-reference/generated/plotly.graph_objects.Scatter.html) of 
+                `MACD.signal`.
+            histogram_trace_kwargs (dict, optional): Keyword arguments passed to [`plotly.graph_objects.Bar`](https://plotly.com/python-api-reference/generated/plotly.graph_objects.Bar.html) of 
+                `MACD.histogram`.
+            fig (plotly.graph_objects.Figure, optional): Figure to add traces to.
+            **layout_kwargs: Keyword arguments for layout.
+        Examples:
+            ```py
+            macd[(10, 20, 30, False, True)].plot()
+            ```
+
+            ![](img/MACD.png)&#34;&#34;&#34;
         check_type(self.macd, pd.Series)
         check_type(self.signal, pd.Series)
 
-        if macd_name is None:
-            macd_name = f&#39;MACD ({self.name})&#39;
-        if signal_name is None:
-            signal_name = f&#39;Signal ({self.name})&#39;
+        macd_trace_kwargs = {**dict(
+            name=f&#39;MACD ({self.name})&#39;
+        ), **macd_trace_kwargs}
+        signal_trace_kwargs = {**dict(
+            name=f&#39;Signal ({self.name})&#39;
+        ), **signal_trace_kwargs}
+        histogram_trace_kwargs = {**dict(
+            name=f&#39;Histogram ({self.name})&#39;,
+            showlegend=False
+        ), **histogram_trace_kwargs}
 
-        fig = self.macd.vbt.timeseries.plot(
-            name=macd_name, trace_kwargs=macd_trace_kwargs, fig=fig, **layout_kwargs)
-        fig = self.signal.vbt.timeseries.plot(
-            name=signal_name, trace_kwargs=signal_trace_kwargs, fig=fig, **layout_kwargs)
+        layout_kwargs = {**dict(bargap=0), **layout_kwargs}
+        fig = self.macd.vbt.timeseries.plot(trace_kwargs=macd_trace_kwargs, fig=fig, **layout_kwargs)
+        fig = self.signal.vbt.timeseries.plot(trace_kwargs=signal_trace_kwargs, fig=fig, **layout_kwargs)
+            
+        # Plot histogram
+        hist = self.histogram.values
+        hist_diff = diff_1d_nb(hist)
+        marker_colors = np.full(hist.shape, np.nan, dtype=np.object)
+        marker_colors[(hist &gt; 0) &amp; (hist_diff &gt; 0)] = &#39;green&#39;
+        marker_colors[(hist &gt; 0) &amp; (hist_diff &lt;= 0)] = &#39;lightgreen&#39;
+        marker_colors[hist == 0] = &#39;lightgrey&#39;
+        marker_colors[(hist &lt; 0) &amp; (hist_diff &lt; 0)] = &#39;red&#39;
+        marker_colors[(hist &lt; 0) &amp; (hist_diff &gt;= 0)] = &#39;lightcoral&#39;
+
+        histogram_bar = go.Bar(
+            x=self.histogram.index,
+            y=self.histogram.values,
+            marker_color=marker_colors,
+            marker_line_width=0
+        )
+        histogram_bar.update(**histogram_trace_kwargs)
+        fig.add_trace(histogram_bar)
 
         return fig
 
@@ -1818,21 +1950,65 @@ OBV = IndicatorFactory(
 
 
 class OBV(OBV):
+    &#34;&#34;&#34;On-balance volume (OBV) is a technical trading momentum indicator that uses volume flow to predict 
+    changes in stock price.
+
+    See [On-Balance Volume (OBV)](https://www.investopedia.com/terms/o/onbalancevolume.asp).
+
+    Use `OBV.from_params` methods to run the indicator.&#34;&#34;&#34;
     @classmethod
     def from_params(cls, close_ts, volume_ts):
+        &#34;&#34;&#34;Calculate on-balance volume `OBV.obv` from time series `close_ts` and `volume_ts`, and no parameters.
+
+        Args:
+            close_ts (pandas_like): The last closing price.
+            volume_ts (pandas_like): The volume.
+            **kwargs: Keyword arguments passed to `vectorbt.indicators.from_params_pipeline.`
+        Examples:
+            ```python-repl
+            &gt;&gt;&gt; obv = vbt.OBV.from_params(price[&#39;Close&#39;], price[&#39;Volume&#39;])
+
+            &gt;&gt;&gt; print(obv.obv)
+            Date
+            2019-02-28             NaN
+            2019-03-01    7.661248e+09
+            2019-03-02    1.524003e+10
+            2019-03-03    7.986476e+09
+            2019-03-04   -1.042700e+09
+                                   ...     
+            2019-08-27    5.613088e+11
+            2019-08-28    5.437050e+11
+            2019-08-29    5.266592e+11
+            2019-08-30    5.402544e+11
+            2019-08-31    5.517092e+11
+            Name: (Close, Volume), Length: 185, dtype: float64
+            ```
+        &#34;&#34;&#34;
         return super().from_params(close_ts, volume_ts)
 
     def plot(self,
-             name=None,
-             trace_kwargs={},
+             obv_trace_kwargs={},
              fig=None,
              **layout_kwargs):
+        &#34;&#34;&#34;Plot `OBV.obv`.
+
+        Args:
+            obv_trace_kwargs (dict, optional): Keyword arguments passed to [`plotly.graph_objects.Scatter`](https://plotly.com/python-api-reference/generated/plotly.graph_objects.Scatter.html).
+            fig (plotly.graph_objects.Figure, optional): Figure to add traces to.
+            **layout_kwargs: Keyword arguments for layout.
+        Examples:
+            ```py
+            obv.plot()
+            ```
+
+            ![](img/OBV.png)&#34;&#34;&#34;
         check_type(self.obv, pd.Series)
 
-        if name is None:
-            name = f&#39;OBV ({self.name})&#39;
+        obv_trace_kwargs = {**dict(
+            name=f&#39;OBV ({self.name})&#39;
+        ), **obv_trace_kwargs}
 
-        fig = self.obv.vbt.timeseries.plot(name=name, trace_kwargs=trace_kwargs, fig=fig, **layout_kwargs)
+        fig = self.obv.vbt.timeseries.plot(trace_kwargs=obv_trace_kwargs, fig=fig, **layout_kwargs)
 
         return fig
 
@@ -2175,7 +2351,7 @@ a list of other generated outputs that are outside of
 <div class="desc"><p>A Bollinger Band® is a technical analysis tool defined by a set of lines plotted two standard
 deviations (positively and negatively) away from a simple moving average (SMA) of the security's
 price, but can be adjusted to user preferences.</p>
-<p>See <a href="https://www.investopedia.com/terms/b/bollingerbands.asp">Bollinger Band® Definition</a>.</p>
+<p>See <a href="https://www.investopedia.com/terms/b/bollingerbands.asp">Bollinger Band®</a>.</p>
 <p>Use <code><a title="vectorbt.indicators.BollingerBands.from_params" href="#vectorbt.indicators.BollingerBands.from_params">BollingerBands.from_params()</a></code> method to run the indicator.</p></div>
 <details class="source">
 <summary>
@@ -2186,7 +2362,7 @@ price, but can be adjusted to user preferences.</p>
     deviations (positively and negatively) away from a simple moving average (SMA) of the security&#39;s 
     price, but can be adjusted to user preferences.
 
-    See [Bollinger Band® Definition](https://www.investopedia.com/terms/b/bollingerbands.asp).
+    See [Bollinger Band®](https://www.investopedia.com/terms/b/bollingerbands.asp).
 
     Use `BollingerBands.from_params` method to run the indicator.&#34;&#34;&#34;
     
@@ -2294,10 +2470,6 @@ price, but can be adjusted to user preferences.</p>
         return super().from_params(ts, window, ewm, alpha, **kwargs)
 
     def plot(self,
-             ts_name=None,
-             ma_name=None,
-             upper_band_name=None,
-             lower_band_name=None,
              ts_trace_kwargs={},
              ma_trace_kwargs={},
              upper_band_trace_kwargs={},
@@ -2308,10 +2480,6 @@ price, but can be adjusted to user preferences.</p>
         `BollingerBands.ts`.
 
         Args:
-            ts_name (str): Name of the trace for `BollingerBands.ts`.
-            ma_name (str): Name of the trace for `BollingerBands.ma`.
-            upper_band_name (str): Name of the trace for `BollingerBands.upper_band`.
-            lower_band_name (str): Name of the trace for `BollingerBands.lower_band`.
             ts_trace_kwargs (dict, optional): Keyword arguments passed to [`plotly.graph_objects.Scatter`](https://plotly.com/python-api-reference/generated/plotly.graph_objects.Scatter.html) of 
                 `BollingerBands.ts`.
             ma_trace_kwargs (dict, optional): Keyword arguments passed to [`plotly.graph_objects.Scatter`](https://plotly.com/python-api-reference/generated/plotly.graph_objects.Scatter.html) of 
@@ -2333,26 +2501,31 @@ price, but can be adjusted to user preferences.</p>
         check_type(self.upper_band, pd.Series)
         check_type(self.lower_band, pd.Series)
 
-        if ts_name is None:
-            ts_name = f&#39;Price ({self.name})&#39;
-        if ma_name is None:
-            ma_name = f&#39;MA ({self.name})&#39;
-        if upper_band_name is None:
-            upper_band_name = f&#39;Upper Band ({self.name})&#39;
-        if lower_band_name is None:
-            lower_band_name = f&#39;Lower Band ({self.name})&#39;
+        lower_band_trace_kwargs = {**dict(
+            name=f&#39;Lower Band ({self.name})&#39;,
+            line=dict(color=&#39;grey&#39;, width=0), 
+            showlegend=False
+        ), **lower_band_trace_kwargs}
+        upper_band_trace_kwargs = {**dict(
+            name=f&#39;Upper Band ({self.name})&#39;,
+            line=dict(color=&#39;grey&#39;, width=0), 
+            fill=&#39;tonexty&#39;, 
+            fillcolor=&#39;rgba(128, 128, 128, 0.25)&#39;, 
+            showlegend=False
+        ), **upper_band_trace_kwargs}  # default kwargs
+        ma_trace_kwargs = {**dict(
+            name=f&#39;MA ({self.name})&#39;,
+            line=dict(color=layout_defaults[&#39;colorway&#39;][1])
+        ), **ma_trace_kwargs}
+        ts_trace_kwargs = {**dict(
+            name=f&#39;Price ({self.name})&#39;,
+            line=dict(color=layout_defaults[&#39;colorway&#39;][0])
+        ), **ts_trace_kwargs}
 
-        upper_band_trace_kwargs = {**dict(line=dict(color=&#39;grey&#39;)), **upper_band_trace_kwargs}  # default kwargs
-        lower_band_trace_kwargs = {**dict(line=dict(color=&#39;grey&#39;)), **lower_band_trace_kwargs}
-
-        fig = self.ts.vbt.timeseries.plot(
-            name=ts_name, trace_kwargs=ts_trace_kwargs, fig=fig, **layout_kwargs)
-        fig = self.ma.vbt.timeseries.plot(
-            name=ma_name, trace_kwargs=ma_trace_kwargs, fig=fig)
-        fig = self.upper_band.vbt.timeseries.plot(
-            name=upper_band_name, trace_kwargs=upper_band_trace_kwargs, fig=fig)
-        fig = self.lower_band.vbt.timeseries.plot(
-            name=lower_band_name, trace_kwargs=lower_band_trace_kwargs, fig=fig)
+        fig = self.lower_band.vbt.timeseries.plot(trace_kwargs=lower_band_trace_kwargs, fig=fig, **layout_kwargs)
+        fig = self.upper_band.vbt.timeseries.plot(trace_kwargs=upper_band_trace_kwargs, fig=fig, **layout_kwargs)
+        fig = self.ma.vbt.timeseries.plot(trace_kwargs=ma_trace_kwargs, fig=fig, **layout_kwargs)
+        fig = self.ts.vbt.timeseries.plot(trace_kwargs=ts_trace_kwargs, fig=fig, **layout_kwargs)
 
         return fig</code></pre>
 </details>
@@ -2600,7 +2773,7 @@ def param_loc(self):
 <summary>
 <span>Expand source code</span>
 </summary>
-<pre><code class="python">bandwidth=lambda self: (self.upper_band - self.lower_band) / self.ma</code></pre>
+<pre><code class="python">bandwidth=lambda self: self.ts.vbt.wrap_array((self.upper_band.values - self.lower_band.values) / self.ma.values)</code></pre>
 </details>
 </dd>
 <dt id="vectorbt.indicators.BollingerBands.ewm_loc"><code class="name">var <span class="ident">ewm_loc</span></code></dt>
@@ -2683,7 +2856,7 @@ def loc(self):
 <summary>
 <span>Expand source code</span>
 </summary>
-<pre><code class="python">percent_b=lambda self: (self.ts - self.lower_band) / (self.upper_band - self.lower_band),</code></pre>
+<pre><code class="python">percent_b=lambda self: self.ts.vbt.wrap_array((self.ts.values - self.lower_band.values) / (self.upper_band.values - self.lower_band.values)),</code></pre>
 </details>
 </dd>
 <dt id="vectorbt.indicators.BollingerBands.ts"><code class="name">var <span class="ident">ts</span></code></dt>
@@ -3062,21 +3235,13 @@ For more keyword arguments, see <code><a title="vectorbt.utils.Base_Accessor.com
 </details>
 </dd>
 <dt id="vectorbt.indicators.BollingerBands.plot"><code class="name flex">
-<span>def <span class="ident">plot</span></span>(<span>self, ts_name=None, ma_name=None, upper_band_name=None, lower_band_name=None, ts_trace_kwargs={}, ma_trace_kwargs={}, upper_band_trace_kwargs={}, lower_band_trace_kwargs={}, fig=None, **layout_kwargs)</span>
+<span>def <span class="ident">plot</span></span>(<span>self, ts_trace_kwargs={}, ma_trace_kwargs={}, upper_band_trace_kwargs={}, lower_band_trace_kwargs={}, fig=None, **layout_kwargs)</span>
 </code></dt>
 <dd>
 <div class="desc"><p>Plot <code><a title="vectorbt.indicators.BollingerBands.ma" href="#vectorbt.indicators.BollingerBands.ma">BollingerBands.ma</a></code>, <code><a title="vectorbt.indicators.BollingerBands.upper_band" href="#vectorbt.indicators.BollingerBands.upper_band">BollingerBands.upper_band</a></code> and <code><a title="vectorbt.indicators.BollingerBands.lower_band" href="#vectorbt.indicators.BollingerBands.lower_band">BollingerBands.lower_band</a></code> against
 <code><a title="vectorbt.indicators.BollingerBands.ts" href="#vectorbt.indicators.BollingerBands.ts">BollingerBands.ts</a></code>.</p>
 <h2 id="args">Args</h2>
 <dl>
-<dt><strong><code>ts_name</code></strong> :&ensp;<code>str</code></dt>
-<dd>Name of the trace for <code><a title="vectorbt.indicators.BollingerBands.ts" href="#vectorbt.indicators.BollingerBands.ts">BollingerBands.ts</a></code>.</dd>
-<dt><strong><code>ma_name</code></strong> :&ensp;<code>str</code></dt>
-<dd>Name of the trace for <code><a title="vectorbt.indicators.BollingerBands.ma" href="#vectorbt.indicators.BollingerBands.ma">BollingerBands.ma</a></code>.</dd>
-<dt><strong><code>upper_band_name</code></strong> :&ensp;<code>str</code></dt>
-<dd>Name of the trace for <code><a title="vectorbt.indicators.BollingerBands.upper_band" href="#vectorbt.indicators.BollingerBands.upper_band">BollingerBands.upper_band</a></code>.</dd>
-<dt><strong><code>lower_band_name</code></strong> :&ensp;<code>str</code></dt>
-<dd>Name of the trace for <code><a title="vectorbt.indicators.BollingerBands.lower_band" href="#vectorbt.indicators.BollingerBands.lower_band">BollingerBands.lower_band</a></code>.</dd>
 <dt><strong><code>ts_trace_kwargs</code></strong> :&ensp;<code>dict</code>, optional</dt>
 <dd>Keyword arguments passed to <a href="https://plotly.com/python-api-reference/generated/plotly.graph_objects.Scatter.html"><code>plotly.graph_objects.Scatter</code></a> of
 <code><a title="vectorbt.indicators.BollingerBands.ts" href="#vectorbt.indicators.BollingerBands.ts">BollingerBands.ts</a></code>.</dd>
@@ -3103,10 +3268,6 @@ For more keyword arguments, see <code><a title="vectorbt.utils.Base_Accessor.com
 <span>Expand source code</span>
 </summary>
 <pre><code class="python">def plot(self,
-         ts_name=None,
-         ma_name=None,
-         upper_band_name=None,
-         lower_band_name=None,
          ts_trace_kwargs={},
          ma_trace_kwargs={},
          upper_band_trace_kwargs={},
@@ -3117,10 +3278,6 @@ For more keyword arguments, see <code><a title="vectorbt.utils.Base_Accessor.com
     `BollingerBands.ts`.
 
     Args:
-        ts_name (str): Name of the trace for `BollingerBands.ts`.
-        ma_name (str): Name of the trace for `BollingerBands.ma`.
-        upper_band_name (str): Name of the trace for `BollingerBands.upper_band`.
-        lower_band_name (str): Name of the trace for `BollingerBands.lower_band`.
         ts_trace_kwargs (dict, optional): Keyword arguments passed to [`plotly.graph_objects.Scatter`](https://plotly.com/python-api-reference/generated/plotly.graph_objects.Scatter.html) of 
             `BollingerBands.ts`.
         ma_trace_kwargs (dict, optional): Keyword arguments passed to [`plotly.graph_objects.Scatter`](https://plotly.com/python-api-reference/generated/plotly.graph_objects.Scatter.html) of 
@@ -3142,26 +3299,31 @@ For more keyword arguments, see <code><a title="vectorbt.utils.Base_Accessor.com
     check_type(self.upper_band, pd.Series)
     check_type(self.lower_band, pd.Series)
 
-    if ts_name is None:
-        ts_name = f&#39;Price ({self.name})&#39;
-    if ma_name is None:
-        ma_name = f&#39;MA ({self.name})&#39;
-    if upper_band_name is None:
-        upper_band_name = f&#39;Upper Band ({self.name})&#39;
-    if lower_band_name is None:
-        lower_band_name = f&#39;Lower Band ({self.name})&#39;
+    lower_band_trace_kwargs = {**dict(
+        name=f&#39;Lower Band ({self.name})&#39;,
+        line=dict(color=&#39;grey&#39;, width=0), 
+        showlegend=False
+    ), **lower_band_trace_kwargs}
+    upper_band_trace_kwargs = {**dict(
+        name=f&#39;Upper Band ({self.name})&#39;,
+        line=dict(color=&#39;grey&#39;, width=0), 
+        fill=&#39;tonexty&#39;, 
+        fillcolor=&#39;rgba(128, 128, 128, 0.25)&#39;, 
+        showlegend=False
+    ), **upper_band_trace_kwargs}  # default kwargs
+    ma_trace_kwargs = {**dict(
+        name=f&#39;MA ({self.name})&#39;,
+        line=dict(color=layout_defaults[&#39;colorway&#39;][1])
+    ), **ma_trace_kwargs}
+    ts_trace_kwargs = {**dict(
+        name=f&#39;Price ({self.name})&#39;,
+        line=dict(color=layout_defaults[&#39;colorway&#39;][0])
+    ), **ts_trace_kwargs}
 
-    upper_band_trace_kwargs = {**dict(line=dict(color=&#39;grey&#39;)), **upper_band_trace_kwargs}  # default kwargs
-    lower_band_trace_kwargs = {**dict(line=dict(color=&#39;grey&#39;)), **lower_band_trace_kwargs}
-
-    fig = self.ts.vbt.timeseries.plot(
-        name=ts_name, trace_kwargs=ts_trace_kwargs, fig=fig, **layout_kwargs)
-    fig = self.ma.vbt.timeseries.plot(
-        name=ma_name, trace_kwargs=ma_trace_kwargs, fig=fig)
-    fig = self.upper_band.vbt.timeseries.plot(
-        name=upper_band_name, trace_kwargs=upper_band_trace_kwargs, fig=fig)
-    fig = self.lower_band.vbt.timeseries.plot(
-        name=lower_band_name, trace_kwargs=lower_band_trace_kwargs, fig=fig)
+    fig = self.lower_band.vbt.timeseries.plot(trace_kwargs=lower_band_trace_kwargs, fig=fig, **layout_kwargs)
+    fig = self.upper_band.vbt.timeseries.plot(trace_kwargs=upper_band_trace_kwargs, fig=fig, **layout_kwargs)
+    fig = self.ma.vbt.timeseries.plot(trace_kwargs=ma_trace_kwargs, fig=fig, **layout_kwargs)
+    fig = self.ts.vbt.timeseries.plot(trace_kwargs=ts_trace_kwargs, fig=fig, **layout_kwargs)
 
     return fig</code></pre>
 </details>
@@ -4743,8 +4905,6 @@ price action by filtering out the “noise” from random short-term price fluct
         return tuple(mas)
 
     def plot(self,
-             ts_name=None,
-             ma_name=None,
              ts_trace_kwargs={},
              ma_trace_kwargs={},
              fig=None,
@@ -4752,8 +4912,6 @@ price action by filtering out the “noise” from random short-term price fluct
         &#34;&#34;&#34;Plot `MA.ma` against `MA.ts`.
 
         Args:
-            ts_name (str): Name of the trace for `MA.ts`.
-            ma_name (str): Name of the trace for `MA.ma`.
             ts_trace_kwargs (dict, optional): Keyword arguments passed to [`plotly.graph_objects.Scatter`](https://plotly.com/python-api-reference/generated/plotly.graph_objects.Scatter.html) of `MA.ts`.
             ma_trace_kwargs (dict, optional): Keyword arguments passed to [`plotly.graph_objects.Scatter`](https://plotly.com/python-api-reference/generated/plotly.graph_objects.Scatter.html) of `MA.ma`.
             fig (plotly.graph_objects.Figure, optional): Figure to add traces to.
@@ -4767,13 +4925,15 @@ price action by filtering out the “noise” from random short-term price fluct
         check_type(self.ts, pd.Series)
         check_type(self.ma, pd.Series)
 
-        if ts_name is None:
-            ts_name = f&#39;Price ({self.name})&#39;
-        if ma_name is None:
-            ma_name = f&#39;MA ({self.name})&#39;
+        ts_trace_kwargs = {**dict(
+            name=f&#39;Price ({self.name})&#39;
+        ), **ts_trace_kwargs}
+        ma_trace_kwargs = {**dict(
+            name=f&#39;MA ({self.name})&#39;
+        ), **ma_trace_kwargs}
 
-        fig = self.ts.vbt.timeseries.plot(name=ts_name, trace_kwargs=ts_trace_kwargs, fig=fig, **layout_kwargs)
-        fig = self.ma.vbt.timeseries.plot(name=ma_name, trace_kwargs=ma_trace_kwargs, fig=fig)
+        fig = self.ts.vbt.timeseries.plot(trace_kwargs=ts_trace_kwargs, fig=fig, **layout_kwargs)
+        fig = self.ma.vbt.timeseries.plot(trace_kwargs=ma_trace_kwargs, fig=fig, **layout_kwargs)
 
         return fig</code></pre>
 </details>
@@ -5251,16 +5411,12 @@ For more keyword arguments, see <code><a title="vectorbt.utils.Base_Accessor.com
 </details>
 </dd>
 <dt id="vectorbt.indicators.MA.plot"><code class="name flex">
-<span>def <span class="ident">plot</span></span>(<span>self, ts_name=None, ma_name=None, ts_trace_kwargs={}, ma_trace_kwargs={}, fig=None, **layout_kwargs)</span>
+<span>def <span class="ident">plot</span></span>(<span>self, ts_trace_kwargs={}, ma_trace_kwargs={}, fig=None, **layout_kwargs)</span>
 </code></dt>
 <dd>
 <div class="desc"><p>Plot <code><a title="vectorbt.indicators.MA.ma" href="#vectorbt.indicators.MA.ma">MA.ma</a></code> against <code><a title="vectorbt.indicators.MA.ts" href="#vectorbt.indicators.MA.ts">MA.ts</a></code>.</p>
 <h2 id="args">Args</h2>
 <dl>
-<dt><strong><code>ts_name</code></strong> :&ensp;<code>str</code></dt>
-<dd>Name of the trace for <code><a title="vectorbt.indicators.MA.ts" href="#vectorbt.indicators.MA.ts">MA.ts</a></code>.</dd>
-<dt><strong><code>ma_name</code></strong> :&ensp;<code>str</code></dt>
-<dd>Name of the trace for <code><a title="vectorbt.indicators.MA.ma" href="#vectorbt.indicators.MA.ma">MA.ma</a></code>.</dd>
 <dt><strong><code>ts_trace_kwargs</code></strong> :&ensp;<code>dict</code>, optional</dt>
 <dd>Keyword arguments passed to <a href="https://plotly.com/python-api-reference/generated/plotly.graph_objects.Scatter.html"><code>plotly.graph_objects.Scatter</code></a> of <code><a title="vectorbt.indicators.MA.ts" href="#vectorbt.indicators.MA.ts">MA.ts</a></code>.</dd>
 <dt><strong><code>ma_trace_kwargs</code></strong> :&ensp;<code>dict</code>, optional</dt>
@@ -5279,8 +5435,6 @@ For more keyword arguments, see <code><a title="vectorbt.utils.Base_Accessor.com
 <span>Expand source code</span>
 </summary>
 <pre><code class="python">def plot(self,
-         ts_name=None,
-         ma_name=None,
          ts_trace_kwargs={},
          ma_trace_kwargs={},
          fig=None,
@@ -5288,8 +5442,6 @@ For more keyword arguments, see <code><a title="vectorbt.utils.Base_Accessor.com
     &#34;&#34;&#34;Plot `MA.ma` against `MA.ts`.
 
     Args:
-        ts_name (str): Name of the trace for `MA.ts`.
-        ma_name (str): Name of the trace for `MA.ma`.
         ts_trace_kwargs (dict, optional): Keyword arguments passed to [`plotly.graph_objects.Scatter`](https://plotly.com/python-api-reference/generated/plotly.graph_objects.Scatter.html) of `MA.ts`.
         ma_trace_kwargs (dict, optional): Keyword arguments passed to [`plotly.graph_objects.Scatter`](https://plotly.com/python-api-reference/generated/plotly.graph_objects.Scatter.html) of `MA.ma`.
         fig (plotly.graph_objects.Figure, optional): Figure to add traces to.
@@ -5303,13 +5455,15 @@ For more keyword arguments, see <code><a title="vectorbt.utils.Base_Accessor.com
     check_type(self.ts, pd.Series)
     check_type(self.ma, pd.Series)
 
-    if ts_name is None:
-        ts_name = f&#39;Price ({self.name})&#39;
-    if ma_name is None:
-        ma_name = f&#39;MA ({self.name})&#39;
+    ts_trace_kwargs = {**dict(
+        name=f&#39;Price ({self.name})&#39;
+    ), **ts_trace_kwargs}
+    ma_trace_kwargs = {**dict(
+        name=f&#39;MA ({self.name})&#39;
+    ), **ma_trace_kwargs}
 
-    fig = self.ts.vbt.timeseries.plot(name=ts_name, trace_kwargs=ts_trace_kwargs, fig=fig, **layout_kwargs)
-    fig = self.ma.vbt.timeseries.plot(name=ma_name, trace_kwargs=ma_trace_kwargs, fig=fig)
+    fig = self.ts.vbt.timeseries.plot(trace_kwargs=ts_trace_kwargs, fig=fig, **layout_kwargs)
+    fig = self.ma.vbt.timeseries.plot(trace_kwargs=ma_trace_kwargs, fig=fig, **layout_kwargs)
 
     return fig</code></pre>
 </details>
@@ -5435,33 +5589,177 @@ shows the relationship between two moving averages of a security’s price.</p>
     Use `MACD.from_params` methods to run the indicator.&#34;&#34;&#34;
 
     @classmethod
-    def from_params(cls, ts, fast_window=26, slow_window=12, signal_window=9, ewm=True, **kwargs):
-        return super().from_params(ts, fast_window, slow_window, signal_window, ewm, **kwargs)
+    def from_params(cls, ts, fast_window=26, slow_window=12, signal_window=9, macd_ewm=True, signal_ewm=True, **kwargs):
+        &#34;&#34;&#34;Calculate fast moving average `MACD.fast_ma`, slow moving average `MACD.slow_ma`, MACD `MACD.macd`, 
+        signal `MACD.signal` and histogram `MACD.histogram` from time series `ts` and parameters `fast_window`, 
+        `slow_window`, `signal_window`, `macd_ewm` and `signal_ewm`.
 
-    def crossover(self, **kwargs):
-        above_signals = self.macd_above(self.signal, crossover=True, **kwargs)
-        below_signals = self.macd_below(self.signal, crossover=True, **kwargs)
-        return above_signals, below_signals
+        Args:
+            ts (pandas_like): Time series (such as price).
+            fast_window (int or array_like): Size of the fast moving window for MACD. Can be one or more values.
+                Defaults to 26.
+            slow_window (int or array_like): Size of the slow moving window for MACD. Can be one or more values.
+                Defaults to 12.
+            signal_window (int or array_like): Size of the moving window for signal. Can be one or more values.
+                Defaults to 9.
+            macd_ewm (bool or array_like): If True, uses exponential moving average for MACD, otherwise uses 
+                simple moving average. Can be one or more values. Defaults to True.
+            signal_ewm (bool or array_like): If True, uses exponential moving average for signal, otherwise uses 
+                simple moving average. Can be one or more values. Defaults to True.
+            **kwargs: Keyword arguments passed to `vectorbt.indicators.from_params_pipeline.`
+        Examples:
+            ```python-repl
+            &gt;&gt;&gt; macd = vbt.MACD.from_params(price[&#39;Close&#39;], 
+            ...     fast_window=[10, 20], slow_window=[20, 30], signal_window=[30, 40], 
+            ...     macd_ewm=[False, True], signal_ewm=[True, False])
+
+            &gt;&gt;&gt; print(macd.fast_ma)
+            macd_fast_window           10            20
+            macd_slow_window           20            30
+            macd_signal_window         30            40
+            macd_macd_ewm           False          True
+            macd_signal_ewm          True         False
+            Date                                       
+            2019-02-28                NaN           NaN
+            2019-03-01                NaN           NaN
+            2019-03-02                NaN           NaN
+            ...                       ...           ...
+            2019-08-29          10155.972  10330.457140
+            2019-08-30          10039.466  10260.715507
+            2019-08-31           9988.727  10200.710220
+
+            [185 rows x 2 columns]
+
+            &gt;&gt;&gt; print(macd.slow_ma)
+            macd_fast_window            10            20
+            macd_slow_window            20            30
+            macd_signal_window          30            40
+            macd_macd_ewm            False          True
+            macd_signal_ewm           True         False
+            Date                                        
+            2019-02-28                 NaN           NaN
+            2019-03-01                 NaN           NaN
+            2019-03-02                 NaN           NaN
+            ...                        ...           ...
+            2019-08-29          10447.3480  10423.585970
+            2019-08-30          10359.5555  10370.333077
+            2019-08-31          10264.9095  10322.612024
+
+            [185 rows x 2 columns]
+
+            &gt;&gt;&gt; print(macd.macd)
+            macd_fast_window          10          20
+            macd_slow_window          20          30
+            macd_signal_window        30          40
+            macd_macd_ewm          False        True
+            macd_signal_ewm         True       False
+            Date                                    
+            2019-02-28               NaN         NaN
+            2019-03-01               NaN         NaN
+            2019-03-02               NaN         NaN
+            ...                      ...         ...
+            2019-08-29         -291.3760  -93.128830
+            2019-08-30         -320.0895 -109.617570
+            2019-08-31         -276.1825 -121.901804
+
+            [185 rows x 2 columns]
+
+            &gt;&gt;&gt; print(macd.signal)
+            macd_fast_window            10         20
+            macd_slow_window            20         30
+            macd_signal_window          30         40
+            macd_macd_ewm            False       True
+            macd_signal_ewm           True      False
+            Date                                     
+            2019-02-28                 NaN        NaN
+            2019-03-01                 NaN        NaN
+            2019-03-02                 NaN        NaN
+            ...                        ...        ...
+            2019-08-29         -104.032603  28.622033
+            2019-08-30         -117.971990  22.424149
+            2019-08-31         -128.179278  16.493338
+
+            [185 rows x 2 columns]
+
+            &gt;&gt;&gt; print(macd.histogram)
+            macd_fast_window            10          20
+            macd_slow_window            20          30
+            macd_signal_window          30          40
+            macd_macd_ewm            False        True
+            macd_signal_ewm           True       False
+            Date                                      
+            2019-02-28                 NaN         NaN
+            2019-03-01                 NaN         NaN
+            2019-03-02                 NaN         NaN
+            ...                        ...         ...
+            2019-08-29         -187.343397 -121.750863
+            2019-08-30         -202.117510 -132.041719
+            2019-08-31         -148.003222 -138.395142
+
+            [185 rows x 2 columns]
+            ```
+        &#34;&#34;&#34;
+        return super().from_params(ts, fast_window, slow_window, signal_window, macd_ewm, signal_ewm, **kwargs)
 
     def plot(self,
-             macd_name=None,
-             signal_name=None,
              macd_trace_kwargs={},
              signal_trace_kwargs={},
+             histogram_trace_kwargs={},
              fig=None,
              **layout_kwargs):
+        &#34;&#34;&#34;Plot `MACD.macd`, `MACD.signal` and `MACD.histogram`.
+
+        Args:
+            macd_trace_kwargs (dict, optional): Keyword arguments passed to [`plotly.graph_objects.Scatter`](https://plotly.com/python-api-reference/generated/plotly.graph_objects.Scatter.html) of 
+                `MACD.macd`.
+            signal_trace_kwargs (dict, optional): Keyword arguments passed to [`plotly.graph_objects.Scatter`](https://plotly.com/python-api-reference/generated/plotly.graph_objects.Scatter.html) of 
+                `MACD.signal`.
+            histogram_trace_kwargs (dict, optional): Keyword arguments passed to [`plotly.graph_objects.Bar`](https://plotly.com/python-api-reference/generated/plotly.graph_objects.Bar.html) of 
+                `MACD.histogram`.
+            fig (plotly.graph_objects.Figure, optional): Figure to add traces to.
+            **layout_kwargs: Keyword arguments for layout.
+        Examples:
+            ```py
+            macd[(10, 20, 30, False, True)].plot()
+            ```
+
+            ![](img/MACD.png)&#34;&#34;&#34;
         check_type(self.macd, pd.Series)
         check_type(self.signal, pd.Series)
 
-        if macd_name is None:
-            macd_name = f&#39;MACD ({self.name})&#39;
-        if signal_name is None:
-            signal_name = f&#39;Signal ({self.name})&#39;
+        macd_trace_kwargs = {**dict(
+            name=f&#39;MACD ({self.name})&#39;
+        ), **macd_trace_kwargs}
+        signal_trace_kwargs = {**dict(
+            name=f&#39;Signal ({self.name})&#39;
+        ), **signal_trace_kwargs}
+        histogram_trace_kwargs = {**dict(
+            name=f&#39;Histogram ({self.name})&#39;,
+            showlegend=False
+        ), **histogram_trace_kwargs}
 
-        fig = self.macd.vbt.timeseries.plot(
-            name=macd_name, trace_kwargs=macd_trace_kwargs, fig=fig, **layout_kwargs)
-        fig = self.signal.vbt.timeseries.plot(
-            name=signal_name, trace_kwargs=signal_trace_kwargs, fig=fig, **layout_kwargs)
+        layout_kwargs = {**dict(bargap=0), **layout_kwargs}
+        fig = self.macd.vbt.timeseries.plot(trace_kwargs=macd_trace_kwargs, fig=fig, **layout_kwargs)
+        fig = self.signal.vbt.timeseries.plot(trace_kwargs=signal_trace_kwargs, fig=fig, **layout_kwargs)
+            
+        # Plot histogram
+        hist = self.histogram.values
+        hist_diff = diff_1d_nb(hist)
+        marker_colors = np.full(hist.shape, np.nan, dtype=np.object)
+        marker_colors[(hist &gt; 0) &amp; (hist_diff &gt; 0)] = &#39;green&#39;
+        marker_colors[(hist &gt; 0) &amp; (hist_diff &lt;= 0)] = &#39;lightgreen&#39;
+        marker_colors[hist == 0] = &#39;lightgrey&#39;
+        marker_colors[(hist &lt; 0) &amp; (hist_diff &lt; 0)] = &#39;red&#39;
+        marker_colors[(hist &lt; 0) &amp; (hist_diff &gt;= 0)] = &#39;lightcoral&#39;
+
+        histogram_bar = go.Bar(
+            x=self.histogram.index,
+            y=self.histogram.values,
+            marker_color=marker_colors,
+            marker_line_width=0
+        )
+        histogram_bar.update(**histogram_trace_kwargs)
+        fig.add_trace(histogram_bar)
 
         return fig</code></pre>
 </details>
@@ -5472,36 +5770,245 @@ shows the relationship between two moving averages of a security’s price.</p>
 <h3>Static methods</h3>
 <dl>
 <dt id="vectorbt.indicators.MACD.from_params"><code class="name flex">
-<span>def <span class="ident">from_params</span></span>(<span>ts, fast_window=26, slow_window=12, signal_window=9, ewm=True, **kwargs)</span>
+<span>def <span class="ident">from_params</span></span>(<span>ts, fast_window=26, slow_window=12, signal_window=9, macd_ewm=True, signal_ewm=True, **kwargs)</span>
 </code></dt>
 <dd>
-<div class="desc"><p>Runs the pipeline and initializes the class.</p></div>
+<div class="desc"><p>Calculate fast moving average <code><a title="vectorbt.indicators.MACD.fast_ma" href="#vectorbt.indicators.MACD.fast_ma">MACD.fast_ma</a></code>, slow moving average <code><a title="vectorbt.indicators.MACD.slow_ma" href="#vectorbt.indicators.MACD.slow_ma">MACD.slow_ma</a></code>, MACD <code><a title="vectorbt.indicators.MACD.macd" href="#vectorbt.indicators.MACD.macd">MACD.macd</a></code>,
+signal <code><a title="vectorbt.indicators.MACD.signal" href="#vectorbt.indicators.MACD.signal">MACD.signal</a></code> and histogram <code><a title="vectorbt.indicators.MACD.histogram" href="#vectorbt.indicators.MACD.histogram">MACD.histogram</a></code> from time series <code>ts</code> and parameters <code>fast_window</code>,
+<code>slow_window</code>, <code>signal_window</code>, <code>macd_ewm</code> and <code>signal_ewm</code>.</p>
+<h2 id="args">Args</h2>
+<dl>
+<dt><strong><code>ts</code></strong> :&ensp;<code>pandas_like</code></dt>
+<dd>Time series (such as price).</dd>
+<dt><strong><code>fast_window</code></strong> :&ensp;<code>int</code> or <code>array_like</code></dt>
+<dd>Size of the fast moving window for MACD. Can be one or more values.
+Defaults to 26.</dd>
+<dt><strong><code>slow_window</code></strong> :&ensp;<code>int</code> or <code>array_like</code></dt>
+<dd>Size of the slow moving window for MACD. Can be one or more values.
+Defaults to 12.</dd>
+<dt><strong><code>signal_window</code></strong> :&ensp;<code>int</code> or <code>array_like</code></dt>
+<dd>Size of the moving window for signal. Can be one or more values.
+Defaults to 9.</dd>
+<dt><strong><code>macd_ewm</code></strong> :&ensp;<code>bool</code> or <code>array_like</code></dt>
+<dd>If True, uses exponential moving average for MACD, otherwise uses
+simple moving average. Can be one or more values. Defaults to True.</dd>
+<dt><strong><code>signal_ewm</code></strong> :&ensp;<code>bool</code> or <code>array_like</code></dt>
+<dd>If True, uses exponential moving average for signal, otherwise uses
+simple moving average. Can be one or more values. Defaults to True.</dd>
+<dt><strong><code>**kwargs</code></strong></dt>
+<dd>Keyword arguments passed to <code><a title="vectorbt.indicators.from_params_pipeline" href="#vectorbt.indicators.from_params_pipeline">from_params_pipeline()</a>.</code></dd>
+</dl>
+<h2 id="examples">Examples</h2>
+<pre><code class="python-repl">&gt;&gt;&gt; macd = vbt.MACD.from_params(price['Close'], 
+...     fast_window=[10, 20], slow_window=[20, 30], signal_window=[30, 40], 
+...     macd_ewm=[False, True], signal_ewm=[True, False])
+
+&gt;&gt;&gt; print(macd.fast_ma)
+macd_fast_window           10            20
+macd_slow_window           20            30
+macd_signal_window         30            40
+macd_macd_ewm           False          True
+macd_signal_ewm          True         False
+Date                                       
+2019-02-28                NaN           NaN
+2019-03-01                NaN           NaN
+2019-03-02                NaN           NaN
+...                       ...           ...
+2019-08-29          10155.972  10330.457140
+2019-08-30          10039.466  10260.715507
+2019-08-31           9988.727  10200.710220
+
+[185 rows x 2 columns]
+
+&gt;&gt;&gt; print(macd.slow_ma)
+macd_fast_window            10            20
+macd_slow_window            20            30
+macd_signal_window          30            40
+macd_macd_ewm            False          True
+macd_signal_ewm           True         False
+Date                                        
+2019-02-28                 NaN           NaN
+2019-03-01                 NaN           NaN
+2019-03-02                 NaN           NaN
+...                        ...           ...
+2019-08-29          10447.3480  10423.585970
+2019-08-30          10359.5555  10370.333077
+2019-08-31          10264.9095  10322.612024
+
+[185 rows x 2 columns]
+
+&gt;&gt;&gt; print(macd.macd)
+macd_fast_window          10          20
+macd_slow_window          20          30
+macd_signal_window        30          40
+macd_macd_ewm          False        True
+macd_signal_ewm         True       False
+Date                                    
+2019-02-28               NaN         NaN
+2019-03-01               NaN         NaN
+2019-03-02               NaN         NaN
+...                      ...         ...
+2019-08-29         -291.3760  -93.128830
+2019-08-30         -320.0895 -109.617570
+2019-08-31         -276.1825 -121.901804
+
+[185 rows x 2 columns]
+
+&gt;&gt;&gt; print(macd.signal)
+macd_fast_window            10         20
+macd_slow_window            20         30
+macd_signal_window          30         40
+macd_macd_ewm            False       True
+macd_signal_ewm           True      False
+Date                                     
+2019-02-28                 NaN        NaN
+2019-03-01                 NaN        NaN
+2019-03-02                 NaN        NaN
+...                        ...        ...
+2019-08-29         -104.032603  28.622033
+2019-08-30         -117.971990  22.424149
+2019-08-31         -128.179278  16.493338
+
+[185 rows x 2 columns]
+
+&gt;&gt;&gt; print(macd.histogram)
+macd_fast_window            10          20
+macd_slow_window            20          30
+macd_signal_window          30          40
+macd_macd_ewm            False        True
+macd_signal_ewm           True       False
+Date                                      
+2019-02-28                 NaN         NaN
+2019-03-01                 NaN         NaN
+2019-03-02                 NaN         NaN
+...                        ...         ...
+2019-08-29         -187.343397 -121.750863
+2019-08-30         -202.117510 -132.041719
+2019-08-31         -148.003222 -138.395142
+
+[185 rows x 2 columns]
+</code></pre></div>
 <details class="source">
 <summary>
 <span>Expand source code</span>
 </summary>
 <pre><code class="python">@classmethod
-def from_params(cls, ts, fast_window=26, slow_window=12, signal_window=9, ewm=True, **kwargs):
-    return super().from_params(ts, fast_window, slow_window, signal_window, ewm, **kwargs)</code></pre>
+def from_params(cls, ts, fast_window=26, slow_window=12, signal_window=9, macd_ewm=True, signal_ewm=True, **kwargs):
+    &#34;&#34;&#34;Calculate fast moving average `MACD.fast_ma`, slow moving average `MACD.slow_ma`, MACD `MACD.macd`, 
+    signal `MACD.signal` and histogram `MACD.histogram` from time series `ts` and parameters `fast_window`, 
+    `slow_window`, `signal_window`, `macd_ewm` and `signal_ewm`.
+
+    Args:
+        ts (pandas_like): Time series (such as price).
+        fast_window (int or array_like): Size of the fast moving window for MACD. Can be one or more values.
+            Defaults to 26.
+        slow_window (int or array_like): Size of the slow moving window for MACD. Can be one or more values.
+            Defaults to 12.
+        signal_window (int or array_like): Size of the moving window for signal. Can be one or more values.
+            Defaults to 9.
+        macd_ewm (bool or array_like): If True, uses exponential moving average for MACD, otherwise uses 
+            simple moving average. Can be one or more values. Defaults to True.
+        signal_ewm (bool or array_like): If True, uses exponential moving average for signal, otherwise uses 
+            simple moving average. Can be one or more values. Defaults to True.
+        **kwargs: Keyword arguments passed to `vectorbt.indicators.from_params_pipeline.`
+    Examples:
+        ```python-repl
+        &gt;&gt;&gt; macd = vbt.MACD.from_params(price[&#39;Close&#39;], 
+        ...     fast_window=[10, 20], slow_window=[20, 30], signal_window=[30, 40], 
+        ...     macd_ewm=[False, True], signal_ewm=[True, False])
+
+        &gt;&gt;&gt; print(macd.fast_ma)
+        macd_fast_window           10            20
+        macd_slow_window           20            30
+        macd_signal_window         30            40
+        macd_macd_ewm           False          True
+        macd_signal_ewm          True         False
+        Date                                       
+        2019-02-28                NaN           NaN
+        2019-03-01                NaN           NaN
+        2019-03-02                NaN           NaN
+        ...                       ...           ...
+        2019-08-29          10155.972  10330.457140
+        2019-08-30          10039.466  10260.715507
+        2019-08-31           9988.727  10200.710220
+
+        [185 rows x 2 columns]
+
+        &gt;&gt;&gt; print(macd.slow_ma)
+        macd_fast_window            10            20
+        macd_slow_window            20            30
+        macd_signal_window          30            40
+        macd_macd_ewm            False          True
+        macd_signal_ewm           True         False
+        Date                                        
+        2019-02-28                 NaN           NaN
+        2019-03-01                 NaN           NaN
+        2019-03-02                 NaN           NaN
+        ...                        ...           ...
+        2019-08-29          10447.3480  10423.585970
+        2019-08-30          10359.5555  10370.333077
+        2019-08-31          10264.9095  10322.612024
+
+        [185 rows x 2 columns]
+
+        &gt;&gt;&gt; print(macd.macd)
+        macd_fast_window          10          20
+        macd_slow_window          20          30
+        macd_signal_window        30          40
+        macd_macd_ewm          False        True
+        macd_signal_ewm         True       False
+        Date                                    
+        2019-02-28               NaN         NaN
+        2019-03-01               NaN         NaN
+        2019-03-02               NaN         NaN
+        ...                      ...         ...
+        2019-08-29         -291.3760  -93.128830
+        2019-08-30         -320.0895 -109.617570
+        2019-08-31         -276.1825 -121.901804
+
+        [185 rows x 2 columns]
+
+        &gt;&gt;&gt; print(macd.signal)
+        macd_fast_window            10         20
+        macd_slow_window            20         30
+        macd_signal_window          30         40
+        macd_macd_ewm            False       True
+        macd_signal_ewm           True      False
+        Date                                     
+        2019-02-28                 NaN        NaN
+        2019-03-01                 NaN        NaN
+        2019-03-02                 NaN        NaN
+        ...                        ...        ...
+        2019-08-29         -104.032603  28.622033
+        2019-08-30         -117.971990  22.424149
+        2019-08-31         -128.179278  16.493338
+
+        [185 rows x 2 columns]
+
+        &gt;&gt;&gt; print(macd.histogram)
+        macd_fast_window            10          20
+        macd_slow_window            20          30
+        macd_signal_window          30          40
+        macd_macd_ewm            False        True
+        macd_signal_ewm           True       False
+        Date                                      
+        2019-02-28                 NaN         NaN
+        2019-03-01                 NaN         NaN
+        2019-03-02                 NaN         NaN
+        ...                        ...         ...
+        2019-08-29         -187.343397 -121.750863
+        2019-08-30         -202.117510 -132.041719
+        2019-08-31         -148.003222 -138.395142
+
+        [185 rows x 2 columns]
+        ```
+    &#34;&#34;&#34;
+    return super().from_params(ts, fast_window, slow_window, signal_window, macd_ewm, signal_ewm, **kwargs)</code></pre>
 </details>
 </dd>
 </dl>
 <h3>Instance variables</h3>
 <dl>
-<dt id="vectorbt.indicators.MACD.ewm_loc"><code class="name">var <span class="ident">ewm_loc</span></code></dt>
-<dd>
-<div class="desc"><p>Access a group of columns by parameter ewm using
-<a href="https://pandas.pydata.org/pandas-docs/stable/reference/api/pandas.Series.loc.html"><code>pandas.Series.loc</code></a>.</p>
-<p>Forwards this operation to each Series/DataFrame and returns a new instance of <code>CustomIndicator</code></p></div>
-<details class="source">
-<summary>
-<span>Expand source code</span>
-</summary>
-<pre><code class="python">@property
-def param_loc(self):
-    return getattr(self, f&#39;_{param_name}_loc&#39;)</code></pre>
-</details>
-</dd>
 <dt id="vectorbt.indicators.MACD.fast_ma"><code class="name">var <span class="ident">fast_ma</span></code></dt>
 <dd>
 <div class="desc"><p>Output time series (read-only).</p></div>
@@ -5533,7 +6040,7 @@ def param_loc(self):
 <summary>
 <span>Expand source code</span>
 </summary>
-<pre><code class="python">histogram=lambda self: self.macd - self.signal,</code></pre>
+<pre><code class="python">histogram=lambda self: self.ts.vbt.wrap_array(self.macd.values - self.signal.values),</code></pre>
 </details>
 </dd>
 <dt id="vectorbt.indicators.MACD.iloc"><code class="name">var <span class="ident">iloc</span></code></dt>
@@ -5575,6 +6082,20 @@ def loc(self):
 <pre><code class="python">prop = property(lambda self, output_name=output_name: getattr(self, &#39;_&#39; + output_name))</code></pre>
 </details>
 </dd>
+<dt id="vectorbt.indicators.MACD.macd_ewm_loc"><code class="name">var <span class="ident">macd_ewm_loc</span></code></dt>
+<dd>
+<div class="desc"><p>Access a group of columns by parameter macd_ewm using
+<a href="https://pandas.pydata.org/pandas-docs/stable/reference/api/pandas.Series.loc.html"><code>pandas.Series.loc</code></a>.</p>
+<p>Forwards this operation to each Series/DataFrame and returns a new instance of <code>CustomIndicator</code></p></div>
+<details class="source">
+<summary>
+<span>Expand source code</span>
+</summary>
+<pre><code class="python">@property
+def param_loc(self):
+    return getattr(self, f&#39;_{param_name}_loc&#39;)</code></pre>
+</details>
+</dd>
 <dt id="vectorbt.indicators.MACD.name"><code class="name">var <span class="ident">name</span></code></dt>
 <dd>
 <div class="desc"><p>Name of the indicator (read-only).</p></div>
@@ -5593,6 +6114,20 @@ def loc(self):
 <span>Expand source code</span>
 </summary>
 <pre><code class="python">prop = property(lambda self, output_name=output_name: getattr(self, &#39;_&#39; + output_name))</code></pre>
+</details>
+</dd>
+<dt id="vectorbt.indicators.MACD.signal_ewm_loc"><code class="name">var <span class="ident">signal_ewm_loc</span></code></dt>
+<dd>
+<div class="desc"><p>Access a group of columns by parameter signal_ewm using
+<a href="https://pandas.pydata.org/pandas-docs/stable/reference/api/pandas.Series.loc.html"><code>pandas.Series.loc</code></a>.</p>
+<p>Forwards this operation to each Series/DataFrame and returns a new instance of <code>CustomIndicator</code></p></div>
+<details class="source">
+<summary>
+<span>Expand source code</span>
+</summary>
+<pre><code class="python">@property
+def param_loc(self):
+    return getattr(self, f&#39;_{param_name}_loc&#39;)</code></pre>
 </details>
 </dd>
 <dt id="vectorbt.indicators.MACD.signal_window_loc"><code class="name">var <span class="ident">signal_window_loc</span></code></dt>
@@ -5660,21 +6195,6 @@ def param_loc(self):
 </dl>
 <h3>Methods</h3>
 <dl>
-<dt id="vectorbt.indicators.MACD.crossover"><code class="name flex">
-<span>def <span class="ident">crossover</span></span>(<span>self, **kwargs)</span>
-</code></dt>
-<dd>
-<div class="desc"></div>
-<details class="source">
-<summary>
-<span>Expand source code</span>
-</summary>
-<pre><code class="python">def crossover(self, **kwargs):
-    above_signals = self.macd_above(self.signal, crossover=True, **kwargs)
-    below_signals = self.macd_below(self.signal, crossover=True, **kwargs)
-    return above_signals, below_signals</code></pre>
-</details>
-</dd>
 <dt id="vectorbt.indicators.MACD.fast_ma_above"><code class="name flex">
 <span>def <span class="ident">fast_ma_above</span></span>(<span>self, other, crossover=False, wait=0, name=None, **kwargs)</span>
 </code></dt>
@@ -5919,33 +6439,93 @@ For more keyword arguments, see <code><a title="vectorbt.utils.Base_Accessor.com
 </details>
 </dd>
 <dt id="vectorbt.indicators.MACD.plot"><code class="name flex">
-<span>def <span class="ident">plot</span></span>(<span>self, macd_name=None, signal_name=None, macd_trace_kwargs={}, signal_trace_kwargs={}, fig=None, **layout_kwargs)</span>
+<span>def <span class="ident">plot</span></span>(<span>self, macd_trace_kwargs={}, signal_trace_kwargs={}, histogram_trace_kwargs={}, fig=None, **layout_kwargs)</span>
 </code></dt>
 <dd>
-<div class="desc"></div>
+<div class="desc"><p>Plot <code><a title="vectorbt.indicators.MACD.macd" href="#vectorbt.indicators.MACD.macd">MACD.macd</a></code>, <code><a title="vectorbt.indicators.MACD.signal" href="#vectorbt.indicators.MACD.signal">MACD.signal</a></code> and <code><a title="vectorbt.indicators.MACD.histogram" href="#vectorbt.indicators.MACD.histogram">MACD.histogram</a></code>.</p>
+<h2 id="args">Args</h2>
+<dl>
+<dt><strong><code>macd_trace_kwargs</code></strong> :&ensp;<code>dict</code>, optional</dt>
+<dd>Keyword arguments passed to <a href="https://plotly.com/python-api-reference/generated/plotly.graph_objects.Scatter.html"><code>plotly.graph_objects.Scatter</code></a> of
+<code><a title="vectorbt.indicators.MACD.macd" href="#vectorbt.indicators.MACD.macd">MACD.macd</a></code>.</dd>
+<dt><strong><code>signal_trace_kwargs</code></strong> :&ensp;<code>dict</code>, optional</dt>
+<dd>Keyword arguments passed to <a href="https://plotly.com/python-api-reference/generated/plotly.graph_objects.Scatter.html"><code>plotly.graph_objects.Scatter</code></a> of
+<code><a title="vectorbt.indicators.MACD.signal" href="#vectorbt.indicators.MACD.signal">MACD.signal</a></code>.</dd>
+<dt><strong><code>histogram_trace_kwargs</code></strong> :&ensp;<code>dict</code>, optional</dt>
+<dd>Keyword arguments passed to <a href="https://plotly.com/python-api-reference/generated/plotly.graph_objects.Bar.html"><code>plotly.graph_objects.Bar</code></a> of
+<code><a title="vectorbt.indicators.MACD.histogram" href="#vectorbt.indicators.MACD.histogram">MACD.histogram</a></code>.</dd>
+<dt><strong><code>fig</code></strong> :&ensp;<code>plotly.graph_objects.Figure</code>, optional</dt>
+<dd>Figure to add traces to.</dd>
+<dt><strong><code>**layout_kwargs</code></strong></dt>
+<dd>Keyword arguments for layout.</dd>
+</dl>
+<h2 id="examples">Examples</h2>
+<pre><code class="py">macd[(10, 20, 30, False, True)].plot()
+</code></pre>
+<p><img alt="" src="img/MACD.png"></p></div>
 <details class="source">
 <summary>
 <span>Expand source code</span>
 </summary>
 <pre><code class="python">def plot(self,
-         macd_name=None,
-         signal_name=None,
          macd_trace_kwargs={},
          signal_trace_kwargs={},
+         histogram_trace_kwargs={},
          fig=None,
          **layout_kwargs):
+    &#34;&#34;&#34;Plot `MACD.macd`, `MACD.signal` and `MACD.histogram`.
+
+    Args:
+        macd_trace_kwargs (dict, optional): Keyword arguments passed to [`plotly.graph_objects.Scatter`](https://plotly.com/python-api-reference/generated/plotly.graph_objects.Scatter.html) of 
+            `MACD.macd`.
+        signal_trace_kwargs (dict, optional): Keyword arguments passed to [`plotly.graph_objects.Scatter`](https://plotly.com/python-api-reference/generated/plotly.graph_objects.Scatter.html) of 
+            `MACD.signal`.
+        histogram_trace_kwargs (dict, optional): Keyword arguments passed to [`plotly.graph_objects.Bar`](https://plotly.com/python-api-reference/generated/plotly.graph_objects.Bar.html) of 
+            `MACD.histogram`.
+        fig (plotly.graph_objects.Figure, optional): Figure to add traces to.
+        **layout_kwargs: Keyword arguments for layout.
+    Examples:
+        ```py
+        macd[(10, 20, 30, False, True)].plot()
+        ```
+
+        ![](img/MACD.png)&#34;&#34;&#34;
     check_type(self.macd, pd.Series)
     check_type(self.signal, pd.Series)
 
-    if macd_name is None:
-        macd_name = f&#39;MACD ({self.name})&#39;
-    if signal_name is None:
-        signal_name = f&#39;Signal ({self.name})&#39;
+    macd_trace_kwargs = {**dict(
+        name=f&#39;MACD ({self.name})&#39;
+    ), **macd_trace_kwargs}
+    signal_trace_kwargs = {**dict(
+        name=f&#39;Signal ({self.name})&#39;
+    ), **signal_trace_kwargs}
+    histogram_trace_kwargs = {**dict(
+        name=f&#39;Histogram ({self.name})&#39;,
+        showlegend=False
+    ), **histogram_trace_kwargs}
 
-    fig = self.macd.vbt.timeseries.plot(
-        name=macd_name, trace_kwargs=macd_trace_kwargs, fig=fig, **layout_kwargs)
-    fig = self.signal.vbt.timeseries.plot(
-        name=signal_name, trace_kwargs=signal_trace_kwargs, fig=fig, **layout_kwargs)
+    layout_kwargs = {**dict(bargap=0), **layout_kwargs}
+    fig = self.macd.vbt.timeseries.plot(trace_kwargs=macd_trace_kwargs, fig=fig, **layout_kwargs)
+    fig = self.signal.vbt.timeseries.plot(trace_kwargs=signal_trace_kwargs, fig=fig, **layout_kwargs)
+        
+    # Plot histogram
+    hist = self.histogram.values
+    hist_diff = diff_1d_nb(hist)
+    marker_colors = np.full(hist.shape, np.nan, dtype=np.object)
+    marker_colors[(hist &gt; 0) &amp; (hist_diff &gt; 0)] = &#39;green&#39;
+    marker_colors[(hist &gt; 0) &amp; (hist_diff &lt;= 0)] = &#39;lightgreen&#39;
+    marker_colors[hist == 0] = &#39;lightgrey&#39;
+    marker_colors[(hist &lt; 0) &amp; (hist_diff &lt; 0)] = &#39;red&#39;
+    marker_colors[(hist &lt; 0) &amp; (hist_diff &gt;= 0)] = &#39;lightcoral&#39;
+
+    histogram_bar = go.Bar(
+        x=self.histogram.index,
+        y=self.histogram.values,
+        marker_color=marker_colors,
+        marker_line_width=0
+    )
+    histogram_bar.update(**histogram_trace_kwargs)
+    fig.add_trace(histogram_bar)
 
     return fig</code></pre>
 </details>
@@ -6263,15 +6843,13 @@ in order to predict how volatile the price may be in the future.</p>
         return super().from_params(ts, window, ewm, **kwargs)
 
     def plot(self,
-             name=None,
-             trace_kwargs={},
+             mstd_trace_kwargs={},
              fig=None,
              **layout_kwargs):
         &#34;&#34;&#34;Plot `MSTD.mstd`.
 
         Args:
-            name (str): Name of the trace.
-            trace_kwargs (dict, optional): Keyword arguments passed to [`plotly.graph_objects.Scatter`](https://plotly.com/python-api-reference/generated/plotly.graph_objects.Scatter.html).
+            mstd_trace_kwargs (dict, optional): Keyword arguments passed to [`plotly.graph_objects.Scatter`](https://plotly.com/python-api-reference/generated/plotly.graph_objects.Scatter.html).
             fig (plotly.graph_objects.Figure, optional): Figure to add traces to.
             **layout_kwargs: Keyword arguments for layout.
         Examples:
@@ -6282,10 +6860,11 @@ in order to predict how volatile the price may be in the future.</p>
             ![](img/MSTD.png)&#34;&#34;&#34;
         check_type(self.mstd, pd.Series)
 
-        if name is None:
-            name = f&#39;MSTD ({self.name})&#39;
+        mstd_trace_kwargs = {**dict(
+            name=f&#39;MSTD ({self.name})&#39;
+        ), **mstd_trace_kwargs}
 
-        fig = self.mstd.vbt.timeseries.plot(name=name, trace_kwargs=trace_kwargs, fig=fig, **layout_kwargs)
+        fig = self.mstd.vbt.timeseries.plot(trace_kwargs=mstd_trace_kwargs, fig=fig, **layout_kwargs)
 
         return fig</code></pre>
 </details>
@@ -6558,15 +7137,13 @@ For more keyword arguments, see <code><a title="vectorbt.utils.Base_Accessor.com
 </details>
 </dd>
 <dt id="vectorbt.indicators.MSTD.plot"><code class="name flex">
-<span>def <span class="ident">plot</span></span>(<span>self, name=None, trace_kwargs={}, fig=None, **layout_kwargs)</span>
+<span>def <span class="ident">plot</span></span>(<span>self, mstd_trace_kwargs={}, fig=None, **layout_kwargs)</span>
 </code></dt>
 <dd>
 <div class="desc"><p>Plot <code><a title="vectorbt.indicators.MSTD.mstd" href="#vectorbt.indicators.MSTD.mstd">MSTD.mstd</a></code>.</p>
 <h2 id="args">Args</h2>
 <dl>
-<dt><strong><code>name</code></strong> :&ensp;<code>str</code></dt>
-<dd>Name of the trace.</dd>
-<dt><strong><code>trace_kwargs</code></strong> :&ensp;<code>dict</code>, optional</dt>
+<dt><strong><code>mstd_trace_kwargs</code></strong> :&ensp;<code>dict</code>, optional</dt>
 <dd>Keyword arguments passed to <a href="https://plotly.com/python-api-reference/generated/plotly.graph_objects.Scatter.html"><code>plotly.graph_objects.Scatter</code></a>.</dd>
 <dt><strong><code>fig</code></strong> :&ensp;<code>plotly.graph_objects.Figure</code>, optional</dt>
 <dd>Figure to add traces to.</dd>
@@ -6582,15 +7159,13 @@ For more keyword arguments, see <code><a title="vectorbt.utils.Base_Accessor.com
 <span>Expand source code</span>
 </summary>
 <pre><code class="python">def plot(self,
-         name=None,
-         trace_kwargs={},
+         mstd_trace_kwargs={},
          fig=None,
          **layout_kwargs):
     &#34;&#34;&#34;Plot `MSTD.mstd`.
 
     Args:
-        name (str): Name of the trace.
-        trace_kwargs (dict, optional): Keyword arguments passed to [`plotly.graph_objects.Scatter`](https://plotly.com/python-api-reference/generated/plotly.graph_objects.Scatter.html).
+        mstd_trace_kwargs (dict, optional): Keyword arguments passed to [`plotly.graph_objects.Scatter`](https://plotly.com/python-api-reference/generated/plotly.graph_objects.Scatter.html).
         fig (plotly.graph_objects.Figure, optional): Figure to add traces to.
         **layout_kwargs: Keyword arguments for layout.
     Examples:
@@ -6601,10 +7176,11 @@ For more keyword arguments, see <code><a title="vectorbt.utils.Base_Accessor.com
         ![](img/MSTD.png)&#34;&#34;&#34;
     check_type(self.mstd, pd.Series)
 
-    if name is None:
-        name = f&#39;MSTD ({self.name})&#39;
+    mstd_trace_kwargs = {**dict(
+        name=f&#39;MSTD ({self.name})&#39;
+    ), **mstd_trace_kwargs}
 
-    fig = self.mstd.vbt.timeseries.plot(name=name, trace_kwargs=trace_kwargs, fig=fig, **layout_kwargs)
+    fig = self.mstd.vbt.timeseries.plot(trace_kwargs=mstd_trace_kwargs, fig=fig, **layout_kwargs)
 
     return fig</code></pre>
 </details>
@@ -6713,27 +7289,74 @@ operation to each Series/DataFrame and returns a new instance of <code>CustomInd
 <span>(</span><span>*args, **kwargs)</span>
 </code></dt>
 <dd>
-<div class="desc"></div>
+<div class="desc"><p>On-balance volume (OBV) is a technical trading momentum indicator that uses volume flow to predict
+changes in stock price.</p>
+<p>See <a href="https://www.investopedia.com/terms/o/onbalancevolume.asp">On-Balance Volume (OBV)</a>.</p>
+<p>Use <code><a title="vectorbt.indicators.OBV.from_params" href="#vectorbt.indicators.OBV.from_params">OBV.from_params()</a></code> methods to run the indicator.</p></div>
 <details class="source">
 <summary>
 <span>Expand source code</span>
 </summary>
 <pre><code class="python">class OBV(OBV):
+    &#34;&#34;&#34;On-balance volume (OBV) is a technical trading momentum indicator that uses volume flow to predict 
+    changes in stock price.
+
+    See [On-Balance Volume (OBV)](https://www.investopedia.com/terms/o/onbalancevolume.asp).
+
+    Use `OBV.from_params` methods to run the indicator.&#34;&#34;&#34;
     @classmethod
     def from_params(cls, close_ts, volume_ts):
+        &#34;&#34;&#34;Calculate on-balance volume `OBV.obv` from time series `close_ts` and `volume_ts`, and no parameters.
+
+        Args:
+            close_ts (pandas_like): The last closing price.
+            volume_ts (pandas_like): The volume.
+            **kwargs: Keyword arguments passed to `vectorbt.indicators.from_params_pipeline.`
+        Examples:
+            ```python-repl
+            &gt;&gt;&gt; obv = vbt.OBV.from_params(price[&#39;Close&#39;], price[&#39;Volume&#39;])
+
+            &gt;&gt;&gt; print(obv.obv)
+            Date
+            2019-02-28             NaN
+            2019-03-01    7.661248e+09
+            2019-03-02    1.524003e+10
+            2019-03-03    7.986476e+09
+            2019-03-04   -1.042700e+09
+                                   ...     
+            2019-08-27    5.613088e+11
+            2019-08-28    5.437050e+11
+            2019-08-29    5.266592e+11
+            2019-08-30    5.402544e+11
+            2019-08-31    5.517092e+11
+            Name: (Close, Volume), Length: 185, dtype: float64
+            ```
+        &#34;&#34;&#34;
         return super().from_params(close_ts, volume_ts)
 
     def plot(self,
-             name=None,
-             trace_kwargs={},
+             obv_trace_kwargs={},
              fig=None,
              **layout_kwargs):
+        &#34;&#34;&#34;Plot `OBV.obv`.
+
+        Args:
+            obv_trace_kwargs (dict, optional): Keyword arguments passed to [`plotly.graph_objects.Scatter`](https://plotly.com/python-api-reference/generated/plotly.graph_objects.Scatter.html).
+            fig (plotly.graph_objects.Figure, optional): Figure to add traces to.
+            **layout_kwargs: Keyword arguments for layout.
+        Examples:
+            ```py
+            obv.plot()
+            ```
+
+            ![](img/OBV.png)&#34;&#34;&#34;
         check_type(self.obv, pd.Series)
 
-        if name is None:
-            name = f&#39;OBV ({self.name})&#39;
+        obv_trace_kwargs = {**dict(
+            name=f&#39;OBV ({self.name})&#39;
+        ), **obv_trace_kwargs}
 
-        fig = self.obv.vbt.timeseries.plot(name=name, trace_kwargs=trace_kwargs, fig=fig, **layout_kwargs)
+        fig = self.obv.vbt.timeseries.plot(trace_kwargs=obv_trace_kwargs, fig=fig, **layout_kwargs)
 
         return fig</code></pre>
 </details>
@@ -6747,13 +7370,66 @@ operation to each Series/DataFrame and returns a new instance of <code>CustomInd
 <span>def <span class="ident">from_params</span></span>(<span>close_ts, volume_ts)</span>
 </code></dt>
 <dd>
-<div class="desc"><p>Runs the pipeline and initializes the class.</p></div>
+<div class="desc"><p>Calculate on-balance volume <code><a title="vectorbt.indicators.OBV.obv" href="#vectorbt.indicators.OBV.obv">OBV.obv</a></code> from time series <code>close_ts</code> and <code>volume_ts</code>, and no parameters.</p>
+<h2 id="args">Args</h2>
+<dl>
+<dt><strong><code>close_ts</code></strong> :&ensp;<code>pandas_like</code></dt>
+<dd>The last closing price.</dd>
+<dt><strong><code>volume_ts</code></strong> :&ensp;<code>pandas_like</code></dt>
+<dd>The volume.</dd>
+<dt><strong><code>**kwargs</code></strong></dt>
+<dd>Keyword arguments passed to <code><a title="vectorbt.indicators.from_params_pipeline" href="#vectorbt.indicators.from_params_pipeline">from_params_pipeline()</a>.</code></dd>
+</dl>
+<h2 id="examples">Examples</h2>
+<pre><code class="python-repl">&gt;&gt;&gt; obv = vbt.OBV.from_params(price['Close'], price['Volume'])
+
+&gt;&gt;&gt; print(obv.obv)
+Date
+2019-02-28             NaN
+2019-03-01    7.661248e+09
+2019-03-02    1.524003e+10
+2019-03-03    7.986476e+09
+2019-03-04   -1.042700e+09
+                       ...     
+2019-08-27    5.613088e+11
+2019-08-28    5.437050e+11
+2019-08-29    5.266592e+11
+2019-08-30    5.402544e+11
+2019-08-31    5.517092e+11
+Name: (Close, Volume), Length: 185, dtype: float64
+</code></pre></div>
 <details class="source">
 <summary>
 <span>Expand source code</span>
 </summary>
 <pre><code class="python">@classmethod
 def from_params(cls, close_ts, volume_ts):
+    &#34;&#34;&#34;Calculate on-balance volume `OBV.obv` from time series `close_ts` and `volume_ts`, and no parameters.
+
+    Args:
+        close_ts (pandas_like): The last closing price.
+        volume_ts (pandas_like): The volume.
+        **kwargs: Keyword arguments passed to `vectorbt.indicators.from_params_pipeline.`
+    Examples:
+        ```python-repl
+        &gt;&gt;&gt; obv = vbt.OBV.from_params(price[&#39;Close&#39;], price[&#39;Volume&#39;])
+
+        &gt;&gt;&gt; print(obv.obv)
+        Date
+        2019-02-28             NaN
+        2019-03-01    7.661248e+09
+        2019-03-02    1.524003e+10
+        2019-03-03    7.986476e+09
+        2019-03-04   -1.042700e+09
+                               ...     
+        2019-08-27    5.613088e+11
+        2019-08-28    5.437050e+11
+        2019-08-29    5.266592e+11
+        2019-08-30    5.402544e+11
+        2019-08-31    5.517092e+11
+        Name: (Close, Volume), Length: 185, dtype: float64
+        ```
+    &#34;&#34;&#34;
     return super().from_params(close_ts, volume_ts)</code></pre>
 </details>
 </dd>
@@ -6995,25 +7671,50 @@ For more keyword arguments, see <code><a title="vectorbt.utils.Base_Accessor.com
 </details>
 </dd>
 <dt id="vectorbt.indicators.OBV.plot"><code class="name flex">
-<span>def <span class="ident">plot</span></span>(<span>self, name=None, trace_kwargs={}, fig=None, **layout_kwargs)</span>
+<span>def <span class="ident">plot</span></span>(<span>self, obv_trace_kwargs={}, fig=None, **layout_kwargs)</span>
 </code></dt>
 <dd>
-<div class="desc"></div>
+<div class="desc"><p>Plot <code><a title="vectorbt.indicators.OBV.obv" href="#vectorbt.indicators.OBV.obv">OBV.obv</a></code>.</p>
+<h2 id="args">Args</h2>
+<dl>
+<dt><strong><code>obv_trace_kwargs</code></strong> :&ensp;<code>dict</code>, optional</dt>
+<dd>Keyword arguments passed to <a href="https://plotly.com/python-api-reference/generated/plotly.graph_objects.Scatter.html"><code>plotly.graph_objects.Scatter</code></a>.</dd>
+<dt><strong><code>fig</code></strong> :&ensp;<code>plotly.graph_objects.Figure</code>, optional</dt>
+<dd>Figure to add traces to.</dd>
+<dt><strong><code>**layout_kwargs</code></strong></dt>
+<dd>Keyword arguments for layout.</dd>
+</dl>
+<h2 id="examples">Examples</h2>
+<pre><code class="py">obv.plot()
+</code></pre>
+<p><img alt="" src="img/OBV.png"></p></div>
 <details class="source">
 <summary>
 <span>Expand source code</span>
 </summary>
 <pre><code class="python">def plot(self,
-         name=None,
-         trace_kwargs={},
+         obv_trace_kwargs={},
          fig=None,
          **layout_kwargs):
+    &#34;&#34;&#34;Plot `OBV.obv`.
+
+    Args:
+        obv_trace_kwargs (dict, optional): Keyword arguments passed to [`plotly.graph_objects.Scatter`](https://plotly.com/python-api-reference/generated/plotly.graph_objects.Scatter.html).
+        fig (plotly.graph_objects.Figure, optional): Figure to add traces to.
+        **layout_kwargs: Keyword arguments for layout.
+    Examples:
+        ```py
+        obv.plot()
+        ```
+
+        ![](img/OBV.png)&#34;&#34;&#34;
     check_type(self.obv, pd.Series)
 
-    if name is None:
-        name = f&#39;OBV ({self.name})&#39;
+    obv_trace_kwargs = {**dict(
+        name=f&#39;OBV ({self.name})&#39;
+    ), **obv_trace_kwargs}
 
-    fig = self.obv.vbt.timeseries.plot(name=name, trace_kwargs=trace_kwargs, fig=fig, **layout_kwargs)
+    fig = self.obv.vbt.timeseries.plot(trace_kwargs=obv_trace_kwargs, fig=fig, **layout_kwargs)
 
     return fig</code></pre>
 </details>
@@ -7175,14 +7876,12 @@ extremes) and can have a reading from 0 to 100.</p>
 
     def plot(self,
              levels=(30, 70),
-             name=None,
-             trace_kwargs={},
+             rsi_trace_kwargs={},
              fig=None,
              **layout_kwargs):
         &#34;&#34;&#34;Plot `RSI.rsi`.
 
         Args:
-            name (str): Name of the trace.
             trace_kwargs (dict, optional): Keyword arguments passed to [`plotly.graph_objects.Scatter`](https://plotly.com/python-api-reference/generated/plotly.graph_objects.Scatter.html).
             fig (plotly.graph_objects.Figure, optional): Figure to add traces to.
             **layout_kwargs: Keyword arguments for layout.
@@ -7194,23 +7893,27 @@ extremes) and can have a reading from 0 to 100.</p>
             ![](img/RSI.png)&#34;&#34;&#34;
         check_type(self.rsi, pd.Series)
 
-        if name is None:
-            name = f&#39;RSI ({self.name})&#39;
+        rsi_trace_kwargs = {**dict(
+            name=f&#39;RSI ({self.name})&#39;
+        ), **rsi_trace_kwargs}
 
         layout_kwargs = {**dict(yaxis=dict(range=[-5, 105])), **layout_kwargs}
-        fig = self.rsi.vbt.timeseries.plot(name=name, trace_kwargs=trace_kwargs, fig=fig, **layout_kwargs)
-        for level in levels:
-            fig.add_shape(
-                type=&#34;line&#34;,
-                x0=self.rsi.index[0],
-                y0=level,
-                x1=self.rsi.index[-1],
-                y1=level,
-                line=dict(
-                    color=&#34;grey&#34;,
-                    dash=&#34;dash&#34;,
-                ),
-            )
+        fig = self.rsi.vbt.timeseries.plot(trace_kwargs=rsi_trace_kwargs, fig=fig, **layout_kwargs)
+
+        # Fill void between levels
+        fig.add_shape(
+            type=&#34;rect&#34;,
+            xref=&#34;x&#34;,
+            yref=&#34;y&#34;,
+            x0=self.rsi.index[0],
+            y0=levels[0],
+            x1=self.rsi.index[-1],
+            y1=levels[1],
+            fillcolor=&#34;purple&#34;,
+            opacity=0.1,
+            layer=&#34;below&#34;,
+            line_width=0,
+        )
 
         return fig</code></pre>
 </details>
@@ -7398,14 +8101,12 @@ def param_loc(self):
 <h3>Methods</h3>
 <dl>
 <dt id="vectorbt.indicators.RSI.plot"><code class="name flex">
-<span>def <span class="ident">plot</span></span>(<span>self, levels=(30, 70), name=None, trace_kwargs={}, fig=None, **layout_kwargs)</span>
+<span>def <span class="ident">plot</span></span>(<span>self, levels=(30, 70), rsi_trace_kwargs={}, fig=None, **layout_kwargs)</span>
 </code></dt>
 <dd>
 <div class="desc"><p>Plot <code><a title="vectorbt.indicators.RSI.rsi" href="#vectorbt.indicators.RSI.rsi">RSI.rsi</a></code>.</p>
 <h2 id="args">Args</h2>
 <dl>
-<dt><strong><code>name</code></strong> :&ensp;<code>str</code></dt>
-<dd>Name of the trace.</dd>
 <dt><strong><code>trace_kwargs</code></strong> :&ensp;<code>dict</code>, optional</dt>
 <dd>Keyword arguments passed to <a href="https://plotly.com/python-api-reference/generated/plotly.graph_objects.Scatter.html"><code>plotly.graph_objects.Scatter</code></a>.</dd>
 <dt><strong><code>fig</code></strong> :&ensp;<code>plotly.graph_objects.Figure</code>, optional</dt>
@@ -7423,14 +8124,12 @@ def param_loc(self):
 </summary>
 <pre><code class="python">def plot(self,
          levels=(30, 70),
-         name=None,
-         trace_kwargs={},
+         rsi_trace_kwargs={},
          fig=None,
          **layout_kwargs):
     &#34;&#34;&#34;Plot `RSI.rsi`.
 
     Args:
-        name (str): Name of the trace.
         trace_kwargs (dict, optional): Keyword arguments passed to [`plotly.graph_objects.Scatter`](https://plotly.com/python-api-reference/generated/plotly.graph_objects.Scatter.html).
         fig (plotly.graph_objects.Figure, optional): Figure to add traces to.
         **layout_kwargs: Keyword arguments for layout.
@@ -7442,23 +8141,27 @@ def param_loc(self):
         ![](img/RSI.png)&#34;&#34;&#34;
     check_type(self.rsi, pd.Series)
 
-    if name is None:
-        name = f&#39;RSI ({self.name})&#39;
+    rsi_trace_kwargs = {**dict(
+        name=f&#39;RSI ({self.name})&#39;
+    ), **rsi_trace_kwargs}
 
     layout_kwargs = {**dict(yaxis=dict(range=[-5, 105])), **layout_kwargs}
-    fig = self.rsi.vbt.timeseries.plot(name=name, trace_kwargs=trace_kwargs, fig=fig, **layout_kwargs)
-    for level in levels:
-        fig.add_shape(
-            type=&#34;line&#34;,
-            x0=self.rsi.index[0],
-            y0=level,
-            x1=self.rsi.index[-1],
-            y1=level,
-            line=dict(
-                color=&#34;grey&#34;,
-                dash=&#34;dash&#34;,
-            ),
-        )
+    fig = self.rsi.vbt.timeseries.plot(trace_kwargs=rsi_trace_kwargs, fig=fig, **layout_kwargs)
+
+    # Fill void between levels
+    fig.add_shape(
+        type=&#34;rect&#34;,
+        xref=&#34;x&#34;,
+        yref=&#34;y&#34;,
+        x0=self.rsi.index[0],
+        y0=levels[0],
+        x1=self.rsi.index[-1],
+        y1=levels[1],
+        fillcolor=&#34;purple&#34;,
+        opacity=0.1,
+        layer=&#34;below&#34;,
+        line_width=0,
+    )
 
     return fig</code></pre>
 </details>
@@ -7651,7 +8354,7 @@ operation to each Series/DataFrame and returns a new instance of <code>CustomInd
 <div class="desc"><p>A stochastic oscillator is a momentum indicator comparing a particular closing price of a security
 to a range of its prices over a certain period of time. It is used to generate overbought and oversold
 trading signals, utilizing a 0-100 bounded range of values.</p>
-<p>See <a href="https://www.investopedia.com/terms/s/stochasticoscillator.asp">Stochastic Oscillator Definition</a>.</p>
+<p>See <a href="https://www.investopedia.com/terms/s/stochasticoscillator.asp">Stochastic Oscillator</a>.</p>
 <p>Use <code><a title="vectorbt.indicators.Stochastic.from_params" href="#vectorbt.indicators.Stochastic.from_params">Stochastic.from_params()</a></code> methods to run the indicator.</p></div>
 <details class="source">
 <summary>
@@ -7662,7 +8365,7 @@ trading signals, utilizing a 0-100 bounded range of values.</p>
     to a range of its prices over a certain period of time. It is used to generate overbought and oversold 
     trading signals, utilizing a 0-100 bounded range of values.
 
-    See [Stochastic Oscillator Definition](https://www.investopedia.com/terms/s/stochasticoscillator.asp).
+    See [Stochastic Oscillator](https://www.investopedia.com/terms/s/stochasticoscillator.asp).
 
     Use `Stochastic.from_params` methods to run the indicator.&#34;&#34;&#34;
 
@@ -7725,19 +8428,8 @@ trading signals, utilizing a 0-100 bounded range of values.</p>
             low_ts = close_ts
         return super().from_params(close_ts, high_ts, low_ts, k_window, d_window, d_ewm, **kwargs)
 
-    def crossover(self, **kwargs):
-        &#34;&#34;&#34;Generate crossover signals between `Stochastic.percent_k` and `Stochastic.percent_d`.
-        
-        For `**kwargs`, see `Stochastic.percent_k_above` and `Stochastic.percent_k_below`.
-        &#34;&#34;&#34;
-        above_signals = self.percent_k_above(self.percent_d, crossover=True, **kwargs)
-        below_signals = self.percent_k_below(self.percent_d, crossover=True, **kwargs)
-        return above_signals, below_signals
-
     def plot(self,
              levels=(30, 70),
-             percent_k_name=None,
-             percent_d_name=None,
              percent_k_trace_kwargs={},
              percent_d_trace_kwargs={},
              fig=None,
@@ -7745,8 +8437,6 @@ trading signals, utilizing a 0-100 bounded range of values.</p>
         &#34;&#34;&#34;Plot `Stochastic.percent_k` and `Stochastic.percent_d`.
 
         Args:
-            percent_k_name (str): Name of the trace for `Stochastic.percent_k`.
-            percent_d_name (str): Name of the trace for `Stochastic.percent_d`.
             percent_k_trace_kwargs (dict, optional): Keyword arguments passed to [`plotly.graph_objects.Scatter`](https://plotly.com/python-api-reference/generated/plotly.graph_objects.Scatter.html) of 
                 `Stochastic.percent_k`.
             percent_d_trace_kwargs (dict, optional): Keyword arguments passed to [`plotly.graph_objects.Scatter`](https://plotly.com/python-api-reference/generated/plotly.graph_objects.Scatter.html) of 
@@ -7762,28 +8452,32 @@ trading signals, utilizing a 0-100 bounded range of values.</p>
         check_type(self.percent_k, pd.Series)
         check_type(self.percent_d, pd.Series)
 
-        if percent_k_name is None:
-            percent_k_name = f&#39;%K ({self.name})&#39;
-        if percent_d_name is None:
-            percent_d_name = f&#39;%D ({self.name})&#39;
+        percent_k_trace_kwargs = {**dict(
+            name=f&#39;%K ({self.name})&#39;
+        ), **percent_k_trace_kwargs}
+        percent_d_trace_kwargs = {**dict(
+            name=f&#39;%D ({self.name})&#39;
+        ), **percent_d_trace_kwargs}
 
         layout_kwargs = {**dict(yaxis=dict(range=[-5, 105])), **layout_kwargs}
-        fig = self.percent_k.vbt.timeseries.plot(
-            name=percent_k_name, trace_kwargs=percent_k_trace_kwargs, fig=fig, **layout_kwargs)
-        fig = self.percent_d.vbt.timeseries.plot(
-            name=percent_d_name, trace_kwargs=percent_d_trace_kwargs, fig=fig, **layout_kwargs)
-        for level in levels:
-            fig.add_shape(
-                type=&#34;line&#34;,
-                x0=self.percent_k.index[0],
-                y0=level,
-                x1=self.percent_k.index[-1],
-                y1=level,
-                line=dict(
-                    color=&#34;grey&#34;,
-                    dash=&#34;dash&#34;,
-                ),
-            )
+        fig = self.percent_k.vbt.timeseries.plot(trace_kwargs=percent_k_trace_kwargs, fig=fig, **layout_kwargs)
+        fig = self.percent_d.vbt.timeseries.plot(trace_kwargs=percent_d_trace_kwargs, fig=fig, **layout_kwargs)
+
+        # Plot levels
+        # Fill void between levels
+        fig.add_shape(
+            type=&#34;rect&#34;,
+            xref=&#34;x&#34;,
+            yref=&#34;y&#34;,
+            x0=self.percent_k.index[0],
+            y0=levels[0],
+            x1=self.percent_k.index[-1],
+            y1=levels[1],
+            fillcolor=&#34;purple&#34;,
+            opacity=0.1,
+            layer=&#34;below&#34;,
+            line_width=0,
+        )
 
         return fig</code></pre>
 </details>
@@ -8150,26 +8844,6 @@ For more keyword arguments, see <code><a title="vectorbt.utils.Base_Accessor.com
     return result</code></pre>
 </details>
 </dd>
-<dt id="vectorbt.indicators.Stochastic.crossover"><code class="name flex">
-<span>def <span class="ident">crossover</span></span>(<span>self, **kwargs)</span>
-</code></dt>
-<dd>
-<div class="desc"><p>Generate crossover signals between <code><a title="vectorbt.indicators.Stochastic.percent_k" href="#vectorbt.indicators.Stochastic.percent_k">Stochastic.percent_k</a></code> and <code><a title="vectorbt.indicators.Stochastic.percent_d" href="#vectorbt.indicators.Stochastic.percent_d">Stochastic.percent_d</a></code>.</p>
-<p>For <code>**kwargs</code>, see <code><a title="vectorbt.indicators.Stochastic.percent_k_above" href="#vectorbt.indicators.Stochastic.percent_k_above">CustomIndicator.percent_k_above()</a></code> and <code><a title="vectorbt.indicators.Stochastic.percent_k_below" href="#vectorbt.indicators.Stochastic.percent_k_below">CustomIndicator.percent_k_below()</a></code>.</p></div>
-<details class="source">
-<summary>
-<span>Expand source code</span>
-</summary>
-<pre><code class="python">def crossover(self, **kwargs):
-    &#34;&#34;&#34;Generate crossover signals between `Stochastic.percent_k` and `Stochastic.percent_d`.
-    
-    For `**kwargs`, see `Stochastic.percent_k_above` and `Stochastic.percent_k_below`.
-    &#34;&#34;&#34;
-    above_signals = self.percent_k_above(self.percent_d, crossover=True, **kwargs)
-    below_signals = self.percent_k_below(self.percent_d, crossover=True, **kwargs)
-    return above_signals, below_signals</code></pre>
-</details>
-</dd>
 <dt id="vectorbt.indicators.Stochastic.high_ts_above"><code class="name flex">
 <span>def <span class="ident">high_ts_above</span></span>(<span>self, other, crossover=False, wait=0, name=None, **kwargs)</span>
 </code></dt>
@@ -8495,16 +9169,12 @@ For more keyword arguments, see <code><a title="vectorbt.utils.Base_Accessor.com
 </details>
 </dd>
 <dt id="vectorbt.indicators.Stochastic.plot"><code class="name flex">
-<span>def <span class="ident">plot</span></span>(<span>self, levels=(30, 70), percent_k_name=None, percent_d_name=None, percent_k_trace_kwargs={}, percent_d_trace_kwargs={}, fig=None, **layout_kwargs)</span>
+<span>def <span class="ident">plot</span></span>(<span>self, levels=(30, 70), percent_k_trace_kwargs={}, percent_d_trace_kwargs={}, fig=None, **layout_kwargs)</span>
 </code></dt>
 <dd>
 <div class="desc"><p>Plot <code><a title="vectorbt.indicators.Stochastic.percent_k" href="#vectorbt.indicators.Stochastic.percent_k">Stochastic.percent_k</a></code> and <code><a title="vectorbt.indicators.Stochastic.percent_d" href="#vectorbt.indicators.Stochastic.percent_d">Stochastic.percent_d</a></code>.</p>
 <h2 id="args">Args</h2>
 <dl>
-<dt><strong><code>percent_k_name</code></strong> :&ensp;<code>str</code></dt>
-<dd>Name of the trace for <code><a title="vectorbt.indicators.Stochastic.percent_k" href="#vectorbt.indicators.Stochastic.percent_k">Stochastic.percent_k</a></code>.</dd>
-<dt><strong><code>percent_d_name</code></strong> :&ensp;<code>str</code></dt>
-<dd>Name of the trace for <code><a title="vectorbt.indicators.Stochastic.percent_d" href="#vectorbt.indicators.Stochastic.percent_d">Stochastic.percent_d</a></code>.</dd>
 <dt><strong><code>percent_k_trace_kwargs</code></strong> :&ensp;<code>dict</code>, optional</dt>
 <dd>Keyword arguments passed to <a href="https://plotly.com/python-api-reference/generated/plotly.graph_objects.Scatter.html"><code>plotly.graph_objects.Scatter</code></a> of
 <code><a title="vectorbt.indicators.Stochastic.percent_k" href="#vectorbt.indicators.Stochastic.percent_k">Stochastic.percent_k</a></code>.</dd>
@@ -8526,8 +9196,6 @@ For more keyword arguments, see <code><a title="vectorbt.utils.Base_Accessor.com
 </summary>
 <pre><code class="python">def plot(self,
          levels=(30, 70),
-         percent_k_name=None,
-         percent_d_name=None,
          percent_k_trace_kwargs={},
          percent_d_trace_kwargs={},
          fig=None,
@@ -8535,8 +9203,6 @@ For more keyword arguments, see <code><a title="vectorbt.utils.Base_Accessor.com
     &#34;&#34;&#34;Plot `Stochastic.percent_k` and `Stochastic.percent_d`.
 
     Args:
-        percent_k_name (str): Name of the trace for `Stochastic.percent_k`.
-        percent_d_name (str): Name of the trace for `Stochastic.percent_d`.
         percent_k_trace_kwargs (dict, optional): Keyword arguments passed to [`plotly.graph_objects.Scatter`](https://plotly.com/python-api-reference/generated/plotly.graph_objects.Scatter.html) of 
             `Stochastic.percent_k`.
         percent_d_trace_kwargs (dict, optional): Keyword arguments passed to [`plotly.graph_objects.Scatter`](https://plotly.com/python-api-reference/generated/plotly.graph_objects.Scatter.html) of 
@@ -8552,28 +9218,32 @@ For more keyword arguments, see <code><a title="vectorbt.utils.Base_Accessor.com
     check_type(self.percent_k, pd.Series)
     check_type(self.percent_d, pd.Series)
 
-    if percent_k_name is None:
-        percent_k_name = f&#39;%K ({self.name})&#39;
-    if percent_d_name is None:
-        percent_d_name = f&#39;%D ({self.name})&#39;
+    percent_k_trace_kwargs = {**dict(
+        name=f&#39;%K ({self.name})&#39;
+    ), **percent_k_trace_kwargs}
+    percent_d_trace_kwargs = {**dict(
+        name=f&#39;%D ({self.name})&#39;
+    ), **percent_d_trace_kwargs}
 
     layout_kwargs = {**dict(yaxis=dict(range=[-5, 105])), **layout_kwargs}
-    fig = self.percent_k.vbt.timeseries.plot(
-        name=percent_k_name, trace_kwargs=percent_k_trace_kwargs, fig=fig, **layout_kwargs)
-    fig = self.percent_d.vbt.timeseries.plot(
-        name=percent_d_name, trace_kwargs=percent_d_trace_kwargs, fig=fig, **layout_kwargs)
-    for level in levels:
-        fig.add_shape(
-            type=&#34;line&#34;,
-            x0=self.percent_k.index[0],
-            y0=level,
-            x1=self.percent_k.index[-1],
-            y1=level,
-            line=dict(
-                color=&#34;grey&#34;,
-                dash=&#34;dash&#34;,
-            ),
-        )
+    fig = self.percent_k.vbt.timeseries.plot(trace_kwargs=percent_k_trace_kwargs, fig=fig, **layout_kwargs)
+    fig = self.percent_d.vbt.timeseries.plot(trace_kwargs=percent_d_trace_kwargs, fig=fig, **layout_kwargs)
+
+    # Plot levels
+    # Fill void between levels
+    fig.add_shape(
+        type=&#34;rect&#34;,
+        xref=&#34;x&#34;,
+        yref=&#34;y&#34;,
+        x0=self.percent_k.index[0],
+        y0=levels[0],
+        x1=self.percent_k.index[-1],
+        y1=levels[1],
+        fillcolor=&#34;purple&#34;,
+        opacity=0.1,
+        layer=&#34;below&#34;,
+        line_width=0,
+    )
 
     return fig</code></pre>
 </details>
@@ -8689,8 +9359,6 @@ operation to each Series/DataFrame and returns a new instance of <code>CustomInd
 <li>
 <h4><code><a title="vectorbt.indicators.MACD" href="#vectorbt.indicators.MACD">MACD</a></code></h4>
 <ul class="two-column">
-<li><code><a title="vectorbt.indicators.MACD.crossover" href="#vectorbt.indicators.MACD.crossover">crossover</a></code></li>
-<li><code><a title="vectorbt.indicators.MACD.ewm_loc" href="#vectorbt.indicators.MACD.ewm_loc">ewm_loc</a></code></li>
 <li><code><a title="vectorbt.indicators.MACD.fast_ma" href="#vectorbt.indicators.MACD.fast_ma">fast_ma</a></code></li>
 <li><code><a title="vectorbt.indicators.MACD.fast_ma_above" href="#vectorbt.indicators.MACD.fast_ma_above">fast_ma_above</a></code></li>
 <li><code><a title="vectorbt.indicators.MACD.fast_ma_below" href="#vectorbt.indicators.MACD.fast_ma_below">fast_ma_below</a></code></li>
@@ -8707,12 +9375,14 @@ operation to each Series/DataFrame and returns a new instance of <code>CustomInd
 <li><code><a title="vectorbt.indicators.MACD.macd_above" href="#vectorbt.indicators.MACD.macd_above">macd_above</a></code></li>
 <li><code><a title="vectorbt.indicators.MACD.macd_below" href="#vectorbt.indicators.MACD.macd_below">macd_below</a></code></li>
 <li><code><a title="vectorbt.indicators.MACD.macd_equal" href="#vectorbt.indicators.MACD.macd_equal">macd_equal</a></code></li>
+<li><code><a title="vectorbt.indicators.MACD.macd_ewm_loc" href="#vectorbt.indicators.MACD.macd_ewm_loc">macd_ewm_loc</a></code></li>
 <li><code><a title="vectorbt.indicators.MACD.name" href="#vectorbt.indicators.MACD.name">name</a></code></li>
 <li><code><a title="vectorbt.indicators.MACD.plot" href="#vectorbt.indicators.MACD.plot">plot</a></code></li>
 <li><code><a title="vectorbt.indicators.MACD.signal" href="#vectorbt.indicators.MACD.signal">signal</a></code></li>
 <li><code><a title="vectorbt.indicators.MACD.signal_above" href="#vectorbt.indicators.MACD.signal_above">signal_above</a></code></li>
 <li><code><a title="vectorbt.indicators.MACD.signal_below" href="#vectorbt.indicators.MACD.signal_below">signal_below</a></code></li>
 <li><code><a title="vectorbt.indicators.MACD.signal_equal" href="#vectorbt.indicators.MACD.signal_equal">signal_equal</a></code></li>
+<li><code><a title="vectorbt.indicators.MACD.signal_ewm_loc" href="#vectorbt.indicators.MACD.signal_ewm_loc">signal_ewm_loc</a></code></li>
 <li><code><a title="vectorbt.indicators.MACD.signal_window_loc" href="#vectorbt.indicators.MACD.signal_window_loc">signal_window_loc</a></code></li>
 <li><code><a title="vectorbt.indicators.MACD.slow_ma" href="#vectorbt.indicators.MACD.slow_ma">slow_ma</a></code></li>
 <li><code><a title="vectorbt.indicators.MACD.slow_ma_above" href="#vectorbt.indicators.MACD.slow_ma_above">slow_ma_above</a></code></li>
@@ -8801,7 +9471,6 @@ operation to each Series/DataFrame and returns a new instance of <code>CustomInd
 <li><code><a title="vectorbt.indicators.Stochastic.close_ts_above" href="#vectorbt.indicators.Stochastic.close_ts_above">close_ts_above</a></code></li>
 <li><code><a title="vectorbt.indicators.Stochastic.close_ts_below" href="#vectorbt.indicators.Stochastic.close_ts_below">close_ts_below</a></code></li>
 <li><code><a title="vectorbt.indicators.Stochastic.close_ts_equal" href="#vectorbt.indicators.Stochastic.close_ts_equal">close_ts_equal</a></code></li>
-<li><code><a title="vectorbt.indicators.Stochastic.crossover" href="#vectorbt.indicators.Stochastic.crossover">crossover</a></code></li>
 <li><code><a title="vectorbt.indicators.Stochastic.d_ewm_loc" href="#vectorbt.indicators.Stochastic.d_ewm_loc">d_ewm_loc</a></code></li>
 <li><code><a title="vectorbt.indicators.Stochastic.d_window_loc" href="#vectorbt.indicators.Stochastic.d_window_loc">d_window_loc</a></code></li>
 <li><code><a title="vectorbt.indicators.Stochastic.from_params" href="#vectorbt.indicators.Stochastic.from_params">from_params</a></code></li>
