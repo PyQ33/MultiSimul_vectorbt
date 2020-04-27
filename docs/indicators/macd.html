@@ -37,36 +37,36 @@ See [Moving Average Convergence Divergence – MACD](https://www.investopedia.co
 Use `MACD.from_params` methods to run the indicator.&#34;&#34;&#34;
 
 import numpy as np
+import pandas as pd
 from numba import njit
 from numba.types import UniTuple, f8, i8, b1, DictType
-from vectorbt.indicators.ma import ma_caching_nb
-from vectorbt.timeseries import ewm_mean_nb, rolling_mean_nb, diff_1d_nb
-from vectorbt.indicators.indicator_factory import IndicatorFactory
-from vectorbt.utils import *
 import plotly.graph_objects as go
 
-__all__ = [&#39;MACD&#39;]
+from vectorbt import timeseries, indicators
+from vectorbt.utils import checks, common
 
 
 @njit(DictType(UniTuple(i8, 2), f8[:, :])(f8[:, :], i8[:], i8[:], i8[:], b1[:], b1[:]), cache=True)
 def macd_caching_nb(ts, fast_windows, slow_windows, signal_windows, macd_ewms, signal_ewms):
-    return ma_caching_nb(ts, np.concatenate((fast_windows, slow_windows)), np.concatenate((macd_ewms, macd_ewms)))
+    &#34;&#34;&#34;Numba-compiled caching function for `MACD`.&#34;&#34;&#34;
+    return indicators.ma.ma_caching_nb(ts, np.concatenate((fast_windows, slow_windows)), np.concatenate((macd_ewms, macd_ewms)))
 
 
 @njit(UniTuple(f8[:, :], 4)(f8[:, :], i8, i8, i8, b1, b1, DictType(UniTuple(i8, 2), f8[:, :])), cache=True)
 def macd_apply_func_nb(ts, fast_window, slow_window, signal_window, macd_ewm, signal_ewm, cache_dict):
+    &#34;&#34;&#34;Numba-compiled apply function for `MACD`.&#34;&#34;&#34;
     fast_ma = cache_dict[(fast_window, int(macd_ewm))]
     slow_ma = cache_dict[(slow_window, int(macd_ewm))]
     macd_ts = fast_ma - slow_ma
     if signal_ewm:
-        signal_ts = ewm_mean_nb(macd_ts, signal_window)
+        signal_ts = timeseries.nb.ewm_mean_nb(macd_ts, signal_window)
     else:
-        signal_ts = rolling_mean_nb(macd_ts, signal_window)
+        signal_ts = timeseries.nb.rolling_mean_nb(macd_ts, signal_window)
     signal_ts[:max(fast_window, slow_window)+signal_window-2, :] = np.nan  # min_periodd
     return np.copy(fast_ma), np.copy(slow_ma), macd_ts, signal_ts
 
 
-MACD = IndicatorFactory(
+MACD = indicators.factory.IndicatorFactory(
     ts_names=[&#39;ts&#39;],
     param_names=[&#39;fast_window&#39;, &#39;slow_window&#39;, &#39;signal_window&#39;, &#39;macd_ewm&#39;, &#39;signal_ewm&#39;],
     output_names=[&#39;fast_ma&#39;, &#39;slow_ma&#39;, &#39;macd&#39;, &#39;signal&#39;],
@@ -96,7 +96,7 @@ class MACD(MACD):
                 simple moving average. Can be one or more values. Defaults to True.
             signal_ewm (bool or array_like): If True, uses exponential moving average for signal, otherwise uses 
                 simple moving average. Can be one or more values. Defaults to True.
-            **kwargs: Keyword arguments passed to `vectorbt.indicators.indicator_factory.from_params_pipeline.`
+            **kwargs: Keyword arguments passed to `vectorbt.indicators.factory.from_params_pipeline.`
         Returns:
             MACD
         Examples:
@@ -218,9 +218,9 @@ class MACD(MACD):
             ```
 
             ![](img/MACD.png)&#34;&#34;&#34;
-        check_type(self.macd, pd.Series)
-        check_type(self.signal, pd.Series)
-        check_type(self.histogram, pd.Series)
+        checks.assert_type(self.macd, pd.Series)
+        checks.assert_type(self.signal, pd.Series)
+        checks.assert_type(self.histogram, pd.Series)
 
         macd_trace_kwargs = {**dict(
             name=f&#39;MACD ({self.name})&#39;
@@ -239,7 +239,7 @@ class MACD(MACD):
 
         # Plot histogram
         hist = self.histogram.values
-        hist_diff = diff_1d_nb(hist)
+        hist_diff = timeseries.nb.diff_1d_nb(hist)
         marker_colors = np.full(hist.shape, np.nan, dtype=np.object)
         marker_colors[(hist &gt; 0) &amp; (hist_diff &gt; 0)] = &#39;green&#39;
         marker_colors[(hist &gt; 0) &amp; (hist_diff &lt;= 0)] = &#39;lightgreen&#39;
@@ -259,7 +259,7 @@ class MACD(MACD):
         return fig
 
 
-fix_class_for_pdoc(MACD)</code></pre>
+common.fix_class_for_pdoc(MACD)</code></pre>
 </details>
 </section>
 <section>
@@ -267,6 +267,47 @@ fix_class_for_pdoc(MACD)</code></pre>
 <section>
 </section>
 <section>
+<h2 class="section-title" id="header-functions">Functions</h2>
+<dl>
+<dt id="vectorbt.indicators.macd.macd_apply_func_nb"><code class="name flex">
+<span>def <span class="ident">macd_apply_func_nb</span></span>(<span>ts, fast_window, slow_window, signal_window, macd_ewm, signal_ewm, cache_dict)</span>
+</code></dt>
+<dd>
+<div class="desc"><p>Numba-compiled apply function for <code><a title="vectorbt.indicators.macd.MACD" href="#vectorbt.indicators.macd.MACD">MACD</a></code>.</p></div>
+<details class="source">
+<summary>
+<span>Expand source code</span>
+</summary>
+<pre><code class="python">@njit(UniTuple(f8[:, :], 4)(f8[:, :], i8, i8, i8, b1, b1, DictType(UniTuple(i8, 2), f8[:, :])), cache=True)
+def macd_apply_func_nb(ts, fast_window, slow_window, signal_window, macd_ewm, signal_ewm, cache_dict):
+    &#34;&#34;&#34;Numba-compiled apply function for `MACD`.&#34;&#34;&#34;
+    fast_ma = cache_dict[(fast_window, int(macd_ewm))]
+    slow_ma = cache_dict[(slow_window, int(macd_ewm))]
+    macd_ts = fast_ma - slow_ma
+    if signal_ewm:
+        signal_ts = timeseries.nb.ewm_mean_nb(macd_ts, signal_window)
+    else:
+        signal_ts = timeseries.nb.rolling_mean_nb(macd_ts, signal_window)
+    signal_ts[:max(fast_window, slow_window)+signal_window-2, :] = np.nan  # min_periodd
+    return np.copy(fast_ma), np.copy(slow_ma), macd_ts, signal_ts</code></pre>
+</details>
+</dd>
+<dt id="vectorbt.indicators.macd.macd_caching_nb"><code class="name flex">
+<span>def <span class="ident">macd_caching_nb</span></span>(<span>ts, fast_windows, slow_windows, signal_windows, macd_ewms, signal_ewms)</span>
+</code></dt>
+<dd>
+<div class="desc"><p>Numba-compiled caching function for <code><a title="vectorbt.indicators.macd.MACD" href="#vectorbt.indicators.macd.MACD">MACD</a></code>.</p></div>
+<details class="source">
+<summary>
+<span>Expand source code</span>
+</summary>
+<pre><code class="python">@njit(DictType(UniTuple(i8, 2), f8[:, :])(f8[:, :], i8[:], i8[:], i8[:], b1[:], b1[:]), cache=True)
+def macd_caching_nb(ts, fast_windows, slow_windows, signal_windows, macd_ewms, signal_ewms):
+    &#34;&#34;&#34;Numba-compiled caching function for `MACD`.&#34;&#34;&#34;
+    return indicators.ma.ma_caching_nb(ts, np.concatenate((fast_windows, slow_windows)), np.concatenate((macd_ewms, macd_ewms)))</code></pre>
+</details>
+</dd>
+</dl>
 </section>
 <section>
 <h2 class="section-title" id="header-classes">Classes</h2>
@@ -300,7 +341,7 @@ fix_class_for_pdoc(MACD)</code></pre>
                 simple moving average. Can be one or more values. Defaults to True.
             signal_ewm (bool or array_like): If True, uses exponential moving average for signal, otherwise uses 
                 simple moving average. Can be one or more values. Defaults to True.
-            **kwargs: Keyword arguments passed to `vectorbt.indicators.indicator_factory.from_params_pipeline.`
+            **kwargs: Keyword arguments passed to `vectorbt.indicators.factory.from_params_pipeline.`
         Returns:
             MACD
         Examples:
@@ -422,9 +463,9 @@ fix_class_for_pdoc(MACD)</code></pre>
             ```
 
             ![](img/MACD.png)&#34;&#34;&#34;
-        check_type(self.macd, pd.Series)
-        check_type(self.signal, pd.Series)
-        check_type(self.histogram, pd.Series)
+        checks.assert_type(self.macd, pd.Series)
+        checks.assert_type(self.signal, pd.Series)
+        checks.assert_type(self.histogram, pd.Series)
 
         macd_trace_kwargs = {**dict(
             name=f&#39;MACD ({self.name})&#39;
@@ -443,7 +484,7 @@ fix_class_for_pdoc(MACD)</code></pre>
 
         # Plot histogram
         hist = self.histogram.values
-        hist_diff = diff_1d_nb(hist)
+        hist_diff = timeseries.nb.diff_1d_nb(hist)
         marker_colors = np.full(hist.shape, np.nan, dtype=np.object)
         marker_colors[(hist &gt; 0) &amp; (hist_diff &gt; 0)] = &#39;green&#39;
         marker_colors[(hist &gt; 0) &amp; (hist_diff &lt;= 0)] = &#39;lightgreen&#39;
@@ -464,7 +505,7 @@ fix_class_for_pdoc(MACD)</code></pre>
 </details>
 <h3>Ancestors</h3>
 <ul class="hlist">
-<li>vectorbt.indicators.indicator_factory.CustomIndicator</li>
+<li>vectorbt.indicators.factory.CustomIndicator</li>
 </ul>
 <h3>Static methods</h3>
 <dl>
@@ -495,7 +536,7 @@ simple moving average. Can be one or more values. Defaults to True.</dd>
 <dd>If True, uses exponential moving average for signal, otherwise uses
 simple moving average. Can be one or more values. Defaults to True.</dd>
 <dt><strong><code>**kwargs</code></strong></dt>
-<dd>Keyword arguments passed to <code><a title="vectorbt.indicators.indicator_factory.from_params_pipeline" href="indicator_factory.html#vectorbt.indicators.indicator_factory.from_params_pipeline">from_params_pipeline()</a>.</code></dd>
+<dd>Keyword arguments passed to <code><a title="vectorbt.indicators.factory.from_params_pipeline" href="factory.html#vectorbt.indicators.factory.from_params_pipeline">from_params_pipeline()</a>.</code></dd>
 </dl>
 <h2 id="returns">Returns</h2>
 <dl>
@@ -614,7 +655,7 @@ def from_params(cls, ts, fast_window=26, slow_window=12, signal_window=9, macd_e
             simple moving average. Can be one or more values. Defaults to True.
         signal_ewm (bool or array_like): If True, uses exponential moving average for signal, otherwise uses 
             simple moving average. Can be one or more values. Defaults to True.
-        **kwargs: Keyword arguments passed to `vectorbt.indicators.indicator_factory.from_params_pipeline.`
+        **kwargs: Keyword arguments passed to `vectorbt.indicators.factory.from_params_pipeline.`
     Returns:
         MACD
     Examples:
@@ -908,8 +949,7 @@ def param_loc(self):
 <div class="desc"><p>Returns True when <code>fast_ma</code> is above <code>other</code>. </p>
 <p>Set <code>crossover</code> to True to return the first True after crossover. Specify <code>wait</code> to return
 True only when <code>fast_ma</code> is above for a number of time steps in a row after crossover.</p>
-<p>Both will be broadcasted together. Set <code>multiple</code> to True to combine with multiple arguments.
-For more keyword arguments, see <code><a title="vectorbt.utils.Base_Accessor.combine_with" href="../utils.html#vectorbt.utils.Base_Accessor.combine_with">Base_Accessor.combine_with()</a></code>.</p></div>
+<p>For more details, see <code><a title="vectorbt.indicators.factory.compare" href="factory.html#vectorbt.indicators.factory.compare">compare()</a></code>.</p></div>
 <details class="source">
 <summary>
 <span>Expand source code</span>
@@ -922,7 +962,7 @@ For more keyword arguments, see <code><a title="vectorbt.utils.Base_Accessor.com
             name = f&#39;{self.name}_{func_name}&#39;
         else:
             name = f&#39;{self.name}_{attr}_{func_name}&#39;
-    result = comparison_func(getattr(self, attr), other, name=name, **kwargs)
+    result = compare(getattr(self, attr), other, compare_func, name=name, **kwargs)
     if crossover:
         return result.vbt.signals.nst(wait+1, after_false=True)
     return result</code></pre>
@@ -935,8 +975,7 @@ For more keyword arguments, see <code><a title="vectorbt.utils.Base_Accessor.com
 <div class="desc"><p>Returns True when <code>fast_ma</code> is below <code>other</code>. </p>
 <p>Set <code>crossover</code> to True to return the first True after crossover. Specify <code>wait</code> to return
 True only when <code>fast_ma</code> is below for a number of time steps in a row after crossover.</p>
-<p>Both will be broadcasted together. Set <code>multiple</code> to True to combine with multiple arguments.
-For more keyword arguments, see <code><a title="vectorbt.utils.Base_Accessor.combine_with" href="../utils.html#vectorbt.utils.Base_Accessor.combine_with">Base_Accessor.combine_with()</a></code>.</p></div>
+<p>For more details, see <code><a title="vectorbt.indicators.factory.compare" href="factory.html#vectorbt.indicators.factory.compare">compare()</a></code>.</p></div>
 <details class="source">
 <summary>
 <span>Expand source code</span>
@@ -949,7 +988,7 @@ For more keyword arguments, see <code><a title="vectorbt.utils.Base_Accessor.com
             name = f&#39;{self.name}_{func_name}&#39;
         else:
             name = f&#39;{self.name}_{attr}_{func_name}&#39;
-    result = comparison_func(getattr(self, attr), other, name=name, **kwargs)
+    result = compare(getattr(self, attr), other, compare_func, name=name, **kwargs)
     if crossover:
         return result.vbt.signals.nst(wait+1, after_false=True)
     return result</code></pre>
@@ -962,8 +1001,7 @@ For more keyword arguments, see <code><a title="vectorbt.utils.Base_Accessor.com
 <div class="desc"><p>Returns True when <code>fast_ma</code> is equal <code>other</code>. </p>
 <p>Set <code>crossover</code> to True to return the first True after crossover. Specify <code>wait</code> to return
 True only when <code>fast_ma</code> is equal for a number of time steps in a row after crossover.</p>
-<p>Both will be broadcasted together. Set <code>multiple</code> to True to combine with multiple arguments.
-For more keyword arguments, see <code><a title="vectorbt.utils.Base_Accessor.combine_with" href="../utils.html#vectorbt.utils.Base_Accessor.combine_with">Base_Accessor.combine_with()</a></code>.</p></div>
+<p>For more details, see <code><a title="vectorbt.indicators.factory.compare" href="factory.html#vectorbt.indicators.factory.compare">compare()</a></code>.</p></div>
 <details class="source">
 <summary>
 <span>Expand source code</span>
@@ -976,7 +1014,7 @@ For more keyword arguments, see <code><a title="vectorbt.utils.Base_Accessor.com
             name = f&#39;{self.name}_{func_name}&#39;
         else:
             name = f&#39;{self.name}_{attr}_{func_name}&#39;
-    result = comparison_func(getattr(self, attr), other, name=name, **kwargs)
+    result = compare(getattr(self, attr), other, compare_func, name=name, **kwargs)
     if crossover:
         return result.vbt.signals.nst(wait+1, after_false=True)
     return result</code></pre>
@@ -989,8 +1027,7 @@ For more keyword arguments, see <code><a title="vectorbt.utils.Base_Accessor.com
 <div class="desc"><p>Returns True when <code>histogram</code> is above <code>other</code>. </p>
 <p>Set <code>crossover</code> to True to return the first True after crossover. Specify <code>wait</code> to return
 True only when <code>histogram</code> is above for a number of time steps in a row after crossover.</p>
-<p>Both will be broadcasted together. Set <code>multiple</code> to True to combine with multiple arguments.
-For more keyword arguments, see <code><a title="vectorbt.utils.Base_Accessor.combine_with" href="../utils.html#vectorbt.utils.Base_Accessor.combine_with">Base_Accessor.combine_with()</a></code>.</p></div>
+<p>For more details, see <code><a title="vectorbt.indicators.factory.compare" href="factory.html#vectorbt.indicators.factory.compare">compare()</a></code>.</p></div>
 <details class="source">
 <summary>
 <span>Expand source code</span>
@@ -1003,7 +1040,7 @@ For more keyword arguments, see <code><a title="vectorbt.utils.Base_Accessor.com
             name = f&#39;{self.name}_{func_name}&#39;
         else:
             name = f&#39;{self.name}_{attr}_{func_name}&#39;
-    result = comparison_func(getattr(self, attr), other, name=name, **kwargs)
+    result = compare(getattr(self, attr), other, compare_func, name=name, **kwargs)
     if crossover:
         return result.vbt.signals.nst(wait+1, after_false=True)
     return result</code></pre>
@@ -1016,8 +1053,7 @@ For more keyword arguments, see <code><a title="vectorbt.utils.Base_Accessor.com
 <div class="desc"><p>Returns True when <code>histogram</code> is below <code>other</code>. </p>
 <p>Set <code>crossover</code> to True to return the first True after crossover. Specify <code>wait</code> to return
 True only when <code>histogram</code> is below for a number of time steps in a row after crossover.</p>
-<p>Both will be broadcasted together. Set <code>multiple</code> to True to combine with multiple arguments.
-For more keyword arguments, see <code><a title="vectorbt.utils.Base_Accessor.combine_with" href="../utils.html#vectorbt.utils.Base_Accessor.combine_with">Base_Accessor.combine_with()</a></code>.</p></div>
+<p>For more details, see <code><a title="vectorbt.indicators.factory.compare" href="factory.html#vectorbt.indicators.factory.compare">compare()</a></code>.</p></div>
 <details class="source">
 <summary>
 <span>Expand source code</span>
@@ -1030,7 +1066,7 @@ For more keyword arguments, see <code><a title="vectorbt.utils.Base_Accessor.com
             name = f&#39;{self.name}_{func_name}&#39;
         else:
             name = f&#39;{self.name}_{attr}_{func_name}&#39;
-    result = comparison_func(getattr(self, attr), other, name=name, **kwargs)
+    result = compare(getattr(self, attr), other, compare_func, name=name, **kwargs)
     if crossover:
         return result.vbt.signals.nst(wait+1, after_false=True)
     return result</code></pre>
@@ -1043,8 +1079,7 @@ For more keyword arguments, see <code><a title="vectorbt.utils.Base_Accessor.com
 <div class="desc"><p>Returns True when <code>histogram</code> is equal <code>other</code>. </p>
 <p>Set <code>crossover</code> to True to return the first True after crossover. Specify <code>wait</code> to return
 True only when <code>histogram</code> is equal for a number of time steps in a row after crossover.</p>
-<p>Both will be broadcasted together. Set <code>multiple</code> to True to combine with multiple arguments.
-For more keyword arguments, see <code><a title="vectorbt.utils.Base_Accessor.combine_with" href="../utils.html#vectorbt.utils.Base_Accessor.combine_with">Base_Accessor.combine_with()</a></code>.</p></div>
+<p>For more details, see <code><a title="vectorbt.indicators.factory.compare" href="factory.html#vectorbt.indicators.factory.compare">compare()</a></code>.</p></div>
 <details class="source">
 <summary>
 <span>Expand source code</span>
@@ -1057,7 +1092,7 @@ For more keyword arguments, see <code><a title="vectorbt.utils.Base_Accessor.com
             name = f&#39;{self.name}_{func_name}&#39;
         else:
             name = f&#39;{self.name}_{attr}_{func_name}&#39;
-    result = comparison_func(getattr(self, attr), other, name=name, **kwargs)
+    result = compare(getattr(self, attr), other, compare_func, name=name, **kwargs)
     if crossover:
         return result.vbt.signals.nst(wait+1, after_false=True)
     return result</code></pre>
@@ -1070,8 +1105,7 @@ For more keyword arguments, see <code><a title="vectorbt.utils.Base_Accessor.com
 <div class="desc"><p>Returns True when <code>macd</code> is above <code>other</code>. </p>
 <p>Set <code>crossover</code> to True to return the first True after crossover. Specify <code>wait</code> to return
 True only when <code>macd</code> is above for a number of time steps in a row after crossover.</p>
-<p>Both will be broadcasted together. Set <code>multiple</code> to True to combine with multiple arguments.
-For more keyword arguments, see <code><a title="vectorbt.utils.Base_Accessor.combine_with" href="../utils.html#vectorbt.utils.Base_Accessor.combine_with">Base_Accessor.combine_with()</a></code>.</p></div>
+<p>For more details, see <code><a title="vectorbt.indicators.factory.compare" href="factory.html#vectorbt.indicators.factory.compare">compare()</a></code>.</p></div>
 <details class="source">
 <summary>
 <span>Expand source code</span>
@@ -1084,7 +1118,7 @@ For more keyword arguments, see <code><a title="vectorbt.utils.Base_Accessor.com
             name = f&#39;{self.name}_{func_name}&#39;
         else:
             name = f&#39;{self.name}_{attr}_{func_name}&#39;
-    result = comparison_func(getattr(self, attr), other, name=name, **kwargs)
+    result = compare(getattr(self, attr), other, compare_func, name=name, **kwargs)
     if crossover:
         return result.vbt.signals.nst(wait+1, after_false=True)
     return result</code></pre>
@@ -1097,8 +1131,7 @@ For more keyword arguments, see <code><a title="vectorbt.utils.Base_Accessor.com
 <div class="desc"><p>Returns True when <code>macd</code> is below <code>other</code>. </p>
 <p>Set <code>crossover</code> to True to return the first True after crossover. Specify <code>wait</code> to return
 True only when <code>macd</code> is below for a number of time steps in a row after crossover.</p>
-<p>Both will be broadcasted together. Set <code>multiple</code> to True to combine with multiple arguments.
-For more keyword arguments, see <code><a title="vectorbt.utils.Base_Accessor.combine_with" href="../utils.html#vectorbt.utils.Base_Accessor.combine_with">Base_Accessor.combine_with()</a></code>.</p></div>
+<p>For more details, see <code><a title="vectorbt.indicators.factory.compare" href="factory.html#vectorbt.indicators.factory.compare">compare()</a></code>.</p></div>
 <details class="source">
 <summary>
 <span>Expand source code</span>
@@ -1111,7 +1144,7 @@ For more keyword arguments, see <code><a title="vectorbt.utils.Base_Accessor.com
             name = f&#39;{self.name}_{func_name}&#39;
         else:
             name = f&#39;{self.name}_{attr}_{func_name}&#39;
-    result = comparison_func(getattr(self, attr), other, name=name, **kwargs)
+    result = compare(getattr(self, attr), other, compare_func, name=name, **kwargs)
     if crossover:
         return result.vbt.signals.nst(wait+1, after_false=True)
     return result</code></pre>
@@ -1124,8 +1157,7 @@ For more keyword arguments, see <code><a title="vectorbt.utils.Base_Accessor.com
 <div class="desc"><p>Returns True when <code>macd</code> is equal <code>other</code>. </p>
 <p>Set <code>crossover</code> to True to return the first True after crossover. Specify <code>wait</code> to return
 True only when <code>macd</code> is equal for a number of time steps in a row after crossover.</p>
-<p>Both will be broadcasted together. Set <code>multiple</code> to True to combine with multiple arguments.
-For more keyword arguments, see <code><a title="vectorbt.utils.Base_Accessor.combine_with" href="../utils.html#vectorbt.utils.Base_Accessor.combine_with">Base_Accessor.combine_with()</a></code>.</p></div>
+<p>For more details, see <code><a title="vectorbt.indicators.factory.compare" href="factory.html#vectorbt.indicators.factory.compare">compare()</a></code>.</p></div>
 <details class="source">
 <summary>
 <span>Expand source code</span>
@@ -1138,7 +1170,7 @@ For more keyword arguments, see <code><a title="vectorbt.utils.Base_Accessor.com
             name = f&#39;{self.name}_{func_name}&#39;
         else:
             name = f&#39;{self.name}_{attr}_{func_name}&#39;
-    result = comparison_func(getattr(self, attr), other, name=name, **kwargs)
+    result = compare(getattr(self, attr), other, compare_func, name=name, **kwargs)
     if crossover:
         return result.vbt.signals.nst(wait+1, after_false=True)
     return result</code></pre>
@@ -1203,9 +1235,9 @@ For more keyword arguments, see <code><a title="vectorbt.utils.Base_Accessor.com
         ```
 
         ![](img/MACD.png)&#34;&#34;&#34;
-    check_type(self.macd, pd.Series)
-    check_type(self.signal, pd.Series)
-    check_type(self.histogram, pd.Series)
+    checks.assert_type(self.macd, pd.Series)
+    checks.assert_type(self.signal, pd.Series)
+    checks.assert_type(self.histogram, pd.Series)
 
     macd_trace_kwargs = {**dict(
         name=f&#39;MACD ({self.name})&#39;
@@ -1224,7 +1256,7 @@ For more keyword arguments, see <code><a title="vectorbt.utils.Base_Accessor.com
 
     # Plot histogram
     hist = self.histogram.values
-    hist_diff = diff_1d_nb(hist)
+    hist_diff = timeseries.nb.diff_1d_nb(hist)
     marker_colors = np.full(hist.shape, np.nan, dtype=np.object)
     marker_colors[(hist &gt; 0) &amp; (hist_diff &gt; 0)] = &#39;green&#39;
     marker_colors[(hist &gt; 0) &amp; (hist_diff &lt;= 0)] = &#39;lightgreen&#39;
@@ -1251,8 +1283,7 @@ For more keyword arguments, see <code><a title="vectorbt.utils.Base_Accessor.com
 <div class="desc"><p>Returns True when <code>signal</code> is above <code>other</code>. </p>
 <p>Set <code>crossover</code> to True to return the first True after crossover. Specify <code>wait</code> to return
 True only when <code>signal</code> is above for a number of time steps in a row after crossover.</p>
-<p>Both will be broadcasted together. Set <code>multiple</code> to True to combine with multiple arguments.
-For more keyword arguments, see <code><a title="vectorbt.utils.Base_Accessor.combine_with" href="../utils.html#vectorbt.utils.Base_Accessor.combine_with">Base_Accessor.combine_with()</a></code>.</p></div>
+<p>For more details, see <code><a title="vectorbt.indicators.factory.compare" href="factory.html#vectorbt.indicators.factory.compare">compare()</a></code>.</p></div>
 <details class="source">
 <summary>
 <span>Expand source code</span>
@@ -1265,7 +1296,7 @@ For more keyword arguments, see <code><a title="vectorbt.utils.Base_Accessor.com
             name = f&#39;{self.name}_{func_name}&#39;
         else:
             name = f&#39;{self.name}_{attr}_{func_name}&#39;
-    result = comparison_func(getattr(self, attr), other, name=name, **kwargs)
+    result = compare(getattr(self, attr), other, compare_func, name=name, **kwargs)
     if crossover:
         return result.vbt.signals.nst(wait+1, after_false=True)
     return result</code></pre>
@@ -1278,8 +1309,7 @@ For more keyword arguments, see <code><a title="vectorbt.utils.Base_Accessor.com
 <div class="desc"><p>Returns True when <code>signal</code> is below <code>other</code>. </p>
 <p>Set <code>crossover</code> to True to return the first True after crossover. Specify <code>wait</code> to return
 True only when <code>signal</code> is below for a number of time steps in a row after crossover.</p>
-<p>Both will be broadcasted together. Set <code>multiple</code> to True to combine with multiple arguments.
-For more keyword arguments, see <code><a title="vectorbt.utils.Base_Accessor.combine_with" href="../utils.html#vectorbt.utils.Base_Accessor.combine_with">Base_Accessor.combine_with()</a></code>.</p></div>
+<p>For more details, see <code><a title="vectorbt.indicators.factory.compare" href="factory.html#vectorbt.indicators.factory.compare">compare()</a></code>.</p></div>
 <details class="source">
 <summary>
 <span>Expand source code</span>
@@ -1292,7 +1322,7 @@ For more keyword arguments, see <code><a title="vectorbt.utils.Base_Accessor.com
             name = f&#39;{self.name}_{func_name}&#39;
         else:
             name = f&#39;{self.name}_{attr}_{func_name}&#39;
-    result = comparison_func(getattr(self, attr), other, name=name, **kwargs)
+    result = compare(getattr(self, attr), other, compare_func, name=name, **kwargs)
     if crossover:
         return result.vbt.signals.nst(wait+1, after_false=True)
     return result</code></pre>
@@ -1305,8 +1335,7 @@ For more keyword arguments, see <code><a title="vectorbt.utils.Base_Accessor.com
 <div class="desc"><p>Returns True when <code>signal</code> is equal <code>other</code>. </p>
 <p>Set <code>crossover</code> to True to return the first True after crossover. Specify <code>wait</code> to return
 True only when <code>signal</code> is equal for a number of time steps in a row after crossover.</p>
-<p>Both will be broadcasted together. Set <code>multiple</code> to True to combine with multiple arguments.
-For more keyword arguments, see <code><a title="vectorbt.utils.Base_Accessor.combine_with" href="../utils.html#vectorbt.utils.Base_Accessor.combine_with">Base_Accessor.combine_with()</a></code>.</p></div>
+<p>For more details, see <code><a title="vectorbt.indicators.factory.compare" href="factory.html#vectorbt.indicators.factory.compare">compare()</a></code>.</p></div>
 <details class="source">
 <summary>
 <span>Expand source code</span>
@@ -1319,7 +1348,7 @@ For more keyword arguments, see <code><a title="vectorbt.utils.Base_Accessor.com
             name = f&#39;{self.name}_{func_name}&#39;
         else:
             name = f&#39;{self.name}_{attr}_{func_name}&#39;
-    result = comparison_func(getattr(self, attr), other, name=name, **kwargs)
+    result = compare(getattr(self, attr), other, compare_func, name=name, **kwargs)
     if crossover:
         return result.vbt.signals.nst(wait+1, after_false=True)
     return result</code></pre>
@@ -1332,8 +1361,7 @@ For more keyword arguments, see <code><a title="vectorbt.utils.Base_Accessor.com
 <div class="desc"><p>Returns True when <code>slow_ma</code> is above <code>other</code>. </p>
 <p>Set <code>crossover</code> to True to return the first True after crossover. Specify <code>wait</code> to return
 True only when <code>slow_ma</code> is above for a number of time steps in a row after crossover.</p>
-<p>Both will be broadcasted together. Set <code>multiple</code> to True to combine with multiple arguments.
-For more keyword arguments, see <code><a title="vectorbt.utils.Base_Accessor.combine_with" href="../utils.html#vectorbt.utils.Base_Accessor.combine_with">Base_Accessor.combine_with()</a></code>.</p></div>
+<p>For more details, see <code><a title="vectorbt.indicators.factory.compare" href="factory.html#vectorbt.indicators.factory.compare">compare()</a></code>.</p></div>
 <details class="source">
 <summary>
 <span>Expand source code</span>
@@ -1346,7 +1374,7 @@ For more keyword arguments, see <code><a title="vectorbt.utils.Base_Accessor.com
             name = f&#39;{self.name}_{func_name}&#39;
         else:
             name = f&#39;{self.name}_{attr}_{func_name}&#39;
-    result = comparison_func(getattr(self, attr), other, name=name, **kwargs)
+    result = compare(getattr(self, attr), other, compare_func, name=name, **kwargs)
     if crossover:
         return result.vbt.signals.nst(wait+1, after_false=True)
     return result</code></pre>
@@ -1359,8 +1387,7 @@ For more keyword arguments, see <code><a title="vectorbt.utils.Base_Accessor.com
 <div class="desc"><p>Returns True when <code>slow_ma</code> is below <code>other</code>. </p>
 <p>Set <code>crossover</code> to True to return the first True after crossover. Specify <code>wait</code> to return
 True only when <code>slow_ma</code> is below for a number of time steps in a row after crossover.</p>
-<p>Both will be broadcasted together. Set <code>multiple</code> to True to combine with multiple arguments.
-For more keyword arguments, see <code><a title="vectorbt.utils.Base_Accessor.combine_with" href="../utils.html#vectorbt.utils.Base_Accessor.combine_with">Base_Accessor.combine_with()</a></code>.</p></div>
+<p>For more details, see <code><a title="vectorbt.indicators.factory.compare" href="factory.html#vectorbt.indicators.factory.compare">compare()</a></code>.</p></div>
 <details class="source">
 <summary>
 <span>Expand source code</span>
@@ -1373,7 +1400,7 @@ For more keyword arguments, see <code><a title="vectorbt.utils.Base_Accessor.com
             name = f&#39;{self.name}_{func_name}&#39;
         else:
             name = f&#39;{self.name}_{attr}_{func_name}&#39;
-    result = comparison_func(getattr(self, attr), other, name=name, **kwargs)
+    result = compare(getattr(self, attr), other, compare_func, name=name, **kwargs)
     if crossover:
         return result.vbt.signals.nst(wait+1, after_false=True)
     return result</code></pre>
@@ -1386,8 +1413,7 @@ For more keyword arguments, see <code><a title="vectorbt.utils.Base_Accessor.com
 <div class="desc"><p>Returns True when <code>slow_ma</code> is equal <code>other</code>. </p>
 <p>Set <code>crossover</code> to True to return the first True after crossover. Specify <code>wait</code> to return
 True only when <code>slow_ma</code> is equal for a number of time steps in a row after crossover.</p>
-<p>Both will be broadcasted together. Set <code>multiple</code> to True to combine with multiple arguments.
-For more keyword arguments, see <code><a title="vectorbt.utils.Base_Accessor.combine_with" href="../utils.html#vectorbt.utils.Base_Accessor.combine_with">Base_Accessor.combine_with()</a></code>.</p></div>
+<p>For more details, see <code><a title="vectorbt.indicators.factory.compare" href="factory.html#vectorbt.indicators.factory.compare">compare()</a></code>.</p></div>
 <details class="source">
 <summary>
 <span>Expand source code</span>
@@ -1400,7 +1426,7 @@ For more keyword arguments, see <code><a title="vectorbt.utils.Base_Accessor.com
             name = f&#39;{self.name}_{func_name}&#39;
         else:
             name = f&#39;{self.name}_{attr}_{func_name}&#39;
-    result = comparison_func(getattr(self, attr), other, name=name, **kwargs)
+    result = compare(getattr(self, attr), other, compare_func, name=name, **kwargs)
     if crossover:
         return result.vbt.signals.nst(wait+1, after_false=True)
     return result</code></pre>
@@ -1413,8 +1439,7 @@ For more keyword arguments, see <code><a title="vectorbt.utils.Base_Accessor.com
 <div class="desc"><p>Returns True when <code>ts</code> is above <code>other</code>. </p>
 <p>Set <code>crossover</code> to True to return the first True after crossover. Specify <code>wait</code> to return
 True only when <code>ts</code> is above for a number of time steps in a row after crossover.</p>
-<p>Both will be broadcasted together. Set <code>multiple</code> to True to combine with multiple arguments.
-For more keyword arguments, see <code><a title="vectorbt.utils.Base_Accessor.combine_with" href="../utils.html#vectorbt.utils.Base_Accessor.combine_with">Base_Accessor.combine_with()</a></code>.</p></div>
+<p>For more details, see <code><a title="vectorbt.indicators.factory.compare" href="factory.html#vectorbt.indicators.factory.compare">compare()</a></code>.</p></div>
 <details class="source">
 <summary>
 <span>Expand source code</span>
@@ -1427,7 +1452,7 @@ For more keyword arguments, see <code><a title="vectorbt.utils.Base_Accessor.com
             name = f&#39;{self.name}_{func_name}&#39;
         else:
             name = f&#39;{self.name}_{attr}_{func_name}&#39;
-    result = comparison_func(getattr(self, attr), other, name=name, **kwargs)
+    result = compare(getattr(self, attr), other, compare_func, name=name, **kwargs)
     if crossover:
         return result.vbt.signals.nst(wait+1, after_false=True)
     return result</code></pre>
@@ -1440,8 +1465,7 @@ For more keyword arguments, see <code><a title="vectorbt.utils.Base_Accessor.com
 <div class="desc"><p>Returns True when <code>ts</code> is below <code>other</code>. </p>
 <p>Set <code>crossover</code> to True to return the first True after crossover. Specify <code>wait</code> to return
 True only when <code>ts</code> is below for a number of time steps in a row after crossover.</p>
-<p>Both will be broadcasted together. Set <code>multiple</code> to True to combine with multiple arguments.
-For more keyword arguments, see <code><a title="vectorbt.utils.Base_Accessor.combine_with" href="../utils.html#vectorbt.utils.Base_Accessor.combine_with">Base_Accessor.combine_with()</a></code>.</p></div>
+<p>For more details, see <code><a title="vectorbt.indicators.factory.compare" href="factory.html#vectorbt.indicators.factory.compare">compare()</a></code>.</p></div>
 <details class="source">
 <summary>
 <span>Expand source code</span>
@@ -1454,7 +1478,7 @@ For more keyword arguments, see <code><a title="vectorbt.utils.Base_Accessor.com
             name = f&#39;{self.name}_{func_name}&#39;
         else:
             name = f&#39;{self.name}_{attr}_{func_name}&#39;
-    result = comparison_func(getattr(self, attr), other, name=name, **kwargs)
+    result = compare(getattr(self, attr), other, compare_func, name=name, **kwargs)
     if crossover:
         return result.vbt.signals.nst(wait+1, after_false=True)
     return result</code></pre>
@@ -1467,8 +1491,7 @@ For more keyword arguments, see <code><a title="vectorbt.utils.Base_Accessor.com
 <div class="desc"><p>Returns True when <code>ts</code> is equal <code>other</code>. </p>
 <p>Set <code>crossover</code> to True to return the first True after crossover. Specify <code>wait</code> to return
 True only when <code>ts</code> is equal for a number of time steps in a row after crossover.</p>
-<p>Both will be broadcasted together. Set <code>multiple</code> to True to combine with multiple arguments.
-For more keyword arguments, see <code><a title="vectorbt.utils.Base_Accessor.combine_with" href="../utils.html#vectorbt.utils.Base_Accessor.combine_with">Base_Accessor.combine_with()</a></code>.</p></div>
+<p>For more details, see <code><a title="vectorbt.indicators.factory.compare" href="factory.html#vectorbt.indicators.factory.compare">compare()</a></code>.</p></div>
 <details class="source">
 <summary>
 <span>Expand source code</span>
@@ -1481,7 +1504,7 @@ For more keyword arguments, see <code><a title="vectorbt.utils.Base_Accessor.com
             name = f&#39;{self.name}_{func_name}&#39;
         else:
             name = f&#39;{self.name}_{attr}_{func_name}&#39;
-    result = comparison_func(getattr(self, attr), other, name=name, **kwargs)
+    result = compare(getattr(self, attr), other, compare_func, name=name, **kwargs)
     if crossover:
         return result.vbt.signals.nst(wait+1, after_false=True)
     return result</code></pre>
@@ -1517,6 +1540,12 @@ operation to each Series/DataFrame and returns a new instance of <code>CustomInd
 <li><h3>Super-module</h3>
 <ul>
 <li><code><a title="vectorbt.indicators" href="index.html">vectorbt.indicators</a></code></li>
+</ul>
+</li>
+<li><h3><a href="#header-functions">Functions</a></h3>
+<ul class="">
+<li><code><a title="vectorbt.indicators.macd.macd_apply_func_nb" href="#vectorbt.indicators.macd.macd_apply_func_nb">macd_apply_func_nb</a></code></li>
+<li><code><a title="vectorbt.indicators.macd.macd_caching_nb" href="#vectorbt.indicators.macd.macd_caching_nb">macd_caching_nb</a></code></li>
 </ul>
 </li>
 <li><h3><a href="#header-classes">Classes</a></h3>

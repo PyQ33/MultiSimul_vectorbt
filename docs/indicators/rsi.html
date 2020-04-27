@@ -41,44 +41,45 @@ See [Relative Strength Index (RSI)](https://www.investopedia.com/terms/r/rsi.asp
 Use `RSI.from_params` methods to run the indicator.&#34;&#34;&#34;
 
 import numpy as np
+import pandas as pd
 from numba import njit
 from numba.types import UniTuple, f8, i8, b1, DictType
-from vectorbt.timeseries import ewm_mean_nb, rolling_mean_nb, diff_nb, set_by_mask_nb, prepend_nb
-from vectorbt.indicators.indicator_factory import IndicatorFactory
-from vectorbt.utils import *
 
-__all__ = [&#39;RSI&#39;]
+from vectorbt import timeseries, indicators
+from vectorbt.utils import checks, common
 
 
 @njit(DictType(UniTuple(i8, 2), UniTuple(f8[:, :], 2))(f8[:, :], i8[:], b1[:]), cache=True)
 def rsi_caching_nb(ts, windows, ewms):
-    delta = diff_nb(ts)[1:, :]  # otherwise ewma will be all NaN
+    &#34;&#34;&#34;Numba-compiled caching function for `RSI`.&#34;&#34;&#34;
+    delta = timeseries.nb.diff_nb(ts)[1:, :]  # otherwise ewma will be all NaN
     up, down = delta.copy(), delta.copy()
-    up = set_by_mask_nb(up, up &lt; 0, 0)
-    down = np.abs(set_by_mask_nb(down, down &gt; 0, 0))
+    up = timeseries.nb.set_by_mask_nb(up, up &lt; 0, 0)
+    down = np.abs(timeseries.nb.set_by_mask_nb(down, down &gt; 0, 0))
     # Cache
     cache_dict = dict()
     for i in range(windows.shape[0]):
         if (windows[i], int(ewms[i])) not in cache_dict:
             if ewms[i]:
-                roll_up = ewm_mean_nb(up, windows[i])
-                roll_down = ewm_mean_nb(down, windows[i])
+                roll_up = timeseries.nb.ewm_mean_nb(up, windows[i])
+                roll_down = timeseries.nb.ewm_mean_nb(down, windows[i])
             else:
-                roll_up = rolling_mean_nb(up, windows[i])
-                roll_down = rolling_mean_nb(down, windows[i])
-            roll_up = prepend_nb(roll_up, 1, np.nan)  # bring to old shape
-            roll_down = prepend_nb(roll_down, 1, np.nan)
+                roll_up = timeseries.nb.rolling_mean_nb(up, windows[i])
+                roll_down = timeseries.nb.rolling_mean_nb(down, windows[i])
+            roll_up = timeseries.nb.prepend_nb(roll_up, 1, np.nan)  # bring to old shape
+            roll_down = timeseries.nb.prepend_nb(roll_down, 1, np.nan)
             cache_dict[(windows[i], int(ewms[i]))] = roll_up, roll_down
     return cache_dict
 
 
 @njit(f8[:, :](f8[:, :], i8, b1, DictType(UniTuple(i8, 2), UniTuple(f8[:, :], 2))), cache=True)
 def rsi_apply_func_nb(ts, window, ewm, cache_dict):
+    &#34;&#34;&#34;Numba-compiled apply function for `RSI`.&#34;&#34;&#34;
     roll_up, roll_down = cache_dict[(window, int(ewm))]
     return 100 - 100 / (1 + roll_up / roll_down)
 
 
-RSI = IndicatorFactory(
+RSI = indicators.factory.IndicatorFactory(
     ts_names=[&#39;ts&#39;],
     param_names=[&#39;window&#39;, &#39;ewm&#39;],
     output_names=[&#39;rsi&#39;],
@@ -96,7 +97,7 @@ class RSI(RSI):
             window (int or array_like): Size of the moving window. Can be one or more values. Defaults to 14.
             ewm (bool or array_like): If True, uses exponential moving average, otherwise 
                 simple moving average. Can be one or more values. Defaults to False.
-            **kwargs: Keyword arguments passed to `vectorbt.indicators.indicator_factory.from_params_pipeline.`
+            **kwargs: Keyword arguments passed to `vectorbt.indicators.factory.from_params_pipeline.`
         Returns:
             RSI
         Examples:
@@ -139,7 +140,7 @@ class RSI(RSI):
             ```
 
             ![](img/RSI.png)&#34;&#34;&#34;
-        check_type(self.rsi, pd.Series)
+        checks.assert_type(self.rsi, pd.Series)
 
         rsi_trace_kwargs = {**dict(
             name=f&#39;RSI ({self.name})&#39;
@@ -166,7 +167,7 @@ class RSI(RSI):
         return fig
 
 
-fix_class_for_pdoc(RSI)</code></pre>
+common.fix_class_for_pdoc(RSI)</code></pre>
 </details>
 </section>
 <section>
@@ -174,6 +175,57 @@ fix_class_for_pdoc(RSI)</code></pre>
 <section>
 </section>
 <section>
+<h2 class="section-title" id="header-functions">Functions</h2>
+<dl>
+<dt id="vectorbt.indicators.rsi.rsi_apply_func_nb"><code class="name flex">
+<span>def <span class="ident">rsi_apply_func_nb</span></span>(<span>ts, window, ewm, cache_dict)</span>
+</code></dt>
+<dd>
+<div class="desc"><p>Numba-compiled apply function for <code><a title="vectorbt.indicators.rsi.RSI" href="#vectorbt.indicators.rsi.RSI">RSI</a></code>.</p></div>
+<details class="source">
+<summary>
+<span>Expand source code</span>
+</summary>
+<pre><code class="python">@njit(f8[:, :](f8[:, :], i8, b1, DictType(UniTuple(i8, 2), UniTuple(f8[:, :], 2))), cache=True)
+def rsi_apply_func_nb(ts, window, ewm, cache_dict):
+    &#34;&#34;&#34;Numba-compiled apply function for `RSI`.&#34;&#34;&#34;
+    roll_up, roll_down = cache_dict[(window, int(ewm))]
+    return 100 - 100 / (1 + roll_up / roll_down)</code></pre>
+</details>
+</dd>
+<dt id="vectorbt.indicators.rsi.rsi_caching_nb"><code class="name flex">
+<span>def <span class="ident">rsi_caching_nb</span></span>(<span>ts, windows, ewms)</span>
+</code></dt>
+<dd>
+<div class="desc"><p>Numba-compiled caching function for <code><a title="vectorbt.indicators.rsi.RSI" href="#vectorbt.indicators.rsi.RSI">RSI</a></code>.</p></div>
+<details class="source">
+<summary>
+<span>Expand source code</span>
+</summary>
+<pre><code class="python">@njit(DictType(UniTuple(i8, 2), UniTuple(f8[:, :], 2))(f8[:, :], i8[:], b1[:]), cache=True)
+def rsi_caching_nb(ts, windows, ewms):
+    &#34;&#34;&#34;Numba-compiled caching function for `RSI`.&#34;&#34;&#34;
+    delta = timeseries.nb.diff_nb(ts)[1:, :]  # otherwise ewma will be all NaN
+    up, down = delta.copy(), delta.copy()
+    up = timeseries.nb.set_by_mask_nb(up, up &lt; 0, 0)
+    down = np.abs(timeseries.nb.set_by_mask_nb(down, down &gt; 0, 0))
+    # Cache
+    cache_dict = dict()
+    for i in range(windows.shape[0]):
+        if (windows[i], int(ewms[i])) not in cache_dict:
+            if ewms[i]:
+                roll_up = timeseries.nb.ewm_mean_nb(up, windows[i])
+                roll_down = timeseries.nb.ewm_mean_nb(down, windows[i])
+            else:
+                roll_up = timeseries.nb.rolling_mean_nb(up, windows[i])
+                roll_down = timeseries.nb.rolling_mean_nb(down, windows[i])
+            roll_up = timeseries.nb.prepend_nb(roll_up, 1, np.nan)  # bring to old shape
+            roll_down = timeseries.nb.prepend_nb(roll_down, 1, np.nan)
+            cache_dict[(windows[i], int(ewms[i]))] = roll_up, roll_down
+    return cache_dict</code></pre>
+</details>
+</dd>
+</dl>
 </section>
 <section>
 <h2 class="section-title" id="header-classes">Classes</h2>
@@ -198,7 +250,7 @@ fix_class_for_pdoc(RSI)</code></pre>
             window (int or array_like): Size of the moving window. Can be one or more values. Defaults to 14.
             ewm (bool or array_like): If True, uses exponential moving average, otherwise 
                 simple moving average. Can be one or more values. Defaults to False.
-            **kwargs: Keyword arguments passed to `vectorbt.indicators.indicator_factory.from_params_pipeline.`
+            **kwargs: Keyword arguments passed to `vectorbt.indicators.factory.from_params_pipeline.`
         Returns:
             RSI
         Examples:
@@ -241,7 +293,7 @@ fix_class_for_pdoc(RSI)</code></pre>
             ```
 
             ![](img/RSI.png)&#34;&#34;&#34;
-        check_type(self.rsi, pd.Series)
+        checks.assert_type(self.rsi, pd.Series)
 
         rsi_trace_kwargs = {**dict(
             name=f&#39;RSI ({self.name})&#39;
@@ -269,7 +321,7 @@ fix_class_for_pdoc(RSI)</code></pre>
 </details>
 <h3>Ancestors</h3>
 <ul class="hlist">
-<li>vectorbt.indicators.indicator_factory.CustomIndicator</li>
+<li>vectorbt.indicators.factory.CustomIndicator</li>
 </ul>
 <h3>Static methods</h3>
 <dl>
@@ -288,7 +340,7 @@ fix_class_for_pdoc(RSI)</code></pre>
 <dd>If True, uses exponential moving average, otherwise
 simple moving average. Can be one or more values. Defaults to False.</dd>
 <dt><strong><code>**kwargs</code></strong></dt>
-<dd>Keyword arguments passed to <code><a title="vectorbt.indicators.indicator_factory.from_params_pipeline" href="indicator_factory.html#vectorbt.indicators.indicator_factory.from_params_pipeline">from_params_pipeline()</a>.</code></dd>
+<dd>Keyword arguments passed to <code><a title="vectorbt.indicators.factory.from_params_pipeline" href="factory.html#vectorbt.indicators.factory.from_params_pipeline">from_params_pipeline()</a>.</code></dd>
 </dl>
 <h2 id="returns">Returns</h2>
 <dl>
@@ -325,7 +377,7 @@ def from_params(cls, ts, window=14, ewm=False, **kwargs):
         window (int or array_like): Size of the moving window. Can be one or more values. Defaults to 14.
         ewm (bool or array_like): If True, uses exponential moving average, otherwise 
             simple moving average. Can be one or more values. Defaults to False.
-        **kwargs: Keyword arguments passed to `vectorbt.indicators.indicator_factory.from_params_pipeline.`
+        **kwargs: Keyword arguments passed to `vectorbt.indicators.factory.from_params_pipeline.`
     Returns:
         RSI
     Examples:
@@ -503,7 +555,7 @@ def param_loc(self):
         ```
 
         ![](img/RSI.png)&#34;&#34;&#34;
-    check_type(self.rsi, pd.Series)
+    checks.assert_type(self.rsi, pd.Series)
 
     rsi_trace_kwargs = {**dict(
         name=f&#39;RSI ({self.name})&#39;
@@ -537,8 +589,7 @@ def param_loc(self):
 <div class="desc"><p>Returns True when <code>rsi</code> is above <code>other</code>. </p>
 <p>Set <code>crossover</code> to True to return the first True after crossover. Specify <code>wait</code> to return
 True only when <code>rsi</code> is above for a number of time steps in a row after crossover.</p>
-<p>Both will be broadcasted together. Set <code>multiple</code> to True to combine with multiple arguments.
-For more keyword arguments, see <code><a title="vectorbt.utils.Base_Accessor.combine_with" href="../utils.html#vectorbt.utils.Base_Accessor.combine_with">Base_Accessor.combine_with()</a></code>.</p></div>
+<p>For more details, see <code><a title="vectorbt.indicators.factory.compare" href="factory.html#vectorbt.indicators.factory.compare">compare()</a></code>.</p></div>
 <details class="source">
 <summary>
 <span>Expand source code</span>
@@ -551,7 +602,7 @@ For more keyword arguments, see <code><a title="vectorbt.utils.Base_Accessor.com
             name = f&#39;{self.name}_{func_name}&#39;
         else:
             name = f&#39;{self.name}_{attr}_{func_name}&#39;
-    result = comparison_func(getattr(self, attr), other, name=name, **kwargs)
+    result = compare(getattr(self, attr), other, compare_func, name=name, **kwargs)
     if crossover:
         return result.vbt.signals.nst(wait+1, after_false=True)
     return result</code></pre>
@@ -564,8 +615,7 @@ For more keyword arguments, see <code><a title="vectorbt.utils.Base_Accessor.com
 <div class="desc"><p>Returns True when <code>rsi</code> is below <code>other</code>. </p>
 <p>Set <code>crossover</code> to True to return the first True after crossover. Specify <code>wait</code> to return
 True only when <code>rsi</code> is below for a number of time steps in a row after crossover.</p>
-<p>Both will be broadcasted together. Set <code>multiple</code> to True to combine with multiple arguments.
-For more keyword arguments, see <code><a title="vectorbt.utils.Base_Accessor.combine_with" href="../utils.html#vectorbt.utils.Base_Accessor.combine_with">Base_Accessor.combine_with()</a></code>.</p></div>
+<p>For more details, see <code><a title="vectorbt.indicators.factory.compare" href="factory.html#vectorbt.indicators.factory.compare">compare()</a></code>.</p></div>
 <details class="source">
 <summary>
 <span>Expand source code</span>
@@ -578,7 +628,7 @@ For more keyword arguments, see <code><a title="vectorbt.utils.Base_Accessor.com
             name = f&#39;{self.name}_{func_name}&#39;
         else:
             name = f&#39;{self.name}_{attr}_{func_name}&#39;
-    result = comparison_func(getattr(self, attr), other, name=name, **kwargs)
+    result = compare(getattr(self, attr), other, compare_func, name=name, **kwargs)
     if crossover:
         return result.vbt.signals.nst(wait+1, after_false=True)
     return result</code></pre>
@@ -591,8 +641,7 @@ For more keyword arguments, see <code><a title="vectorbt.utils.Base_Accessor.com
 <div class="desc"><p>Returns True when <code>rsi</code> is equal <code>other</code>. </p>
 <p>Set <code>crossover</code> to True to return the first True after crossover. Specify <code>wait</code> to return
 True only when <code>rsi</code> is equal for a number of time steps in a row after crossover.</p>
-<p>Both will be broadcasted together. Set <code>multiple</code> to True to combine with multiple arguments.
-For more keyword arguments, see <code><a title="vectorbt.utils.Base_Accessor.combine_with" href="../utils.html#vectorbt.utils.Base_Accessor.combine_with">Base_Accessor.combine_with()</a></code>.</p></div>
+<p>For more details, see <code><a title="vectorbt.indicators.factory.compare" href="factory.html#vectorbt.indicators.factory.compare">compare()</a></code>.</p></div>
 <details class="source">
 <summary>
 <span>Expand source code</span>
@@ -605,7 +654,7 @@ For more keyword arguments, see <code><a title="vectorbt.utils.Base_Accessor.com
             name = f&#39;{self.name}_{func_name}&#39;
         else:
             name = f&#39;{self.name}_{attr}_{func_name}&#39;
-    result = comparison_func(getattr(self, attr), other, name=name, **kwargs)
+    result = compare(getattr(self, attr), other, compare_func, name=name, **kwargs)
     if crossover:
         return result.vbt.signals.nst(wait+1, after_false=True)
     return result</code></pre>
@@ -618,8 +667,7 @@ For more keyword arguments, see <code><a title="vectorbt.utils.Base_Accessor.com
 <div class="desc"><p>Returns True when <code>ts</code> is above <code>other</code>. </p>
 <p>Set <code>crossover</code> to True to return the first True after crossover. Specify <code>wait</code> to return
 True only when <code>ts</code> is above for a number of time steps in a row after crossover.</p>
-<p>Both will be broadcasted together. Set <code>multiple</code> to True to combine with multiple arguments.
-For more keyword arguments, see <code><a title="vectorbt.utils.Base_Accessor.combine_with" href="../utils.html#vectorbt.utils.Base_Accessor.combine_with">Base_Accessor.combine_with()</a></code>.</p></div>
+<p>For more details, see <code><a title="vectorbt.indicators.factory.compare" href="factory.html#vectorbt.indicators.factory.compare">compare()</a></code>.</p></div>
 <details class="source">
 <summary>
 <span>Expand source code</span>
@@ -632,7 +680,7 @@ For more keyword arguments, see <code><a title="vectorbt.utils.Base_Accessor.com
             name = f&#39;{self.name}_{func_name}&#39;
         else:
             name = f&#39;{self.name}_{attr}_{func_name}&#39;
-    result = comparison_func(getattr(self, attr), other, name=name, **kwargs)
+    result = compare(getattr(self, attr), other, compare_func, name=name, **kwargs)
     if crossover:
         return result.vbt.signals.nst(wait+1, after_false=True)
     return result</code></pre>
@@ -645,8 +693,7 @@ For more keyword arguments, see <code><a title="vectorbt.utils.Base_Accessor.com
 <div class="desc"><p>Returns True when <code>ts</code> is below <code>other</code>. </p>
 <p>Set <code>crossover</code> to True to return the first True after crossover. Specify <code>wait</code> to return
 True only when <code>ts</code> is below for a number of time steps in a row after crossover.</p>
-<p>Both will be broadcasted together. Set <code>multiple</code> to True to combine with multiple arguments.
-For more keyword arguments, see <code><a title="vectorbt.utils.Base_Accessor.combine_with" href="../utils.html#vectorbt.utils.Base_Accessor.combine_with">Base_Accessor.combine_with()</a></code>.</p></div>
+<p>For more details, see <code><a title="vectorbt.indicators.factory.compare" href="factory.html#vectorbt.indicators.factory.compare">compare()</a></code>.</p></div>
 <details class="source">
 <summary>
 <span>Expand source code</span>
@@ -659,7 +706,7 @@ For more keyword arguments, see <code><a title="vectorbt.utils.Base_Accessor.com
             name = f&#39;{self.name}_{func_name}&#39;
         else:
             name = f&#39;{self.name}_{attr}_{func_name}&#39;
-    result = comparison_func(getattr(self, attr), other, name=name, **kwargs)
+    result = compare(getattr(self, attr), other, compare_func, name=name, **kwargs)
     if crossover:
         return result.vbt.signals.nst(wait+1, after_false=True)
     return result</code></pre>
@@ -672,8 +719,7 @@ For more keyword arguments, see <code><a title="vectorbt.utils.Base_Accessor.com
 <div class="desc"><p>Returns True when <code>ts</code> is equal <code>other</code>. </p>
 <p>Set <code>crossover</code> to True to return the first True after crossover. Specify <code>wait</code> to return
 True only when <code>ts</code> is equal for a number of time steps in a row after crossover.</p>
-<p>Both will be broadcasted together. Set <code>multiple</code> to True to combine with multiple arguments.
-For more keyword arguments, see <code><a title="vectorbt.utils.Base_Accessor.combine_with" href="../utils.html#vectorbt.utils.Base_Accessor.combine_with">Base_Accessor.combine_with()</a></code>.</p></div>
+<p>For more details, see <code><a title="vectorbt.indicators.factory.compare" href="factory.html#vectorbt.indicators.factory.compare">compare()</a></code>.</p></div>
 <details class="source">
 <summary>
 <span>Expand source code</span>
@@ -686,7 +732,7 @@ For more keyword arguments, see <code><a title="vectorbt.utils.Base_Accessor.com
             name = f&#39;{self.name}_{func_name}&#39;
         else:
             name = f&#39;{self.name}_{attr}_{func_name}&#39;
-    result = comparison_func(getattr(self, attr), other, name=name, **kwargs)
+    result = compare(getattr(self, attr), other, compare_func, name=name, **kwargs)
     if crossover:
         return result.vbt.signals.nst(wait+1, after_false=True)
     return result</code></pre>
@@ -722,6 +768,12 @@ operation to each Series/DataFrame and returns a new instance of <code>CustomInd
 <li><h3>Super-module</h3>
 <ul>
 <li><code><a title="vectorbt.indicators" href="index.html">vectorbt.indicators</a></code></li>
+</ul>
+</li>
+<li><h3><a href="#header-functions">Functions</a></h3>
+<ul class="">
+<li><code><a title="vectorbt.indicators.rsi.rsi_apply_func_nb" href="#vectorbt.indicators.rsi.rsi_apply_func_nb">rsi_apply_func_nb</a></code></li>
+<li><code><a title="vectorbt.indicators.rsi.rsi_caching_nb" href="#vectorbt.indicators.rsi.rsi_caching_nb">rsi_caching_nb</a></code></li>
 </ul>
 </li>
 <li><h3><a href="#header-classes">Classes</a></h3>
