@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1, minimum-scale=1" />
 <meta name="generator" content="pdoc 0.8.1" />
 <title>vectorbt.utils.indexing API documentation</title>
-<meta name="description" content="" />
+<meta name="description" content="Class decorators for indexing." />
 <link href='https://cdnjs.cloudflare.com/ajax/libs/normalize/8.0.0/normalize.min.css' rel='stylesheet'>
 <link href='https://cdnjs.cloudflare.com/ajax/libs/10up-sanitize.css/8.0.0/sanitize.min.css' rel='stylesheet'>
 <link href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/9.12.0/styles/github.min.css" rel="stylesheet">
@@ -20,11 +20,14 @@
 <h1 class="title">Module <code>vectorbt.utils.indexing</code></h1>
 </header>
 <section id="section-intro">
+<p>Class decorators for indexing.</p>
 <details class="source">
 <summary>
 <span>Expand source code</span>
 </summary>
-<pre><code class="python">import numpy as np
+<pre><code class="python">&#34;&#34;&#34;Class decorators for indexing.&#34;&#34;&#34;
+
+import numpy as np
 import pandas as pd
 from functools import update_wrapper
 import inspect
@@ -34,7 +37,9 @@ from vectorbt.utils import checks, index_fns, reshape_fns
 
 
 def copy_func(f):
-    &#34;&#34;&#34;Based on http://stackoverflow.com/a/6528148/190597 (Glenn Maynard)&#34;&#34;&#34;
+    &#34;&#34;&#34;Copy function.
+    
+    Based on http://stackoverflow.com/a/6528148/190597 (Glenn Maynard)&#34;&#34;&#34;
     g = FunctionType(f.__code__, f.__globals__, name=f.__name__,
                      argdefs=f.__defaults__,
                      closure=f.__closure__)
@@ -43,13 +48,49 @@ def copy_func(f):
     return g
 
 
-def add_indexing(indexing_func):
+def add_pd_indexing(indexing_func):
+    &#34;&#34;&#34;Add `iloc`, `loc`, `xs` and `__getitem__` indexers to a class.
+
+    Delegates indexing operation via `indexing_func`, which must accept an instance of
+    the class and a pandas indexing function.
+
+    !!! note
+        Remember than `pd_indexing_func` passed to `indexing_func` doesn&#39;t care about which
+        pandas object you pass, so you must ensure that each object has same index/columns.
+    
+    Example:
+        ```python-repl
+        &gt;&gt;&gt; import pandas as pd
+        &gt;&gt;&gt; from vectorbt.utils.indexing import add_pd_indexing
+
+        &gt;&gt;&gt; def indexing_func(c, pd_indexing_func):
+        ...     return C(pd_indexing_func(c.df1), pd_indexing_func(c.df2))
+
+        &gt;&gt;&gt; @add_pd_indexing(indexing_func)
+        ... class C():
+        ...     def __init__(self, df1, df2):
+        ...         self.df1 = df1
+        ...         self.df2 = df2
+
+        &gt;&gt;&gt; df1 = pd.DataFrame({&#39;a&#39;: [1, 2], &#39;b&#39;: [3, 4]})
+        &gt;&gt;&gt; df2 = pd.DataFrame({&#39;a&#39;: [5, 6], &#39;b&#39;: [7, 8]})
+        &gt;&gt;&gt; c = C(df1, df2)
+
+        &gt;&gt;&gt; print(c.iloc[0])
+        &lt;__main__.C at 0x623c27cf8&gt;
+
+        &gt;&gt;&gt; print(c.iloc[0].df1)
+        a    1
+        b    3
+        Name: 0, dtype: int64
+
+        &gt;&gt;&gt; print(c.iloc[0].df2)
+        a    5
+        b    7
+        Name: 0, dtype: int64
+        ```
+        &#34;&#34;&#34;
     def wrapper(cls):
-        &#34;&#34;&#34;Add iloc, loc and __getitem__ indexing to a class.
-
-        Each indexing operation is forwarded to the underlying pandas objects and
-        a new instance of the class with new pandas objects is created using the indexing_func.&#34;&#34;&#34;
-
         class iLoc:
             def __init__(self, obj):
                 self.obj = obj
@@ -108,10 +149,13 @@ def add_indexing(indexing_func):
     return wrapper
 
 
-def loc_mapper(mapper, like_df, loc_pandas_func):
-    &#34;&#34;&#34;Broadcast mapper series to a dataframe to perform advanced pandas indexing on it.&#34;&#34;&#34;
-    df_range_mapper = reshape_fns.broadcast_to(np.arange(len(mapper.index)), like_df, index_from=1, columns_from=1)
-    loced_range_mapper = loc_pandas_func(df_range_mapper)
+def mapper_indexing_func(mapper, like_df, pd_indexing_func):
+    &#34;&#34;&#34;Broadcast `mapper` Series to DataFrame `like_df` and perform pandas indexing using `pd_indexing_func`.&#34;&#34;&#34;
+    checks.assert_type(mapper, pd.Series)
+    checks.assert_type(like_df, (pd.Series, pd.DataFrame))
+
+    df_range_mapper = reshape_fns.broadcast_to(np.arange(len(mapper.index)), like_df)
+    loced_range_mapper = pd_indexing_func(df_range_mapper)
     new_mapper = mapper.iloc[loced_range_mapper.values[0]]
     if checks.is_frame(loced_range_mapper):
         return pd.Series(new_mapper.values, index=loced_range_mapper.columns, name=mapper.name)
@@ -120,24 +164,72 @@ def loc_mapper(mapper, like_df, loc_pandas_func):
 
 
 def add_param_indexing(param_name, indexing_func):
+    &#34;&#34;&#34;Add parameter indexer to a class.
+
+    Parameter indexer enables accessing a group of rows and columns by a parameter array (similar to `loc`). 
+    This way, one can query index/columns by another Series called a parameter mapper, which is just a
+    `pandas.Series` that maps columns (its index) to params (its values).
+    
+    Parameter indexing is important, since querying by column/index labels alone is not always sufficient.
+    For example, `pandas` doesn&#39;t let you query by list at a specific index/column level.
+    
+    !!! note
+        This method requires from class after `__init__` having the `_{param_name}_mapper` attribute that holds 
+        the parameter mapper. It will then create an indexer under the `{param_name}_loc` attribute. It uses
+        the same `pd_indexing_func` as `add_pd_indexing`.
+    
+    Example:
+        ```python-repl
+        &gt;&gt;&gt; import pandas as pd
+        &gt;&gt;&gt; from vectorbt.utils.indexing import add_param_indexing, mapper_indexing_func
+
+        &gt;&gt;&gt; def indexing_func(c, pd_indexing_func):
+        ...     return C(pd_indexing_func(c.df), mapper_indexing_func(
+                    c._my_param_mapper, c.df, pd_indexing_func))
+
+        &gt;&gt;&gt; @add_param_indexing(&#39;my_param&#39;, indexing_func)
+        ... class C():
+        ...     def __init__(self, df, param_mapper):
+        ...         self.df = df
+        ...         self._my_param_mapper = param_mapper # important!
+                
+        &gt;&gt;&gt; df = pd.DataFrame({&#39;a&#39;: [1, 2], &#39;b&#39;: [3, 4]})
+        &gt;&gt;&gt; param_mapper = pd.Series([&#39;First&#39;, &#39;Second&#39;], index=[&#39;a&#39;, &#39;b&#39;])
+        &gt;&gt;&gt; c = C(df, param_mapper)
+
+        &gt;&gt;&gt; print(c.my_param_loc[&#39;First&#39;])
+        &lt;__main__.C object at 0x61f8b0a58&gt;
+
+        &gt;&gt;&gt; print(c.my_param_loc[&#39;First&#39;].df)
+        0    1
+        1    2
+        Name: a, dtype: int64
+
+        &gt;&gt;&gt; print(c.my_param_loc[&#39;Second&#39;].df)
+        0    3
+        1    4
+        Name: b, dtype: int64
+
+        &gt;&gt;&gt; print(c.my_param_loc[[&#39;First&#39;, &#39;First&#39;, &#39;Second&#39;, &#39;Second&#39;]].df)
+              a     b
+        0  1  1  3  3
+        1  2  2  4  4
+        ```
+        ```&#34;&#34;&#34;
     def wrapper(cls):
-        &#34;&#34;&#34;Add loc indexing of params to a class.
-
-        Uses a mapper, which is just a pd.Series object that maps columns to params.&#34;&#34;&#34;
-
         class ParamLoc:
-            def __init__(self, obj, param_mapper, level_names=None):
-                checks.assert_type(param_mapper, pd.Series)
+            def __init__(self, obj, mapper, level_names=None):
+                checks.assert_type(mapper, pd.Series)
 
                 self.obj = obj
-                if param_mapper.dtype == &#39;O&#39;:
+                if mapper.dtype == &#39;O&#39;:
                     # If params are objects, we must cast them to string first
                     # The original mapper isn&#39;t touched
-                    param_mapper = param_mapper.astype(str)
-                self.param_mapper = param_mapper
+                    mapper = mapper.astype(str)
+                self.mapper = mapper
 
             def get_indices(self, key):
-                if self.param_mapper.dtype == &#39;O&#39;:
+                if self.mapper.dtype == &#39;O&#39;:
                     # We must also cast the key to string
                     if isinstance(key, slice):
                         start = str(key.start) if key.start is not None else None
@@ -148,10 +240,10 @@ def add_param_indexing(param_name, indexing_func):
                     else:
                         # Tuples, objects, etc.
                         key = str(key)
-                param_mapper = self.param_mapper
+                mapper = self.mapper
                 # Use pandas to perform indexing
-                param_mapper = pd.Series(np.arange(len(param_mapper.index)), index=param_mapper.values)
-                indices = param_mapper.loc.__getitem__(key)
+                mapper = pd.Series(np.arange(len(mapper.index)), index=mapper.values)
+                indices = mapper.loc.__getitem__(key)
                 if isinstance(indices, pd.Series):
                     indices = indices.values
                 return indices
@@ -159,9 +251,9 @@ def add_param_indexing(param_name, indexing_func):
             def __getitem__(self, key):
                 indices = self.get_indices(key)
                 is_multiple = isinstance(key, (slice, list, np.ndarray))
-                level_name = self.param_mapper.name  # name of the mapper should contain level names of the params
+                level_name = self.mapper.name  # name of the mapper should contain level names of the params
 
-                def loc_pandas_func(obj):
+                def pd_indexing_func(obj):
                     new_obj = obj.iloc[:, indices]
                     if not is_multiple:
                         # If we selected only one param, then remove its columns levels to keep it clean
@@ -171,7 +263,7 @@ def add_param_indexing(param_name, indexing_func):
                                     new_obj.columns = index_fns.drop_levels(new_obj.columns, level_name)
                     return new_obj
 
-                return indexing_func(self.obj, loc_pandas_func)
+                return indexing_func(self.obj, pd_indexing_func)
 
         @property
         def param_loc(self):
@@ -203,22 +295,277 @@ def add_param_indexing(param_name, indexing_func):
 <section>
 <h2 class="section-title" id="header-functions">Functions</h2>
 <dl>
-<dt id="vectorbt.utils.indexing.add_indexing"><code class="name flex">
-<span>def <span class="ident">add_indexing</span></span>(<span>indexing_func)</span>
+<dt id="vectorbt.utils.indexing.add_param_indexing"><code class="name flex">
+<span>def <span class="ident">add_param_indexing</span></span>(<span>param_name, indexing_func)</span>
 </code></dt>
 <dd>
-<div class="desc"></div>
+<div class="desc"><p>Add parameter indexer to a class.</p>
+<p>Parameter indexer enables accessing a group of rows and columns by a parameter array (similar to <code>loc</code>).
+This way, one can query index/columns by another Series called a parameter mapper, which is just a
+<code>pandas.Series</code> that maps columns (its index) to params (its values).</p>
+<p>Parameter indexing is important, since querying by column/index labels alone is not always sufficient.
+For example, <code>pandas</code> doesn't let you query by list at a specific index/column level.</p>
+<div class="admonition note">
+<p class="admonition-title">Note</p>
+<p>This method requires from class after <code>__init__</code> having the <code>_{param_name}_mapper</code> attribute that holds
+the parameter mapper. It will then create an indexer under the <code>{param_name}_loc</code> attribute. It uses
+the same <code>pd_indexing_func</code> as <code><a title="vectorbt.utils.indexing.add_pd_indexing" href="#vectorbt.utils.indexing.add_pd_indexing">add_pd_indexing()</a></code>.</p>
+</div>
+<h2 id="example">Example</h2>
+<pre><code class="python-repl">&gt;&gt;&gt; import pandas as pd
+&gt;&gt;&gt; from vectorbt.utils.indexing import add_param_indexing, mapper_indexing_func
+
+&gt;&gt;&gt; def indexing_func(c, pd_indexing_func):
+...     return C(pd_indexing_func(c.df), mapper_indexing_func(
+            c._my_param_mapper, c.df, pd_indexing_func))
+
+&gt;&gt;&gt; @add_param_indexing('my_param', indexing_func)
+... class C():
+...     def __init__(self, df, param_mapper):
+...         self.df = df
+...         self._my_param_mapper = param_mapper # important!
+
+&gt;&gt;&gt; df = pd.DataFrame({'a': [1, 2], 'b': [3, 4]})
+&gt;&gt;&gt; param_mapper = pd.Series(['First', 'Second'], index=['a', 'b'])
+&gt;&gt;&gt; c = C(df, param_mapper)
+
+&gt;&gt;&gt; print(c.my_param_loc['First'])
+&lt;__main__.C object at 0x61f8b0a58&gt;
+
+&gt;&gt;&gt; print(c.my_param_loc['First'].df)
+0    1
+1    2
+Name: a, dtype: int64
+
+&gt;&gt;&gt; print(c.my_param_loc['Second'].df)
+0    3
+1    4
+Name: b, dtype: int64
+
+&gt;&gt;&gt; print(c.my_param_loc[['First', 'First', 'Second', 'Second']].df)
+      a     b
+0  1  1  3  3
+1  2  2  4  4
+</code></pre>
+<p>```</p></div>
 <details class="source">
 <summary>
 <span>Expand source code</span>
 </summary>
-<pre><code class="python">def add_indexing(indexing_func):
+<pre><code class="python">def add_param_indexing(param_name, indexing_func):
+    &#34;&#34;&#34;Add parameter indexer to a class.
+
+    Parameter indexer enables accessing a group of rows and columns by a parameter array (similar to `loc`). 
+    This way, one can query index/columns by another Series called a parameter mapper, which is just a
+    `pandas.Series` that maps columns (its index) to params (its values).
+    
+    Parameter indexing is important, since querying by column/index labels alone is not always sufficient.
+    For example, `pandas` doesn&#39;t let you query by list at a specific index/column level.
+    
+    !!! note
+        This method requires from class after `__init__` having the `_{param_name}_mapper` attribute that holds 
+        the parameter mapper. It will then create an indexer under the `{param_name}_loc` attribute. It uses
+        the same `pd_indexing_func` as `add_pd_indexing`.
+    
+    Example:
+        ```python-repl
+        &gt;&gt;&gt; import pandas as pd
+        &gt;&gt;&gt; from vectorbt.utils.indexing import add_param_indexing, mapper_indexing_func
+
+        &gt;&gt;&gt; def indexing_func(c, pd_indexing_func):
+        ...     return C(pd_indexing_func(c.df), mapper_indexing_func(
+                    c._my_param_mapper, c.df, pd_indexing_func))
+
+        &gt;&gt;&gt; @add_param_indexing(&#39;my_param&#39;, indexing_func)
+        ... class C():
+        ...     def __init__(self, df, param_mapper):
+        ...         self.df = df
+        ...         self._my_param_mapper = param_mapper # important!
+                
+        &gt;&gt;&gt; df = pd.DataFrame({&#39;a&#39;: [1, 2], &#39;b&#39;: [3, 4]})
+        &gt;&gt;&gt; param_mapper = pd.Series([&#39;First&#39;, &#39;Second&#39;], index=[&#39;a&#39;, &#39;b&#39;])
+        &gt;&gt;&gt; c = C(df, param_mapper)
+
+        &gt;&gt;&gt; print(c.my_param_loc[&#39;First&#39;])
+        &lt;__main__.C object at 0x61f8b0a58&gt;
+
+        &gt;&gt;&gt; print(c.my_param_loc[&#39;First&#39;].df)
+        0    1
+        1    2
+        Name: a, dtype: int64
+
+        &gt;&gt;&gt; print(c.my_param_loc[&#39;Second&#39;].df)
+        0    3
+        1    4
+        Name: b, dtype: int64
+
+        &gt;&gt;&gt; print(c.my_param_loc[[&#39;First&#39;, &#39;First&#39;, &#39;Second&#39;, &#39;Second&#39;]].df)
+              a     b
+        0  1  1  3  3
+        1  2  2  4  4
+        ```
+        ```&#34;&#34;&#34;
     def wrapper(cls):
-        &#34;&#34;&#34;Add iloc, loc and __getitem__ indexing to a class.
+        class ParamLoc:
+            def __init__(self, obj, mapper, level_names=None):
+                checks.assert_type(mapper, pd.Series)
 
-        Each indexing operation is forwarded to the underlying pandas objects and
-        a new instance of the class with new pandas objects is created using the indexing_func.&#34;&#34;&#34;
+                self.obj = obj
+                if mapper.dtype == &#39;O&#39;:
+                    # If params are objects, we must cast them to string first
+                    # The original mapper isn&#39;t touched
+                    mapper = mapper.astype(str)
+                self.mapper = mapper
 
+            def get_indices(self, key):
+                if self.mapper.dtype == &#39;O&#39;:
+                    # We must also cast the key to string
+                    if isinstance(key, slice):
+                        start = str(key.start) if key.start is not None else None
+                        stop = str(key.stop) if key.stop is not None else None
+                        key = slice(start, stop, key.step)
+                    elif isinstance(key, (list, np.ndarray)):
+                        key = list(map(str, key))
+                    else:
+                        # Tuples, objects, etc.
+                        key = str(key)
+                mapper = self.mapper
+                # Use pandas to perform indexing
+                mapper = pd.Series(np.arange(len(mapper.index)), index=mapper.values)
+                indices = mapper.loc.__getitem__(key)
+                if isinstance(indices, pd.Series):
+                    indices = indices.values
+                return indices
+
+            def __getitem__(self, key):
+                indices = self.get_indices(key)
+                is_multiple = isinstance(key, (slice, list, np.ndarray))
+                level_name = self.mapper.name  # name of the mapper should contain level names of the params
+
+                def pd_indexing_func(obj):
+                    new_obj = obj.iloc[:, indices]
+                    if not is_multiple:
+                        # If we selected only one param, then remove its columns levels to keep it clean
+                        if level_name is not None:
+                            if checks.is_frame(new_obj):
+                                if isinstance(new_obj.columns, pd.MultiIndex):
+                                    new_obj.columns = index_fns.drop_levels(new_obj.columns, level_name)
+                    return new_obj
+
+                return indexing_func(self.obj, pd_indexing_func)
+
+        @property
+        def param_loc(self):
+            return getattr(self, f&#39;_{param_name}_loc&#39;)
+
+        param_loc.__doc__ = f&#34;&#34;&#34;Access a group of columns by parameter {param_name} using
+        [`pandas.Series.loc`](https://pandas.pydata.org/pandas-docs/stable/reference/api/pandas.Series.loc.html).
+        
+        Forwards this operation to each Series/DataFrame and returns a new instance of `{cls.__name__}`
+        &#34;&#34;&#34;
+
+        orig_init_method = copy_func(cls.__init__)
+
+        def __init__(self, *args, **kwargs):
+            orig_init_method(self, *args, **kwargs)
+            mapper = getattr(self, f&#39;_{param_name}_mapper&#39;)
+            setattr(self, f&#39;_{param_name}_loc&#39;, ParamLoc(self, mapper))
+
+        setattr(cls, &#39;__init__&#39;, __init__)
+        setattr(cls, f&#39;{param_name}_loc&#39;, param_loc)
+        return cls
+    return wrapper</code></pre>
+</details>
+</dd>
+<dt id="vectorbt.utils.indexing.add_pd_indexing"><code class="name flex">
+<span>def <span class="ident">add_pd_indexing</span></span>(<span>indexing_func)</span>
+</code></dt>
+<dd>
+<div class="desc"><p>Add <code>iloc</code>, <code>loc</code>, <code>xs</code> and <code>__getitem__</code> indexers to a class.</p>
+<p>Delegates indexing operation via <code>indexing_func</code>, which must accept an instance of
+the class and a pandas indexing function.</p>
+<div class="admonition note">
+<p class="admonition-title">Note</p>
+<p>Remember than <code>pd_indexing_func</code> passed to <code>indexing_func</code> doesn't care about which
+pandas object you pass, so you must ensure that each object has same index/columns.</p>
+</div>
+<h2 id="example">Example</h2>
+<pre><code class="python-repl">&gt;&gt;&gt; import pandas as pd
+&gt;&gt;&gt; from vectorbt.utils.indexing import add_pd_indexing
+
+&gt;&gt;&gt; def indexing_func(c, pd_indexing_func):
+...     return C(pd_indexing_func(c.df1), pd_indexing_func(c.df2))
+
+&gt;&gt;&gt; @add_pd_indexing(indexing_func)
+... class C():
+...     def __init__(self, df1, df2):
+...         self.df1 = df1
+...         self.df2 = df2
+
+&gt;&gt;&gt; df1 = pd.DataFrame({'a': [1, 2], 'b': [3, 4]})
+&gt;&gt;&gt; df2 = pd.DataFrame({'a': [5, 6], 'b': [7, 8]})
+&gt;&gt;&gt; c = C(df1, df2)
+
+&gt;&gt;&gt; print(c.iloc[0])
+&lt;__main__.C at 0x623c27cf8&gt;
+
+&gt;&gt;&gt; print(c.iloc[0].df1)
+a    1
+b    3
+Name: 0, dtype: int64
+
+&gt;&gt;&gt; print(c.iloc[0].df2)
+a    5
+b    7
+Name: 0, dtype: int64
+</code></pre></div>
+<details class="source">
+<summary>
+<span>Expand source code</span>
+</summary>
+<pre><code class="python">def add_pd_indexing(indexing_func):
+    &#34;&#34;&#34;Add `iloc`, `loc`, `xs` and `__getitem__` indexers to a class.
+
+    Delegates indexing operation via `indexing_func`, which must accept an instance of
+    the class and a pandas indexing function.
+
+    !!! note
+        Remember than `pd_indexing_func` passed to `indexing_func` doesn&#39;t care about which
+        pandas object you pass, so you must ensure that each object has same index/columns.
+    
+    Example:
+        ```python-repl
+        &gt;&gt;&gt; import pandas as pd
+        &gt;&gt;&gt; from vectorbt.utils.indexing import add_pd_indexing
+
+        &gt;&gt;&gt; def indexing_func(c, pd_indexing_func):
+        ...     return C(pd_indexing_func(c.df1), pd_indexing_func(c.df2))
+
+        &gt;&gt;&gt; @add_pd_indexing(indexing_func)
+        ... class C():
+        ...     def __init__(self, df1, df2):
+        ...         self.df1 = df1
+        ...         self.df2 = df2
+
+        &gt;&gt;&gt; df1 = pd.DataFrame({&#39;a&#39;: [1, 2], &#39;b&#39;: [3, 4]})
+        &gt;&gt;&gt; df2 = pd.DataFrame({&#39;a&#39;: [5, 6], &#39;b&#39;: [7, 8]})
+        &gt;&gt;&gt; c = C(df1, df2)
+
+        &gt;&gt;&gt; print(c.iloc[0])
+        &lt;__main__.C at 0x623c27cf8&gt;
+
+        &gt;&gt;&gt; print(c.iloc[0].df1)
+        a    1
+        b    3
+        Name: 0, dtype: int64
+
+        &gt;&gt;&gt; print(c.iloc[0].df2)
+        a    5
+        b    7
+        Name: 0, dtype: int64
+        ```
+        &#34;&#34;&#34;
+    def wrapper(cls):
         class iLoc:
             def __init__(self, obj):
                 self.obj = obj
@@ -277,103 +624,20 @@ def add_param_indexing(param_name, indexing_func):
     return wrapper</code></pre>
 </details>
 </dd>
-<dt id="vectorbt.utils.indexing.add_param_indexing"><code class="name flex">
-<span>def <span class="ident">add_param_indexing</span></span>(<span>param_name, indexing_func)</span>
-</code></dt>
-<dd>
-<div class="desc"></div>
-<details class="source">
-<summary>
-<span>Expand source code</span>
-</summary>
-<pre><code class="python">def add_param_indexing(param_name, indexing_func):
-    def wrapper(cls):
-        &#34;&#34;&#34;Add loc indexing of params to a class.
-
-        Uses a mapper, which is just a pd.Series object that maps columns to params.&#34;&#34;&#34;
-
-        class ParamLoc:
-            def __init__(self, obj, param_mapper, level_names=None):
-                checks.assert_type(param_mapper, pd.Series)
-
-                self.obj = obj
-                if param_mapper.dtype == &#39;O&#39;:
-                    # If params are objects, we must cast them to string first
-                    # The original mapper isn&#39;t touched
-                    param_mapper = param_mapper.astype(str)
-                self.param_mapper = param_mapper
-
-            def get_indices(self, key):
-                if self.param_mapper.dtype == &#39;O&#39;:
-                    # We must also cast the key to string
-                    if isinstance(key, slice):
-                        start = str(key.start) if key.start is not None else None
-                        stop = str(key.stop) if key.stop is not None else None
-                        key = slice(start, stop, key.step)
-                    elif isinstance(key, (list, np.ndarray)):
-                        key = list(map(str, key))
-                    else:
-                        # Tuples, objects, etc.
-                        key = str(key)
-                param_mapper = self.param_mapper
-                # Use pandas to perform indexing
-                param_mapper = pd.Series(np.arange(len(param_mapper.index)), index=param_mapper.values)
-                indices = param_mapper.loc.__getitem__(key)
-                if isinstance(indices, pd.Series):
-                    indices = indices.values
-                return indices
-
-            def __getitem__(self, key):
-                indices = self.get_indices(key)
-                is_multiple = isinstance(key, (slice, list, np.ndarray))
-                level_name = self.param_mapper.name  # name of the mapper should contain level names of the params
-
-                def loc_pandas_func(obj):
-                    new_obj = obj.iloc[:, indices]
-                    if not is_multiple:
-                        # If we selected only one param, then remove its columns levels to keep it clean
-                        if level_name is not None:
-                            if checks.is_frame(new_obj):
-                                if isinstance(new_obj.columns, pd.MultiIndex):
-                                    new_obj.columns = index_fns.drop_levels(new_obj.columns, level_name)
-                    return new_obj
-
-                return indexing_func(self.obj, loc_pandas_func)
-
-        @property
-        def param_loc(self):
-            return getattr(self, f&#39;_{param_name}_loc&#39;)
-
-        param_loc.__doc__ = f&#34;&#34;&#34;Access a group of columns by parameter {param_name} using
-        [`pandas.Series.loc`](https://pandas.pydata.org/pandas-docs/stable/reference/api/pandas.Series.loc.html).
-        
-        Forwards this operation to each Series/DataFrame and returns a new instance of `{cls.__name__}`
-        &#34;&#34;&#34;
-
-        orig_init_method = copy_func(cls.__init__)
-
-        def __init__(self, *args, **kwargs):
-            orig_init_method(self, *args, **kwargs)
-            mapper = getattr(self, f&#39;_{param_name}_mapper&#39;)
-            setattr(self, f&#39;_{param_name}_loc&#39;, ParamLoc(self, mapper))
-
-        setattr(cls, &#39;__init__&#39;, __init__)
-        setattr(cls, f&#39;{param_name}_loc&#39;, param_loc)
-        return cls
-    return wrapper</code></pre>
-</details>
-</dd>
 <dt id="vectorbt.utils.indexing.copy_func"><code class="name flex">
 <span>def <span class="ident">copy_func</span></span>(<span>f)</span>
 </code></dt>
 <dd>
-<div class="desc"><p>Based on <a href="http://stackoverflow.com/a/6528148/190597">http://stackoverflow.com/a/6528148/190597</a> (Glenn Maynard)</p></div>
+<div class="desc"><p>Copy function.</p>
+<p>Based on <a href="http://stackoverflow.com/a/6528148/190597">http://stackoverflow.com/a/6528148/190597</a> (Glenn Maynard)</p></div>
 <details class="source">
 <summary>
 <span>Expand source code</span>
 </summary>
 <pre><code class="python">def copy_func(f):
-    &#34;&#34;&#34;Based on http://stackoverflow.com/a/6528148/190597 (Glenn Maynard)&#34;&#34;&#34;
+    &#34;&#34;&#34;Copy function.
+    
+    Based on http://stackoverflow.com/a/6528148/190597 (Glenn Maynard)&#34;&#34;&#34;
     g = FunctionType(f.__code__, f.__globals__, name=f.__name__,
                      argdefs=f.__defaults__,
                      closure=f.__closure__)
@@ -382,19 +646,22 @@ def add_param_indexing(param_name, indexing_func):
     return g</code></pre>
 </details>
 </dd>
-<dt id="vectorbt.utils.indexing.loc_mapper"><code class="name flex">
-<span>def <span class="ident">loc_mapper</span></span>(<span>mapper, like_df, loc_pandas_func)</span>
+<dt id="vectorbt.utils.indexing.mapper_indexing_func"><code class="name flex">
+<span>def <span class="ident">mapper_indexing_func</span></span>(<span>mapper, like_df, pd_indexing_func)</span>
 </code></dt>
 <dd>
-<div class="desc"><p>Broadcast mapper series to a dataframe to perform advanced pandas indexing on it.</p></div>
+<div class="desc"><p>Broadcast <code>mapper</code> Series to DataFrame <code>like_df</code> and perform pandas indexing using <code>pd_indexing_func</code>.</p></div>
 <details class="source">
 <summary>
 <span>Expand source code</span>
 </summary>
-<pre><code class="python">def loc_mapper(mapper, like_df, loc_pandas_func):
-    &#34;&#34;&#34;Broadcast mapper series to a dataframe to perform advanced pandas indexing on it.&#34;&#34;&#34;
-    df_range_mapper = reshape_fns.broadcast_to(np.arange(len(mapper.index)), like_df, index_from=1, columns_from=1)
-    loced_range_mapper = loc_pandas_func(df_range_mapper)
+<pre><code class="python">def mapper_indexing_func(mapper, like_df, pd_indexing_func):
+    &#34;&#34;&#34;Broadcast `mapper` Series to DataFrame `like_df` and perform pandas indexing using `pd_indexing_func`.&#34;&#34;&#34;
+    checks.assert_type(mapper, pd.Series)
+    checks.assert_type(like_df, (pd.Series, pd.DataFrame))
+
+    df_range_mapper = reshape_fns.broadcast_to(np.arange(len(mapper.index)), like_df)
+    loced_range_mapper = pd_indexing_func(df_range_mapper)
     new_mapper = mapper.iloc[loced_range_mapper.values[0]]
     if checks.is_frame(loced_range_mapper):
         return pd.Series(new_mapper.values, index=loced_range_mapper.columns, name=mapper.name)
@@ -420,10 +687,10 @@ def add_param_indexing(param_name, indexing_func):
 </li>
 <li><h3><a href="#header-functions">Functions</a></h3>
 <ul class="">
-<li><code><a title="vectorbt.utils.indexing.add_indexing" href="#vectorbt.utils.indexing.add_indexing">add_indexing</a></code></li>
 <li><code><a title="vectorbt.utils.indexing.add_param_indexing" href="#vectorbt.utils.indexing.add_param_indexing">add_param_indexing</a></code></li>
+<li><code><a title="vectorbt.utils.indexing.add_pd_indexing" href="#vectorbt.utils.indexing.add_pd_indexing">add_pd_indexing</a></code></li>
 <li><code><a title="vectorbt.utils.indexing.copy_func" href="#vectorbt.utils.indexing.copy_func">copy_func</a></code></li>
-<li><code><a title="vectorbt.utils.indexing.loc_mapper" href="#vectorbt.utils.indexing.loc_mapper">loc_mapper</a></code></li>
+<li><code><a title="vectorbt.utils.indexing.mapper_indexing_func" href="#vectorbt.utils.indexing.mapper_indexing_func">mapper_indexing_func</a></code></li>
 </ul>
 </li>
 </ul>

@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1, minimum-scale=1" />
 <meta name="generator" content="pdoc 0.8.1" />
 <title>vectorbt.signals.accessors API documentation</title>
-<meta name="description" content="" />
+<meta name="description" content="Custom pandas accessors for working with signals …" />
 <link href='https://cdnjs.cloudflare.com/ajax/libs/normalize/8.0.0/normalize.min.css' rel='stylesheet'>
 <link href='https://cdnjs.cloudflare.com/ajax/libs/10up-sanitize.css/8.0.0/sanitize.min.css' rel='stylesheet'>
 <link href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/9.12.0/styles/github.min.css" rel="stylesheet">
@@ -20,55 +20,331 @@
 <h1 class="title">Module <code>vectorbt.signals.accessors</code></h1>
 </header>
 <section id="section-intro">
+<p>Custom pandas accessors for working with signals.</p>
+<div class="admonition note">
+<p class="admonition-title">Note</p>
+<p>Input arrays must be <code>numpy.bool</code>.</p>
+</div>
+<p>Before running the examples:</p>
+<pre><code class="py">import vectorbt as vbt
+import numpy as np
+import pandas as pd
+from numba import njit
+from datetime import datetime
+
+index = pd.Index([
+    datetime(2018, 1, 1),
+    datetime(2018, 1, 2),
+    datetime(2018, 1, 3),
+    datetime(2018, 1, 4),
+    datetime(2018, 1, 5)
+])
+columns = ['a', 'b', 'c']
+signals = pd.DataFrame([
+    [True, False, False],
+    [False, True, False],
+    [False, False, True],
+    [True, False, False],
+    [False, True, False]
+], index=index, columns=columns)
+ts = pd.DataFrame([
+    [1, 5, 1],
+    [2, 4, 2],
+    [3, 3, 3],
+    [4, 2, 2],
+    [5, 1, 1]
+], index=index, columns=columns)
+</code></pre>
 <details class="source">
 <summary>
 <span>Expand source code</span>
 </summary>
-<pre><code class="python">import numpy as np
+<pre><code class="python">&#34;&#34;&#34;Custom pandas accessors for working with signals.
+
+!!! note
+    Input arrays must be `numpy.bool`.
+    
+Before running the examples:
+```py
+import vectorbt as vbt
+import numpy as np
+import pandas as pd
+from numba import njit
+from datetime import datetime
+
+index = pd.Index([
+    datetime(2018, 1, 1),
+    datetime(2018, 1, 2),
+    datetime(2018, 1, 3),
+    datetime(2018, 1, 4),
+    datetime(2018, 1, 5)
+])
+columns = [&#39;a&#39;, &#39;b&#39;, &#39;c&#39;]
+signals = pd.DataFrame([
+    [True, False, False],
+    [False, True, False],
+    [False, False, True],
+    [True, False, False],
+    [False, True, False]
+], index=index, columns=columns)
+ts = pd.DataFrame([
+    [1, 5, 1],
+    [2, 4, 2],
+    [3, 3, 3],
+    [4, 2, 2],
+    [5, 1, 1]
+], index=index, columns=columns)
+```&#34;&#34;&#34;
+
+import numpy as np
 import pandas as pd
 import plotly.graph_objects as go
 
 from vectorbt.accessors import register_dataframe_accessor, register_series_accessor
-from vectorbt.utils import checks, reshape_fns, index_fns
-from vectorbt.utils.common import add_safe_nb_methods, cached_property
-from vectorbt.utils.accessors import Base_DFAccessor, Base_SRAccessor
+from vectorbt.utils import checks, reshape_fns, index_fns, common
+from vectorbt.utils.common import add_nb_methods, cached_property
+from vectorbt.utils.accessors import Base_Accessor, Base_DFAccessor, Base_SRAccessor
 from vectorbt.signals import nb
-from vectorbt.widgets import FigureWidget
+from vectorbt.widgets import DefaultFigureWidget
 
 
-@add_safe_nb_methods(
+@add_nb_methods(
     nb.shuffle_nb,
-    nb.fshift_nb)
+    nb.fshift_nb,
+    module_name=&#39;vectorbt.signals.nb&#39;)
 class Signals_Accessor():
-    dtype = np.bool
+    &#34;&#34;&#34;Accessor with methods for both Series and DataFrames.
+
+    Accessible through `pandas.Series.vbt.signals` and `pandas.DataFrame.vbt.signals`.&#34;&#34;&#34;
 
     @classmethod
     def _validate(cls, obj):
-        if cls.dtype is not None:
-            checks.assert_dtype(obj, cls.dtype)
+        checks.assert_dtype(obj, np.bool)
 
-    def random_exits(self, n, every_nth=1, seed=None):
-        return self.wrap_array(nb.random_exits_nb(self.to_2d_array(), reshape_fns.to_1d(n), every_nth, seed))
+    @classmethod
+    def empty(cls, *args, fill_value=False, **kwargs):
+        &#34;&#34;&#34;`vectorbt.utils.accessors.Base_Accessor.empty` with `fill_value=False`.
 
-    def random_exits_by_func(self, choice_func_nb, *args, seed=None):
-        return self.wrap_array(nb.random_exits_by_func_nb(self.to_2d_array(), choice_func_nb, seed, *args))
+        Example:
+            ```python-repl
+            &gt;&gt;&gt; print(pd.DataFrame.vbt.signals.empty((5, 3), 
+            ...     index=index, columns=columns))
+                            a      b      c
+            2018-01-01  False  False  False
+            2018-01-02  False  False  False
+            2018-01-03  False  False  False
+            2018-01-04  False  False  False
+            2018-01-05  False  False  False
+            ```&#34;&#34;&#34;
+        return Base_Accessor.empty(*args, fill_value=fill_value, **kwargs)
 
-    def exits(self, exit_mask_nb, *args, only_first=True):
-        return self.wrap_array(nb.exits_nb(self.to_2d_array(), exit_mask_nb, only_first, *args))
+    @classmethod
+    def empty_like(cls, *args, fill_value=False, **kwargs):
+        &#34;&#34;&#34;`vectorbt.utils.accessors.Base_Accessor.empty_like` with `fill_value=False`.
 
-    def stop_loss_exits(self, ts, stops, relative=True, only_first=True, trailing=False, as_columns=None, broadcast_kwargs={}):
+        Example:
+            ```python-repl
+            &gt;&gt;&gt; print(pd.DataFrame.vbt.signals.empty_like(signals))
+                            a      b      c
+            2018-01-01  False  False  False
+            2018-01-02  False  False  False
+            2018-01-03  False  False  False
+            2018-01-04  False  False  False
+            2018-01-05  False  False  False
+            ```&#34;&#34;&#34;
+        return Base_Accessor.empty_like(*args, fill_value=fill_value, **kwargs)
+
+    @classmethod
+    def generate(cls, shape, choice_func_nb, *args, **kwargs):
+        &#34;&#34;&#34;See `vectorbt.signals.nb.generate_nb`.
+
+        `**kwargs` will be passed to pandas constructor.
+
+        Example:
+            Generate random signals manually:
+
+            ```python-repl
+            &gt;&gt;&gt; @njit
+            ... def choice_func_nb(col, from_i, to_i):
+            ...     return np.random.choice(np.arange(from_i, to_i+1), replace=False)
+
+            &gt;&gt;&gt; print(pd.DataFrame.vbt.signals.generate((5, 3), 
+            ...     choice_func_nb, index=index, columns=columns))
+                            a      b      c
+            2018-01-01  False  False  False
+            2018-01-02  False  False  False
+            2018-01-03  False   True  False
+            2018-01-04   True  False  False
+            2018-01-05  False  False   True
+            ```&#34;&#34;&#34;
+        checks.assert_numba_func(choice_func_nb)
+
+        if not isinstance(shape, tuple):
+            shape = (shape, 1)
+        elif isinstance(shape, tuple) and len(shape) == 1:
+            shape = (shape[0], 1)
+
+        result = nb.generate_nb(shape, choice_func_nb, *args)
+
+        if cls.is_series():
+            return pd.Series(result[:, 0], **kwargs)
+        return pd.DataFrame(result, **kwargs)
+
+    @classmethod
+    def generate_random(cls, shape, n_range, n_prob=None, min_space=None, seed=None, **kwargs):
+        &#34;&#34;&#34;See `vectorbt.signals.nb.generate_random_nb`.
+
+        `**kwargs` will be passed to pandas constructor.
+
+        Example:
+            For each column, generate either 1 (with 30% probability) or 2 (with 70% probability)
+            signals randomly. Leave one position free between signals:
+
+            ```python-repl
+            &gt;&gt;&gt; print(pd.DataFrame.vbt.signals.generate_random((5, 3), [1, 2], 
+            ...     n_prob=[0.3, 0.7], min_space=1, seed=42, index=index, columns=columns))
+                            a      b      c
+            2018-01-01   True  False  False
+            2018-01-02  False   True  False
+            2018-01-03   True  False  False
+            2018-01-04  False   True   True
+            2018-01-05  False  False  False
+            ```&#34;&#34;&#34;
+        if not isinstance(shape, tuple):
+            shape = (shape, 1)
+        elif isinstance(shape, tuple) and len(shape) == 1:
+            shape = (shape[0], 1)
+
+        n_range = reshape_fns.to_1d(n_range)
+        if n_prob is not None:
+            n_prob = reshape_fns.to_1d(n_prob)
+            checks.assert_same_shape(n_range, n_prob)
+        result = nb.generate_random_nb(shape, n_range, n_prob=n_prob, min_space=min_space, seed=seed)
+
+        if cls.is_series():
+            return pd.Series(result[:, 0], **kwargs)
+        return pd.DataFrame(result, **kwargs)
+
+    @classmethod
+    def generate_iteratively(cls, shape, choice_func1_nb, choice_func2_nb, *args, **kwargs):
+        &#34;&#34;&#34;See `vectorbt.signals.nb.generate_iteratively_nb`.
+
+        `**kwargs` will be passed to pandas constructor.
+
+        Example:
+            Generate entry and exit signals one after another:
+
+            ```python-repl
+            &gt;&gt;&gt; @njit
+            ... def choice_func1_nb(col, from_i, to_i):
+            ...     return np.array([from_i])
+            &gt;&gt;&gt; @njit
+            ... def choice_func2_nb(col, from_i, to_i):
+            ...     return np.array([from_i])
+
+            &gt;&gt;&gt; entries, exits = pd.DataFrame.vbt.signals.generate_iteratively(
+            ...     (5, 3), choice_func1_nb, choice_func2_nb, 
+            ...     index=index, columns=columns)
+            &gt;&gt;&gt; print(entries)
+                            a      b      c
+            2018-01-01   True   True   True
+            2018-01-02  False  False  False
+            2018-01-03   True   True   True
+            2018-01-04  False  False  False
+            2018-01-05   True   True   True
+            &gt;&gt;&gt; print(exits)
+                            a      b      c
+            2018-01-01  False  False  False
+            2018-01-02   True   True   True
+            2018-01-03  False  False  False
+            2018-01-04   True   True   True
+            2018-01-05  False  False  False
+            ```&#34;&#34;&#34;
+        checks.assert_numba_func(choice_func1_nb)
+        checks.assert_numba_func(choice_func2_nb)
+
+        if not isinstance(shape, tuple):
+            shape = (shape, 1)
+        elif isinstance(shape, tuple) and len(shape) == 1:
+            shape = (shape[0], 1)
+
+        result1, result2 = nb.generate_iteratively_nb(shape, choice_func1_nb, choice_func2_nb, *args)
+        if cls.is_series():
+            return pd.Series(result1[:, 0], **kwargs), pd.Series(result2[:, 0], **kwargs)
+        return pd.DataFrame(result1, **kwargs), pd.DataFrame(result2, **kwargs)
+
+    def generate_after(self, choice_func_nb, *args):
+        &#34;&#34;&#34;See `vectorbt.signals.nb.generate_after_nb`.
+
+        Example:
+            Fill all space between signals in `signals`:
+
+            ```python-repl
+            &gt;&gt;&gt; @njit
+            ... def choice_func_nb(col, from_i, to_i):
+            ...     return np.arange(from_i, to_i+1)
+
+            &gt;&gt;&gt; print(signals.vbt.signals.generate_after(choice_func_nb))
+                            a      b      c
+            2018-01-01  False  False  False
+            2018-01-02   True  False  False
+            2018-01-03   True   True  False
+            2018-01-04  False   True   True
+            2018-01-05   True  False   True
+            ```&#34;&#34;&#34;
+        checks.assert_numba_func(choice_func_nb)
+
+        return self.wrap_array(nb.generate_after_nb(self.to_2d_array(), choice_func_nb, *args))
+
+    def generate_random_after(self, n_range, n_prob=None, min_space=None, seed=None):
+        &#34;&#34;&#34;See `vectorbt.signals.nb.generate_random_after_nb`.
+
+        Example:
+            Generate exactly one random signal after each signal in `signals`:
+
+            ```python-repl
+            &gt;&gt;&gt; print(signals.vbt.signals.generate_random_after(1, seed=42))
+                            a      b      c
+            2018-01-01  False  False  False
+            2018-01-02  False  False  False
+            2018-01-03   True   True  False
+            2018-01-04  False  False  False
+            2018-01-05   True  False   True
+            ```&#34;&#34;&#34;
+        n_range = reshape_fns.to_1d(n_range)
+        if n_prob is not None:
+            n_prob = reshape_fns.to_1d(n_prob)
+            checks.assert_same_shape(n_range, n_prob)
+        return self.wrap_array(nb.generate_random_after_nb(
+            self.to_2d_array(), n_range, n_prob=n_prob, min_space=min_space, seed=seed))
+
+    def generate_stop_loss(self, ts, stops, trailing=False, as_columns=None, broadcast_kwargs={}):
+        &#34;&#34;&#34;See `vectorbt.signals.nb.stop_loss_nb`.
+
+        Arguments will be broadcasted using `vectorbt.utils.reshape_fns.broadcast`
+        with `broadcast_kwargs`. Argument `stops` can be either a single number, an array of 
+        numbers, or a 3D array, where each matrix corresponds to a single configuration. 
+        Use `as_columns` as a top-level column level.
+
+        Example:
+            For each entry in `signals`, set stop-loss order for 10% and 20% below the price `ts`:
+
+            ```python-repl
+            &gt;&gt;&gt; print(entries.vbt.signals.generate_stop_loss(ts, [0.1, 0.2]))
+            stop_loss                   0.1                  0.2
+                            a      b      c      a      b      c
+            2018-01-01  False  False  False  False  False  False
+            2018-01-02  False   True  False  False  False  False
+            2018-01-03  False  False  False  False  False  False
+            2018-01-04  False   True   True  False   True   True
+            2018-01-05  False  False  False  False  False  False
+            ```&#34;&#34;&#34;
         entries = self._obj
         checks.assert_type(ts, (pd.Series, pd.DataFrame))
-        ts.vbt.timeseries.validate()
 
         entries, ts = reshape_fns.broadcast(entries, ts, **broadcast_kwargs, writeable=True)
         stops = reshape_fns.broadcast_to_array_of(stops, entries.vbt.to_2d_array())
-        stops = stops.astype(np.float64)
-
-        exits = nb.stop_loss_exits_nb(
-            entries.vbt.to_2d_array(),
-            ts.vbt.to_2d_array(),
-            stops, relative, only_first, trailing)
+        exits = nb.generate_stop_loss_nb(entries.vbt.to_2d_array(), ts.vbt.to_2d_array(), stops, trailing)
 
         # Build column hierarchy
         if as_columns is not None:
@@ -76,136 +352,262 @@ class Signals_Accessor():
         else:
             name = &#39;trail_stop&#39; if trailing else &#39;stop_loss&#39;
             param_columns = index_fns.from_values(stops, name=name)
-        columns = index_fns.combine(param_columns, reshape_fns.to_2d(entries).columns)
+        columns = index_fns.combine(param_columns, entries.vbt.columns)
         return entries.vbt.wrap_array(exits, columns=columns)
 
-    def AND(self, *others):
-        # you can also do A &amp; B, but then you need to have the same index and columns
-        return self.combine_with_multiple(others, combine_func=np.logical_and)
-
-    def OR(self, *others):
-        return self.combine_with_multiple(others, combine_func=np.logical_or)
-
-    def XOR(self, *others):
-        return self.combine_with_multiple(others, combine_func=np.logical_xor)
-
-    @cached_property
-    def num_signals(self):
-        return self._obj.sum(axis=0)
-
-    @cached_property
-    def avg_distance(self):
-        sr = pd.Series(nb.avg_distance_nb(self.to_2d_array()), index=reshape_fns.to_2d(self._obj).columns)
-        if isinstance(self._obj, pd.Series):
-            return sr.iloc[0]
-        return sr
-
-    def avg_distance_to(self, other, **kwargs):
-        return self.map_reduce_between(other=other, map_func_nb=nb.diff_map_nb, reduce_func_nb=nb.avg_reduce_nb, **kwargs)
-
     def map_reduce_between(self, *args, other=None, map_func_nb=None, reduce_func_nb=None, broadcast_kwargs={}):
+        &#34;&#34;&#34;See `vectorbt.signals.nb.map_reduce_between_nb`. 
+
+        If `other` specified, see `vectorbt.signals.nb.map_reduce_between_two_nb`.
+
+        Arguments will be broadcasted using `vectorbt.utils.reshape_fns.broadcast`
+        with `broadcast_kwargs`.
+
+        Example:
+            Get maximum distance between signals in `signals`:
+
+            ```python-repl
+            &gt;&gt;&gt; distance_map_nb = njit(lambda col, prev_i, next_i: next_i - prev_i)
+            &gt;&gt;&gt; max_reduce_nb = njit(lambda col, a: np.nanmax(a))
+
+            &gt;&gt;&gt; print(signals.vbt.signals.map_reduce_between(
+            ...     map_func_nb=distance_map_nb, reduce_func_nb=max_reduce_nb))
+            a    3.0
+            b    3.0
+            c    NaN
+            dtype: float64
+            ```&#34;&#34;&#34;
         checks.assert_not_none(map_func_nb)
         checks.assert_not_none(reduce_func_nb)
+        checks.assert_numba_func(map_func_nb)
+        checks.assert_numba_func(reduce_func_nb)
+
         if other is None:
-            result = nb.map_reduce_between_one_nb(self.to_2d_array(), map_func_nb, reduce_func_nb, *args)
+            # One input array
+            result = nb.map_reduce_between_nb(self.to_2d_array(), map_func_nb, reduce_func_nb, *args)
             if isinstance(self._obj, pd.Series):
                 return result[0]
-            return pd.Series(result, index=reshape_fns.to_2d(self._obj).columns)
+            return pd.Series(result, index=self.columns)
         else:
+            # Two input arrays
             obj, other = reshape_fns.broadcast(self._obj, other, **broadcast_kwargs)
             other.vbt.signals.validate()
             result = nb.map_reduce_between_two_nb(
                 self.to_2d_array(), other.vbt.to_2d_array(), map_func_nb, reduce_func_nb, *args)
             if isinstance(obj, pd.Series):
                 return result[0]
-            return pd.Series(result, index=reshape_fns.to_2d(obj).columns)
+            return pd.Series(result, index=obj.vbt.columns)
 
-    def rank(self, reset_signals=None, after_false=False, allow_gaps=False, broadcast_kwargs={}):
-        if reset_signals is not None:
-            obj, reset_signals = reshape_fns.broadcast(self._obj, reset_signals, **broadcast_kwargs)
-            reset_signals = reset_signals.vbt.to_2d_array()
+    @cached_property
+    def num_signals(self):
+        &#34;&#34;&#34;Sum up `True` values.
+
+        Example:
+            ```python-repl
+            &gt;&gt;&gt; print(signals.vbt.signals.num_signals)
+            a    2
+            b    2
+            c    1
+            dtype: int64
+            ```&#34;&#34;&#34;
+        num_signals = self.to_array().sum(axis=0)
+        if self.is_series():
+            return num_signals
+        return pd.Series(num_signals, index=self.columns)
+
+    @cached_property
+    def avg_distance(self):
+        &#34;&#34;&#34;Calculate the average distance between `True` values.
+
+        See `Signals_Accessor.map_reduce_between`.
+
+        Example:
+            ```python-repl
+            &gt;&gt;&gt; print(signals.vbt.signals.avg_distance)
+            a    3.0
+            b    3.0
+            c    NaN
+            dtype: float64
+            ```&#34;&#34;&#34;
+        return self.map_reduce_between(map_func_nb=nb.distance_map_nb, reduce_func_nb=nb.mean_reduce_nb)
+
+    def avg_distance_to(self, other, **kwargs):
+        &#34;&#34;&#34;Calculate the average distance between `True` values in `self` and `other`.
+
+        See `Signals_Accessor.map_reduce_between`.
+
+        Example:
+            Get average distance of `signals` to `signals` shifted by one:
+
+            ```python-repl
+            &gt;&gt;&gt; print(signals.vbt.signals.avg_distance_to(signals.vbt.signals.fshift(1)))
+            a    1.0
+            b    1.0
+            c    1.0
+            dtype: float64
+            ```&#34;&#34;&#34;
+        return self.map_reduce_between(other=other, map_func_nb=nb.distance_map_nb, reduce_func_nb=nb.mean_reduce_nb, **kwargs)
+
+    def rank(self, reset_by=None, after_false=False, allow_gaps=False, broadcast_kwargs={}):
+        &#34;&#34;&#34;See `vectorbt.signals.nb.rank_nb`.
+
+        Example:
+            Rank `False` values in `signals`:
+
+            ```python-repl
+            &gt;&gt;&gt; not_signals = ~signals
+            &gt;&gt;&gt; print(not_signals.vbt.signals.rank())
+                        a  b  c
+            2018-01-01  0  1  1
+            2018-01-02  1  0  2
+            2018-01-03  2  1  0
+            2018-01-04  0  2  1
+            2018-01-05  1  0  2
+            &gt;&gt;&gt; print(not_signals.vbt.signals.rank(after_false=True))
+                        a  b  c
+            2018-01-01  0  0  0
+            2018-01-02  1  0  1
+            2018-01-03  2  1  0
+            2018-01-04  0  2  1
+            2018-01-05  1  0  2
+            &gt;&gt;&gt; print(not_signals.vbt.signals.rank(allow_gaps=True))
+                        a  b  c
+            2018-01-01  0  1  1
+            2018-01-02  1  0  2
+            2018-01-03  2  2  0
+            2018-01-04  0  3  3
+            2018-01-05  3  0  4
+            &gt;&gt;&gt; print(not_signals.vbt.signals.rank(reset_by=signals, allow_gaps=True))
+                        a  b  c
+            2018-01-01  0  1  1
+            2018-01-02  1  0  2
+            2018-01-03  2  1  0
+            2018-01-04  0  2  1
+            2018-01-05  1  0  2
+            ```&#34;&#34;&#34;
+        if reset_by is not None:
+            obj, reset_by = reshape_fns.broadcast(self._obj, reset_by, **broadcast_kwargs)
+            reset_by = reset_by.vbt.to_2d_array()
         else:
             obj = self._obj
         ranked = nb.rank_nb(
             obj.vbt.to_2d_array(),
-            reset_b=reset_signals,
+            reset_by=reset_by,
             after_false=after_false,
             allow_gaps=allow_gaps)
         return obj.vbt.wrap_array(ranked)
 
     def first(self, **kwargs):
+        &#34;&#34;&#34;For each partition of `True` values, get the first `True`.
+
+        See `vectorbt.signals.nb.rank_nb`.
+
+        Example:
+            ```python-repl
+            &gt;&gt;&gt; not_signals = ~signals
+            &gt;&gt;&gt; print(not_signals.vbt.signals.first())
+                            a      b      c
+            2018-01-01  False   True   True
+            2018-01-02   True  False  False
+            2018-01-03  False   True  False
+            2018-01-04  False  False   True
+            2018-01-05   True  False  False
+            ```&#34;&#34;&#34;
         return self.wrap_array(self.rank(**kwargs).values == 1)
 
     def nst(self, n, **kwargs):
+        &#34;&#34;&#34;For each partition of `True` values, get the nst `True`.
+
+        See `vectorbt.signals.nb.rank_nb`.
+
+        Example:
+            ```python-repl
+            &gt;&gt;&gt; not_signals = ~signals
+            &gt;&gt;&gt; print(not_signals.vbt.signals.nst(2, allow_gaps=True))
+                            a      b      c
+            2018-01-01  False  False  False
+            2018-01-02  False  False   True
+            2018-01-03   True   True  False
+            2018-01-04  False  False  False
+            2018-01-05  False  False  False
+            ```&#34;&#34;&#34;
         return self.wrap_array(self.rank(**kwargs).values == n)
 
     def from_nst(self, n, **kwargs):
+        &#34;&#34;&#34;For each partition of `True` values, get the nst `True` and beyond.
+
+        See `vectorbt.signals.nb.rank_nb`.
+
+        Example:
+            ```python-repl
+            &gt;&gt;&gt; not_signals = ~signals
+            &gt;&gt;&gt; print(not_signals.vbt.signals.from_nst(2, allow_gaps=True))
+                            a      b      c
+            2018-01-01  False  False  False
+            2018-01-02  False  False   True
+            2018-01-03   True   True  False
+            2018-01-04  False   True   True
+            2018-01-05   True  False   True
+            ```&#34;&#34;&#34;
         return self.wrap_array(self.rank(**kwargs).values &gt;= n)
 
+    def AND(self, *others, **kwargs):
+        &#34;&#34;&#34;Combine with each in `*others` using logical AND.
 
-@register_dataframe_accessor(&#39;signals&#39;)
-class Signals_DFAccessor(Signals_Accessor, Base_DFAccessor):
+        See `vectorbt.utils.accessors.Base_Accessor.combine_with_multiple`.
 
-    @classmethod
-    def empty(cls, *args, fill_value=False, **kwargs):
-        return Base_DFAccessor.empty(*args, fill_value=fill_value, **kwargs)
+        &#34;&#34;&#34;
+        return self.combine_with_multiple(others, combine_func=np.logical_and, **kwargs)
 
-    @classmethod
-    def empty_like(cls, *args, fill_value=False, **kwargs):
-        return Base_DFAccessor.empty_like(*args, fill_value=fill_value, **kwargs)
+    def OR(self, *others, **kwargs):
+        &#34;&#34;&#34;Combine with each in `*others` using logical OR.
 
-    @classmethod
-    def random(cls, shape, n, every_nth=1, seed=None, multiple=False, name=&#39;random_n&#39;, **kwargs):
-        return pd.DataFrame(nb.random_nb(shape, reshape_fns.to_1d(n), every_nth, seed), **kwargs)
+        See `vectorbt.utils.accessors.Base_Accessor.combine_with_multiple`.
 
-    @classmethod
-    def random_by_func(cls, shape, choice_func_nb, *args, seed=None, **kwargs):
-        return pd.DataFrame(nb.random_by_func_nb(shape, choice_func_nb, seed, *args), **kwargs)
+        Example:
+            ```python-repl
+            &gt;&gt;&gt; print(signals.vbt.signals.OR(ts &gt; 1, ts &gt; 2, 
+            ...     concat=True, as_columns=[&#39;&gt;1&#39;, &#39;&gt;2&#39;]))
+                                       &gt;1                   &gt;2
+                           a     b      c      a      b      c
+            2018-01-01  True  True  False   True   True  False
+            2018-01-02  True  True   True  False   True  False
+            2018-01-03  True  True   True   True   True   True
+            2018-01-04  True  True   True   True  False  False
+            2018-01-05  True  True  False   True   True  False
+            ```&#34;&#34;&#34;
+        return self.combine_with_multiple(others, combine_func=np.logical_or, **kwargs)
 
-    @classmethod
-    def entries_and_exits(cls, shape, entry_mask_nb, exit_mask_nb, *args, **kwargs):
-        entries, exits = nb.entries_and_exits_nb(shape, entry_mask_nb, exit_mask_nb, *args)
-        return pd.DataFrame(entries, **kwargs), pd.DataFrame(exits, **kwargs)
+    def XOR(self, *others, **kwargs):
+        &#34;&#34;&#34;Combine with each in `*others` using logical XOR.
 
-    def plot(self, trace_kwargs={}, fig=None, **layout_kwargs):
-        for col in range(self._obj.shape[1]):
-            fig = self._obj.iloc[:, col].vbt.signals.plot(
-                trace_kwargs=trace_kwargs,
-                fig=fig,
-                **layout_kwargs
-            )
-
-        return fig
+        See `vectorbt.utils.accessors.Base_Accessor.combine_with_multiple`.&#34;&#34;&#34;
+        return self.combine_with_multiple(others, combine_func=np.logical_xor, **kwargs)
 
 
 @register_series_accessor(&#39;signals&#39;)
 class Signals_SRAccessor(Signals_Accessor, Base_SRAccessor):
+    &#34;&#34;&#34;Accessor with methods for Series only.
 
-    @classmethod
-    def empty(cls, *args, fill_value=False, **kwargs):
-        return Base_SRAccessor.empty(*args, fill_value=fill_value, **kwargs)
-
-    @classmethod
-    def empty_like(cls, *args, fill_value=False, **kwargs):
-        return Base_SRAccessor.empty_like(*args, fill_value=fill_value, **kwargs)
-
-    @classmethod
-    def random(cls, size, n, every_nth=1, seed=None, **kwargs):
-        return pd.Series(nb.random_nb((size, 1), reshape_fns.to_1d(n), every_nth, seed)[:, 0], **kwargs)
-
-    @classmethod
-    def random_by_func(cls, size, choice_func_nb, *args, seed=None, **kwargs):
-        return pd.Series(nb.random_by_func_nb(size, choice_func_nb, seed, *args), **kwargs)
-
-    @classmethod
-    def entries_and_exits(cls, size, entry_mask_nb, exit_mask_nb, *args, **kwargs):
-        entries, exits = nb.entries_and_exits_nb((size, 1), entry_mask_nb, exit_mask_nb, *args)
-        return pd.Series(entries[:, 0], **kwargs), pd.Series(exits[:, 0], **kwargs)
+    Accessible through `pandas.Series.vbt.signals`.&#34;&#34;&#34;
 
     def plot(self, name=None, trace_kwargs={}, fig=None, **layout_kwargs):
+        &#34;&#34;&#34;Plot Series as a line.
+
+        Args:
+            name (str): Name of the signals.
+            trace_kwargs (dict): Keyword arguments passed to [`plotly.graph_objects.Scatter`](https://plotly.com/python-api-reference/generated/plotly.graph_objects.Scatter.html).
+            fig (plotly.graph_objects.Figure): Figure to add traces to.
+            **layout_kwargs: Keyword arguments for layout.
+        Example:
+            ```py
+            signals[&#39;a&#39;].vbt.signals.plot()
+            ```
+
+            ![](img/signals_sr_plot.png)&#34;&#34;&#34;
         # Set up figure
         if fig is None:
-            fig = FigureWidget()
+            fig = DefaultFigureWidget()
             fig.update_layout(
                 yaxis=dict(
                     tickmode=&#39;array&#39;,
@@ -216,28 +618,48 @@ class Signals_SRAccessor(Signals_Accessor, Base_SRAccessor):
             fig.update_layout(**layout_kwargs)
         if name is None:
             name = self._obj.name
-        if name is not None:
-            fig.update_layout(showlegend=True)
 
         scatter = go.Scatter(
-            x=self._obj.index,
-            y=self._obj.values,
+            x=self.index,
+            y=self.to_array(),
             mode=&#39;lines&#39;,
-            name=str(name) if name is not None else None
+            name=str(name),
+            showlegend=name is not None
         )
         scatter.update(**trace_kwargs)
         fig.add_trace(scatter)
 
         return fig
 
-    def plot_markers(self, ts, name=None, signal_type=None, trace_kwargs={}, fig=None, **layout_kwargs):
+    def plot_markers(self, ts, name=None, trace_kwargs={}, fig=None, **layout_kwargs):
+        &#34;&#34;&#34;Plot Series as markers.
+
+        Args:
+            ts (pandas.Series): Time series to plot markers on.
+
+                !!! note
+                    Doesn&#39;t plot `ts` itself.
+
+            name (str): Name of the signals.
+            trace_kwargs (dict): Keyword arguments passed to [`plotly.graph_objects.Scatter`](https://plotly.com/python-api-reference/generated/plotly.graph_objects.Scatter.html).
+            fig (plotly.graph_objects.Figure): Figure to add traces to.
+            **layout_kwargs: Keyword arguments for layout.
+        Example:
+            ```py
+            fig = ts[&#39;a&#39;].vbt.timeseries.plot()
+            signals[&#39;a&#39;].vbt.signals.plot_entry_markers(ts[&#39;a&#39;], fig=fig)
+            signals[&#39;b&#39;].vbt.signals.plot_exit_markers(ts[&#39;a&#39;], fig=fig)
+            ```
+
+            ![](img/signals_plot_markers.png)&#34;&#34;&#34;
         checks.assert_type(ts, pd.Series)
-        ts.vbt.timeseries.validate()
         checks.assert_same_index(self._obj, ts)
 
         if fig is None:
-            fig = FigureWidget()
+            fig = DefaultFigureWidget()
             fig.update_layout(**layout_kwargs)
+        if name is None:
+            name = self._obj.name
 
         # Plot markers
         scatter = go.Scatter(
@@ -246,18 +668,65 @@ class Signals_SRAccessor(Signals_Accessor, Base_SRAccessor):
             mode=&#39;markers&#39;,
             marker=dict(
                 size=10
-            )
+            ),
+            name=str(name),
+            showlegend=name is not None
         )
-        if signal_type == &#39;entry&#39;:
-            scatter.marker.symbol = &#39;triangle-up&#39;
-            scatter.marker.color = &#39;limegreen&#39;
-            scatter.name = &#39;Entry&#39;
-        if signal_type == &#39;exit&#39;:
-            scatter.marker.symbol = &#39;triangle-down&#39;
-            scatter.marker.color = &#39;orangered&#39;
-            scatter.name = &#39;Exit&#39;
         scatter.update(**trace_kwargs)
         fig.add_trace(scatter)
+        return fig
+
+    def plot_entry_markers(self, *args, name=&#39;Entry&#39;, trace_kwargs={}, **kwargs):
+        &#34;&#34;&#34;Plot signals as entry markers.
+        
+        See `Signals_SRAccessor.plot_markers`.&#34;&#34;&#34;
+        trace_kwargs = common.merge_kwargs(dict(
+            marker=dict(
+                symbol=&#39;triangle-up&#39;,
+                color=&#39;limegreen&#39;
+            )
+        ), trace_kwargs)
+        return self.plot_markers(*args, name=name, trace_kwargs=trace_kwargs, **kwargs)
+
+    def plot_exit_markers(self, *args, name=&#39;Exit&#39;, trace_kwargs={}, **kwargs):
+        &#34;&#34;&#34;Plot signals as exit markers.
+        
+        See `Signals_SRAccessor.plot_markers`.&#34;&#34;&#34;
+        trace_kwargs = common.merge_kwargs(dict(
+            marker=dict(
+                symbol=&#39;triangle-down&#39;,
+                color=&#39;orangered&#39;
+            )
+        ), trace_kwargs)
+        return self.plot_markers(*args, name=name, trace_kwargs=trace_kwargs, **kwargs)
+
+
+@register_dataframe_accessor(&#39;signals&#39;)
+class Signals_DFAccessor(Signals_Accessor, Base_DFAccessor):
+    &#34;&#34;&#34;Accessor with methods for DataFrames only.
+
+    Accessible through `pandas.DataFrame.vbt.signals`.&#34;&#34;&#34;
+
+    def plot(self, trace_kwargs={}, fig=None, **layout_kwargs):
+        &#34;&#34;&#34;Plot each column in DataFrame as a line.
+
+        Args:
+            trace_kwargs (dict or list of dict): Keyword arguments passed to each [`plotly.graph_objects.Scatter`](https://plotly.com/python-api-reference/generated/plotly.graph_objects.Scatter.html).
+            fig (plotly.graph_objects.Figure): Figure to add traces to.
+            **layout_kwargs: Keyword arguments for layout.
+        Example:
+            ```py
+            signals[[&#39;a&#39;, &#39;c&#39;]].vbt.signals.plot().show_png()
+            ```
+
+            ![](img/signals_signals_plot.png)&#34;&#34;&#34;
+        for col in range(self._obj.shape[1]):
+            fig = self._obj.iloc[:, col].vbt.signals.plot(
+                trace_kwargs=trace_kwargs,
+                fig=fig,
+                **layout_kwargs
+            )
+
         return fig</code></pre>
 </details>
 </section>
@@ -274,41 +743,245 @@ class Signals_SRAccessor(Signals_Accessor, Base_SRAccessor):
 <span>class <span class="ident">Signals_Accessor</span></span>
 </code></dt>
 <dd>
-<div class="desc"></div>
+<div class="desc"><p>Accessor with methods for both Series and DataFrames.</p>
+<p>Accessible through <code>pandas.Series.vbt.signals</code> and <code>pandas.DataFrame.vbt.signals</code>.</p></div>
 <details class="source">
 <summary>
 <span>Expand source code</span>
 </summary>
 <pre><code class="python">class Signals_Accessor():
-    dtype = np.bool
+    &#34;&#34;&#34;Accessor with methods for both Series and DataFrames.
+
+    Accessible through `pandas.Series.vbt.signals` and `pandas.DataFrame.vbt.signals`.&#34;&#34;&#34;
 
     @classmethod
     def _validate(cls, obj):
-        if cls.dtype is not None:
-            checks.assert_dtype(obj, cls.dtype)
+        checks.assert_dtype(obj, np.bool)
 
-    def random_exits(self, n, every_nth=1, seed=None):
-        return self.wrap_array(nb.random_exits_nb(self.to_2d_array(), reshape_fns.to_1d(n), every_nth, seed))
+    @classmethod
+    def empty(cls, *args, fill_value=False, **kwargs):
+        &#34;&#34;&#34;`vectorbt.utils.accessors.Base_Accessor.empty` with `fill_value=False`.
 
-    def random_exits_by_func(self, choice_func_nb, *args, seed=None):
-        return self.wrap_array(nb.random_exits_by_func_nb(self.to_2d_array(), choice_func_nb, seed, *args))
+        Example:
+            ```python-repl
+            &gt;&gt;&gt; print(pd.DataFrame.vbt.signals.empty((5, 3), 
+            ...     index=index, columns=columns))
+                            a      b      c
+            2018-01-01  False  False  False
+            2018-01-02  False  False  False
+            2018-01-03  False  False  False
+            2018-01-04  False  False  False
+            2018-01-05  False  False  False
+            ```&#34;&#34;&#34;
+        return Base_Accessor.empty(*args, fill_value=fill_value, **kwargs)
 
-    def exits(self, exit_mask_nb, *args, only_first=True):
-        return self.wrap_array(nb.exits_nb(self.to_2d_array(), exit_mask_nb, only_first, *args))
+    @classmethod
+    def empty_like(cls, *args, fill_value=False, **kwargs):
+        &#34;&#34;&#34;`vectorbt.utils.accessors.Base_Accessor.empty_like` with `fill_value=False`.
 
-    def stop_loss_exits(self, ts, stops, relative=True, only_first=True, trailing=False, as_columns=None, broadcast_kwargs={}):
+        Example:
+            ```python-repl
+            &gt;&gt;&gt; print(pd.DataFrame.vbt.signals.empty_like(signals))
+                            a      b      c
+            2018-01-01  False  False  False
+            2018-01-02  False  False  False
+            2018-01-03  False  False  False
+            2018-01-04  False  False  False
+            2018-01-05  False  False  False
+            ```&#34;&#34;&#34;
+        return Base_Accessor.empty_like(*args, fill_value=fill_value, **kwargs)
+
+    @classmethod
+    def generate(cls, shape, choice_func_nb, *args, **kwargs):
+        &#34;&#34;&#34;See `vectorbt.signals.nb.generate_nb`.
+
+        `**kwargs` will be passed to pandas constructor.
+
+        Example:
+            Generate random signals manually:
+
+            ```python-repl
+            &gt;&gt;&gt; @njit
+            ... def choice_func_nb(col, from_i, to_i):
+            ...     return np.random.choice(np.arange(from_i, to_i+1), replace=False)
+
+            &gt;&gt;&gt; print(pd.DataFrame.vbt.signals.generate((5, 3), 
+            ...     choice_func_nb, index=index, columns=columns))
+                            a      b      c
+            2018-01-01  False  False  False
+            2018-01-02  False  False  False
+            2018-01-03  False   True  False
+            2018-01-04   True  False  False
+            2018-01-05  False  False   True
+            ```&#34;&#34;&#34;
+        checks.assert_numba_func(choice_func_nb)
+
+        if not isinstance(shape, tuple):
+            shape = (shape, 1)
+        elif isinstance(shape, tuple) and len(shape) == 1:
+            shape = (shape[0], 1)
+
+        result = nb.generate_nb(shape, choice_func_nb, *args)
+
+        if cls.is_series():
+            return pd.Series(result[:, 0], **kwargs)
+        return pd.DataFrame(result, **kwargs)
+
+    @classmethod
+    def generate_random(cls, shape, n_range, n_prob=None, min_space=None, seed=None, **kwargs):
+        &#34;&#34;&#34;See `vectorbt.signals.nb.generate_random_nb`.
+
+        `**kwargs` will be passed to pandas constructor.
+
+        Example:
+            For each column, generate either 1 (with 30% probability) or 2 (with 70% probability)
+            signals randomly. Leave one position free between signals:
+
+            ```python-repl
+            &gt;&gt;&gt; print(pd.DataFrame.vbt.signals.generate_random((5, 3), [1, 2], 
+            ...     n_prob=[0.3, 0.7], min_space=1, seed=42, index=index, columns=columns))
+                            a      b      c
+            2018-01-01   True  False  False
+            2018-01-02  False   True  False
+            2018-01-03   True  False  False
+            2018-01-04  False   True   True
+            2018-01-05  False  False  False
+            ```&#34;&#34;&#34;
+        if not isinstance(shape, tuple):
+            shape = (shape, 1)
+        elif isinstance(shape, tuple) and len(shape) == 1:
+            shape = (shape[0], 1)
+
+        n_range = reshape_fns.to_1d(n_range)
+        if n_prob is not None:
+            n_prob = reshape_fns.to_1d(n_prob)
+            checks.assert_same_shape(n_range, n_prob)
+        result = nb.generate_random_nb(shape, n_range, n_prob=n_prob, min_space=min_space, seed=seed)
+
+        if cls.is_series():
+            return pd.Series(result[:, 0], **kwargs)
+        return pd.DataFrame(result, **kwargs)
+
+    @classmethod
+    def generate_iteratively(cls, shape, choice_func1_nb, choice_func2_nb, *args, **kwargs):
+        &#34;&#34;&#34;See `vectorbt.signals.nb.generate_iteratively_nb`.
+
+        `**kwargs` will be passed to pandas constructor.
+
+        Example:
+            Generate entry and exit signals one after another:
+
+            ```python-repl
+            &gt;&gt;&gt; @njit
+            ... def choice_func1_nb(col, from_i, to_i):
+            ...     return np.array([from_i])
+            &gt;&gt;&gt; @njit
+            ... def choice_func2_nb(col, from_i, to_i):
+            ...     return np.array([from_i])
+
+            &gt;&gt;&gt; entries, exits = pd.DataFrame.vbt.signals.generate_iteratively(
+            ...     (5, 3), choice_func1_nb, choice_func2_nb, 
+            ...     index=index, columns=columns)
+            &gt;&gt;&gt; print(entries)
+                            a      b      c
+            2018-01-01   True   True   True
+            2018-01-02  False  False  False
+            2018-01-03   True   True   True
+            2018-01-04  False  False  False
+            2018-01-05   True   True   True
+            &gt;&gt;&gt; print(exits)
+                            a      b      c
+            2018-01-01  False  False  False
+            2018-01-02   True   True   True
+            2018-01-03  False  False  False
+            2018-01-04   True   True   True
+            2018-01-05  False  False  False
+            ```&#34;&#34;&#34;
+        checks.assert_numba_func(choice_func1_nb)
+        checks.assert_numba_func(choice_func2_nb)
+
+        if not isinstance(shape, tuple):
+            shape = (shape, 1)
+        elif isinstance(shape, tuple) and len(shape) == 1:
+            shape = (shape[0], 1)
+
+        result1, result2 = nb.generate_iteratively_nb(shape, choice_func1_nb, choice_func2_nb, *args)
+        if cls.is_series():
+            return pd.Series(result1[:, 0], **kwargs), pd.Series(result2[:, 0], **kwargs)
+        return pd.DataFrame(result1, **kwargs), pd.DataFrame(result2, **kwargs)
+
+    def generate_after(self, choice_func_nb, *args):
+        &#34;&#34;&#34;See `vectorbt.signals.nb.generate_after_nb`.
+
+        Example:
+            Fill all space between signals in `signals`:
+
+            ```python-repl
+            &gt;&gt;&gt; @njit
+            ... def choice_func_nb(col, from_i, to_i):
+            ...     return np.arange(from_i, to_i+1)
+
+            &gt;&gt;&gt; print(signals.vbt.signals.generate_after(choice_func_nb))
+                            a      b      c
+            2018-01-01  False  False  False
+            2018-01-02   True  False  False
+            2018-01-03   True   True  False
+            2018-01-04  False   True   True
+            2018-01-05   True  False   True
+            ```&#34;&#34;&#34;
+        checks.assert_numba_func(choice_func_nb)
+
+        return self.wrap_array(nb.generate_after_nb(self.to_2d_array(), choice_func_nb, *args))
+
+    def generate_random_after(self, n_range, n_prob=None, min_space=None, seed=None):
+        &#34;&#34;&#34;See `vectorbt.signals.nb.generate_random_after_nb`.
+
+        Example:
+            Generate exactly one random signal after each signal in `signals`:
+
+            ```python-repl
+            &gt;&gt;&gt; print(signals.vbt.signals.generate_random_after(1, seed=42))
+                            a      b      c
+            2018-01-01  False  False  False
+            2018-01-02  False  False  False
+            2018-01-03   True   True  False
+            2018-01-04  False  False  False
+            2018-01-05   True  False   True
+            ```&#34;&#34;&#34;
+        n_range = reshape_fns.to_1d(n_range)
+        if n_prob is not None:
+            n_prob = reshape_fns.to_1d(n_prob)
+            checks.assert_same_shape(n_range, n_prob)
+        return self.wrap_array(nb.generate_random_after_nb(
+            self.to_2d_array(), n_range, n_prob=n_prob, min_space=min_space, seed=seed))
+
+    def generate_stop_loss(self, ts, stops, trailing=False, as_columns=None, broadcast_kwargs={}):
+        &#34;&#34;&#34;See `vectorbt.signals.nb.stop_loss_nb`.
+
+        Arguments will be broadcasted using `vectorbt.utils.reshape_fns.broadcast`
+        with `broadcast_kwargs`. Argument `stops` can be either a single number, an array of 
+        numbers, or a 3D array, where each matrix corresponds to a single configuration. 
+        Use `as_columns` as a top-level column level.
+
+        Example:
+            For each entry in `signals`, set stop-loss order for 10% and 20% below the price `ts`:
+
+            ```python-repl
+            &gt;&gt;&gt; print(entries.vbt.signals.generate_stop_loss(ts, [0.1, 0.2]))
+            stop_loss                   0.1                  0.2
+                            a      b      c      a      b      c
+            2018-01-01  False  False  False  False  False  False
+            2018-01-02  False   True  False  False  False  False
+            2018-01-03  False  False  False  False  False  False
+            2018-01-04  False   True   True  False   True   True
+            2018-01-05  False  False  False  False  False  False
+            ```&#34;&#34;&#34;
         entries = self._obj
         checks.assert_type(ts, (pd.Series, pd.DataFrame))
-        ts.vbt.timeseries.validate()
 
         entries, ts = reshape_fns.broadcast(entries, ts, **broadcast_kwargs, writeable=True)
         stops = reshape_fns.broadcast_to_array_of(stops, entries.vbt.to_2d_array())
-        stops = stops.astype(np.float64)
-
-        exits = nb.stop_loss_exits_nb(
-            entries.vbt.to_2d_array(),
-            ts.vbt.to_2d_array(),
-            stops, relative, only_first, trailing)
+        exits = nb.generate_stop_loss_nb(entries.vbt.to_2d_array(), ts.vbt.to_2d_array(), stops, trailing)
 
         # Build column hierarchy
         if as_columns is not None:
@@ -316,195 +989,742 @@ class Signals_SRAccessor(Signals_Accessor, Base_SRAccessor):
         else:
             name = &#39;trail_stop&#39; if trailing else &#39;stop_loss&#39;
             param_columns = index_fns.from_values(stops, name=name)
-        columns = index_fns.combine(param_columns, reshape_fns.to_2d(entries).columns)
+        columns = index_fns.combine(param_columns, entries.vbt.columns)
         return entries.vbt.wrap_array(exits, columns=columns)
 
-    def AND(self, *others):
-        # you can also do A &amp; B, but then you need to have the same index and columns
-        return self.combine_with_multiple(others, combine_func=np.logical_and)
-
-    def OR(self, *others):
-        return self.combine_with_multiple(others, combine_func=np.logical_or)
-
-    def XOR(self, *others):
-        return self.combine_with_multiple(others, combine_func=np.logical_xor)
-
-    @cached_property
-    def num_signals(self):
-        return self._obj.sum(axis=0)
-
-    @cached_property
-    def avg_distance(self):
-        sr = pd.Series(nb.avg_distance_nb(self.to_2d_array()), index=reshape_fns.to_2d(self._obj).columns)
-        if isinstance(self._obj, pd.Series):
-            return sr.iloc[0]
-        return sr
-
-    def avg_distance_to(self, other, **kwargs):
-        return self.map_reduce_between(other=other, map_func_nb=nb.diff_map_nb, reduce_func_nb=nb.avg_reduce_nb, **kwargs)
-
     def map_reduce_between(self, *args, other=None, map_func_nb=None, reduce_func_nb=None, broadcast_kwargs={}):
+        &#34;&#34;&#34;See `vectorbt.signals.nb.map_reduce_between_nb`. 
+
+        If `other` specified, see `vectorbt.signals.nb.map_reduce_between_two_nb`.
+
+        Arguments will be broadcasted using `vectorbt.utils.reshape_fns.broadcast`
+        with `broadcast_kwargs`.
+
+        Example:
+            Get maximum distance between signals in `signals`:
+
+            ```python-repl
+            &gt;&gt;&gt; distance_map_nb = njit(lambda col, prev_i, next_i: next_i - prev_i)
+            &gt;&gt;&gt; max_reduce_nb = njit(lambda col, a: np.nanmax(a))
+
+            &gt;&gt;&gt; print(signals.vbt.signals.map_reduce_between(
+            ...     map_func_nb=distance_map_nb, reduce_func_nb=max_reduce_nb))
+            a    3.0
+            b    3.0
+            c    NaN
+            dtype: float64
+            ```&#34;&#34;&#34;
         checks.assert_not_none(map_func_nb)
         checks.assert_not_none(reduce_func_nb)
+        checks.assert_numba_func(map_func_nb)
+        checks.assert_numba_func(reduce_func_nb)
+
         if other is None:
-            result = nb.map_reduce_between_one_nb(self.to_2d_array(), map_func_nb, reduce_func_nb, *args)
+            # One input array
+            result = nb.map_reduce_between_nb(self.to_2d_array(), map_func_nb, reduce_func_nb, *args)
             if isinstance(self._obj, pd.Series):
                 return result[0]
-            return pd.Series(result, index=reshape_fns.to_2d(self._obj).columns)
+            return pd.Series(result, index=self.columns)
         else:
+            # Two input arrays
             obj, other = reshape_fns.broadcast(self._obj, other, **broadcast_kwargs)
             other.vbt.signals.validate()
             result = nb.map_reduce_between_two_nb(
                 self.to_2d_array(), other.vbt.to_2d_array(), map_func_nb, reduce_func_nb, *args)
             if isinstance(obj, pd.Series):
                 return result[0]
-            return pd.Series(result, index=reshape_fns.to_2d(obj).columns)
+            return pd.Series(result, index=obj.vbt.columns)
 
-    def rank(self, reset_signals=None, after_false=False, allow_gaps=False, broadcast_kwargs={}):
-        if reset_signals is not None:
-            obj, reset_signals = reshape_fns.broadcast(self._obj, reset_signals, **broadcast_kwargs)
-            reset_signals = reset_signals.vbt.to_2d_array()
+    @cached_property
+    def num_signals(self):
+        &#34;&#34;&#34;Sum up `True` values.
+
+        Example:
+            ```python-repl
+            &gt;&gt;&gt; print(signals.vbt.signals.num_signals)
+            a    2
+            b    2
+            c    1
+            dtype: int64
+            ```&#34;&#34;&#34;
+        num_signals = self.to_array().sum(axis=0)
+        if self.is_series():
+            return num_signals
+        return pd.Series(num_signals, index=self.columns)
+
+    @cached_property
+    def avg_distance(self):
+        &#34;&#34;&#34;Calculate the average distance between `True` values.
+
+        See `Signals_Accessor.map_reduce_between`.
+
+        Example:
+            ```python-repl
+            &gt;&gt;&gt; print(signals.vbt.signals.avg_distance)
+            a    3.0
+            b    3.0
+            c    NaN
+            dtype: float64
+            ```&#34;&#34;&#34;
+        return self.map_reduce_between(map_func_nb=nb.distance_map_nb, reduce_func_nb=nb.mean_reduce_nb)
+
+    def avg_distance_to(self, other, **kwargs):
+        &#34;&#34;&#34;Calculate the average distance between `True` values in `self` and `other`.
+
+        See `Signals_Accessor.map_reduce_between`.
+
+        Example:
+            Get average distance of `signals` to `signals` shifted by one:
+
+            ```python-repl
+            &gt;&gt;&gt; print(signals.vbt.signals.avg_distance_to(signals.vbt.signals.fshift(1)))
+            a    1.0
+            b    1.0
+            c    1.0
+            dtype: float64
+            ```&#34;&#34;&#34;
+        return self.map_reduce_between(other=other, map_func_nb=nb.distance_map_nb, reduce_func_nb=nb.mean_reduce_nb, **kwargs)
+
+    def rank(self, reset_by=None, after_false=False, allow_gaps=False, broadcast_kwargs={}):
+        &#34;&#34;&#34;See `vectorbt.signals.nb.rank_nb`.
+
+        Example:
+            Rank `False` values in `signals`:
+
+            ```python-repl
+            &gt;&gt;&gt; not_signals = ~signals
+            &gt;&gt;&gt; print(not_signals.vbt.signals.rank())
+                        a  b  c
+            2018-01-01  0  1  1
+            2018-01-02  1  0  2
+            2018-01-03  2  1  0
+            2018-01-04  0  2  1
+            2018-01-05  1  0  2
+            &gt;&gt;&gt; print(not_signals.vbt.signals.rank(after_false=True))
+                        a  b  c
+            2018-01-01  0  0  0
+            2018-01-02  1  0  1
+            2018-01-03  2  1  0
+            2018-01-04  0  2  1
+            2018-01-05  1  0  2
+            &gt;&gt;&gt; print(not_signals.vbt.signals.rank(allow_gaps=True))
+                        a  b  c
+            2018-01-01  0  1  1
+            2018-01-02  1  0  2
+            2018-01-03  2  2  0
+            2018-01-04  0  3  3
+            2018-01-05  3  0  4
+            &gt;&gt;&gt; print(not_signals.vbt.signals.rank(reset_by=signals, allow_gaps=True))
+                        a  b  c
+            2018-01-01  0  1  1
+            2018-01-02  1  0  2
+            2018-01-03  2  1  0
+            2018-01-04  0  2  1
+            2018-01-05  1  0  2
+            ```&#34;&#34;&#34;
+        if reset_by is not None:
+            obj, reset_by = reshape_fns.broadcast(self._obj, reset_by, **broadcast_kwargs)
+            reset_by = reset_by.vbt.to_2d_array()
         else:
             obj = self._obj
         ranked = nb.rank_nb(
             obj.vbt.to_2d_array(),
-            reset_b=reset_signals,
+            reset_by=reset_by,
             after_false=after_false,
             allow_gaps=allow_gaps)
         return obj.vbt.wrap_array(ranked)
 
     def first(self, **kwargs):
+        &#34;&#34;&#34;For each partition of `True` values, get the first `True`.
+
+        See `vectorbt.signals.nb.rank_nb`.
+
+        Example:
+            ```python-repl
+            &gt;&gt;&gt; not_signals = ~signals
+            &gt;&gt;&gt; print(not_signals.vbt.signals.first())
+                            a      b      c
+            2018-01-01  False   True   True
+            2018-01-02   True  False  False
+            2018-01-03  False   True  False
+            2018-01-04  False  False   True
+            2018-01-05   True  False  False
+            ```&#34;&#34;&#34;
         return self.wrap_array(self.rank(**kwargs).values == 1)
 
     def nst(self, n, **kwargs):
+        &#34;&#34;&#34;For each partition of `True` values, get the nst `True`.
+
+        See `vectorbt.signals.nb.rank_nb`.
+
+        Example:
+            ```python-repl
+            &gt;&gt;&gt; not_signals = ~signals
+            &gt;&gt;&gt; print(not_signals.vbt.signals.nst(2, allow_gaps=True))
+                            a      b      c
+            2018-01-01  False  False  False
+            2018-01-02  False  False   True
+            2018-01-03   True   True  False
+            2018-01-04  False  False  False
+            2018-01-05  False  False  False
+            ```&#34;&#34;&#34;
         return self.wrap_array(self.rank(**kwargs).values == n)
 
     def from_nst(self, n, **kwargs):
-        return self.wrap_array(self.rank(**kwargs).values &gt;= n)</code></pre>
+        &#34;&#34;&#34;For each partition of `True` values, get the nst `True` and beyond.
+
+        See `vectorbt.signals.nb.rank_nb`.
+
+        Example:
+            ```python-repl
+            &gt;&gt;&gt; not_signals = ~signals
+            &gt;&gt;&gt; print(not_signals.vbt.signals.from_nst(2, allow_gaps=True))
+                            a      b      c
+            2018-01-01  False  False  False
+            2018-01-02  False  False   True
+            2018-01-03   True   True  False
+            2018-01-04  False   True   True
+            2018-01-05   True  False   True
+            ```&#34;&#34;&#34;
+        return self.wrap_array(self.rank(**kwargs).values &gt;= n)
+
+    def AND(self, *others, **kwargs):
+        &#34;&#34;&#34;Combine with each in `*others` using logical AND.
+
+        See `vectorbt.utils.accessors.Base_Accessor.combine_with_multiple`.
+
+        &#34;&#34;&#34;
+        return self.combine_with_multiple(others, combine_func=np.logical_and, **kwargs)
+
+    def OR(self, *others, **kwargs):
+        &#34;&#34;&#34;Combine with each in `*others` using logical OR.
+
+        See `vectorbt.utils.accessors.Base_Accessor.combine_with_multiple`.
+
+        Example:
+            ```python-repl
+            &gt;&gt;&gt; print(signals.vbt.signals.OR(ts &gt; 1, ts &gt; 2, 
+            ...     concat=True, as_columns=[&#39;&gt;1&#39;, &#39;&gt;2&#39;]))
+                                       &gt;1                   &gt;2
+                           a     b      c      a      b      c
+            2018-01-01  True  True  False   True   True  False
+            2018-01-02  True  True   True  False   True  False
+            2018-01-03  True  True   True   True   True   True
+            2018-01-04  True  True   True   True  False  False
+            2018-01-05  True  True  False   True   True  False
+            ```&#34;&#34;&#34;
+        return self.combine_with_multiple(others, combine_func=np.logical_or, **kwargs)
+
+    def XOR(self, *others, **kwargs):
+        &#34;&#34;&#34;Combine with each in `*others` using logical XOR.
+
+        See `vectorbt.utils.accessors.Base_Accessor.combine_with_multiple`.&#34;&#34;&#34;
+        return self.combine_with_multiple(others, combine_func=np.logical_xor, **kwargs)</code></pre>
 </details>
 <h3>Subclasses</h3>
 <ul class="hlist">
 <li><a title="vectorbt.signals.accessors.Signals_DFAccessor" href="#vectorbt.signals.accessors.Signals_DFAccessor">Signals_DFAccessor</a></li>
 <li><a title="vectorbt.signals.accessors.Signals_SRAccessor" href="#vectorbt.signals.accessors.Signals_SRAccessor">Signals_SRAccessor</a></li>
 </ul>
-<h3>Class variables</h3>
+<h3>Static methods</h3>
 <dl>
-<dt id="vectorbt.signals.accessors.Signals_Accessor.dtype"><code class="name">var <span class="ident">dtype</span></code></dt>
+<dt id="vectorbt.signals.accessors.Signals_Accessor.empty"><code class="name flex">
+<span>def <span class="ident">empty</span></span>(<span>*args, fill_value=False, **kwargs)</span>
+</code></dt>
 <dd>
-<div class="desc"><p>bool(x) -&gt; bool</p>
-<p>Returns True when the argument x is true, False otherwise.
-The builtins True and False are the only two instances of the class bool.
-The class bool is a subclass of the class int, and cannot be subclassed.</p></div>
+<div class="desc"><p><code><a title="vectorbt.utils.accessors.Base_Accessor.empty" href="../utils/accessors.html#vectorbt.utils.accessors.Base_Accessor.empty">Base_Accessor.empty()</a></code> with <code>fill_value=False</code>.</p>
+<h2 id="example">Example</h2>
+<pre><code class="python-repl">&gt;&gt;&gt; print(pd.DataFrame.vbt.signals.empty((5, 3), 
+...     index=index, columns=columns))
+                a      b      c
+2018-01-01  False  False  False
+2018-01-02  False  False  False
+2018-01-03  False  False  False
+2018-01-04  False  False  False
+2018-01-05  False  False  False
+</code></pre></div>
+<details class="source">
+<summary>
+<span>Expand source code</span>
+</summary>
+<pre><code class="python">@classmethod
+def empty(cls, *args, fill_value=False, **kwargs):
+    &#34;&#34;&#34;`vectorbt.utils.accessors.Base_Accessor.empty` with `fill_value=False`.
+
+    Example:
+        ```python-repl
+        &gt;&gt;&gt; print(pd.DataFrame.vbt.signals.empty((5, 3), 
+        ...     index=index, columns=columns))
+                        a      b      c
+        2018-01-01  False  False  False
+        2018-01-02  False  False  False
+        2018-01-03  False  False  False
+        2018-01-04  False  False  False
+        2018-01-05  False  False  False
+        ```&#34;&#34;&#34;
+    return Base_Accessor.empty(*args, fill_value=fill_value, **kwargs)</code></pre>
+</details>
+</dd>
+<dt id="vectorbt.signals.accessors.Signals_Accessor.empty_like"><code class="name flex">
+<span>def <span class="ident">empty_like</span></span>(<span>*args, fill_value=False, **kwargs)</span>
+</code></dt>
+<dd>
+<div class="desc"><p><code><a title="vectorbt.utils.accessors.Base_Accessor.empty_like" href="../utils/accessors.html#vectorbt.utils.accessors.Base_Accessor.empty_like">Base_Accessor.empty_like()</a></code> with <code>fill_value=False</code>.</p>
+<h2 id="example">Example</h2>
+<pre><code class="python-repl">&gt;&gt;&gt; print(pd.DataFrame.vbt.signals.empty_like(signals))
+                a      b      c
+2018-01-01  False  False  False
+2018-01-02  False  False  False
+2018-01-03  False  False  False
+2018-01-04  False  False  False
+2018-01-05  False  False  False
+</code></pre></div>
+<details class="source">
+<summary>
+<span>Expand source code</span>
+</summary>
+<pre><code class="python">@classmethod
+def empty_like(cls, *args, fill_value=False, **kwargs):
+    &#34;&#34;&#34;`vectorbt.utils.accessors.Base_Accessor.empty_like` with `fill_value=False`.
+
+    Example:
+        ```python-repl
+        &gt;&gt;&gt; print(pd.DataFrame.vbt.signals.empty_like(signals))
+                        a      b      c
+        2018-01-01  False  False  False
+        2018-01-02  False  False  False
+        2018-01-03  False  False  False
+        2018-01-04  False  False  False
+        2018-01-05  False  False  False
+        ```&#34;&#34;&#34;
+    return Base_Accessor.empty_like(*args, fill_value=fill_value, **kwargs)</code></pre>
+</details>
+</dd>
+<dt id="vectorbt.signals.accessors.Signals_Accessor.generate"><code class="name flex">
+<span>def <span class="ident">generate</span></span>(<span>shape, choice_func_nb, *args, **kwargs)</span>
+</code></dt>
+<dd>
+<div class="desc"><p>See <code><a title="vectorbt.signals.nb.generate_nb" href="nb.html#vectorbt.signals.nb.generate_nb">generate_nb()</a></code>.</p>
+<p><code>**kwargs</code> will be passed to pandas constructor.</p>
+<h2 id="example">Example</h2>
+<p>Generate random signals manually:</p>
+<pre><code class="python-repl">&gt;&gt;&gt; @njit
+... def choice_func_nb(col, from_i, to_i):
+...     return np.random.choice(np.arange(from_i, to_i+1), replace=False)
+
+&gt;&gt;&gt; print(pd.DataFrame.vbt.signals.generate((5, 3), 
+...     choice_func_nb, index=index, columns=columns))
+                a      b      c
+2018-01-01  False  False  False
+2018-01-02  False  False  False
+2018-01-03  False   True  False
+2018-01-04   True  False  False
+2018-01-05  False  False   True
+</code></pre></div>
+<details class="source">
+<summary>
+<span>Expand source code</span>
+</summary>
+<pre><code class="python">@classmethod
+def generate(cls, shape, choice_func_nb, *args, **kwargs):
+    &#34;&#34;&#34;See `vectorbt.signals.nb.generate_nb`.
+
+    `**kwargs` will be passed to pandas constructor.
+
+    Example:
+        Generate random signals manually:
+
+        ```python-repl
+        &gt;&gt;&gt; @njit
+        ... def choice_func_nb(col, from_i, to_i):
+        ...     return np.random.choice(np.arange(from_i, to_i+1), replace=False)
+
+        &gt;&gt;&gt; print(pd.DataFrame.vbt.signals.generate((5, 3), 
+        ...     choice_func_nb, index=index, columns=columns))
+                        a      b      c
+        2018-01-01  False  False  False
+        2018-01-02  False  False  False
+        2018-01-03  False   True  False
+        2018-01-04   True  False  False
+        2018-01-05  False  False   True
+        ```&#34;&#34;&#34;
+    checks.assert_numba_func(choice_func_nb)
+
+    if not isinstance(shape, tuple):
+        shape = (shape, 1)
+    elif isinstance(shape, tuple) and len(shape) == 1:
+        shape = (shape[0], 1)
+
+    result = nb.generate_nb(shape, choice_func_nb, *args)
+
+    if cls.is_series():
+        return pd.Series(result[:, 0], **kwargs)
+    return pd.DataFrame(result, **kwargs)</code></pre>
+</details>
+</dd>
+<dt id="vectorbt.signals.accessors.Signals_Accessor.generate_iteratively"><code class="name flex">
+<span>def <span class="ident">generate_iteratively</span></span>(<span>shape, choice_func1_nb, choice_func2_nb, *args, **kwargs)</span>
+</code></dt>
+<dd>
+<div class="desc"><p>See <code><a title="vectorbt.signals.nb.generate_iteratively_nb" href="nb.html#vectorbt.signals.nb.generate_iteratively_nb">generate_iteratively_nb()</a></code>.</p>
+<p><code>**kwargs</code> will be passed to pandas constructor.</p>
+<h2 id="example">Example</h2>
+<p>Generate entry and exit signals one after another:</p>
+<pre><code class="python-repl">&gt;&gt;&gt; @njit
+... def choice_func1_nb(col, from_i, to_i):
+...     return np.array([from_i])
+&gt;&gt;&gt; @njit
+... def choice_func2_nb(col, from_i, to_i):
+...     return np.array([from_i])
+
+&gt;&gt;&gt; entries, exits = pd.DataFrame.vbt.signals.generate_iteratively(
+...     (5, 3), choice_func1_nb, choice_func2_nb, 
+...     index=index, columns=columns)
+&gt;&gt;&gt; print(entries)
+                a      b      c
+2018-01-01   True   True   True
+2018-01-02  False  False  False
+2018-01-03   True   True   True
+2018-01-04  False  False  False
+2018-01-05   True   True   True
+&gt;&gt;&gt; print(exits)
+                a      b      c
+2018-01-01  False  False  False
+2018-01-02   True   True   True
+2018-01-03  False  False  False
+2018-01-04   True   True   True
+2018-01-05  False  False  False
+</code></pre></div>
+<details class="source">
+<summary>
+<span>Expand source code</span>
+</summary>
+<pre><code class="python">@classmethod
+def generate_iteratively(cls, shape, choice_func1_nb, choice_func2_nb, *args, **kwargs):
+    &#34;&#34;&#34;See `vectorbt.signals.nb.generate_iteratively_nb`.
+
+    `**kwargs` will be passed to pandas constructor.
+
+    Example:
+        Generate entry and exit signals one after another:
+
+        ```python-repl
+        &gt;&gt;&gt; @njit
+        ... def choice_func1_nb(col, from_i, to_i):
+        ...     return np.array([from_i])
+        &gt;&gt;&gt; @njit
+        ... def choice_func2_nb(col, from_i, to_i):
+        ...     return np.array([from_i])
+
+        &gt;&gt;&gt; entries, exits = pd.DataFrame.vbt.signals.generate_iteratively(
+        ...     (5, 3), choice_func1_nb, choice_func2_nb, 
+        ...     index=index, columns=columns)
+        &gt;&gt;&gt; print(entries)
+                        a      b      c
+        2018-01-01   True   True   True
+        2018-01-02  False  False  False
+        2018-01-03   True   True   True
+        2018-01-04  False  False  False
+        2018-01-05   True   True   True
+        &gt;&gt;&gt; print(exits)
+                        a      b      c
+        2018-01-01  False  False  False
+        2018-01-02   True   True   True
+        2018-01-03  False  False  False
+        2018-01-04   True   True   True
+        2018-01-05  False  False  False
+        ```&#34;&#34;&#34;
+    checks.assert_numba_func(choice_func1_nb)
+    checks.assert_numba_func(choice_func2_nb)
+
+    if not isinstance(shape, tuple):
+        shape = (shape, 1)
+    elif isinstance(shape, tuple) and len(shape) == 1:
+        shape = (shape[0], 1)
+
+    result1, result2 = nb.generate_iteratively_nb(shape, choice_func1_nb, choice_func2_nb, *args)
+    if cls.is_series():
+        return pd.Series(result1[:, 0], **kwargs), pd.Series(result2[:, 0], **kwargs)
+    return pd.DataFrame(result1, **kwargs), pd.DataFrame(result2, **kwargs)</code></pre>
+</details>
+</dd>
+<dt id="vectorbt.signals.accessors.Signals_Accessor.generate_random"><code class="name flex">
+<span>def <span class="ident">generate_random</span></span>(<span>shape, n_range, n_prob=None, min_space=None, seed=None, **kwargs)</span>
+</code></dt>
+<dd>
+<div class="desc"><p>See <code><a title="vectorbt.signals.nb.generate_random_nb" href="nb.html#vectorbt.signals.nb.generate_random_nb">generate_random_nb()</a></code>.</p>
+<p><code>**kwargs</code> will be passed to pandas constructor.</p>
+<h2 id="example">Example</h2>
+<p>For each column, generate either 1 (with 30% probability) or 2 (with 70% probability)
+signals randomly. Leave one position free between signals:</p>
+<pre><code class="python-repl">&gt;&gt;&gt; print(pd.DataFrame.vbt.signals.generate_random((5, 3), [1, 2], 
+...     n_prob=[0.3, 0.7], min_space=1, seed=42, index=index, columns=columns))
+                a      b      c
+2018-01-01   True  False  False
+2018-01-02  False   True  False
+2018-01-03   True  False  False
+2018-01-04  False   True   True
+2018-01-05  False  False  False
+</code></pre></div>
+<details class="source">
+<summary>
+<span>Expand source code</span>
+</summary>
+<pre><code class="python">@classmethod
+def generate_random(cls, shape, n_range, n_prob=None, min_space=None, seed=None, **kwargs):
+    &#34;&#34;&#34;See `vectorbt.signals.nb.generate_random_nb`.
+
+    `**kwargs` will be passed to pandas constructor.
+
+    Example:
+        For each column, generate either 1 (with 30% probability) or 2 (with 70% probability)
+        signals randomly. Leave one position free between signals:
+
+        ```python-repl
+        &gt;&gt;&gt; print(pd.DataFrame.vbt.signals.generate_random((5, 3), [1, 2], 
+        ...     n_prob=[0.3, 0.7], min_space=1, seed=42, index=index, columns=columns))
+                        a      b      c
+        2018-01-01   True  False  False
+        2018-01-02  False   True  False
+        2018-01-03   True  False  False
+        2018-01-04  False   True   True
+        2018-01-05  False  False  False
+        ```&#34;&#34;&#34;
+    if not isinstance(shape, tuple):
+        shape = (shape, 1)
+    elif isinstance(shape, tuple) and len(shape) == 1:
+        shape = (shape[0], 1)
+
+    n_range = reshape_fns.to_1d(n_range)
+    if n_prob is not None:
+        n_prob = reshape_fns.to_1d(n_prob)
+        checks.assert_same_shape(n_range, n_prob)
+    result = nb.generate_random_nb(shape, n_range, n_prob=n_prob, min_space=min_space, seed=seed)
+
+    if cls.is_series():
+        return pd.Series(result[:, 0], **kwargs)
+    return pd.DataFrame(result, **kwargs)</code></pre>
+</details>
 </dd>
 </dl>
 <h3>Instance variables</h3>
 <dl>
 <dt id="vectorbt.signals.accessors.Signals_Accessor.avg_distance"><code class="name">var <span class="ident">avg_distance</span></code></dt>
 <dd>
-<div class="desc"></div>
+<div class="desc"><p>Calculate the average distance between <code>True</code> values.</p>
+<p>See <code><a title="vectorbt.signals.accessors.Signals_Accessor.map_reduce_between" href="#vectorbt.signals.accessors.Signals_Accessor.map_reduce_between">Signals_Accessor.map_reduce_between()</a></code>.</p>
+<h2 id="example">Example</h2>
+<pre><code class="python-repl">&gt;&gt;&gt; print(signals.vbt.signals.avg_distance)
+a    3.0
+b    3.0
+c    NaN
+dtype: float64
+</code></pre></div>
 <details class="source">
 <summary>
 <span>Expand source code</span>
 </summary>
 <pre><code class="python">@cached_property
 def avg_distance(self):
-    sr = pd.Series(nb.avg_distance_nb(self.to_2d_array()), index=reshape_fns.to_2d(self._obj).columns)
-    if isinstance(self._obj, pd.Series):
-        return sr.iloc[0]
-    return sr</code></pre>
+    &#34;&#34;&#34;Calculate the average distance between `True` values.
+
+    See `Signals_Accessor.map_reduce_between`.
+
+    Example:
+        ```python-repl
+        &gt;&gt;&gt; print(signals.vbt.signals.avg_distance)
+        a    3.0
+        b    3.0
+        c    NaN
+        dtype: float64
+        ```&#34;&#34;&#34;
+    return self.map_reduce_between(map_func_nb=nb.distance_map_nb, reduce_func_nb=nb.mean_reduce_nb)</code></pre>
 </details>
 </dd>
 <dt id="vectorbt.signals.accessors.Signals_Accessor.num_signals"><code class="name">var <span class="ident">num_signals</span></code></dt>
 <dd>
-<div class="desc"></div>
+<div class="desc"><p>Sum up <code>True</code> values.</p>
+<h2 id="example">Example</h2>
+<pre><code class="python-repl">&gt;&gt;&gt; print(signals.vbt.signals.num_signals)
+a    2
+b    2
+c    1
+dtype: int64
+</code></pre></div>
 <details class="source">
 <summary>
 <span>Expand source code</span>
 </summary>
 <pre><code class="python">@cached_property
 def num_signals(self):
-    return self._obj.sum(axis=0)</code></pre>
+    &#34;&#34;&#34;Sum up `True` values.
+
+    Example:
+        ```python-repl
+        &gt;&gt;&gt; print(signals.vbt.signals.num_signals)
+        a    2
+        b    2
+        c    1
+        dtype: int64
+        ```&#34;&#34;&#34;
+    num_signals = self.to_array().sum(axis=0)
+    if self.is_series():
+        return num_signals
+    return pd.Series(num_signals, index=self.columns)</code></pre>
 </details>
 </dd>
 </dl>
 <h3>Methods</h3>
 <dl>
 <dt id="vectorbt.signals.accessors.Signals_Accessor.AND"><code class="name flex">
-<span>def <span class="ident">AND</span></span>(<span>self, *others)</span>
+<span>def <span class="ident">AND</span></span>(<span>self, *others, **kwargs)</span>
 </code></dt>
 <dd>
-<div class="desc"></div>
+<div class="desc"><p>Combine with each in <code>*others</code> using logical AND.</p>
+<p>See <code><a title="vectorbt.utils.accessors.Base_Accessor.combine_with_multiple" href="../utils/accessors.html#vectorbt.utils.accessors.Base_Accessor.combine_with_multiple">Base_Accessor.combine_with_multiple()</a></code>.</p></div>
 <details class="source">
 <summary>
 <span>Expand source code</span>
 </summary>
-<pre><code class="python">def AND(self, *others):
-    # you can also do A &amp; B, but then you need to have the same index and columns
-    return self.combine_with_multiple(others, combine_func=np.logical_and)</code></pre>
+<pre><code class="python">def AND(self, *others, **kwargs):
+    &#34;&#34;&#34;Combine with each in `*others` using logical AND.
+
+    See `vectorbt.utils.accessors.Base_Accessor.combine_with_multiple`.
+
+    &#34;&#34;&#34;
+    return self.combine_with_multiple(others, combine_func=np.logical_and, **kwargs)</code></pre>
 </details>
 </dd>
 <dt id="vectorbt.signals.accessors.Signals_Accessor.OR"><code class="name flex">
-<span>def <span class="ident">OR</span></span>(<span>self, *others)</span>
+<span>def <span class="ident">OR</span></span>(<span>self, *others, **kwargs)</span>
 </code></dt>
 <dd>
-<div class="desc"></div>
+<div class="desc"><p>Combine with each in <code>*others</code> using logical OR.</p>
+<p>See <code><a title="vectorbt.utils.accessors.Base_Accessor.combine_with_multiple" href="../utils/accessors.html#vectorbt.utils.accessors.Base_Accessor.combine_with_multiple">Base_Accessor.combine_with_multiple()</a></code>.</p>
+<h2 id="example">Example</h2>
+<pre><code class="python-repl">&gt;&gt;&gt; print(signals.vbt.signals.OR(ts &gt; 1, ts &gt; 2, 
+...     concat=True, as_columns=['&gt;1', '&gt;2']))
+                           &gt;1                   &gt;2
+               a     b      c      a      b      c
+2018-01-01  True  True  False   True   True  False
+2018-01-02  True  True   True  False   True  False
+2018-01-03  True  True   True   True   True   True
+2018-01-04  True  True   True   True  False  False
+2018-01-05  True  True  False   True   True  False
+</code></pre></div>
 <details class="source">
 <summary>
 <span>Expand source code</span>
 </summary>
-<pre><code class="python">def OR(self, *others):
-    return self.combine_with_multiple(others, combine_func=np.logical_or)</code></pre>
+<pre><code class="python">def OR(self, *others, **kwargs):
+    &#34;&#34;&#34;Combine with each in `*others` using logical OR.
+
+    See `vectorbt.utils.accessors.Base_Accessor.combine_with_multiple`.
+
+    Example:
+        ```python-repl
+        &gt;&gt;&gt; print(signals.vbt.signals.OR(ts &gt; 1, ts &gt; 2, 
+        ...     concat=True, as_columns=[&#39;&gt;1&#39;, &#39;&gt;2&#39;]))
+                                   &gt;1                   &gt;2
+                       a     b      c      a      b      c
+        2018-01-01  True  True  False   True   True  False
+        2018-01-02  True  True   True  False   True  False
+        2018-01-03  True  True   True   True   True   True
+        2018-01-04  True  True   True   True  False  False
+        2018-01-05  True  True  False   True   True  False
+        ```&#34;&#34;&#34;
+    return self.combine_with_multiple(others, combine_func=np.logical_or, **kwargs)</code></pre>
 </details>
 </dd>
 <dt id="vectorbt.signals.accessors.Signals_Accessor.XOR"><code class="name flex">
-<span>def <span class="ident">XOR</span></span>(<span>self, *others)</span>
+<span>def <span class="ident">XOR</span></span>(<span>self, *others, **kwargs)</span>
 </code></dt>
 <dd>
-<div class="desc"></div>
+<div class="desc"><p>Combine with each in <code>*others</code> using logical XOR.</p>
+<p>See <code><a title="vectorbt.utils.accessors.Base_Accessor.combine_with_multiple" href="../utils/accessors.html#vectorbt.utils.accessors.Base_Accessor.combine_with_multiple">Base_Accessor.combine_with_multiple()</a></code>.</p></div>
 <details class="source">
 <summary>
 <span>Expand source code</span>
 </summary>
-<pre><code class="python">def XOR(self, *others):
-    return self.combine_with_multiple(others, combine_func=np.logical_xor)</code></pre>
+<pre><code class="python">def XOR(self, *others, **kwargs):
+    &#34;&#34;&#34;Combine with each in `*others` using logical XOR.
+
+    See `vectorbt.utils.accessors.Base_Accessor.combine_with_multiple`.&#34;&#34;&#34;
+    return self.combine_with_multiple(others, combine_func=np.logical_xor, **kwargs)</code></pre>
 </details>
 </dd>
 <dt id="vectorbt.signals.accessors.Signals_Accessor.avg_distance_to"><code class="name flex">
 <span>def <span class="ident">avg_distance_to</span></span>(<span>self, other, **kwargs)</span>
 </code></dt>
 <dd>
-<div class="desc"></div>
+<div class="desc"><p>Calculate the average distance between <code>True</code> values in <code>self</code> and <code>other</code>.</p>
+<p>See <code><a title="vectorbt.signals.accessors.Signals_Accessor.map_reduce_between" href="#vectorbt.signals.accessors.Signals_Accessor.map_reduce_between">Signals_Accessor.map_reduce_between()</a></code>.</p>
+<h2 id="example">Example</h2>
+<p>Get average distance of <code>signals</code> to <code>signals</code> shifted by one:</p>
+<pre><code class="python-repl">&gt;&gt;&gt; print(signals.vbt.signals.avg_distance_to(signals.vbt.signals.fshift(1)))
+a    1.0
+b    1.0
+c    1.0
+dtype: float64
+</code></pre></div>
 <details class="source">
 <summary>
 <span>Expand source code</span>
 </summary>
 <pre><code class="python">def avg_distance_to(self, other, **kwargs):
-    return self.map_reduce_between(other=other, map_func_nb=nb.diff_map_nb, reduce_func_nb=nb.avg_reduce_nb, **kwargs)</code></pre>
-</details>
-</dd>
-<dt id="vectorbt.signals.accessors.Signals_Accessor.exits"><code class="name flex">
-<span>def <span class="ident">exits</span></span>(<span>self, exit_mask_nb, *args, only_first=True)</span>
-</code></dt>
-<dd>
-<div class="desc"></div>
-<details class="source">
-<summary>
-<span>Expand source code</span>
-</summary>
-<pre><code class="python">def exits(self, exit_mask_nb, *args, only_first=True):
-    return self.wrap_array(nb.exits_nb(self.to_2d_array(), exit_mask_nb, only_first, *args))</code></pre>
+    &#34;&#34;&#34;Calculate the average distance between `True` values in `self` and `other`.
+
+    See `Signals_Accessor.map_reduce_between`.
+
+    Example:
+        Get average distance of `signals` to `signals` shifted by one:
+
+        ```python-repl
+        &gt;&gt;&gt; print(signals.vbt.signals.avg_distance_to(signals.vbt.signals.fshift(1)))
+        a    1.0
+        b    1.0
+        c    1.0
+        dtype: float64
+        ```&#34;&#34;&#34;
+    return self.map_reduce_between(other=other, map_func_nb=nb.distance_map_nb, reduce_func_nb=nb.mean_reduce_nb, **kwargs)</code></pre>
 </details>
 </dd>
 <dt id="vectorbt.signals.accessors.Signals_Accessor.first"><code class="name flex">
 <span>def <span class="ident">first</span></span>(<span>self, **kwargs)</span>
 </code></dt>
 <dd>
-<div class="desc"></div>
+<div class="desc"><p>For each partition of <code>True</code> values, get the first <code>True</code>.</p>
+<p>See <code><a title="vectorbt.signals.nb.rank_nb" href="nb.html#vectorbt.signals.nb.rank_nb">rank_nb()</a></code>.</p>
+<h2 id="example">Example</h2>
+<pre><code class="python-repl">&gt;&gt;&gt; not_signals = ~signals
+&gt;&gt;&gt; print(not_signals.vbt.signals.first())
+                a      b      c
+2018-01-01  False   True   True
+2018-01-02   True  False  False
+2018-01-03  False   True  False
+2018-01-04  False  False   True
+2018-01-05   True  False  False
+</code></pre></div>
 <details class="source">
 <summary>
 <span>Expand source code</span>
 </summary>
 <pre><code class="python">def first(self, **kwargs):
+    &#34;&#34;&#34;For each partition of `True` values, get the first `True`.
+
+    See `vectorbt.signals.nb.rank_nb`.
+
+    Example:
+        ```python-repl
+        &gt;&gt;&gt; not_signals = ~signals
+        &gt;&gt;&gt; print(not_signals.vbt.signals.first())
+                        a      b      c
+        2018-01-01  False   True   True
+        2018-01-02   True  False  False
+        2018-01-03  False   True  False
+        2018-01-04  False  False   True
+        2018-01-05   True  False  False
+        ```&#34;&#34;&#34;
     return self.wrap_array(self.rank(**kwargs).values == 1)</code></pre>
 </details>
 </dd>
@@ -512,20 +1732,46 @@ def num_signals(self):
 <span>def <span class="ident">from_nst</span></span>(<span>self, n, **kwargs)</span>
 </code></dt>
 <dd>
-<div class="desc"></div>
+<div class="desc"><p>For each partition of <code>True</code> values, get the nst <code>True</code> and beyond.</p>
+<p>See <code><a title="vectorbt.signals.nb.rank_nb" href="nb.html#vectorbt.signals.nb.rank_nb">rank_nb()</a></code>.</p>
+<h2 id="example">Example</h2>
+<pre><code class="python-repl">&gt;&gt;&gt; not_signals = ~signals
+&gt;&gt;&gt; print(not_signals.vbt.signals.from_nst(2, allow_gaps=True))
+                a      b      c
+2018-01-01  False  False  False
+2018-01-02  False  False   True
+2018-01-03   True   True  False
+2018-01-04  False   True   True
+2018-01-05   True  False   True
+</code></pre></div>
 <details class="source">
 <summary>
 <span>Expand source code</span>
 </summary>
 <pre><code class="python">def from_nst(self, n, **kwargs):
+    &#34;&#34;&#34;For each partition of `True` values, get the nst `True` and beyond.
+
+    See `vectorbt.signals.nb.rank_nb`.
+
+    Example:
+        ```python-repl
+        &gt;&gt;&gt; not_signals = ~signals
+        &gt;&gt;&gt; print(not_signals.vbt.signals.from_nst(2, allow_gaps=True))
+                        a      b      c
+        2018-01-01  False  False  False
+        2018-01-02  False  False   True
+        2018-01-03   True   True  False
+        2018-01-04  False   True   True
+        2018-01-05   True  False   True
+        ```&#34;&#34;&#34;
     return self.wrap_array(self.rank(**kwargs).values &gt;= n)</code></pre>
 </details>
 </dd>
 <dt id="vectorbt.signals.accessors.Signals_Accessor.fshift"><code class="name flex">
-<span>def <span class="ident">fshift</span></span>(<span>self, *args, nb_func=CPUDispatcher(&lt;function fshift_nb&gt;), default_kwargs={}, **kwargs)</span>
+<span>def <span class="ident">fshift</span></span>(<span>self, n)</span>
 </code></dt>
 <dd>
-<div class="desc"></div>
+<div class="desc"><p>See <code><a title="vectorbt.signals.nb.fshift_nb" href="nb.html#vectorbt.signals.nb.fshift_nb">fshift_nb()</a></code></p></div>
 <details class="source">
 <summary>
 <span>Expand source code</span>
@@ -538,134 +1784,146 @@ def num_signals(self):
         return self.wrap_array(nb_func(self.to_2d_array(), *args, **{**default_kwargs, **kwargs}))</code></pre>
 </details>
 </dd>
-<dt id="vectorbt.signals.accessors.Signals_Accessor.map_reduce_between"><code class="name flex">
-<span>def <span class="ident">map_reduce_between</span></span>(<span>self, *args, other=None, map_func_nb=None, reduce_func_nb=None, broadcast_kwargs={})</span>
+<dt id="vectorbt.signals.accessors.Signals_Accessor.generate_after"><code class="name flex">
+<span>def <span class="ident">generate_after</span></span>(<span>self, choice_func_nb, *args)</span>
 </code></dt>
 <dd>
-<div class="desc"></div>
+<div class="desc"><p>See <code><a title="vectorbt.signals.nb.generate_after_nb" href="nb.html#vectorbt.signals.nb.generate_after_nb">generate_after_nb()</a></code>.</p>
+<h2 id="example">Example</h2>
+<p>Fill all space between signals in <code>signals</code>:</p>
+<pre><code class="python-repl">&gt;&gt;&gt; @njit
+... def choice_func_nb(col, from_i, to_i):
+...     return np.arange(from_i, to_i+1)
+
+&gt;&gt;&gt; print(signals.vbt.signals.generate_after(choice_func_nb))
+                a      b      c
+2018-01-01  False  False  False
+2018-01-02   True  False  False
+2018-01-03   True   True  False
+2018-01-04  False   True   True
+2018-01-05   True  False   True
+</code></pre></div>
 <details class="source">
 <summary>
 <span>Expand source code</span>
 </summary>
-<pre><code class="python">def map_reduce_between(self, *args, other=None, map_func_nb=None, reduce_func_nb=None, broadcast_kwargs={}):
-    checks.assert_not_none(map_func_nb)
-    checks.assert_not_none(reduce_func_nb)
-    if other is None:
-        result = nb.map_reduce_between_one_nb(self.to_2d_array(), map_func_nb, reduce_func_nb, *args)
-        if isinstance(self._obj, pd.Series):
-            return result[0]
-        return pd.Series(result, index=reshape_fns.to_2d(self._obj).columns)
-    else:
-        obj, other = reshape_fns.broadcast(self._obj, other, **broadcast_kwargs)
-        other.vbt.signals.validate()
-        result = nb.map_reduce_between_two_nb(
-            self.to_2d_array(), other.vbt.to_2d_array(), map_func_nb, reduce_func_nb, *args)
-        if isinstance(obj, pd.Series):
-            return result[0]
-        return pd.Series(result, index=reshape_fns.to_2d(obj).columns)</code></pre>
+<pre><code class="python">def generate_after(self, choice_func_nb, *args):
+    &#34;&#34;&#34;See `vectorbt.signals.nb.generate_after_nb`.
+
+    Example:
+        Fill all space between signals in `signals`:
+
+        ```python-repl
+        &gt;&gt;&gt; @njit
+        ... def choice_func_nb(col, from_i, to_i):
+        ...     return np.arange(from_i, to_i+1)
+
+        &gt;&gt;&gt; print(signals.vbt.signals.generate_after(choice_func_nb))
+                        a      b      c
+        2018-01-01  False  False  False
+        2018-01-02   True  False  False
+        2018-01-03   True   True  False
+        2018-01-04  False   True   True
+        2018-01-05   True  False   True
+        ```&#34;&#34;&#34;
+    checks.assert_numba_func(choice_func_nb)
+
+    return self.wrap_array(nb.generate_after_nb(self.to_2d_array(), choice_func_nb, *args))</code></pre>
 </details>
 </dd>
-<dt id="vectorbt.signals.accessors.Signals_Accessor.nst"><code class="name flex">
-<span>def <span class="ident">nst</span></span>(<span>self, n, **kwargs)</span>
+<dt id="vectorbt.signals.accessors.Signals_Accessor.generate_random_after"><code class="name flex">
+<span>def <span class="ident">generate_random_after</span></span>(<span>self, n_range, n_prob=None, min_space=None, seed=None)</span>
 </code></dt>
 <dd>
-<div class="desc"></div>
+<div class="desc"><p>See <code><a title="vectorbt.signals.nb.generate_random_after_nb" href="nb.html#vectorbt.signals.nb.generate_random_after_nb">generate_random_after_nb()</a></code>.</p>
+<h2 id="example">Example</h2>
+<p>Generate exactly one random signal after each signal in <code>signals</code>:</p>
+<pre><code class="python-repl">&gt;&gt;&gt; print(signals.vbt.signals.generate_random_after(1, seed=42))
+                a      b      c
+2018-01-01  False  False  False
+2018-01-02  False  False  False
+2018-01-03   True   True  False
+2018-01-04  False  False  False
+2018-01-05   True  False   True
+</code></pre></div>
 <details class="source">
 <summary>
 <span>Expand source code</span>
 </summary>
-<pre><code class="python">def nst(self, n, **kwargs):
-    return self.wrap_array(self.rank(**kwargs).values == n)</code></pre>
+<pre><code class="python">def generate_random_after(self, n_range, n_prob=None, min_space=None, seed=None):
+    &#34;&#34;&#34;See `vectorbt.signals.nb.generate_random_after_nb`.
+
+    Example:
+        Generate exactly one random signal after each signal in `signals`:
+
+        ```python-repl
+        &gt;&gt;&gt; print(signals.vbt.signals.generate_random_after(1, seed=42))
+                        a      b      c
+        2018-01-01  False  False  False
+        2018-01-02  False  False  False
+        2018-01-03   True   True  False
+        2018-01-04  False  False  False
+        2018-01-05   True  False   True
+        ```&#34;&#34;&#34;
+    n_range = reshape_fns.to_1d(n_range)
+    if n_prob is not None:
+        n_prob = reshape_fns.to_1d(n_prob)
+        checks.assert_same_shape(n_range, n_prob)
+    return self.wrap_array(nb.generate_random_after_nb(
+        self.to_2d_array(), n_range, n_prob=n_prob, min_space=min_space, seed=seed))</code></pre>
 </details>
 </dd>
-<dt id="vectorbt.signals.accessors.Signals_Accessor.random_exits"><code class="name flex">
-<span>def <span class="ident">random_exits</span></span>(<span>self, n, every_nth=1, seed=None)</span>
+<dt id="vectorbt.signals.accessors.Signals_Accessor.generate_stop_loss"><code class="name flex">
+<span>def <span class="ident">generate_stop_loss</span></span>(<span>self, ts, stops, trailing=False, as_columns=None, broadcast_kwargs={})</span>
 </code></dt>
 <dd>
-<div class="desc"></div>
+<div class="desc"><p>See <code>vectorbt.signals.nb.stop_loss_nb</code>.</p>
+<p>Arguments will be broadcasted using <code><a title="vectorbt.utils.reshape_fns.broadcast" href="../utils/reshape_fns.html#vectorbt.utils.reshape_fns.broadcast">broadcast()</a></code>
+with <code>broadcast_kwargs</code>. Argument <code>stops</code> can be either a single number, an array of
+numbers, or a 3D array, where each matrix corresponds to a single configuration.
+Use <code>as_columns</code> as a top-level column level.</p>
+<h2 id="example">Example</h2>
+<p>For each entry in <code>signals</code>, set stop-loss order for 10% and 20% below the price <code>ts</code>:</p>
+<pre><code class="python-repl">&gt;&gt;&gt; print(entries.vbt.signals.generate_stop_loss(ts, [0.1, 0.2]))
+stop_loss                   0.1                  0.2
+                a      b      c      a      b      c
+2018-01-01  False  False  False  False  False  False
+2018-01-02  False   True  False  False  False  False
+2018-01-03  False  False  False  False  False  False
+2018-01-04  False   True   True  False   True   True
+2018-01-05  False  False  False  False  False  False
+</code></pre></div>
 <details class="source">
 <summary>
 <span>Expand source code</span>
 </summary>
-<pre><code class="python">def random_exits(self, n, every_nth=1, seed=None):
-    return self.wrap_array(nb.random_exits_nb(self.to_2d_array(), reshape_fns.to_1d(n), every_nth, seed))</code></pre>
-</details>
-</dd>
-<dt id="vectorbt.signals.accessors.Signals_Accessor.random_exits_by_func"><code class="name flex">
-<span>def <span class="ident">random_exits_by_func</span></span>(<span>self, choice_func_nb, *args, seed=None)</span>
-</code></dt>
-<dd>
-<div class="desc"></div>
-<details class="source">
-<summary>
-<span>Expand source code</span>
-</summary>
-<pre><code class="python">def random_exits_by_func(self, choice_func_nb, *args, seed=None):
-    return self.wrap_array(nb.random_exits_by_func_nb(self.to_2d_array(), choice_func_nb, seed, *args))</code></pre>
-</details>
-</dd>
-<dt id="vectorbt.signals.accessors.Signals_Accessor.rank"><code class="name flex">
-<span>def <span class="ident">rank</span></span>(<span>self, reset_signals=None, after_false=False, allow_gaps=False, broadcast_kwargs={})</span>
-</code></dt>
-<dd>
-<div class="desc"></div>
-<details class="source">
-<summary>
-<span>Expand source code</span>
-</summary>
-<pre><code class="python">def rank(self, reset_signals=None, after_false=False, allow_gaps=False, broadcast_kwargs={}):
-    if reset_signals is not None:
-        obj, reset_signals = reshape_fns.broadcast(self._obj, reset_signals, **broadcast_kwargs)
-        reset_signals = reset_signals.vbt.to_2d_array()
-    else:
-        obj = self._obj
-    ranked = nb.rank_nb(
-        obj.vbt.to_2d_array(),
-        reset_b=reset_signals,
-        after_false=after_false,
-        allow_gaps=allow_gaps)
-    return obj.vbt.wrap_array(ranked)</code></pre>
-</details>
-</dd>
-<dt id="vectorbt.signals.accessors.Signals_Accessor.shuffle"><code class="name flex">
-<span>def <span class="ident">shuffle</span></span>(<span>self, *args, nb_func=CPUDispatcher(&lt;function shuffle_nb&gt;), default_kwargs={'seed': None}, **kwargs)</span>
-</code></dt>
-<dd>
-<div class="desc"></div>
-<details class="source">
-<summary>
-<span>Expand source code</span>
-</summary>
-<pre><code class="python">def array_operation(self, *args, nb_func=nb_func, default_kwargs=default_kwargs, **kwargs):
-    if &#39;_1d&#39; in nb_func.__name__:
-        return self.wrap_array(nb_func(self.to_1d_array(), *args, **{**default_kwargs, **kwargs}))
-    else:
-        # We work natively on 2d arrays
-        return self.wrap_array(nb_func(self.to_2d_array(), *args, **{**default_kwargs, **kwargs}))</code></pre>
-</details>
-</dd>
-<dt id="vectorbt.signals.accessors.Signals_Accessor.stop_loss_exits"><code class="name flex">
-<span>def <span class="ident">stop_loss_exits</span></span>(<span>self, ts, stops, relative=True, only_first=True, trailing=False, as_columns=None, broadcast_kwargs={})</span>
-</code></dt>
-<dd>
-<div class="desc"></div>
-<details class="source">
-<summary>
-<span>Expand source code</span>
-</summary>
-<pre><code class="python">def stop_loss_exits(self, ts, stops, relative=True, only_first=True, trailing=False, as_columns=None, broadcast_kwargs={}):
+<pre><code class="python">def generate_stop_loss(self, ts, stops, trailing=False, as_columns=None, broadcast_kwargs={}):
+    &#34;&#34;&#34;See `vectorbt.signals.nb.stop_loss_nb`.
+
+    Arguments will be broadcasted using `vectorbt.utils.reshape_fns.broadcast`
+    with `broadcast_kwargs`. Argument `stops` can be either a single number, an array of 
+    numbers, or a 3D array, where each matrix corresponds to a single configuration. 
+    Use `as_columns` as a top-level column level.
+
+    Example:
+        For each entry in `signals`, set stop-loss order for 10% and 20% below the price `ts`:
+
+        ```python-repl
+        &gt;&gt;&gt; print(entries.vbt.signals.generate_stop_loss(ts, [0.1, 0.2]))
+        stop_loss                   0.1                  0.2
+                        a      b      c      a      b      c
+        2018-01-01  False  False  False  False  False  False
+        2018-01-02  False   True  False  False  False  False
+        2018-01-03  False  False  False  False  False  False
+        2018-01-04  False   True   True  False   True   True
+        2018-01-05  False  False  False  False  False  False
+        ```&#34;&#34;&#34;
     entries = self._obj
     checks.assert_type(ts, (pd.Series, pd.DataFrame))
-    ts.vbt.timeseries.validate()
 
     entries, ts = reshape_fns.broadcast(entries, ts, **broadcast_kwargs, writeable=True)
     stops = reshape_fns.broadcast_to_array_of(stops, entries.vbt.to_2d_array())
-    stops = stops.astype(np.float64)
-
-    exits = nb.stop_loss_exits_nb(
-        entries.vbt.to_2d_array(),
-        ts.vbt.to_2d_array(),
-        stops, relative, only_first, trailing)
+    exits = nb.generate_stop_loss_nb(entries.vbt.to_2d_array(), ts.vbt.to_2d_array(), stops, trailing)
 
     # Build column hierarchy
     if as_columns is not None:
@@ -673,8 +1931,223 @@ def num_signals(self):
     else:
         name = &#39;trail_stop&#39; if trailing else &#39;stop_loss&#39;
         param_columns = index_fns.from_values(stops, name=name)
-    columns = index_fns.combine(param_columns, reshape_fns.to_2d(entries).columns)
+    columns = index_fns.combine(param_columns, entries.vbt.columns)
     return entries.vbt.wrap_array(exits, columns=columns)</code></pre>
+</details>
+</dd>
+<dt id="vectorbt.signals.accessors.Signals_Accessor.map_reduce_between"><code class="name flex">
+<span>def <span class="ident">map_reduce_between</span></span>(<span>self, *args, other=None, map_func_nb=None, reduce_func_nb=None, broadcast_kwargs={})</span>
+</code></dt>
+<dd>
+<div class="desc"><p>See <code><a title="vectorbt.signals.nb.map_reduce_between_nb" href="nb.html#vectorbt.signals.nb.map_reduce_between_nb">map_reduce_between_nb()</a></code>. </p>
+<p>If <code>other</code> specified, see <code><a title="vectorbt.signals.nb.map_reduce_between_two_nb" href="nb.html#vectorbt.signals.nb.map_reduce_between_two_nb">map_reduce_between_two_nb()</a></code>.</p>
+<p>Arguments will be broadcasted using <code><a title="vectorbt.utils.reshape_fns.broadcast" href="../utils/reshape_fns.html#vectorbt.utils.reshape_fns.broadcast">broadcast()</a></code>
+with <code>broadcast_kwargs</code>.</p>
+<h2 id="example">Example</h2>
+<p>Get maximum distance between signals in <code>signals</code>:</p>
+<pre><code class="python-repl">&gt;&gt;&gt; distance_map_nb = njit(lambda col, prev_i, next_i: next_i - prev_i)
+&gt;&gt;&gt; max_reduce_nb = njit(lambda col, a: np.nanmax(a))
+
+&gt;&gt;&gt; print(signals.vbt.signals.map_reduce_between(
+...     map_func_nb=distance_map_nb, reduce_func_nb=max_reduce_nb))
+a    3.0
+b    3.0
+c    NaN
+dtype: float64
+</code></pre></div>
+<details class="source">
+<summary>
+<span>Expand source code</span>
+</summary>
+<pre><code class="python">def map_reduce_between(self, *args, other=None, map_func_nb=None, reduce_func_nb=None, broadcast_kwargs={}):
+    &#34;&#34;&#34;See `vectorbt.signals.nb.map_reduce_between_nb`. 
+
+    If `other` specified, see `vectorbt.signals.nb.map_reduce_between_two_nb`.
+
+    Arguments will be broadcasted using `vectorbt.utils.reshape_fns.broadcast`
+    with `broadcast_kwargs`.
+
+    Example:
+        Get maximum distance between signals in `signals`:
+
+        ```python-repl
+        &gt;&gt;&gt; distance_map_nb = njit(lambda col, prev_i, next_i: next_i - prev_i)
+        &gt;&gt;&gt; max_reduce_nb = njit(lambda col, a: np.nanmax(a))
+
+        &gt;&gt;&gt; print(signals.vbt.signals.map_reduce_between(
+        ...     map_func_nb=distance_map_nb, reduce_func_nb=max_reduce_nb))
+        a    3.0
+        b    3.0
+        c    NaN
+        dtype: float64
+        ```&#34;&#34;&#34;
+    checks.assert_not_none(map_func_nb)
+    checks.assert_not_none(reduce_func_nb)
+    checks.assert_numba_func(map_func_nb)
+    checks.assert_numba_func(reduce_func_nb)
+
+    if other is None:
+        # One input array
+        result = nb.map_reduce_between_nb(self.to_2d_array(), map_func_nb, reduce_func_nb, *args)
+        if isinstance(self._obj, pd.Series):
+            return result[0]
+        return pd.Series(result, index=self.columns)
+    else:
+        # Two input arrays
+        obj, other = reshape_fns.broadcast(self._obj, other, **broadcast_kwargs)
+        other.vbt.signals.validate()
+        result = nb.map_reduce_between_two_nb(
+            self.to_2d_array(), other.vbt.to_2d_array(), map_func_nb, reduce_func_nb, *args)
+        if isinstance(obj, pd.Series):
+            return result[0]
+        return pd.Series(result, index=obj.vbt.columns)</code></pre>
+</details>
+</dd>
+<dt id="vectorbt.signals.accessors.Signals_Accessor.nst"><code class="name flex">
+<span>def <span class="ident">nst</span></span>(<span>self, n, **kwargs)</span>
+</code></dt>
+<dd>
+<div class="desc"><p>For each partition of <code>True</code> values, get the nst <code>True</code>.</p>
+<p>See <code><a title="vectorbt.signals.nb.rank_nb" href="nb.html#vectorbt.signals.nb.rank_nb">rank_nb()</a></code>.</p>
+<h2 id="example">Example</h2>
+<pre><code class="python-repl">&gt;&gt;&gt; not_signals = ~signals
+&gt;&gt;&gt; print(not_signals.vbt.signals.nst(2, allow_gaps=True))
+                a      b      c
+2018-01-01  False  False  False
+2018-01-02  False  False   True
+2018-01-03   True   True  False
+2018-01-04  False  False  False
+2018-01-05  False  False  False
+</code></pre></div>
+<details class="source">
+<summary>
+<span>Expand source code</span>
+</summary>
+<pre><code class="python">def nst(self, n, **kwargs):
+    &#34;&#34;&#34;For each partition of `True` values, get the nst `True`.
+
+    See `vectorbt.signals.nb.rank_nb`.
+
+    Example:
+        ```python-repl
+        &gt;&gt;&gt; not_signals = ~signals
+        &gt;&gt;&gt; print(not_signals.vbt.signals.nst(2, allow_gaps=True))
+                        a      b      c
+        2018-01-01  False  False  False
+        2018-01-02  False  False   True
+        2018-01-03   True   True  False
+        2018-01-04  False  False  False
+        2018-01-05  False  False  False
+        ```&#34;&#34;&#34;
+    return self.wrap_array(self.rank(**kwargs).values == n)</code></pre>
+</details>
+</dd>
+<dt id="vectorbt.signals.accessors.Signals_Accessor.rank"><code class="name flex">
+<span>def <span class="ident">rank</span></span>(<span>self, reset_by=None, after_false=False, allow_gaps=False, broadcast_kwargs={})</span>
+</code></dt>
+<dd>
+<div class="desc"><p>See <code><a title="vectorbt.signals.nb.rank_nb" href="nb.html#vectorbt.signals.nb.rank_nb">rank_nb()</a></code>.</p>
+<h2 id="example">Example</h2>
+<p>Rank <code>False</code> values in <code>signals</code>:</p>
+<pre><code class="python-repl">&gt;&gt;&gt; not_signals = ~signals
+&gt;&gt;&gt; print(not_signals.vbt.signals.rank())
+            a  b  c
+2018-01-01  0  1  1
+2018-01-02  1  0  2
+2018-01-03  2  1  0
+2018-01-04  0  2  1
+2018-01-05  1  0  2
+&gt;&gt;&gt; print(not_signals.vbt.signals.rank(after_false=True))
+            a  b  c
+2018-01-01  0  0  0
+2018-01-02  1  0  1
+2018-01-03  2  1  0
+2018-01-04  0  2  1
+2018-01-05  1  0  2
+&gt;&gt;&gt; print(not_signals.vbt.signals.rank(allow_gaps=True))
+            a  b  c
+2018-01-01  0  1  1
+2018-01-02  1  0  2
+2018-01-03  2  2  0
+2018-01-04  0  3  3
+2018-01-05  3  0  4
+&gt;&gt;&gt; print(not_signals.vbt.signals.rank(reset_by=signals, allow_gaps=True))
+            a  b  c
+2018-01-01  0  1  1
+2018-01-02  1  0  2
+2018-01-03  2  1  0
+2018-01-04  0  2  1
+2018-01-05  1  0  2
+</code></pre></div>
+<details class="source">
+<summary>
+<span>Expand source code</span>
+</summary>
+<pre><code class="python">def rank(self, reset_by=None, after_false=False, allow_gaps=False, broadcast_kwargs={}):
+    &#34;&#34;&#34;See `vectorbt.signals.nb.rank_nb`.
+
+    Example:
+        Rank `False` values in `signals`:
+
+        ```python-repl
+        &gt;&gt;&gt; not_signals = ~signals
+        &gt;&gt;&gt; print(not_signals.vbt.signals.rank())
+                    a  b  c
+        2018-01-01  0  1  1
+        2018-01-02  1  0  2
+        2018-01-03  2  1  0
+        2018-01-04  0  2  1
+        2018-01-05  1  0  2
+        &gt;&gt;&gt; print(not_signals.vbt.signals.rank(after_false=True))
+                    a  b  c
+        2018-01-01  0  0  0
+        2018-01-02  1  0  1
+        2018-01-03  2  1  0
+        2018-01-04  0  2  1
+        2018-01-05  1  0  2
+        &gt;&gt;&gt; print(not_signals.vbt.signals.rank(allow_gaps=True))
+                    a  b  c
+        2018-01-01  0  1  1
+        2018-01-02  1  0  2
+        2018-01-03  2  2  0
+        2018-01-04  0  3  3
+        2018-01-05  3  0  4
+        &gt;&gt;&gt; print(not_signals.vbt.signals.rank(reset_by=signals, allow_gaps=True))
+                    a  b  c
+        2018-01-01  0  1  1
+        2018-01-02  1  0  2
+        2018-01-03  2  1  0
+        2018-01-04  0  2  1
+        2018-01-05  1  0  2
+        ```&#34;&#34;&#34;
+    if reset_by is not None:
+        obj, reset_by = reshape_fns.broadcast(self._obj, reset_by, **broadcast_kwargs)
+        reset_by = reset_by.vbt.to_2d_array()
+    else:
+        obj = self._obj
+    ranked = nb.rank_nb(
+        obj.vbt.to_2d_array(),
+        reset_by=reset_by,
+        after_false=after_false,
+        allow_gaps=allow_gaps)
+    return obj.vbt.wrap_array(ranked)</code></pre>
+</details>
+</dd>
+<dt id="vectorbt.signals.accessors.Signals_Accessor.shuffle"><code class="name flex">
+<span>def <span class="ident">shuffle</span></span>(<span>self, seed=None)</span>
+</code></dt>
+<dd>
+<div class="desc"><p>See <code><a title="vectorbt.signals.nb.shuffle_nb" href="nb.html#vectorbt.signals.nb.shuffle_nb">shuffle_nb()</a></code></p></div>
+<details class="source">
+<summary>
+<span>Expand source code</span>
+</summary>
+<pre><code class="python">def array_operation(self, *args, nb_func=nb_func, default_kwargs=default_kwargs, **kwargs):
+    if &#39;_1d&#39; in nb_func.__name__:
+        return self.wrap_array(nb_func(self.to_1d_array(), *args, **{**default_kwargs, **kwargs}))
+    else:
+        # We work natively on 2d arrays
+        return self.wrap_array(nb_func(self.to_2d_array(), *args, **{**default_kwargs, **kwargs}))</code></pre>
 </details>
 </dd>
 </dl>
@@ -684,35 +2157,30 @@ def num_signals(self):
 <span>(</span><span>obj)</span>
 </code></dt>
 <dd>
-<div class="desc"></div>
+<div class="desc"><p>Accessor with methods for DataFrames only.</p>
+<p>Accessible through <code>pandas.DataFrame.vbt.signals</code>.</p></div>
 <details class="source">
 <summary>
 <span>Expand source code</span>
 </summary>
 <pre><code class="python">class Signals_DFAccessor(Signals_Accessor, Base_DFAccessor):
+    &#34;&#34;&#34;Accessor with methods for DataFrames only.
 
-    @classmethod
-    def empty(cls, *args, fill_value=False, **kwargs):
-        return Base_DFAccessor.empty(*args, fill_value=fill_value, **kwargs)
-
-    @classmethod
-    def empty_like(cls, *args, fill_value=False, **kwargs):
-        return Base_DFAccessor.empty_like(*args, fill_value=fill_value, **kwargs)
-
-    @classmethod
-    def random(cls, shape, n, every_nth=1, seed=None, multiple=False, name=&#39;random_n&#39;, **kwargs):
-        return pd.DataFrame(nb.random_nb(shape, reshape_fns.to_1d(n), every_nth, seed), **kwargs)
-
-    @classmethod
-    def random_by_func(cls, shape, choice_func_nb, *args, seed=None, **kwargs):
-        return pd.DataFrame(nb.random_by_func_nb(shape, choice_func_nb, seed, *args), **kwargs)
-
-    @classmethod
-    def entries_and_exits(cls, shape, entry_mask_nb, exit_mask_nb, *args, **kwargs):
-        entries, exits = nb.entries_and_exits_nb(shape, entry_mask_nb, exit_mask_nb, *args)
-        return pd.DataFrame(entries, **kwargs), pd.DataFrame(exits, **kwargs)
+    Accessible through `pandas.DataFrame.vbt.signals`.&#34;&#34;&#34;
 
     def plot(self, trace_kwargs={}, fig=None, **layout_kwargs):
+        &#34;&#34;&#34;Plot each column in DataFrame as a line.
+
+        Args:
+            trace_kwargs (dict or list of dict): Keyword arguments passed to each [`plotly.graph_objects.Scatter`](https://plotly.com/python-api-reference/generated/plotly.graph_objects.Scatter.html).
+            fig (plotly.graph_objects.Figure): Figure to add traces to.
+            **layout_kwargs: Keyword arguments for layout.
+        Example:
+            ```py
+            signals[[&#39;a&#39;, &#39;c&#39;]].vbt.signals.plot().show_png()
+            ```
+
+            ![](img/signals_signals_plot.png)&#34;&#34;&#34;
         for col in range(self._obj.shape[1]):
             fig = self._obj.iloc[:, col].vbt.signals.plot(
                 trace_kwargs=trace_kwargs,
@@ -728,92 +2196,43 @@ def num_signals(self):
 <li><a title="vectorbt.utils.accessors.Base_DFAccessor" href="../utils/accessors.html#vectorbt.utils.accessors.Base_DFAccessor">Base_DFAccessor</a></li>
 <li><a title="vectorbt.utils.accessors.Base_Accessor" href="../utils/accessors.html#vectorbt.utils.accessors.Base_Accessor">Base_Accessor</a></li>
 </ul>
-<h3>Static methods</h3>
-<dl>
-<dt id="vectorbt.signals.accessors.Signals_DFAccessor.empty"><code class="name flex">
-<span>def <span class="ident">empty</span></span>(<span>*args, fill_value=False, **kwargs)</span>
-</code></dt>
-<dd>
-<div class="desc"></div>
-<details class="source">
-<summary>
-<span>Expand source code</span>
-</summary>
-<pre><code class="python">@classmethod
-def empty(cls, *args, fill_value=False, **kwargs):
-    return Base_DFAccessor.empty(*args, fill_value=fill_value, **kwargs)</code></pre>
-</details>
-</dd>
-<dt id="vectorbt.signals.accessors.Signals_DFAccessor.empty_like"><code class="name flex">
-<span>def <span class="ident">empty_like</span></span>(<span>*args, fill_value=False, **kwargs)</span>
-</code></dt>
-<dd>
-<div class="desc"></div>
-<details class="source">
-<summary>
-<span>Expand source code</span>
-</summary>
-<pre><code class="python">@classmethod
-def empty_like(cls, *args, fill_value=False, **kwargs):
-    return Base_DFAccessor.empty_like(*args, fill_value=fill_value, **kwargs)</code></pre>
-</details>
-</dd>
-<dt id="vectorbt.signals.accessors.Signals_DFAccessor.entries_and_exits"><code class="name flex">
-<span>def <span class="ident">entries_and_exits</span></span>(<span>shape, entry_mask_nb, exit_mask_nb, *args, **kwargs)</span>
-</code></dt>
-<dd>
-<div class="desc"></div>
-<details class="source">
-<summary>
-<span>Expand source code</span>
-</summary>
-<pre><code class="python">@classmethod
-def entries_and_exits(cls, shape, entry_mask_nb, exit_mask_nb, *args, **kwargs):
-    entries, exits = nb.entries_and_exits_nb(shape, entry_mask_nb, exit_mask_nb, *args)
-    return pd.DataFrame(entries, **kwargs), pd.DataFrame(exits, **kwargs)</code></pre>
-</details>
-</dd>
-<dt id="vectorbt.signals.accessors.Signals_DFAccessor.random"><code class="name flex">
-<span>def <span class="ident">random</span></span>(<span>shape, n, every_nth=1, seed=None, multiple=False, name='random_n', **kwargs)</span>
-</code></dt>
-<dd>
-<div class="desc"></div>
-<details class="source">
-<summary>
-<span>Expand source code</span>
-</summary>
-<pre><code class="python">@classmethod
-def random(cls, shape, n, every_nth=1, seed=None, multiple=False, name=&#39;random_n&#39;, **kwargs):
-    return pd.DataFrame(nb.random_nb(shape, reshape_fns.to_1d(n), every_nth, seed), **kwargs)</code></pre>
-</details>
-</dd>
-<dt id="vectorbt.signals.accessors.Signals_DFAccessor.random_by_func"><code class="name flex">
-<span>def <span class="ident">random_by_func</span></span>(<span>shape, choice_func_nb, *args, seed=None, **kwargs)</span>
-</code></dt>
-<dd>
-<div class="desc"></div>
-<details class="source">
-<summary>
-<span>Expand source code</span>
-</summary>
-<pre><code class="python">@classmethod
-def random_by_func(cls, shape, choice_func_nb, *args, seed=None, **kwargs):
-    return pd.DataFrame(nb.random_by_func_nb(shape, choice_func_nb, seed, *args), **kwargs)</code></pre>
-</details>
-</dd>
-</dl>
 <h3>Methods</h3>
 <dl>
 <dt id="vectorbt.signals.accessors.Signals_DFAccessor.plot"><code class="name flex">
 <span>def <span class="ident">plot</span></span>(<span>self, trace_kwargs={}, fig=None, **layout_kwargs)</span>
 </code></dt>
 <dd>
-<div class="desc"></div>
+<div class="desc"><p>Plot each column in DataFrame as a line.</p>
+<h2 id="args">Args</h2>
+<dl>
+<dt><strong><code>trace_kwargs</code></strong> :&ensp;<code>dict</code> or <code>list</code> of <code>dict</code></dt>
+<dd>Keyword arguments passed to each <a href="https://plotly.com/python-api-reference/generated/plotly.graph_objects.Scatter.html"><code>plotly.graph_objects.Scatter</code></a>.</dd>
+<dt><strong><code>fig</code></strong> :&ensp;<code>plotly.graph_objects.Figure</code></dt>
+<dd>Figure to add traces to.</dd>
+<dt><strong><code>**layout_kwargs</code></strong></dt>
+<dd>Keyword arguments for layout.</dd>
+</dl>
+<h2 id="example">Example</h2>
+<pre><code class="py">signals[['a', 'c']].vbt.signals.plot().show_png()
+</code></pre>
+<p><img alt="" src="img/signals_signals_plot.png"></p></div>
 <details class="source">
 <summary>
 <span>Expand source code</span>
 </summary>
 <pre><code class="python">def plot(self, trace_kwargs={}, fig=None, **layout_kwargs):
+    &#34;&#34;&#34;Plot each column in DataFrame as a line.
+
+    Args:
+        trace_kwargs (dict or list of dict): Keyword arguments passed to each [`plotly.graph_objects.Scatter`](https://plotly.com/python-api-reference/generated/plotly.graph_objects.Scatter.html).
+        fig (plotly.graph_objects.Figure): Figure to add traces to.
+        **layout_kwargs: Keyword arguments for layout.
+    Example:
+        ```py
+        signals[[&#39;a&#39;, &#39;c&#39;]].vbt.signals.plot().show_png()
+        ```
+
+        ![](img/signals_signals_plot.png)&#34;&#34;&#34;
     for col in range(self._obj.shape[1]):
         fig = self._obj.iloc[:, col].vbt.signals.plot(
             trace_kwargs=trace_kwargs,
@@ -829,14 +2248,50 @@ def random_by_func(cls, shape, choice_func_nb, *args, seed=None, **kwargs):
 <ul class="hlist">
 <li><code><b><a title="vectorbt.signals.accessors.Signals_Accessor" href="#vectorbt.signals.accessors.Signals_Accessor">Signals_Accessor</a></b></code>:
 <ul class="hlist">
-<li><code><a title="vectorbt.signals.accessors.Signals_Accessor.dtype" href="#vectorbt.signals.accessors.Signals_Accessor.dtype">dtype</a></code></li>
+<li><code><a title="vectorbt.signals.accessors.Signals_Accessor.AND" href="#vectorbt.signals.accessors.Signals_Accessor.AND">AND</a></code></li>
+<li><code><a title="vectorbt.signals.accessors.Signals_Accessor.OR" href="#vectorbt.signals.accessors.Signals_Accessor.OR">OR</a></code></li>
+<li><code><a title="vectorbt.signals.accessors.Signals_Accessor.XOR" href="#vectorbt.signals.accessors.Signals_Accessor.XOR">XOR</a></code></li>
+<li><code><a title="vectorbt.signals.accessors.Signals_Accessor.avg_distance" href="#vectorbt.signals.accessors.Signals_Accessor.avg_distance">avg_distance</a></code></li>
+<li><code><a title="vectorbt.signals.accessors.Signals_Accessor.avg_distance_to" href="#vectorbt.signals.accessors.Signals_Accessor.avg_distance_to">avg_distance_to</a></code></li>
+<li><code><a title="vectorbt.signals.accessors.Signals_Accessor.empty" href="#vectorbt.signals.accessors.Signals_Accessor.empty">empty</a></code></li>
+<li><code><a title="vectorbt.signals.accessors.Signals_Accessor.empty_like" href="#vectorbt.signals.accessors.Signals_Accessor.empty_like">empty_like</a></code></li>
+<li><code><a title="vectorbt.signals.accessors.Signals_Accessor.first" href="#vectorbt.signals.accessors.Signals_Accessor.first">first</a></code></li>
+<li><code><a title="vectorbt.signals.accessors.Signals_Accessor.from_nst" href="#vectorbt.signals.accessors.Signals_Accessor.from_nst">from_nst</a></code></li>
+<li><code><a title="vectorbt.signals.accessors.Signals_Accessor.fshift" href="#vectorbt.signals.accessors.Signals_Accessor.fshift">fshift</a></code></li>
+<li><code><a title="vectorbt.signals.accessors.Signals_Accessor.generate" href="#vectorbt.signals.accessors.Signals_Accessor.generate">generate</a></code></li>
+<li><code><a title="vectorbt.signals.accessors.Signals_Accessor.generate_after" href="#vectorbt.signals.accessors.Signals_Accessor.generate_after">generate_after</a></code></li>
+<li><code><a title="vectorbt.signals.accessors.Signals_Accessor.generate_iteratively" href="#vectorbt.signals.accessors.Signals_Accessor.generate_iteratively">generate_iteratively</a></code></li>
+<li><code><a title="vectorbt.signals.accessors.Signals_Accessor.generate_random" href="#vectorbt.signals.accessors.Signals_Accessor.generate_random">generate_random</a></code></li>
+<li><code><a title="vectorbt.signals.accessors.Signals_Accessor.generate_random_after" href="#vectorbt.signals.accessors.Signals_Accessor.generate_random_after">generate_random_after</a></code></li>
+<li><code><a title="vectorbt.signals.accessors.Signals_Accessor.generate_stop_loss" href="#vectorbt.signals.accessors.Signals_Accessor.generate_stop_loss">generate_stop_loss</a></code></li>
+<li><code><a title="vectorbt.signals.accessors.Signals_Accessor.map_reduce_between" href="#vectorbt.signals.accessors.Signals_Accessor.map_reduce_between">map_reduce_between</a></code></li>
+<li><code><a title="vectorbt.signals.accessors.Signals_Accessor.nst" href="#vectorbt.signals.accessors.Signals_Accessor.nst">nst</a></code></li>
+<li><code><a title="vectorbt.signals.accessors.Signals_Accessor.num_signals" href="#vectorbt.signals.accessors.Signals_Accessor.num_signals">num_signals</a></code></li>
+<li><code><a title="vectorbt.signals.accessors.Signals_Accessor.rank" href="#vectorbt.signals.accessors.Signals_Accessor.rank">rank</a></code></li>
+<li><code><a title="vectorbt.signals.accessors.Signals_Accessor.shuffle" href="#vectorbt.signals.accessors.Signals_Accessor.shuffle">shuffle</a></code></li>
 </ul>
 </li>
 <li><code><b><a title="vectorbt.utils.accessors.Base_DFAccessor" href="../utils/accessors.html#vectorbt.utils.accessors.Base_DFAccessor">Base_DFAccessor</a></b></code>:
 <ul class="hlist">
+<li><code><a title="vectorbt.utils.accessors.Base_DFAccessor.align_to" href="../utils/accessors.html#vectorbt.utils.accessors.Base_Accessor.align_to">align_to</a></code></li>
 <li><code><a title="vectorbt.utils.accessors.Base_DFAccessor.apply_and_concat" href="../utils/accessors.html#vectorbt.utils.accessors.Base_Accessor.apply_and_concat">apply_and_concat</a></code></li>
+<li><code><a title="vectorbt.utils.accessors.Base_DFAccessor.broadcast" href="../utils/accessors.html#vectorbt.utils.accessors.Base_Accessor.broadcast">broadcast</a></code></li>
+<li><code><a title="vectorbt.utils.accessors.Base_DFAccessor.broadcast_to" href="../utils/accessors.html#vectorbt.utils.accessors.Base_Accessor.broadcast_to">broadcast_to</a></code></li>
+<li><code><a title="vectorbt.utils.accessors.Base_DFAccessor.columns" href="../utils/accessors.html#vectorbt.utils.accessors.Base_Accessor.columns">columns</a></code></li>
 <li><code><a title="vectorbt.utils.accessors.Base_DFAccessor.combine_with" href="../utils/accessors.html#vectorbt.utils.accessors.Base_Accessor.combine_with">combine_with</a></code></li>
 <li><code><a title="vectorbt.utils.accessors.Base_DFAccessor.combine_with_multiple" href="../utils/accessors.html#vectorbt.utils.accessors.Base_Accessor.combine_with_multiple">combine_with_multiple</a></code></li>
+<li><code><a title="vectorbt.utils.accessors.Base_DFAccessor.concat" href="../utils/accessors.html#vectorbt.utils.accessors.Base_Accessor.concat">concat</a></code></li>
+<li><code><a title="vectorbt.utils.accessors.Base_DFAccessor.index" href="../utils/accessors.html#vectorbt.utils.accessors.Base_Accessor.index">index</a></code></li>
+<li><code><a title="vectorbt.utils.accessors.Base_DFAccessor.make_symmetric" href="../utils/accessors.html#vectorbt.utils.accessors.Base_Accessor.make_symmetric">make_symmetric</a></code></li>
+<li><code><a title="vectorbt.utils.accessors.Base_DFAccessor.repeat" href="../utils/accessors.html#vectorbt.utils.accessors.Base_Accessor.repeat">repeat</a></code></li>
+<li><code><a title="vectorbt.utils.accessors.Base_DFAccessor.tile" href="../utils/accessors.html#vectorbt.utils.accessors.Base_Accessor.tile">tile</a></code></li>
+<li><code><a title="vectorbt.utils.accessors.Base_DFAccessor.to_1d_array" href="../utils/accessors.html#vectorbt.utils.accessors.Base_Accessor.to_1d_array">to_1d_array</a></code></li>
+<li><code><a title="vectorbt.utils.accessors.Base_DFAccessor.to_2d_array" href="../utils/accessors.html#vectorbt.utils.accessors.Base_Accessor.to_2d_array">to_2d_array</a></code></li>
+<li><code><a title="vectorbt.utils.accessors.Base_DFAccessor.to_array" href="../utils/accessors.html#vectorbt.utils.accessors.Base_Accessor.to_array">to_array</a></code></li>
+<li><code><a title="vectorbt.utils.accessors.Base_DFAccessor.unstack_to_array" href="../utils/accessors.html#vectorbt.utils.accessors.Base_Accessor.unstack_to_array">unstack_to_array</a></code></li>
+<li><code><a title="vectorbt.utils.accessors.Base_DFAccessor.unstack_to_df" href="../utils/accessors.html#vectorbt.utils.accessors.Base_Accessor.unstack_to_df">unstack_to_df</a></code></li>
+<li><code><a title="vectorbt.utils.accessors.Base_DFAccessor.validate" href="../utils/accessors.html#vectorbt.utils.accessors.Base_Accessor.validate">validate</a></code></li>
+<li><code><a title="vectorbt.utils.accessors.Base_DFAccessor.wrap_array" href="../utils/accessors.html#vectorbt.utils.accessors.Base_Accessor.wrap_array">wrap_array</a></code></li>
 </ul>
 </li>
 </ul>
@@ -846,38 +2301,34 @@ def random_by_func(cls, shape, choice_func_nb, *args, seed=None, **kwargs):
 <span>(</span><span>obj)</span>
 </code></dt>
 <dd>
-<div class="desc"></div>
+<div class="desc"><p>Accessor with methods for Series only.</p>
+<p>Accessible through <code>pandas.Series.vbt.signals</code>.</p></div>
 <details class="source">
 <summary>
 <span>Expand source code</span>
 </summary>
 <pre><code class="python">class Signals_SRAccessor(Signals_Accessor, Base_SRAccessor):
+    &#34;&#34;&#34;Accessor with methods for Series only.
 
-    @classmethod
-    def empty(cls, *args, fill_value=False, **kwargs):
-        return Base_SRAccessor.empty(*args, fill_value=fill_value, **kwargs)
-
-    @classmethod
-    def empty_like(cls, *args, fill_value=False, **kwargs):
-        return Base_SRAccessor.empty_like(*args, fill_value=fill_value, **kwargs)
-
-    @classmethod
-    def random(cls, size, n, every_nth=1, seed=None, **kwargs):
-        return pd.Series(nb.random_nb((size, 1), reshape_fns.to_1d(n), every_nth, seed)[:, 0], **kwargs)
-
-    @classmethod
-    def random_by_func(cls, size, choice_func_nb, *args, seed=None, **kwargs):
-        return pd.Series(nb.random_by_func_nb(size, choice_func_nb, seed, *args), **kwargs)
-
-    @classmethod
-    def entries_and_exits(cls, size, entry_mask_nb, exit_mask_nb, *args, **kwargs):
-        entries, exits = nb.entries_and_exits_nb((size, 1), entry_mask_nb, exit_mask_nb, *args)
-        return pd.Series(entries[:, 0], **kwargs), pd.Series(exits[:, 0], **kwargs)
+    Accessible through `pandas.Series.vbt.signals`.&#34;&#34;&#34;
 
     def plot(self, name=None, trace_kwargs={}, fig=None, **layout_kwargs):
+        &#34;&#34;&#34;Plot Series as a line.
+
+        Args:
+            name (str): Name of the signals.
+            trace_kwargs (dict): Keyword arguments passed to [`plotly.graph_objects.Scatter`](https://plotly.com/python-api-reference/generated/plotly.graph_objects.Scatter.html).
+            fig (plotly.graph_objects.Figure): Figure to add traces to.
+            **layout_kwargs: Keyword arguments for layout.
+        Example:
+            ```py
+            signals[&#39;a&#39;].vbt.signals.plot()
+            ```
+
+            ![](img/signals_sr_plot.png)&#34;&#34;&#34;
         # Set up figure
         if fig is None:
-            fig = FigureWidget()
+            fig = DefaultFigureWidget()
             fig.update_layout(
                 yaxis=dict(
                     tickmode=&#39;array&#39;,
@@ -888,28 +2339,48 @@ def random_by_func(cls, shape, choice_func_nb, *args, seed=None, **kwargs):
             fig.update_layout(**layout_kwargs)
         if name is None:
             name = self._obj.name
-        if name is not None:
-            fig.update_layout(showlegend=True)
 
         scatter = go.Scatter(
-            x=self._obj.index,
-            y=self._obj.values,
+            x=self.index,
+            y=self.to_array(),
             mode=&#39;lines&#39;,
-            name=str(name) if name is not None else None
+            name=str(name),
+            showlegend=name is not None
         )
         scatter.update(**trace_kwargs)
         fig.add_trace(scatter)
 
         return fig
 
-    def plot_markers(self, ts, name=None, signal_type=None, trace_kwargs={}, fig=None, **layout_kwargs):
+    def plot_markers(self, ts, name=None, trace_kwargs={}, fig=None, **layout_kwargs):
+        &#34;&#34;&#34;Plot Series as markers.
+
+        Args:
+            ts (pandas.Series): Time series to plot markers on.
+
+                !!! note
+                    Doesn&#39;t plot `ts` itself.
+
+            name (str): Name of the signals.
+            trace_kwargs (dict): Keyword arguments passed to [`plotly.graph_objects.Scatter`](https://plotly.com/python-api-reference/generated/plotly.graph_objects.Scatter.html).
+            fig (plotly.graph_objects.Figure): Figure to add traces to.
+            **layout_kwargs: Keyword arguments for layout.
+        Example:
+            ```py
+            fig = ts[&#39;a&#39;].vbt.timeseries.plot()
+            signals[&#39;a&#39;].vbt.signals.plot_entry_markers(ts[&#39;a&#39;], fig=fig)
+            signals[&#39;b&#39;].vbt.signals.plot_exit_markers(ts[&#39;a&#39;], fig=fig)
+            ```
+
+            ![](img/signals_plot_markers.png)&#34;&#34;&#34;
         checks.assert_type(ts, pd.Series)
-        ts.vbt.timeseries.validate()
         checks.assert_same_index(self._obj, ts)
 
         if fig is None:
-            fig = FigureWidget()
+            fig = DefaultFigureWidget()
             fig.update_layout(**layout_kwargs)
+        if name is None:
+            name = self._obj.name
 
         # Plot markers
         scatter = go.Scatter(
@@ -918,19 +2389,37 @@ def random_by_func(cls, shape, choice_func_nb, *args, seed=None, **kwargs):
             mode=&#39;markers&#39;,
             marker=dict(
                 size=10
-            )
+            ),
+            name=str(name),
+            showlegend=name is not None
         )
-        if signal_type == &#39;entry&#39;:
-            scatter.marker.symbol = &#39;triangle-up&#39;
-            scatter.marker.color = &#39;limegreen&#39;
-            scatter.name = &#39;Entry&#39;
-        if signal_type == &#39;exit&#39;:
-            scatter.marker.symbol = &#39;triangle-down&#39;
-            scatter.marker.color = &#39;orangered&#39;
-            scatter.name = &#39;Exit&#39;
         scatter.update(**trace_kwargs)
         fig.add_trace(scatter)
-        return fig</code></pre>
+        return fig
+
+    def plot_entry_markers(self, *args, name=&#39;Entry&#39;, trace_kwargs={}, **kwargs):
+        &#34;&#34;&#34;Plot signals as entry markers.
+        
+        See `Signals_SRAccessor.plot_markers`.&#34;&#34;&#34;
+        trace_kwargs = common.merge_kwargs(dict(
+            marker=dict(
+                symbol=&#39;triangle-up&#39;,
+                color=&#39;limegreen&#39;
+            )
+        ), trace_kwargs)
+        return self.plot_markers(*args, name=name, trace_kwargs=trace_kwargs, **kwargs)
+
+    def plot_exit_markers(self, *args, name=&#39;Exit&#39;, trace_kwargs={}, **kwargs):
+        &#34;&#34;&#34;Plot signals as exit markers.
+        
+        See `Signals_SRAccessor.plot_markers`.&#34;&#34;&#34;
+        trace_kwargs = common.merge_kwargs(dict(
+            marker=dict(
+                symbol=&#39;triangle-down&#39;,
+                color=&#39;orangered&#39;
+            )
+        ), trace_kwargs)
+        return self.plot_markers(*args, name=name, trace_kwargs=trace_kwargs, **kwargs)</code></pre>
 </details>
 <h3>Ancestors</h3>
 <ul class="hlist">
@@ -938,95 +2427,49 @@ def random_by_func(cls, shape, choice_func_nb, *args, seed=None, **kwargs):
 <li><a title="vectorbt.utils.accessors.Base_SRAccessor" href="../utils/accessors.html#vectorbt.utils.accessors.Base_SRAccessor">Base_SRAccessor</a></li>
 <li><a title="vectorbt.utils.accessors.Base_Accessor" href="../utils/accessors.html#vectorbt.utils.accessors.Base_Accessor">Base_Accessor</a></li>
 </ul>
-<h3>Static methods</h3>
-<dl>
-<dt id="vectorbt.signals.accessors.Signals_SRAccessor.empty"><code class="name flex">
-<span>def <span class="ident">empty</span></span>(<span>*args, fill_value=False, **kwargs)</span>
-</code></dt>
-<dd>
-<div class="desc"></div>
-<details class="source">
-<summary>
-<span>Expand source code</span>
-</summary>
-<pre><code class="python">@classmethod
-def empty(cls, *args, fill_value=False, **kwargs):
-    return Base_SRAccessor.empty(*args, fill_value=fill_value, **kwargs)</code></pre>
-</details>
-</dd>
-<dt id="vectorbt.signals.accessors.Signals_SRAccessor.empty_like"><code class="name flex">
-<span>def <span class="ident">empty_like</span></span>(<span>*args, fill_value=False, **kwargs)</span>
-</code></dt>
-<dd>
-<div class="desc"></div>
-<details class="source">
-<summary>
-<span>Expand source code</span>
-</summary>
-<pre><code class="python">@classmethod
-def empty_like(cls, *args, fill_value=False, **kwargs):
-    return Base_SRAccessor.empty_like(*args, fill_value=fill_value, **kwargs)</code></pre>
-</details>
-</dd>
-<dt id="vectorbt.signals.accessors.Signals_SRAccessor.entries_and_exits"><code class="name flex">
-<span>def <span class="ident">entries_and_exits</span></span>(<span>size, entry_mask_nb, exit_mask_nb, *args, **kwargs)</span>
-</code></dt>
-<dd>
-<div class="desc"></div>
-<details class="source">
-<summary>
-<span>Expand source code</span>
-</summary>
-<pre><code class="python">@classmethod
-def entries_and_exits(cls, size, entry_mask_nb, exit_mask_nb, *args, **kwargs):
-    entries, exits = nb.entries_and_exits_nb((size, 1), entry_mask_nb, exit_mask_nb, *args)
-    return pd.Series(entries[:, 0], **kwargs), pd.Series(exits[:, 0], **kwargs)</code></pre>
-</details>
-</dd>
-<dt id="vectorbt.signals.accessors.Signals_SRAccessor.random"><code class="name flex">
-<span>def <span class="ident">random</span></span>(<span>size, n, every_nth=1, seed=None, **kwargs)</span>
-</code></dt>
-<dd>
-<div class="desc"></div>
-<details class="source">
-<summary>
-<span>Expand source code</span>
-</summary>
-<pre><code class="python">@classmethod
-def random(cls, size, n, every_nth=1, seed=None, **kwargs):
-    return pd.Series(nb.random_nb((size, 1), reshape_fns.to_1d(n), every_nth, seed)[:, 0], **kwargs)</code></pre>
-</details>
-</dd>
-<dt id="vectorbt.signals.accessors.Signals_SRAccessor.random_by_func"><code class="name flex">
-<span>def <span class="ident">random_by_func</span></span>(<span>size, choice_func_nb, *args, seed=None, **kwargs)</span>
-</code></dt>
-<dd>
-<div class="desc"></div>
-<details class="source">
-<summary>
-<span>Expand source code</span>
-</summary>
-<pre><code class="python">@classmethod
-def random_by_func(cls, size, choice_func_nb, *args, seed=None, **kwargs):
-    return pd.Series(nb.random_by_func_nb(size, choice_func_nb, seed, *args), **kwargs)</code></pre>
-</details>
-</dd>
-</dl>
 <h3>Methods</h3>
 <dl>
 <dt id="vectorbt.signals.accessors.Signals_SRAccessor.plot"><code class="name flex">
 <span>def <span class="ident">plot</span></span>(<span>self, name=None, trace_kwargs={}, fig=None, **layout_kwargs)</span>
 </code></dt>
 <dd>
-<div class="desc"></div>
+<div class="desc"><p>Plot Series as a line.</p>
+<h2 id="args">Args</h2>
+<dl>
+<dt><strong><code>name</code></strong> :&ensp;<code>str</code></dt>
+<dd>Name of the signals.</dd>
+<dt><strong><code>trace_kwargs</code></strong> :&ensp;<code>dict</code></dt>
+<dd>Keyword arguments passed to <a href="https://plotly.com/python-api-reference/generated/plotly.graph_objects.Scatter.html"><code>plotly.graph_objects.Scatter</code></a>.</dd>
+<dt><strong><code>fig</code></strong> :&ensp;<code>plotly.graph_objects.Figure</code></dt>
+<dd>Figure to add traces to.</dd>
+<dt><strong><code>**layout_kwargs</code></strong></dt>
+<dd>Keyword arguments for layout.</dd>
+</dl>
+<h2 id="example">Example</h2>
+<pre><code class="py">signals['a'].vbt.signals.plot()
+</code></pre>
+<p><img alt="" src="img/signals_sr_plot.png"></p></div>
 <details class="source">
 <summary>
 <span>Expand source code</span>
 </summary>
 <pre><code class="python">def plot(self, name=None, trace_kwargs={}, fig=None, **layout_kwargs):
+    &#34;&#34;&#34;Plot Series as a line.
+
+    Args:
+        name (str): Name of the signals.
+        trace_kwargs (dict): Keyword arguments passed to [`plotly.graph_objects.Scatter`](https://plotly.com/python-api-reference/generated/plotly.graph_objects.Scatter.html).
+        fig (plotly.graph_objects.Figure): Figure to add traces to.
+        **layout_kwargs: Keyword arguments for layout.
+    Example:
+        ```py
+        signals[&#39;a&#39;].vbt.signals.plot()
+        ```
+
+        ![](img/signals_sr_plot.png)&#34;&#34;&#34;
     # Set up figure
     if fig is None:
-        fig = FigureWidget()
+        fig = DefaultFigureWidget()
         fig.update_layout(
             yaxis=dict(
                 tickmode=&#39;array&#39;,
@@ -1037,14 +2480,13 @@ def random_by_func(cls, size, choice_func_nb, *args, seed=None, **kwargs):
         fig.update_layout(**layout_kwargs)
     if name is None:
         name = self._obj.name
-    if name is not None:
-        fig.update_layout(showlegend=True)
 
     scatter = go.Scatter(
-        x=self._obj.index,
-        y=self._obj.values,
+        x=self.index,
+        y=self.to_array(),
         mode=&#39;lines&#39;,
-        name=str(name) if name is not None else None
+        name=str(name),
+        showlegend=name is not None
     )
     scatter.update(**trace_kwargs)
     fig.add_trace(scatter)
@@ -1052,23 +2494,115 @@ def random_by_func(cls, size, choice_func_nb, *args, seed=None, **kwargs):
     return fig</code></pre>
 </details>
 </dd>
-<dt id="vectorbt.signals.accessors.Signals_SRAccessor.plot_markers"><code class="name flex">
-<span>def <span class="ident">plot_markers</span></span>(<span>self, ts, name=None, signal_type=None, trace_kwargs={}, fig=None, **layout_kwargs)</span>
+<dt id="vectorbt.signals.accessors.Signals_SRAccessor.plot_entry_markers"><code class="name flex">
+<span>def <span class="ident">plot_entry_markers</span></span>(<span>self, *args, name='Entry', trace_kwargs={}, **kwargs)</span>
 </code></dt>
 <dd>
-<div class="desc"></div>
+<div class="desc"><p>Plot signals as entry markers.</p>
+<p>See <code><a title="vectorbt.signals.accessors.Signals_SRAccessor.plot_markers" href="#vectorbt.signals.accessors.Signals_SRAccessor.plot_markers">Signals_SRAccessor.plot_markers()</a></code>.</p></div>
 <details class="source">
 <summary>
 <span>Expand source code</span>
 </summary>
-<pre><code class="python">def plot_markers(self, ts, name=None, signal_type=None, trace_kwargs={}, fig=None, **layout_kwargs):
+<pre><code class="python">def plot_entry_markers(self, *args, name=&#39;Entry&#39;, trace_kwargs={}, **kwargs):
+    &#34;&#34;&#34;Plot signals as entry markers.
+    
+    See `Signals_SRAccessor.plot_markers`.&#34;&#34;&#34;
+    trace_kwargs = common.merge_kwargs(dict(
+        marker=dict(
+            symbol=&#39;triangle-up&#39;,
+            color=&#39;limegreen&#39;
+        )
+    ), trace_kwargs)
+    return self.plot_markers(*args, name=name, trace_kwargs=trace_kwargs, **kwargs)</code></pre>
+</details>
+</dd>
+<dt id="vectorbt.signals.accessors.Signals_SRAccessor.plot_exit_markers"><code class="name flex">
+<span>def <span class="ident">plot_exit_markers</span></span>(<span>self, *args, name='Exit', trace_kwargs={}, **kwargs)</span>
+</code></dt>
+<dd>
+<div class="desc"><p>Plot signals as exit markers.</p>
+<p>See <code><a title="vectorbt.signals.accessors.Signals_SRAccessor.plot_markers" href="#vectorbt.signals.accessors.Signals_SRAccessor.plot_markers">Signals_SRAccessor.plot_markers()</a></code>.</p></div>
+<details class="source">
+<summary>
+<span>Expand source code</span>
+</summary>
+<pre><code class="python">def plot_exit_markers(self, *args, name=&#39;Exit&#39;, trace_kwargs={}, **kwargs):
+    &#34;&#34;&#34;Plot signals as exit markers.
+    
+    See `Signals_SRAccessor.plot_markers`.&#34;&#34;&#34;
+    trace_kwargs = common.merge_kwargs(dict(
+        marker=dict(
+            symbol=&#39;triangle-down&#39;,
+            color=&#39;orangered&#39;
+        )
+    ), trace_kwargs)
+    return self.plot_markers(*args, name=name, trace_kwargs=trace_kwargs, **kwargs)</code></pre>
+</details>
+</dd>
+<dt id="vectorbt.signals.accessors.Signals_SRAccessor.plot_markers"><code class="name flex">
+<span>def <span class="ident">plot_markers</span></span>(<span>self, ts, name=None, trace_kwargs={}, fig=None, **layout_kwargs)</span>
+</code></dt>
+<dd>
+<div class="desc"><p>Plot Series as markers.</p>
+<h2 id="args">Args</h2>
+<dl>
+<dt><strong><code>ts</code></strong> :&ensp;<code>pandas.Series</code></dt>
+<dd>
+<p>Time series to plot markers on.</p>
+<div class="admonition note">
+<p class="admonition-title">Note</p>
+<p>Doesn't plot <code>ts</code> itself.</p>
+</div>
+</dd>
+<dt><strong><code>name</code></strong> :&ensp;<code>str</code></dt>
+<dd>Name of the signals.</dd>
+<dt><strong><code>trace_kwargs</code></strong> :&ensp;<code>dict</code></dt>
+<dd>Keyword arguments passed to <a href="https://plotly.com/python-api-reference/generated/plotly.graph_objects.Scatter.html"><code>plotly.graph_objects.Scatter</code></a>.</dd>
+<dt><strong><code>fig</code></strong> :&ensp;<code>plotly.graph_objects.Figure</code></dt>
+<dd>Figure to add traces to.</dd>
+<dt><strong><code>**layout_kwargs</code></strong></dt>
+<dd>Keyword arguments for layout.</dd>
+</dl>
+<h2 id="example">Example</h2>
+<pre><code class="py">fig = ts['a'].vbt.timeseries.plot()
+signals['a'].vbt.signals.plot_entry_markers(ts['a'], fig=fig)
+signals['b'].vbt.signals.plot_exit_markers(ts['a'], fig=fig)
+</code></pre>
+<p><img alt="" src="img/signals_plot_markers.png"></p></div>
+<details class="source">
+<summary>
+<span>Expand source code</span>
+</summary>
+<pre><code class="python">def plot_markers(self, ts, name=None, trace_kwargs={}, fig=None, **layout_kwargs):
+    &#34;&#34;&#34;Plot Series as markers.
+
+    Args:
+        ts (pandas.Series): Time series to plot markers on.
+
+            !!! note
+                Doesn&#39;t plot `ts` itself.
+
+        name (str): Name of the signals.
+        trace_kwargs (dict): Keyword arguments passed to [`plotly.graph_objects.Scatter`](https://plotly.com/python-api-reference/generated/plotly.graph_objects.Scatter.html).
+        fig (plotly.graph_objects.Figure): Figure to add traces to.
+        **layout_kwargs: Keyword arguments for layout.
+    Example:
+        ```py
+        fig = ts[&#39;a&#39;].vbt.timeseries.plot()
+        signals[&#39;a&#39;].vbt.signals.plot_entry_markers(ts[&#39;a&#39;], fig=fig)
+        signals[&#39;b&#39;].vbt.signals.plot_exit_markers(ts[&#39;a&#39;], fig=fig)
+        ```
+
+        ![](img/signals_plot_markers.png)&#34;&#34;&#34;
     checks.assert_type(ts, pd.Series)
-    ts.vbt.timeseries.validate()
     checks.assert_same_index(self._obj, ts)
 
     if fig is None:
-        fig = FigureWidget()
+        fig = DefaultFigureWidget()
         fig.update_layout(**layout_kwargs)
+    if name is None:
+        name = self._obj.name
 
     # Plot markers
     scatter = go.Scatter(
@@ -1077,16 +2611,10 @@ def random_by_func(cls, size, choice_func_nb, *args, seed=None, **kwargs):
         mode=&#39;markers&#39;,
         marker=dict(
             size=10
-        )
+        ),
+        name=str(name),
+        showlegend=name is not None
     )
-    if signal_type == &#39;entry&#39;:
-        scatter.marker.symbol = &#39;triangle-up&#39;
-        scatter.marker.color = &#39;limegreen&#39;
-        scatter.name = &#39;Entry&#39;
-    if signal_type == &#39;exit&#39;:
-        scatter.marker.symbol = &#39;triangle-down&#39;
-        scatter.marker.color = &#39;orangered&#39;
-        scatter.name = &#39;Exit&#39;
     scatter.update(**trace_kwargs)
     fig.add_trace(scatter)
     return fig</code></pre>
@@ -1097,14 +2625,50 @@ def random_by_func(cls, size, choice_func_nb, *args, seed=None, **kwargs):
 <ul class="hlist">
 <li><code><b><a title="vectorbt.signals.accessors.Signals_Accessor" href="#vectorbt.signals.accessors.Signals_Accessor">Signals_Accessor</a></b></code>:
 <ul class="hlist">
-<li><code><a title="vectorbt.signals.accessors.Signals_Accessor.dtype" href="#vectorbt.signals.accessors.Signals_Accessor.dtype">dtype</a></code></li>
+<li><code><a title="vectorbt.signals.accessors.Signals_Accessor.AND" href="#vectorbt.signals.accessors.Signals_Accessor.AND">AND</a></code></li>
+<li><code><a title="vectorbt.signals.accessors.Signals_Accessor.OR" href="#vectorbt.signals.accessors.Signals_Accessor.OR">OR</a></code></li>
+<li><code><a title="vectorbt.signals.accessors.Signals_Accessor.XOR" href="#vectorbt.signals.accessors.Signals_Accessor.XOR">XOR</a></code></li>
+<li><code><a title="vectorbt.signals.accessors.Signals_Accessor.avg_distance" href="#vectorbt.signals.accessors.Signals_Accessor.avg_distance">avg_distance</a></code></li>
+<li><code><a title="vectorbt.signals.accessors.Signals_Accessor.avg_distance_to" href="#vectorbt.signals.accessors.Signals_Accessor.avg_distance_to">avg_distance_to</a></code></li>
+<li><code><a title="vectorbt.signals.accessors.Signals_Accessor.empty" href="#vectorbt.signals.accessors.Signals_Accessor.empty">empty</a></code></li>
+<li><code><a title="vectorbt.signals.accessors.Signals_Accessor.empty_like" href="#vectorbt.signals.accessors.Signals_Accessor.empty_like">empty_like</a></code></li>
+<li><code><a title="vectorbt.signals.accessors.Signals_Accessor.first" href="#vectorbt.signals.accessors.Signals_Accessor.first">first</a></code></li>
+<li><code><a title="vectorbt.signals.accessors.Signals_Accessor.from_nst" href="#vectorbt.signals.accessors.Signals_Accessor.from_nst">from_nst</a></code></li>
+<li><code><a title="vectorbt.signals.accessors.Signals_Accessor.fshift" href="#vectorbt.signals.accessors.Signals_Accessor.fshift">fshift</a></code></li>
+<li><code><a title="vectorbt.signals.accessors.Signals_Accessor.generate" href="#vectorbt.signals.accessors.Signals_Accessor.generate">generate</a></code></li>
+<li><code><a title="vectorbt.signals.accessors.Signals_Accessor.generate_after" href="#vectorbt.signals.accessors.Signals_Accessor.generate_after">generate_after</a></code></li>
+<li><code><a title="vectorbt.signals.accessors.Signals_Accessor.generate_iteratively" href="#vectorbt.signals.accessors.Signals_Accessor.generate_iteratively">generate_iteratively</a></code></li>
+<li><code><a title="vectorbt.signals.accessors.Signals_Accessor.generate_random" href="#vectorbt.signals.accessors.Signals_Accessor.generate_random">generate_random</a></code></li>
+<li><code><a title="vectorbt.signals.accessors.Signals_Accessor.generate_random_after" href="#vectorbt.signals.accessors.Signals_Accessor.generate_random_after">generate_random_after</a></code></li>
+<li><code><a title="vectorbt.signals.accessors.Signals_Accessor.generate_stop_loss" href="#vectorbt.signals.accessors.Signals_Accessor.generate_stop_loss">generate_stop_loss</a></code></li>
+<li><code><a title="vectorbt.signals.accessors.Signals_Accessor.map_reduce_between" href="#vectorbt.signals.accessors.Signals_Accessor.map_reduce_between">map_reduce_between</a></code></li>
+<li><code><a title="vectorbt.signals.accessors.Signals_Accessor.nst" href="#vectorbt.signals.accessors.Signals_Accessor.nst">nst</a></code></li>
+<li><code><a title="vectorbt.signals.accessors.Signals_Accessor.num_signals" href="#vectorbt.signals.accessors.Signals_Accessor.num_signals">num_signals</a></code></li>
+<li><code><a title="vectorbt.signals.accessors.Signals_Accessor.rank" href="#vectorbt.signals.accessors.Signals_Accessor.rank">rank</a></code></li>
+<li><code><a title="vectorbt.signals.accessors.Signals_Accessor.shuffle" href="#vectorbt.signals.accessors.Signals_Accessor.shuffle">shuffle</a></code></li>
 </ul>
 </li>
 <li><code><b><a title="vectorbt.utils.accessors.Base_SRAccessor" href="../utils/accessors.html#vectorbt.utils.accessors.Base_SRAccessor">Base_SRAccessor</a></b></code>:
 <ul class="hlist">
+<li><code><a title="vectorbt.utils.accessors.Base_SRAccessor.align_to" href="../utils/accessors.html#vectorbt.utils.accessors.Base_Accessor.align_to">align_to</a></code></li>
 <li><code><a title="vectorbt.utils.accessors.Base_SRAccessor.apply_and_concat" href="../utils/accessors.html#vectorbt.utils.accessors.Base_Accessor.apply_and_concat">apply_and_concat</a></code></li>
+<li><code><a title="vectorbt.utils.accessors.Base_SRAccessor.broadcast" href="../utils/accessors.html#vectorbt.utils.accessors.Base_Accessor.broadcast">broadcast</a></code></li>
+<li><code><a title="vectorbt.utils.accessors.Base_SRAccessor.broadcast_to" href="../utils/accessors.html#vectorbt.utils.accessors.Base_Accessor.broadcast_to">broadcast_to</a></code></li>
+<li><code><a title="vectorbt.utils.accessors.Base_SRAccessor.columns" href="../utils/accessors.html#vectorbt.utils.accessors.Base_Accessor.columns">columns</a></code></li>
 <li><code><a title="vectorbt.utils.accessors.Base_SRAccessor.combine_with" href="../utils/accessors.html#vectorbt.utils.accessors.Base_Accessor.combine_with">combine_with</a></code></li>
 <li><code><a title="vectorbt.utils.accessors.Base_SRAccessor.combine_with_multiple" href="../utils/accessors.html#vectorbt.utils.accessors.Base_Accessor.combine_with_multiple">combine_with_multiple</a></code></li>
+<li><code><a title="vectorbt.utils.accessors.Base_SRAccessor.concat" href="../utils/accessors.html#vectorbt.utils.accessors.Base_Accessor.concat">concat</a></code></li>
+<li><code><a title="vectorbt.utils.accessors.Base_SRAccessor.index" href="../utils/accessors.html#vectorbt.utils.accessors.Base_Accessor.index">index</a></code></li>
+<li><code><a title="vectorbt.utils.accessors.Base_SRAccessor.make_symmetric" href="../utils/accessors.html#vectorbt.utils.accessors.Base_Accessor.make_symmetric">make_symmetric</a></code></li>
+<li><code><a title="vectorbt.utils.accessors.Base_SRAccessor.repeat" href="../utils/accessors.html#vectorbt.utils.accessors.Base_Accessor.repeat">repeat</a></code></li>
+<li><code><a title="vectorbt.utils.accessors.Base_SRAccessor.tile" href="../utils/accessors.html#vectorbt.utils.accessors.Base_Accessor.tile">tile</a></code></li>
+<li><code><a title="vectorbt.utils.accessors.Base_SRAccessor.to_1d_array" href="../utils/accessors.html#vectorbt.utils.accessors.Base_Accessor.to_1d_array">to_1d_array</a></code></li>
+<li><code><a title="vectorbt.utils.accessors.Base_SRAccessor.to_2d_array" href="../utils/accessors.html#vectorbt.utils.accessors.Base_Accessor.to_2d_array">to_2d_array</a></code></li>
+<li><code><a title="vectorbt.utils.accessors.Base_SRAccessor.to_array" href="../utils/accessors.html#vectorbt.utils.accessors.Base_Accessor.to_array">to_array</a></code></li>
+<li><code><a title="vectorbt.utils.accessors.Base_SRAccessor.unstack_to_array" href="../utils/accessors.html#vectorbt.utils.accessors.Base_Accessor.unstack_to_array">unstack_to_array</a></code></li>
+<li><code><a title="vectorbt.utils.accessors.Base_SRAccessor.unstack_to_df" href="../utils/accessors.html#vectorbt.utils.accessors.Base_Accessor.unstack_to_df">unstack_to_df</a></code></li>
+<li><code><a title="vectorbt.utils.accessors.Base_SRAccessor.validate" href="../utils/accessors.html#vectorbt.utils.accessors.Base_Accessor.validate">validate</a></code></li>
+<li><code><a title="vectorbt.utils.accessors.Base_SRAccessor.wrap_array" href="../utils/accessors.html#vectorbt.utils.accessors.Base_Accessor.wrap_array">wrap_array</a></code></li>
 </ul>
 </li>
 </ul>
@@ -1133,42 +2697,37 @@ def random_by_func(cls, size, choice_func_nb, *args, seed=None, **kwargs):
 <li><code><a title="vectorbt.signals.accessors.Signals_Accessor.XOR" href="#vectorbt.signals.accessors.Signals_Accessor.XOR">XOR</a></code></li>
 <li><code><a title="vectorbt.signals.accessors.Signals_Accessor.avg_distance" href="#vectorbt.signals.accessors.Signals_Accessor.avg_distance">avg_distance</a></code></li>
 <li><code><a title="vectorbt.signals.accessors.Signals_Accessor.avg_distance_to" href="#vectorbt.signals.accessors.Signals_Accessor.avg_distance_to">avg_distance_to</a></code></li>
-<li><code><a title="vectorbt.signals.accessors.Signals_Accessor.dtype" href="#vectorbt.signals.accessors.Signals_Accessor.dtype">dtype</a></code></li>
-<li><code><a title="vectorbt.signals.accessors.Signals_Accessor.exits" href="#vectorbt.signals.accessors.Signals_Accessor.exits">exits</a></code></li>
+<li><code><a title="vectorbt.signals.accessors.Signals_Accessor.empty" href="#vectorbt.signals.accessors.Signals_Accessor.empty">empty</a></code></li>
+<li><code><a title="vectorbt.signals.accessors.Signals_Accessor.empty_like" href="#vectorbt.signals.accessors.Signals_Accessor.empty_like">empty_like</a></code></li>
 <li><code><a title="vectorbt.signals.accessors.Signals_Accessor.first" href="#vectorbt.signals.accessors.Signals_Accessor.first">first</a></code></li>
 <li><code><a title="vectorbt.signals.accessors.Signals_Accessor.from_nst" href="#vectorbt.signals.accessors.Signals_Accessor.from_nst">from_nst</a></code></li>
 <li><code><a title="vectorbt.signals.accessors.Signals_Accessor.fshift" href="#vectorbt.signals.accessors.Signals_Accessor.fshift">fshift</a></code></li>
+<li><code><a title="vectorbt.signals.accessors.Signals_Accessor.generate" href="#vectorbt.signals.accessors.Signals_Accessor.generate">generate</a></code></li>
+<li><code><a title="vectorbt.signals.accessors.Signals_Accessor.generate_after" href="#vectorbt.signals.accessors.Signals_Accessor.generate_after">generate_after</a></code></li>
+<li><code><a title="vectorbt.signals.accessors.Signals_Accessor.generate_iteratively" href="#vectorbt.signals.accessors.Signals_Accessor.generate_iteratively">generate_iteratively</a></code></li>
+<li><code><a title="vectorbt.signals.accessors.Signals_Accessor.generate_random" href="#vectorbt.signals.accessors.Signals_Accessor.generate_random">generate_random</a></code></li>
+<li><code><a title="vectorbt.signals.accessors.Signals_Accessor.generate_random_after" href="#vectorbt.signals.accessors.Signals_Accessor.generate_random_after">generate_random_after</a></code></li>
+<li><code><a title="vectorbt.signals.accessors.Signals_Accessor.generate_stop_loss" href="#vectorbt.signals.accessors.Signals_Accessor.generate_stop_loss">generate_stop_loss</a></code></li>
 <li><code><a title="vectorbt.signals.accessors.Signals_Accessor.map_reduce_between" href="#vectorbt.signals.accessors.Signals_Accessor.map_reduce_between">map_reduce_between</a></code></li>
 <li><code><a title="vectorbt.signals.accessors.Signals_Accessor.nst" href="#vectorbt.signals.accessors.Signals_Accessor.nst">nst</a></code></li>
 <li><code><a title="vectorbt.signals.accessors.Signals_Accessor.num_signals" href="#vectorbt.signals.accessors.Signals_Accessor.num_signals">num_signals</a></code></li>
-<li><code><a title="vectorbt.signals.accessors.Signals_Accessor.random_exits" href="#vectorbt.signals.accessors.Signals_Accessor.random_exits">random_exits</a></code></li>
-<li><code><a title="vectorbt.signals.accessors.Signals_Accessor.random_exits_by_func" href="#vectorbt.signals.accessors.Signals_Accessor.random_exits_by_func">random_exits_by_func</a></code></li>
 <li><code><a title="vectorbt.signals.accessors.Signals_Accessor.rank" href="#vectorbt.signals.accessors.Signals_Accessor.rank">rank</a></code></li>
 <li><code><a title="vectorbt.signals.accessors.Signals_Accessor.shuffle" href="#vectorbt.signals.accessors.Signals_Accessor.shuffle">shuffle</a></code></li>
-<li><code><a title="vectorbt.signals.accessors.Signals_Accessor.stop_loss_exits" href="#vectorbt.signals.accessors.Signals_Accessor.stop_loss_exits">stop_loss_exits</a></code></li>
 </ul>
 </li>
 <li>
 <h4><code><a title="vectorbt.signals.accessors.Signals_DFAccessor" href="#vectorbt.signals.accessors.Signals_DFAccessor">Signals_DFAccessor</a></code></h4>
-<ul class="two-column">
-<li><code><a title="vectorbt.signals.accessors.Signals_DFAccessor.empty" href="#vectorbt.signals.accessors.Signals_DFAccessor.empty">empty</a></code></li>
-<li><code><a title="vectorbt.signals.accessors.Signals_DFAccessor.empty_like" href="#vectorbt.signals.accessors.Signals_DFAccessor.empty_like">empty_like</a></code></li>
-<li><code><a title="vectorbt.signals.accessors.Signals_DFAccessor.entries_and_exits" href="#vectorbt.signals.accessors.Signals_DFAccessor.entries_and_exits">entries_and_exits</a></code></li>
+<ul class="">
 <li><code><a title="vectorbt.signals.accessors.Signals_DFAccessor.plot" href="#vectorbt.signals.accessors.Signals_DFAccessor.plot">plot</a></code></li>
-<li><code><a title="vectorbt.signals.accessors.Signals_DFAccessor.random" href="#vectorbt.signals.accessors.Signals_DFAccessor.random">random</a></code></li>
-<li><code><a title="vectorbt.signals.accessors.Signals_DFAccessor.random_by_func" href="#vectorbt.signals.accessors.Signals_DFAccessor.random_by_func">random_by_func</a></code></li>
 </ul>
 </li>
 <li>
 <h4><code><a title="vectorbt.signals.accessors.Signals_SRAccessor" href="#vectorbt.signals.accessors.Signals_SRAccessor">Signals_SRAccessor</a></code></h4>
-<ul class="two-column">
-<li><code><a title="vectorbt.signals.accessors.Signals_SRAccessor.empty" href="#vectorbt.signals.accessors.Signals_SRAccessor.empty">empty</a></code></li>
-<li><code><a title="vectorbt.signals.accessors.Signals_SRAccessor.empty_like" href="#vectorbt.signals.accessors.Signals_SRAccessor.empty_like">empty_like</a></code></li>
-<li><code><a title="vectorbt.signals.accessors.Signals_SRAccessor.entries_and_exits" href="#vectorbt.signals.accessors.Signals_SRAccessor.entries_and_exits">entries_and_exits</a></code></li>
+<ul class="">
 <li><code><a title="vectorbt.signals.accessors.Signals_SRAccessor.plot" href="#vectorbt.signals.accessors.Signals_SRAccessor.plot">plot</a></code></li>
+<li><code><a title="vectorbt.signals.accessors.Signals_SRAccessor.plot_entry_markers" href="#vectorbt.signals.accessors.Signals_SRAccessor.plot_entry_markers">plot_entry_markers</a></code></li>
+<li><code><a title="vectorbt.signals.accessors.Signals_SRAccessor.plot_exit_markers" href="#vectorbt.signals.accessors.Signals_SRAccessor.plot_exit_markers">plot_exit_markers</a></code></li>
 <li><code><a title="vectorbt.signals.accessors.Signals_SRAccessor.plot_markers" href="#vectorbt.signals.accessors.Signals_SRAccessor.plot_markers">plot_markers</a></code></li>
-<li><code><a title="vectorbt.signals.accessors.Signals_SRAccessor.random" href="#vectorbt.signals.accessors.Signals_SRAccessor.random">random</a></code></li>
-<li><code><a title="vectorbt.signals.accessors.Signals_SRAccessor.random_by_func" href="#vectorbt.signals.accessors.Signals_SRAccessor.random_by_func">random_by_func</a></code></li>
 </ul>
 </li>
 </ul>

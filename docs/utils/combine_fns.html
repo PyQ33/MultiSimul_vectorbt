@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1, minimum-scale=1" />
 <meta name="generator" content="pdoc 0.8.1" />
 <title>vectorbt.utils.combine_fns API documentation</title>
-<meta name="description" content="" />
+<meta name="description" content="Utility functions for combining arrays." />
 <link href='https://cdnjs.cloudflare.com/ajax/libs/normalize/8.0.0/normalize.min.css' rel='stylesheet'>
 <link href='https://cdnjs.cloudflare.com/ajax/libs/10up-sanitize.css/8.0.0/sanitize.min.css' rel='stylesheet'>
 <link href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/9.12.0/styles/github.min.css" rel="stylesheet">
@@ -20,11 +20,14 @@
 <h1 class="title">Module <code>vectorbt.utils.combine_fns</code></h1>
 </header>
 <section id="section-intro">
+<p>Utility functions for combining arrays.</p>
 <details class="source">
 <summary>
 <span>Expand source code</span>
 </summary>
-<pre><code class="python">import numpy as np
+<pre><code class="python">&#34;&#34;&#34;Utility functions for combining arrays.&#34;&#34;&#34;
+
+import numpy as np
 import pandas as pd
 from numba import njit
 from numba.typed import List
@@ -33,12 +36,21 @@ from vectorbt.utils import reshape_fns
 
 
 def apply_and_concat_one(n, apply_func, *args, **kwargs):
-    &#34;&#34;&#34;For a range from 0 to n, apply a function and concat the results horizontally.&#34;&#34;&#34;
+    &#34;&#34;&#34;For each value `i` from 0 to `n`, apply `apply_func` with arguments `*args` and `**kwargs`, 
+    and concat the results along axis 1. 
+    
+    The result of `apply_func` must be a single 1-dim or 2-dim array.
+    
+    `apply_func` must accept arguments `i`, `*args` and `**kwargs`.&#34;&#34;&#34;
     return np.hstack([reshape_fns.to_2d(apply_func(i, *args, **kwargs)) for i in range(n)])
 
 
 @njit
 def to_2d_one_nb(a):
+    &#34;&#34;&#34;Expand the dimensions of array `a` along axis 1.
+    
+    !!! note
+        * `a` must be strictly homogeneous&#34;&#34;&#34;
     if a.ndim &gt; 1:
         return a
     return np.expand_dims(a, axis=1)
@@ -46,6 +58,13 @@ def to_2d_one_nb(a):
 
 @njit
 def apply_and_concat_one_nb(n, apply_func_nb, *args):  # numba doesn&#39;t accepts **kwargs
+    &#34;&#34;&#34;A Numba-compiled version of `apply_and_concat_one`.
+    
+    !!! note
+        * `apply_func_nb` must be Numba-compiled
+        * `*args` must be Numba-compatible
+        * No support for `**kwargs`
+    &#34;&#34;&#34;
     output_0 = to_2d_one_nb(apply_func_nb(0, *args))
     output = np.empty((output_0.shape[0], n * output_0.shape[1]), dtype=output_0.dtype)
     for i in range(n):
@@ -58,12 +77,20 @@ def apply_and_concat_one_nb(n, apply_func_nb, *args):  # numba doesn&#39;t accep
 
 
 def apply_and_concat_multiple(n, apply_func, *args, **kwargs):
+    &#34;&#34;&#34;Identical to `apply_and_concat_one`, except that the result of `apply_func` must be 
+    multiple 1-dim or 2-dim arrays. Each of these arrays at `i` will be concatenated with the
+    array at the same position at `i+1`.&#34;&#34;&#34;
     outputs = [tuple(map(reshape_fns.to_2d, apply_func(i, *args, **kwargs))) for i in range(n)]
     return list(map(np.hstack, list(zip(*outputs))))
 
 
 @njit
 def to_2d_multiple_nb(a):
+    &#34;&#34;&#34;Expand the dimensions of each array in `a` along axis 1.
+    
+    !!! note
+        * `a` must be strictly homogeneous
+    &#34;&#34;&#34;
     lst = List()
     for _a in a:
         lst.append(to_2d_one_nb(_a))
@@ -71,8 +98,15 @@ def to_2d_multiple_nb(a):
 
 
 @njit
-def apply_and_concat_multiple_nb(n, apply_func_nb, *args):  # numba doesn&#39;t accepts **kwargs
-    # NOTE: apply_func_nb must return a homogeneous tuple!
+def apply_and_concat_multiple_nb(n, apply_func_nb, *args):
+    &#34;&#34;&#34;A Numba-compiled version of `apply_and_concat_multiple`.
+    
+    !!! note
+        * Output of `apply_func_nb` must be strictly homogeneous
+        * `apply_func_nb` must be Numba-compiled
+        * `*args` must be Numba-compatible
+        * No support for `**kwargs`
+    &#34;&#34;&#34;
     outputs = []
     outputs_0 = to_2d_multiple_nb(apply_func_nb(0, *args))
     for j in range(len(outputs_0)):
@@ -88,36 +122,53 @@ def apply_and_concat_multiple_nb(n, apply_func_nb, *args):  # numba doesn&#39;t 
 
 
 def apply_and_concat(obj, n, apply_func, *args, **kwargs):
+    &#34;&#34;&#34;Use `apply_and_concat_one` with additional argument `obj`.&#34;&#34;&#34;
     return apply_and_concat_one(n, apply_func, obj, *args, **kwargs)
 
 
 @njit
 def apply_and_concat_nb(obj, n, apply_func_nb, *args):
+    &#34;&#34;&#34;A Numba-compiled version of `apply_and_concat`.
+    
+    !!! note
+        * `apply_func_nb` must be Numba-compiled
+        * `*args` must be Numba-compatible
+        * No support for `**kwargs`
+    &#34;&#34;&#34;
     return apply_and_concat_one_nb(n, apply_func_nb, obj, *args)
 
 
 def select_and_combine(i, obj, others, combine_func, *args, **kwargs):
+    &#34;&#34;&#34;Combine `obj` and an element from `others` at `i` using `combine_func`.&#34;&#34;&#34;
     return combine_func(obj, others[i], *args, **kwargs)
 
 
 def combine_and_concat(obj, others, combine_func, *args, **kwargs):
-    &#34;&#34;&#34;For each element in others, combine obj and other element and concat the results horizontally.&#34;&#34;&#34;
+    &#34;&#34;&#34;Use `apply_and_concat` to combine `obj` with each element from `others` using `combine_func`.&#34;&#34;&#34;
     return apply_and_concat(obj, len(others), select_and_combine, others, combine_func, *args, **kwargs)
 
 
 @njit
 def select_and_combine_nb(i, obj, others, combine_func_nb, *args):
-    # NOTE: others must be homogeneuous!
+    &#34;&#34;&#34;A Numba-compiled version of `select_and_combine`.
+    
+    !!! note
+        * `combine_func_nb` must be Numba-compiled
+        * `obj`, `others` and `*args` must be Numba-compatible
+        * `others` must be strictly homogeneous
+        * No support for `**kwargs`
+    &#34;&#34;&#34;
     return combine_func_nb(obj, others[i], *args)
 
 
 @njit
 def combine_and_concat_nb(obj, others, combine_func_nb, *args):
+    &#34;&#34;&#34;A Numba-compiled version of `combine_and_concat`.&#34;&#34;&#34;
     return apply_and_concat_nb(obj, len(others), select_and_combine_nb, others, combine_func_nb, *args)
 
 
 def combine_multiple(objs, combine_func, *args, **kwargs):
-    &#34;&#34;&#34;Combine a list of objects pairwise.&#34;&#34;&#34;
+    &#34;&#34;&#34;Combine `objs` pairwise into a single object.&#34;&#34;&#34;
     result = None
     for i in range(1, len(objs)):
         if result is None:
@@ -129,8 +180,14 @@ def combine_multiple(objs, combine_func, *args, **kwargs):
 
 @njit
 def combine_multiple_nb(objs, combine_func_nb, *args):
-    # NOTE: each time combine_func_nb must return the array of the same type!
-    # Also NOTE: objs must all have the same type and arrays in the same memory order!
+    &#34;&#34;&#34;A Numba-compiled version of `combine_multiple`.
+    
+    !!! note
+        * `combine_func_nb` must be Numba-compiled
+        * `objs` and `*args` must be Numba-compatible
+        * `objs` must be strictly homogeneous
+        * No support for `**kwargs`
+    &#34;&#34;&#34;
     result = None
     for i in range(1, len(objs)):
         if result is None:
@@ -151,12 +208,13 @@ def combine_multiple_nb(objs, combine_func_nb, *args):
 <span>def <span class="ident">apply_and_concat</span></span>(<span>obj, n, apply_func, *args, **kwargs)</span>
 </code></dt>
 <dd>
-<div class="desc"></div>
+<div class="desc"><p>Use <code><a title="vectorbt.utils.combine_fns.apply_and_concat_one" href="#vectorbt.utils.combine_fns.apply_and_concat_one">apply_and_concat_one()</a></code> with additional argument <code>obj</code>.</p></div>
 <details class="source">
 <summary>
 <span>Expand source code</span>
 </summary>
 <pre><code class="python">def apply_and_concat(obj, n, apply_func, *args, **kwargs):
+    &#34;&#34;&#34;Use `apply_and_concat_one` with additional argument `obj`.&#34;&#34;&#34;
     return apply_and_concat_one(n, apply_func, obj, *args, **kwargs)</code></pre>
 </details>
 </dd>
@@ -164,12 +222,17 @@ def combine_multiple_nb(objs, combine_func_nb, *args):
 <span>def <span class="ident">apply_and_concat_multiple</span></span>(<span>n, apply_func, *args, **kwargs)</span>
 </code></dt>
 <dd>
-<div class="desc"></div>
+<div class="desc"><p>Identical to <code><a title="vectorbt.utils.combine_fns.apply_and_concat_one" href="#vectorbt.utils.combine_fns.apply_and_concat_one">apply_and_concat_one()</a></code>, except that the result of <code>apply_func</code> must be
+multiple 1-dim or 2-dim arrays. Each of these arrays at <code>i</code> will be concatenated with the
+array at the same position at <code>i+1</code>.</p></div>
 <details class="source">
 <summary>
 <span>Expand source code</span>
 </summary>
 <pre><code class="python">def apply_and_concat_multiple(n, apply_func, *args, **kwargs):
+    &#34;&#34;&#34;Identical to `apply_and_concat_one`, except that the result of `apply_func` must be 
+    multiple 1-dim or 2-dim arrays. Each of these arrays at `i` will be concatenated with the
+    array at the same position at `i+1`.&#34;&#34;&#34;
     outputs = [tuple(map(reshape_fns.to_2d, apply_func(i, *args, **kwargs))) for i in range(n)]
     return list(map(np.hstack, list(zip(*outputs))))</code></pre>
 </details>
@@ -178,14 +241,30 @@ def combine_multiple_nb(objs, combine_func_nb, *args):
 <span>def <span class="ident">apply_and_concat_multiple_nb</span></span>(<span>n, apply_func_nb, *args)</span>
 </code></dt>
 <dd>
-<div class="desc"></div>
+<div class="desc"><p>A Numba-compiled version of <code><a title="vectorbt.utils.combine_fns.apply_and_concat_multiple" href="#vectorbt.utils.combine_fns.apply_and_concat_multiple">apply_and_concat_multiple()</a></code>.</p>
+<div class="admonition note">
+<p class="admonition-title">Note</p>
+<ul>
+<li>Output of <code>apply_func_nb</code> must be strictly homogeneous</li>
+<li><code>apply_func_nb</code> must be Numba-compiled</li>
+<li><code>*args</code> must be Numba-compatible</li>
+<li>No support for <code>**kwargs</code></li>
+</ul>
+</div></div>
 <details class="source">
 <summary>
 <span>Expand source code</span>
 </summary>
 <pre><code class="python">@njit
-def apply_and_concat_multiple_nb(n, apply_func_nb, *args):  # numba doesn&#39;t accepts **kwargs
-    # NOTE: apply_func_nb must return a homogeneous tuple!
+def apply_and_concat_multiple_nb(n, apply_func_nb, *args):
+    &#34;&#34;&#34;A Numba-compiled version of `apply_and_concat_multiple`.
+    
+    !!! note
+        * Output of `apply_func_nb` must be strictly homogeneous
+        * `apply_func_nb` must be Numba-compiled
+        * `*args` must be Numba-compatible
+        * No support for `**kwargs`
+    &#34;&#34;&#34;
     outputs = []
     outputs_0 = to_2d_multiple_nb(apply_func_nb(0, *args))
     for j in range(len(outputs_0)):
@@ -204,13 +283,28 @@ def apply_and_concat_multiple_nb(n, apply_func_nb, *args):  # numba doesn&#39;t 
 <span>def <span class="ident">apply_and_concat_nb</span></span>(<span>obj, n, apply_func_nb, *args)</span>
 </code></dt>
 <dd>
-<div class="desc"></div>
+<div class="desc"><p>A Numba-compiled version of <code><a title="vectorbt.utils.combine_fns.apply_and_concat" href="#vectorbt.utils.combine_fns.apply_and_concat">apply_and_concat()</a></code>.</p>
+<div class="admonition note">
+<p class="admonition-title">Note</p>
+<ul>
+<li><code>apply_func_nb</code> must be Numba-compiled</li>
+<li><code>*args</code> must be Numba-compatible</li>
+<li>No support for <code>**kwargs</code></li>
+</ul>
+</div></div>
 <details class="source">
 <summary>
 <span>Expand source code</span>
 </summary>
 <pre><code class="python">@njit
 def apply_and_concat_nb(obj, n, apply_func_nb, *args):
+    &#34;&#34;&#34;A Numba-compiled version of `apply_and_concat`.
+    
+    !!! note
+        * `apply_func_nb` must be Numba-compiled
+        * `*args` must be Numba-compatible
+        * No support for `**kwargs`
+    &#34;&#34;&#34;
     return apply_and_concat_one_nb(n, apply_func_nb, obj, *args)</code></pre>
 </details>
 </dd>
@@ -218,13 +312,21 @@ def apply_and_concat_nb(obj, n, apply_func_nb, *args):
 <span>def <span class="ident">apply_and_concat_one</span></span>(<span>n, apply_func, *args, **kwargs)</span>
 </code></dt>
 <dd>
-<div class="desc"><p>For a range from 0 to n, apply a function and concat the results horizontally.</p></div>
+<div class="desc"><p>For each value <code>i</code> from 0 to <code>n</code>, apply <code>apply_func</code> with arguments <code>*args</code> and <code>**kwargs</code>,
+and concat the results along axis 1. </p>
+<p>The result of <code>apply_func</code> must be a single 1-dim or 2-dim array.</p>
+<p><code>apply_func</code> must accept arguments <code>i</code>, <code>*args</code> and <code>**kwargs</code>.</p></div>
 <details class="source">
 <summary>
 <span>Expand source code</span>
 </summary>
 <pre><code class="python">def apply_and_concat_one(n, apply_func, *args, **kwargs):
-    &#34;&#34;&#34;For a range from 0 to n, apply a function and concat the results horizontally.&#34;&#34;&#34;
+    &#34;&#34;&#34;For each value `i` from 0 to `n`, apply `apply_func` with arguments `*args` and `**kwargs`, 
+    and concat the results along axis 1. 
+    
+    The result of `apply_func` must be a single 1-dim or 2-dim array.
+    
+    `apply_func` must accept arguments `i`, `*args` and `**kwargs`.&#34;&#34;&#34;
     return np.hstack([reshape_fns.to_2d(apply_func(i, *args, **kwargs)) for i in range(n)])</code></pre>
 </details>
 </dd>
@@ -232,13 +334,28 @@ def apply_and_concat_nb(obj, n, apply_func_nb, *args):
 <span>def <span class="ident">apply_and_concat_one_nb</span></span>(<span>n, apply_func_nb, *args)</span>
 </code></dt>
 <dd>
-<div class="desc"></div>
+<div class="desc"><p>A Numba-compiled version of <code><a title="vectorbt.utils.combine_fns.apply_and_concat_one" href="#vectorbt.utils.combine_fns.apply_and_concat_one">apply_and_concat_one()</a></code>.</p>
+<div class="admonition note">
+<p class="admonition-title">Note</p>
+<ul>
+<li><code>apply_func_nb</code> must be Numba-compiled</li>
+<li><code>*args</code> must be Numba-compatible</li>
+<li>No support for <code>**kwargs</code></li>
+</ul>
+</div></div>
 <details class="source">
 <summary>
 <span>Expand source code</span>
 </summary>
 <pre><code class="python">@njit
 def apply_and_concat_one_nb(n, apply_func_nb, *args):  # numba doesn&#39;t accepts **kwargs
+    &#34;&#34;&#34;A Numba-compiled version of `apply_and_concat_one`.
+    
+    !!! note
+        * `apply_func_nb` must be Numba-compiled
+        * `*args` must be Numba-compatible
+        * No support for `**kwargs`
+    &#34;&#34;&#34;
     output_0 = to_2d_one_nb(apply_func_nb(0, *args))
     output = np.empty((output_0.shape[0], n * output_0.shape[1]), dtype=output_0.dtype)
     for i in range(n):
@@ -254,13 +371,13 @@ def apply_and_concat_one_nb(n, apply_func_nb, *args):  # numba doesn&#39;t accep
 <span>def <span class="ident">combine_and_concat</span></span>(<span>obj, others, combine_func, *args, **kwargs)</span>
 </code></dt>
 <dd>
-<div class="desc"><p>For each element in others, combine obj and other element and concat the results horizontally.</p></div>
+<div class="desc"><p>Use <code><a title="vectorbt.utils.combine_fns.apply_and_concat" href="#vectorbt.utils.combine_fns.apply_and_concat">apply_and_concat()</a></code> to combine <code>obj</code> with each element from <code>others</code> using <code>combine_func</code>.</p></div>
 <details class="source">
 <summary>
 <span>Expand source code</span>
 </summary>
 <pre><code class="python">def combine_and_concat(obj, others, combine_func, *args, **kwargs):
-    &#34;&#34;&#34;For each element in others, combine obj and other element and concat the results horizontally.&#34;&#34;&#34;
+    &#34;&#34;&#34;Use `apply_and_concat` to combine `obj` with each element from `others` using `combine_func`.&#34;&#34;&#34;
     return apply_and_concat(obj, len(others), select_and_combine, others, combine_func, *args, **kwargs)</code></pre>
 </details>
 </dd>
@@ -268,13 +385,14 @@ def apply_and_concat_one_nb(n, apply_func_nb, *args):  # numba doesn&#39;t accep
 <span>def <span class="ident">combine_and_concat_nb</span></span>(<span>obj, others, combine_func_nb, *args)</span>
 </code></dt>
 <dd>
-<div class="desc"></div>
+<div class="desc"><p>A Numba-compiled version of <code><a title="vectorbt.utils.combine_fns.combine_and_concat" href="#vectorbt.utils.combine_fns.combine_and_concat">combine_and_concat()</a></code>.</p></div>
 <details class="source">
 <summary>
 <span>Expand source code</span>
 </summary>
 <pre><code class="python">@njit
 def combine_and_concat_nb(obj, others, combine_func_nb, *args):
+    &#34;&#34;&#34;A Numba-compiled version of `combine_and_concat`.&#34;&#34;&#34;
     return apply_and_concat_nb(obj, len(others), select_and_combine_nb, others, combine_func_nb, *args)</code></pre>
 </details>
 </dd>
@@ -282,13 +400,13 @@ def combine_and_concat_nb(obj, others, combine_func_nb, *args):
 <span>def <span class="ident">combine_multiple</span></span>(<span>objs, combine_func, *args, **kwargs)</span>
 </code></dt>
 <dd>
-<div class="desc"><p>Combine a list of objects pairwise.</p></div>
+<div class="desc"><p>Combine <code>objs</code> pairwise into a single object.</p></div>
 <details class="source">
 <summary>
 <span>Expand source code</span>
 </summary>
 <pre><code class="python">def combine_multiple(objs, combine_func, *args, **kwargs):
-    &#34;&#34;&#34;Combine a list of objects pairwise.&#34;&#34;&#34;
+    &#34;&#34;&#34;Combine `objs` pairwise into a single object.&#34;&#34;&#34;
     result = None
     for i in range(1, len(objs)):
         if result is None:
@@ -302,15 +420,30 @@ def combine_and_concat_nb(obj, others, combine_func_nb, *args):
 <span>def <span class="ident">combine_multiple_nb</span></span>(<span>objs, combine_func_nb, *args)</span>
 </code></dt>
 <dd>
-<div class="desc"></div>
+<div class="desc"><p>A Numba-compiled version of <code><a title="vectorbt.utils.combine_fns.combine_multiple" href="#vectorbt.utils.combine_fns.combine_multiple">combine_multiple()</a></code>.</p>
+<div class="admonition note">
+<p class="admonition-title">Note</p>
+<ul>
+<li><code>combine_func_nb</code> must be Numba-compiled</li>
+<li><code>objs</code> and <code>*args</code> must be Numba-compatible</li>
+<li><code>objs</code> must be strictly homogeneous</li>
+<li>No support for <code>**kwargs</code></li>
+</ul>
+</div></div>
 <details class="source">
 <summary>
 <span>Expand source code</span>
 </summary>
 <pre><code class="python">@njit
 def combine_multiple_nb(objs, combine_func_nb, *args):
-    # NOTE: each time combine_func_nb must return the array of the same type!
-    # Also NOTE: objs must all have the same type and arrays in the same memory order!
+    &#34;&#34;&#34;A Numba-compiled version of `combine_multiple`.
+    
+    !!! note
+        * `combine_func_nb` must be Numba-compiled
+        * `objs` and `*args` must be Numba-compatible
+        * `objs` must be strictly homogeneous
+        * No support for `**kwargs`
+    &#34;&#34;&#34;
     result = None
     for i in range(1, len(objs)):
         if result is None:
@@ -324,12 +457,13 @@ def combine_multiple_nb(objs, combine_func_nb, *args):
 <span>def <span class="ident">select_and_combine</span></span>(<span>i, obj, others, combine_func, *args, **kwargs)</span>
 </code></dt>
 <dd>
-<div class="desc"></div>
+<div class="desc"><p>Combine <code>obj</code> and an element from <code>others</code> at <code>i</code> using <code>combine_func</code>.</p></div>
 <details class="source">
 <summary>
 <span>Expand source code</span>
 </summary>
 <pre><code class="python">def select_and_combine(i, obj, others, combine_func, *args, **kwargs):
+    &#34;&#34;&#34;Combine `obj` and an element from `others` at `i` using `combine_func`.&#34;&#34;&#34;
     return combine_func(obj, others[i], *args, **kwargs)</code></pre>
 </details>
 </dd>
@@ -337,14 +471,30 @@ def combine_multiple_nb(objs, combine_func_nb, *args):
 <span>def <span class="ident">select_and_combine_nb</span></span>(<span>i, obj, others, combine_func_nb, *args)</span>
 </code></dt>
 <dd>
-<div class="desc"></div>
+<div class="desc"><p>A Numba-compiled version of <code><a title="vectorbt.utils.combine_fns.select_and_combine" href="#vectorbt.utils.combine_fns.select_and_combine">select_and_combine()</a></code>.</p>
+<div class="admonition note">
+<p class="admonition-title">Note</p>
+<ul>
+<li><code>combine_func_nb</code> must be Numba-compiled</li>
+<li><code>obj</code>, <code>others</code> and <code>*args</code> must be Numba-compatible</li>
+<li><code>others</code> must be strictly homogeneous</li>
+<li>No support for <code>**kwargs</code></li>
+</ul>
+</div></div>
 <details class="source">
 <summary>
 <span>Expand source code</span>
 </summary>
 <pre><code class="python">@njit
 def select_and_combine_nb(i, obj, others, combine_func_nb, *args):
-    # NOTE: others must be homogeneuous!
+    &#34;&#34;&#34;A Numba-compiled version of `select_and_combine`.
+    
+    !!! note
+        * `combine_func_nb` must be Numba-compiled
+        * `obj`, `others` and `*args` must be Numba-compatible
+        * `others` must be strictly homogeneous
+        * No support for `**kwargs`
+    &#34;&#34;&#34;
     return combine_func_nb(obj, others[i], *args)</code></pre>
 </details>
 </dd>
@@ -352,13 +502,24 @@ def select_and_combine_nb(i, obj, others, combine_func_nb, *args):
 <span>def <span class="ident">to_2d_multiple_nb</span></span>(<span>a)</span>
 </code></dt>
 <dd>
-<div class="desc"></div>
+<div class="desc"><p>Expand the dimensions of each array in <code>a</code> along axis 1.</p>
+<div class="admonition note">
+<p class="admonition-title">Note</p>
+<ul>
+<li><code>a</code> must be strictly homogeneous</li>
+</ul>
+</div></div>
 <details class="source">
 <summary>
 <span>Expand source code</span>
 </summary>
 <pre><code class="python">@njit
 def to_2d_multiple_nb(a):
+    &#34;&#34;&#34;Expand the dimensions of each array in `a` along axis 1.
+    
+    !!! note
+        * `a` must be strictly homogeneous
+    &#34;&#34;&#34;
     lst = List()
     for _a in a:
         lst.append(to_2d_one_nb(_a))
@@ -369,13 +530,23 @@ def to_2d_multiple_nb(a):
 <span>def <span class="ident">to_2d_one_nb</span></span>(<span>a)</span>
 </code></dt>
 <dd>
-<div class="desc"></div>
+<div class="desc"><p>Expand the dimensions of array <code>a</code> along axis 1.</p>
+<div class="admonition note">
+<p class="admonition-title">Note</p>
+<ul>
+<li><code>a</code> must be strictly homogeneous</li>
+</ul>
+</div></div>
 <details class="source">
 <summary>
 <span>Expand source code</span>
 </summary>
 <pre><code class="python">@njit
 def to_2d_one_nb(a):
+    &#34;&#34;&#34;Expand the dimensions of array `a` along axis 1.
+    
+    !!! note
+        * `a` must be strictly homogeneous&#34;&#34;&#34;
     if a.ndim &gt; 1:
         return a
     return np.expand_dims(a, axis=1)</code></pre>

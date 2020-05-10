@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1, minimum-scale=1" />
 <meta name="generator" content="pdoc 0.8.1" />
 <title>vectorbt.utils.common API documentation</title>
-<meta name="description" content="" />
+<meta name="description" content="Common utility functions and classes." />
 <link href='https://cdnjs.cloudflare.com/ajax/libs/normalize/8.0.0/normalize.min.css' rel='stylesheet'>
 <link href='https://cdnjs.cloudflare.com/ajax/libs/10up-sanitize.css/8.0.0/sanitize.min.css' rel='stylesheet'>
 <link href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/9.12.0/styles/github.min.css" rel="stylesheet">
@@ -20,49 +20,52 @@
 <h1 class="title">Module <code>vectorbt.utils.common</code></h1>
 </header>
 <section id="section-intro">
+<p>Common utility functions and classes.</p>
 <details class="source">
 <summary>
 <span>Expand source code</span>
 </summary>
-<pre><code class="python">import numpy as np
+<pre><code class="python">&#34;&#34;&#34;Common utility functions and classes.&#34;&#34;&#34;
+
+import numpy as np
 import pandas as pd
 from functools import wraps
 import inspect
 from types import FunctionType
 
+from vectorbt import defaults
+
 # ############# Configuration ############# #
 
 
-class Config(dict):
-    &#34;&#34;&#34;A simple dict with (optionally) frozen keys.&#34;&#34;&#34;
-
-    def __init__(self, *args, frozen=True, **kwargs):
-        self.frozen = frozen
-        self.update(*args, **kwargs)
-        self.default_config = dict(self)
-        for key, value in dict.items(self):
-            if isinstance(value, dict):
-                dict.__setitem__(self, key, Config(value, frozen=frozen))
-
-    def __setitem__(self, key, val):
-        if self.frozen and key not in self:
-            raise KeyError(f&#34;Key {key} is not a valid parameter&#34;)
-        dict.__setitem__(self, key, val)
-
-    def reset(self):
-        self.update(self.default_config)
+def merge_kwargs(x, y):
+    &#34;&#34;&#34;Merge dictionaries `x` and `y`.
+    
+    By conflicts, `y` wins.&#34;&#34;&#34;
+    z = {}
+    overlapping_keys = x.keys() &amp; y.keys()
+    for key in overlapping_keys:
+        if isinstance(x[key], dict) and isinstance(y[key], dict):
+            z[key] = merge_kwargs(x[key], y[key])
+        else:
+            z[key] = y[key]
+    for key in x.keys() - overlapping_keys:
+        z[key] = x[key]
+    for key in y.keys() - overlapping_keys:
+        z[key] = y[key]
+    return z
 
 # ############# Documentation ############# #
 
 
 def is_from_module(obj, module):
-    &#34;&#34;&#34;Check if `obj` is from the module named by `module_name`.&#34;&#34;&#34;
+    &#34;&#34;&#34;Return whether `obj` is from module `module`.&#34;&#34;&#34;
     mod = inspect.getmodule(inspect.unwrap(obj))
     return mod is None or mod.__name__ == module.__name__
 
 
 def list_valid_module_keys(module):
-    &#34;&#34;&#34;List all functions and classes defined in the `module`.&#34;&#34;&#34;
+    &#34;&#34;&#34;List all public functions and classes defined in the `module`.&#34;&#34;&#34;
     return [name for name, obj in inspect.getmembers(module)
             if not name.startswith(&#34;_&#34;)
             and is_from_module(obj, module)
@@ -70,7 +73,7 @@ def list_valid_module_keys(module):
 
 
 def add__all__to_module(module, blacklist=[]):
-    &#34;&#34;&#34;Add to `__all__` list keys that are in `module` and not in `blacklist`.&#34;&#34;&#34;
+    &#34;&#34;&#34;Add keys that are in `module` and not in `blacklist` to `__all__`.&#34;&#34;&#34;
     __all__ = getattr(module, &#39;__all__&#39;, [])
     all_keys = list_valid_module_keys(module)
     for k in all_keys:
@@ -80,7 +83,8 @@ def add__all__to_module(module, blacklist=[]):
 
 
 def fix_class_for_pdoc(cls):
-    &#34;&#34;&#34;Make class attributes that were defined in the superclass appear in the documentation of this class.&#34;&#34;&#34;
+    &#34;&#34;&#34;Make functions and properties that were defined in any superclass of `cls` visible 
+    in the documentation of `cls`.&#34;&#34;&#34;
     for func_name in dir(cls):
         if not func_name.startswith(&#34;_&#34;):
             func = getattr(cls, func_name)
@@ -91,7 +95,9 @@ def fix_class_for_pdoc(cls):
 
 # ############# Decorators ############# #
 
-def get_default_args(func):
+
+def get_kwargs(func):
+    &#34;&#34;&#34;Get names and default values of keyword arguments from the signature of `func`.&#34;&#34;&#34;
     return {
         k: v.default
         for k, v in inspect.signature(func).parameters.items()
@@ -99,11 +105,11 @@ def get_default_args(func):
     }
 
 
-def add_safe_nb_methods(*nb_funcs):
+def add_nb_methods(*nb_funcs, module_name=None):
+    &#34;&#34;&#34;Class decorator to wrap each Numba function in `nb_funcs` as a method of this class.&#34;&#34;&#34;
     def wrapper(cls):
-        &#34;&#34;&#34;Wrap numba functions as methods.&#34;&#34;&#34;
         for nb_func in nb_funcs:
-            default_kwargs = get_default_args(nb_func)
+            default_kwargs = get_kwargs(nb_func)
 
             def array_operation(self, *args, nb_func=nb_func, default_kwargs=default_kwargs, **kwargs):
                 if &#39;_1d&#39; in nb_func.__name__:
@@ -111,18 +117,27 @@ def add_safe_nb_methods(*nb_funcs):
                 else:
                     # We work natively on 2d arrays
                     return self.wrap_array(nb_func(self.to_2d_array(), *args, **{**default_kwargs, **kwargs}))
+            # Replace the function&#39;s signature with the original one
+            sig = inspect.signature(nb_func)
+            self_arg = tuple(inspect.signature(array_operation).parameters.values())[0]
+            sig = sig.replace(parameters=(self_arg,)+tuple(sig.parameters.values())[1:])
+            array_operation.__signature__ = sig
+            if module_name is not None:
+                array_operation.__doc__ = f&#34;See `{module_name}.{nb_func.__name__}`&#34;
+            else:
+                array_operation.__doc__ = f&#34;See `{nb_func.__name__}`&#34;
             setattr(cls, nb_func.__name__.replace(&#39;_1d&#39;, &#39;&#39;).replace(&#39;_nb&#39;, &#39;&#39;), array_operation)
         return cls
     return wrapper
 
 
 def cached_property(func):
+    &#34;&#34;&#34;Function decorator similar to `property` but with caching.&#34;&#34;&#34;
     @wraps(func)
     def wrapper_decorator(*args, **kwargs):
-        &#34;&#34;&#34;Cache property to avoid recalculating it again and again.&#34;&#34;&#34;
         obj = args[0]
         attr_name = &#39;_&#39; + func.__name__
-        if hasattr(obj, attr_name):
+        if defaults.cached_property and hasattr(obj, attr_name):
             return getattr(obj, attr_name)
         else:
             to_be_cached = func(*args, **kwargs)
@@ -132,6 +147,9 @@ def cached_property(func):
 
 
 class class_or_instancemethod(classmethod):
+    &#34;&#34;&#34;Function decorator that binds `self` to a class if the function is called as class method, 
+    otherwise to an instance.&#34;&#34;&#34;
+
     def __get__(self, instance, type_):
         descr_get = super().__get__ if instance is None else self.__func__.__get__
         return descr_get(instance, type_)</code></pre>
@@ -148,13 +166,13 @@ class class_or_instancemethod(classmethod):
 <span>def <span class="ident">add__all__to_module</span></span>(<span>module, blacklist=[])</span>
 </code></dt>
 <dd>
-<div class="desc"><p>Add to <code>__all__</code> list keys that are in <code>module</code> and not in <code>blacklist</code>.</p></div>
+<div class="desc"><p>Add keys that are in <code>module</code> and not in <code>blacklist</code> to <code>__all__</code>.</p></div>
 <details class="source">
 <summary>
 <span>Expand source code</span>
 </summary>
 <pre><code class="python">def add__all__to_module(module, blacklist=[]):
-    &#34;&#34;&#34;Add to `__all__` list keys that are in `module` and not in `blacklist`.&#34;&#34;&#34;
+    &#34;&#34;&#34;Add keys that are in `module` and not in `blacklist` to `__all__`.&#34;&#34;&#34;
     __all__ = getattr(module, &#39;__all__&#39;, [])
     all_keys = list_valid_module_keys(module)
     for k in all_keys:
@@ -163,20 +181,20 @@ class class_or_instancemethod(classmethod):
     module.__all__ = __all__</code></pre>
 </details>
 </dd>
-<dt id="vectorbt.utils.common.add_safe_nb_methods"><code class="name flex">
-<span>def <span class="ident">add_safe_nb_methods</span></span>(<span>*nb_funcs)</span>
+<dt id="vectorbt.utils.common.add_nb_methods"><code class="name flex">
+<span>def <span class="ident">add_nb_methods</span></span>(<span>*nb_funcs, module_name=None)</span>
 </code></dt>
 <dd>
-<div class="desc"></div>
+<div class="desc"><p>Class decorator to wrap each Numba function in <code>nb_funcs</code> as a method of this class.</p></div>
 <details class="source">
 <summary>
 <span>Expand source code</span>
 </summary>
-<pre><code class="python">def add_safe_nb_methods(*nb_funcs):
+<pre><code class="python">def add_nb_methods(*nb_funcs, module_name=None):
+    &#34;&#34;&#34;Class decorator to wrap each Numba function in `nb_funcs` as a method of this class.&#34;&#34;&#34;
     def wrapper(cls):
-        &#34;&#34;&#34;Wrap numba functions as methods.&#34;&#34;&#34;
         for nb_func in nb_funcs:
-            default_kwargs = get_default_args(nb_func)
+            default_kwargs = get_kwargs(nb_func)
 
             def array_operation(self, *args, nb_func=nb_func, default_kwargs=default_kwargs, **kwargs):
                 if &#39;_1d&#39; in nb_func.__name__:
@@ -184,6 +202,15 @@ class class_or_instancemethod(classmethod):
                 else:
                     # We work natively on 2d arrays
                     return self.wrap_array(nb_func(self.to_2d_array(), *args, **{**default_kwargs, **kwargs}))
+            # Replace the function&#39;s signature with the original one
+            sig = inspect.signature(nb_func)
+            self_arg = tuple(inspect.signature(array_operation).parameters.values())[0]
+            sig = sig.replace(parameters=(self_arg,)+tuple(sig.parameters.values())[1:])
+            array_operation.__signature__ = sig
+            if module_name is not None:
+                array_operation.__doc__ = f&#34;See `{module_name}.{nb_func.__name__}`&#34;
+            else:
+                array_operation.__doc__ = f&#34;See `{nb_func.__name__}`&#34;
             setattr(cls, nb_func.__name__.replace(&#39;_1d&#39;, &#39;&#39;).replace(&#39;_nb&#39;, &#39;&#39;), array_operation)
         return cls
     return wrapper</code></pre>
@@ -193,18 +220,18 @@ class class_or_instancemethod(classmethod):
 <span>def <span class="ident">cached_property</span></span>(<span>func)</span>
 </code></dt>
 <dd>
-<div class="desc"></div>
+<div class="desc"><p>Function decorator similar to <code>property</code> but with caching.</p></div>
 <details class="source">
 <summary>
 <span>Expand source code</span>
 </summary>
 <pre><code class="python">def cached_property(func):
+    &#34;&#34;&#34;Function decorator similar to `property` but with caching.&#34;&#34;&#34;
     @wraps(func)
     def wrapper_decorator(*args, **kwargs):
-        &#34;&#34;&#34;Cache property to avoid recalculating it again and again.&#34;&#34;&#34;
         obj = args[0]
         attr_name = &#39;_&#39; + func.__name__
-        if hasattr(obj, attr_name):
+        if defaults.cached_property and hasattr(obj, attr_name):
             return getattr(obj, attr_name)
         else:
             to_be_cached = func(*args, **kwargs)
@@ -217,13 +244,15 @@ class class_or_instancemethod(classmethod):
 <span>def <span class="ident">fix_class_for_pdoc</span></span>(<span>cls)</span>
 </code></dt>
 <dd>
-<div class="desc"><p>Make class attributes that were defined in the superclass appear in the documentation of this class.</p></div>
+<div class="desc"><p>Make functions and properties that were defined in any superclass of <code>cls</code> visible
+in the documentation of <code>cls</code>.</p></div>
 <details class="source">
 <summary>
 <span>Expand source code</span>
 </summary>
 <pre><code class="python">def fix_class_for_pdoc(cls):
-    &#34;&#34;&#34;Make class attributes that were defined in the superclass appear in the documentation of this class.&#34;&#34;&#34;
+    &#34;&#34;&#34;Make functions and properties that were defined in any superclass of `cls` visible 
+    in the documentation of `cls`.&#34;&#34;&#34;
     for func_name in dir(cls):
         if not func_name.startswith(&#34;_&#34;):
             func = getattr(cls, func_name)
@@ -233,16 +262,17 @@ class class_or_instancemethod(classmethod):
                 setattr(cls, func_name, func)</code></pre>
 </details>
 </dd>
-<dt id="vectorbt.utils.common.get_default_args"><code class="name flex">
-<span>def <span class="ident">get_default_args</span></span>(<span>func)</span>
+<dt id="vectorbt.utils.common.get_kwargs"><code class="name flex">
+<span>def <span class="ident">get_kwargs</span></span>(<span>func)</span>
 </code></dt>
 <dd>
-<div class="desc"></div>
+<div class="desc"><p>Get names and default values of keyword arguments from the signature of <code>func</code>.</p></div>
 <details class="source">
 <summary>
 <span>Expand source code</span>
 </summary>
-<pre><code class="python">def get_default_args(func):
+<pre><code class="python">def get_kwargs(func):
+    &#34;&#34;&#34;Get names and default values of keyword arguments from the signature of `func`.&#34;&#34;&#34;
     return {
         k: v.default
         for k, v in inspect.signature(func).parameters.items()
@@ -254,13 +284,13 @@ class class_or_instancemethod(classmethod):
 <span>def <span class="ident">is_from_module</span></span>(<span>obj, module)</span>
 </code></dt>
 <dd>
-<div class="desc"><p>Check if <code>obj</code> is from the module named by <code>module_name</code>.</p></div>
+<div class="desc"><p>Return whether <code>obj</code> is from module <code>module</code>.</p></div>
 <details class="source">
 <summary>
 <span>Expand source code</span>
 </summary>
 <pre><code class="python">def is_from_module(obj, module):
-    &#34;&#34;&#34;Check if `obj` is from the module named by `module_name`.&#34;&#34;&#34;
+    &#34;&#34;&#34;Return whether `obj` is from module `module`.&#34;&#34;&#34;
     mod = inspect.getmodule(inspect.unwrap(obj))
     return mod is None or mod.__name__ == module.__name__</code></pre>
 </details>
@@ -269,17 +299,45 @@ class class_or_instancemethod(classmethod):
 <span>def <span class="ident">list_valid_module_keys</span></span>(<span>module)</span>
 </code></dt>
 <dd>
-<div class="desc"><p>List all functions and classes defined in the <code>module</code>.</p></div>
+<div class="desc"><p>List all public functions and classes defined in the <code>module</code>.</p></div>
 <details class="source">
 <summary>
 <span>Expand source code</span>
 </summary>
 <pre><code class="python">def list_valid_module_keys(module):
-    &#34;&#34;&#34;List all functions and classes defined in the `module`.&#34;&#34;&#34;
+    &#34;&#34;&#34;List all public functions and classes defined in the `module`.&#34;&#34;&#34;
     return [name for name, obj in inspect.getmembers(module)
             if not name.startswith(&#34;_&#34;)
             and is_from_module(obj, module)
             and ((inspect.isroutine(obj) and callable(obj)) or inspect.isclass(obj))]</code></pre>
+</details>
+</dd>
+<dt id="vectorbt.utils.common.merge_kwargs"><code class="name flex">
+<span>def <span class="ident">merge_kwargs</span></span>(<span>x, y)</span>
+</code></dt>
+<dd>
+<div class="desc"><p>Merge dictionaries <code>x</code> and <code>y</code>.</p>
+<p>By conflicts, <code>y</code> wins.</p></div>
+<details class="source">
+<summary>
+<span>Expand source code</span>
+</summary>
+<pre><code class="python">def merge_kwargs(x, y):
+    &#34;&#34;&#34;Merge dictionaries `x` and `y`.
+    
+    By conflicts, `y` wins.&#34;&#34;&#34;
+    z = {}
+    overlapping_keys = x.keys() &amp; y.keys()
+    for key in overlapping_keys:
+        if isinstance(x[key], dict) and isinstance(y[key], dict):
+            z[key] = merge_kwargs(x[key], y[key])
+        else:
+            z[key] = y[key]
+    for key in x.keys() - overlapping_keys:
+        z[key] = x[key]
+    for key in y.keys() - overlapping_keys:
+        z[key] = y[key]
+    return z</code></pre>
 </details>
 </dd>
 </dl>
@@ -287,82 +345,21 @@ class class_or_instancemethod(classmethod):
 <section>
 <h2 class="section-title" id="header-classes">Classes</h2>
 <dl>
-<dt id="vectorbt.utils.common.Config"><code class="flex name class">
-<span>class <span class="ident">Config</span></span>
-<span>(</span><span>*args, frozen=True, **kwargs)</span>
-</code></dt>
-<dd>
-<div class="desc"><p>A simple dict with (optionally) frozen keys.</p></div>
-<details class="source">
-<summary>
-<span>Expand source code</span>
-</summary>
-<pre><code class="python">class Config(dict):
-    &#34;&#34;&#34;A simple dict with (optionally) frozen keys.&#34;&#34;&#34;
-
-    def __init__(self, *args, frozen=True, **kwargs):
-        self.frozen = frozen
-        self.update(*args, **kwargs)
-        self.default_config = dict(self)
-        for key, value in dict.items(self):
-            if isinstance(value, dict):
-                dict.__setitem__(self, key, Config(value, frozen=frozen))
-
-    def __setitem__(self, key, val):
-        if self.frozen and key not in self:
-            raise KeyError(f&#34;Key {key} is not a valid parameter&#34;)
-        dict.__setitem__(self, key, val)
-
-    def reset(self):
-        self.update(self.default_config)</code></pre>
-</details>
-<h3>Ancestors</h3>
-<ul class="hlist">
-<li>builtins.dict</li>
-</ul>
-<h3>Methods</h3>
-<dl>
-<dt id="vectorbt.utils.common.Config.reset"><code class="name flex">
-<span>def <span class="ident">reset</span></span>(<span>self)</span>
-</code></dt>
-<dd>
-<div class="desc"></div>
-<details class="source">
-<summary>
-<span>Expand source code</span>
-</summary>
-<pre><code class="python">def reset(self):
-    self.update(self.default_config)</code></pre>
-</details>
-</dd>
-</dl>
-</dd>
 <dt id="vectorbt.utils.common.class_or_instancemethod"><code class="flex name class">
 <span>class <span class="ident">class_or_instancemethod</span></span>
 <span>(</span><span>...)</span>
 </code></dt>
 <dd>
-<div class="desc"><p>classmethod(function) -&gt; method</p>
-<p>Convert a function to be a class method.</p>
-<p>A class method receives the class as implicit first argument,
-just like an instance method receives the instance.
-To declare a class method, use this idiom:</p>
-<p>class C:
-@classmethod
-def f(cls, arg1, arg2, &hellip;):
-&hellip;</p>
-<p>It can be called either on the class (e.g. C.f()) or on an instance
-(e.g. C().f()).
-The instance is ignored except for its class.
-If a class method is called for a derived class, the derived class
-object is passed as the implied first argument.</p>
-<p>Class methods are different than C++ or Java static methods.
-If you want those, see the staticmethod builtin.</p></div>
+<div class="desc"><p>Function decorator that binds <code>self</code> to a class if the function is called as class method,
+otherwise to an instance.</p></div>
 <details class="source">
 <summary>
 <span>Expand source code</span>
 </summary>
 <pre><code class="python">class class_or_instancemethod(classmethod):
+    &#34;&#34;&#34;Function decorator that binds `self` to a class if the function is called as class method, 
+    otherwise to an instance.&#34;&#34;&#34;
+
     def __get__(self, instance, type_):
         descr_get = super().__get__ if instance is None else self.__func__.__get__
         return descr_get(instance, type_)</code></pre>
@@ -389,22 +386,17 @@ If you want those, see the staticmethod builtin.</p></div>
 <li><h3><a href="#header-functions">Functions</a></h3>
 <ul class="">
 <li><code><a title="vectorbt.utils.common.add__all__to_module" href="#vectorbt.utils.common.add__all__to_module">add__all__to_module</a></code></li>
-<li><code><a title="vectorbt.utils.common.add_safe_nb_methods" href="#vectorbt.utils.common.add_safe_nb_methods">add_safe_nb_methods</a></code></li>
+<li><code><a title="vectorbt.utils.common.add_nb_methods" href="#vectorbt.utils.common.add_nb_methods">add_nb_methods</a></code></li>
 <li><code><a title="vectorbt.utils.common.cached_property" href="#vectorbt.utils.common.cached_property">cached_property</a></code></li>
 <li><code><a title="vectorbt.utils.common.fix_class_for_pdoc" href="#vectorbt.utils.common.fix_class_for_pdoc">fix_class_for_pdoc</a></code></li>
-<li><code><a title="vectorbt.utils.common.get_default_args" href="#vectorbt.utils.common.get_default_args">get_default_args</a></code></li>
+<li><code><a title="vectorbt.utils.common.get_kwargs" href="#vectorbt.utils.common.get_kwargs">get_kwargs</a></code></li>
 <li><code><a title="vectorbt.utils.common.is_from_module" href="#vectorbt.utils.common.is_from_module">is_from_module</a></code></li>
 <li><code><a title="vectorbt.utils.common.list_valid_module_keys" href="#vectorbt.utils.common.list_valid_module_keys">list_valid_module_keys</a></code></li>
+<li><code><a title="vectorbt.utils.common.merge_kwargs" href="#vectorbt.utils.common.merge_kwargs">merge_kwargs</a></code></li>
 </ul>
 </li>
 <li><h3><a href="#header-classes">Classes</a></h3>
 <ul>
-<li>
-<h4><code><a title="vectorbt.utils.common.Config" href="#vectorbt.utils.common.Config">Config</a></code></h4>
-<ul class="">
-<li><code><a title="vectorbt.utils.common.Config.reset" href="#vectorbt.utils.common.Config.reset">reset</a></code></li>
-</ul>
-</li>
 <li>
 <h4><code><a title="vectorbt.utils.common.class_or_instancemethod" href="#vectorbt.utils.common.class_or_instancemethod">class_or_instancemethod</a></code></h4>
 </li>

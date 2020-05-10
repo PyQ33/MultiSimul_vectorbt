@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1, minimum-scale=1" />
 <meta name="generator" content="pdoc 0.8.1" />
 <title>vectorbt.utils.checks API documentation</title>
-<meta name="description" content="" />
+<meta name="description" content="Utility functions for validation during runtime." />
 <link href='https://cdnjs.cloudflare.com/ajax/libs/normalize/8.0.0/normalize.min.css' rel='stylesheet'>
 <link href='https://cdnjs.cloudflare.com/ajax/libs/10up-sanitize.css/8.0.0/sanitize.min.css' rel='stylesheet'>
 <link href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/9.12.0/styles/github.min.css" rel="stylesheet">
@@ -20,13 +20,16 @@
 <h1 class="title">Module <code>vectorbt.utils.checks</code></h1>
 </header>
 <section id="section-intro">
+<p>Utility functions for validation during runtime.</p>
 <details class="source">
 <summary>
 <span>Expand source code</span>
 </summary>
-<pre><code class="python">import numpy as np
+<pre><code class="python">&#34;&#34;&#34;Utility functions for validation during runtime.&#34;&#34;&#34;
+
+import numpy as np
 import pandas as pd
-from numba.targets.registry import CPUDispatcher
+from numba.core.registry import CPUDispatcher
 
 from vectorbt.utils import reshape_fns
 
@@ -34,38 +37,46 @@ from vectorbt.utils import reshape_fns
 
 
 def is_series(arg):
+    &#34;&#34;&#34;Return whether `arg` is `pandas.Series`.&#34;&#34;&#34;
     return isinstance(arg, pd.Series)
 
 
 def is_frame(arg):
+    &#34;&#34;&#34;Return whether `arg` is `pandas.DataFrame`.&#34;&#34;&#34;
     return isinstance(arg, pd.DataFrame)
 
 
 def is_pandas(arg):
+    &#34;&#34;&#34;Return whether `arg` is `pandas.Series` or `pandas.DataFrame`.&#34;&#34;&#34;
     return is_series(arg) or is_frame(arg)
 
 
 def is_array(arg):
-    return isinstance(arg, np.ndarray)
-
-
-def is_array_like(arg):
-    return is_pandas(arg) or is_array(arg)
+    &#34;&#34;&#34;Return whether `arg` is any of `numpy.ndarray`, `pandas.Series` or `pandas.DataFrame`.&#34;&#34;&#34;
+    return is_pandas(arg) or isinstance(arg, np.ndarray)
 
 
 def is_numba_func(arg):
+    &#34;&#34;&#34;Return whether `arg` is a Numba-compiled function.&#34;&#34;&#34;
     return isinstance(arg, CPUDispatcher)
 
 
 # ############# Asserts ############# #
 
+def assert_numba_func(func):
+    &#34;&#34;&#34;Raise exception if `func` is not Numba-compiled.&#34;&#34;&#34;
+    if not is_numba_func(func):
+        raise TypeError(f&#34;Function {func} must be Numba compiled&#34;)
+
 
 def assert_not_none(arg):
+    &#34;&#34;&#34;Raise exception if `arg` is None.&#34;&#34;&#34;
     if arg is None:
         raise TypeError(f&#34;Cannot be None&#34;)
 
 
 def assert_type(arg, types):
+    &#34;&#34;&#34;Raise exception if `arg` is none of types `types`.&#34;&#34;&#34;
     if not isinstance(arg, types):
         if isinstance(types, tuple):
             raise TypeError(f&#34;Type must be one of {types}, not {type(arg)}&#34;)
@@ -74,6 +85,7 @@ def assert_type(arg, types):
 
 
 def assert_not_type(arg, types):
+    &#34;&#34;&#34;Raise exception if `arg` is any of types `types`.&#34;&#34;&#34;
     if isinstance(arg, types):
         if isinstance(types, tuple):
             raise TypeError(f&#34;Type cannot be any of {types}&#34;)
@@ -82,11 +94,15 @@ def assert_not_type(arg, types):
 
 
 def assert_same_type(arg1, arg2):
+    &#34;&#34;&#34;Raise exception if `arg1` and `arg2` have different types.&#34;&#34;&#34;
     if type(arg1) != type(arg2):
         raise TypeError(f&#34;Types {type(arg1)} and {type(arg2)} do not match&#34;)
 
 
 def assert_dtype(arg, dtype):
+    &#34;&#34;&#34;Raise exception if `arg` is not of data type `dtype`.&#34;&#34;&#34;
+    if not is_array(arg):
+        arg = np.asarray(arg)
     if is_frame(arg):
         if (arg.dtypes != dtype).any():
             raise ValueError(f&#34;Data type must be {dtype}, not {arg.dtypes}&#34;)
@@ -96,9 +112,10 @@ def assert_dtype(arg, dtype):
 
 
 def assert_same_dtype(arg1, arg2):
-    if not is_array_like(arg1):
+    &#34;&#34;&#34;Raise exception if `arg1` and `arg2` have different data types.&#34;&#34;&#34;
+    if not is_array(arg1):
         arg1 = np.asarray(arg1)
-    if not is_array_like(arg2):
+    if not is_array(arg2):
         arg2 = np.asarray(arg2)
     if is_frame(arg1):
         dtypes1 = arg1.dtypes.to_numpy()
@@ -118,7 +135,8 @@ def assert_same_dtype(arg1, arg2):
 
 
 def assert_ndim(arg, ndims):
-    if not is_array_like(arg):
+    &#34;&#34;&#34;Raise exception if `arg` has a different number of dimensions than `ndims`.&#34;&#34;&#34;
+    if not is_array(arg):
         arg = np.asarray(arg)
     if isinstance(ndims, tuple):
         if arg.ndim not in ndims:
@@ -129,50 +147,55 @@ def assert_ndim(arg, ndims):
 
 
 def assert_same_len(arg1, arg2):
+    &#34;&#34;&#34;Raise exception if `arg1` and `arg2` have different length.
+    
+    Does not transform arguments to NumPy arrays.&#34;&#34;&#34;
     if len(arg1) != len(arg2):
         raise ValueError(f&#34;Lengths {len(arg1)} and {len(arg2)} do not match&#34;)
 
 
-def assert_same_shape(arg1, arg2, along_axis=None):
-    if not is_array_like(arg1):
+def assert_same_shape(arg1, arg2, axis=None):
+    &#34;&#34;&#34;Raise exception if `arg1` and `arg2` have different shapes along `axis`.&#34;&#34;&#34;
+    if not is_array(arg1):
         arg1 = np.asarray(arg1)
-    if not is_array_like(arg2):
+    if not is_array(arg2):
         arg2 = np.asarray(arg2)
-    if along_axis is None:
+    if axis is None:
         if arg1.shape != arg2.shape:
             raise ValueError(f&#34;Shapes {arg1.shape} and {arg2.shape} do not match&#34;)
     else:
-        if isinstance(along_axis, tuple):
-            if arg1.shape[along_axis[0]] != arg2.shape[along_axis[1]]:
+        if isinstance(axis, tuple):
+            if arg1.shape[axis[0]] != arg2.shape[axis[1]]:
                 raise ValueError(
-                    f&#34;Axis {along_axis[0]} of {arg1.shape} and axis {along_axis[1]} of {arg2.shape} do not match&#34;)
+                    f&#34;Axis {axis[0]} of {arg1.shape} and axis {axis[1]} of {arg2.shape} do not match&#34;)
         else:
-            if arg1.shape[along_axis] != arg2.shape[along_axis]:
-                raise ValueError(f&#34;Axis {along_axis} of {arg1.shape} and {arg2.shape} do not match&#34;)
+            if arg1.shape[axis] != arg2.shape[axis]:
+                raise ValueError(f&#34;Axis {axis} of {arg1.shape} and {arg2.shape} do not match&#34;)
 
 
 def assert_same_index(arg1, arg2):
+    &#34;&#34;&#34;Raise exception if `arg1` and `arg2` have different index.&#34;&#34;&#34;
     if not pd.Index.equals(arg1.index, arg2.index):
         raise ValueError(f&#34;Indexes {arg1.index} and {arg2.index} do not match&#34;)
 
 
 def assert_same_columns(arg1, arg2):
+    &#34;&#34;&#34;Raise exception if `arg1` and `arg2` have different columns.&#34;&#34;&#34;
     if not pd.Index.equals(arg1.columns, arg2.columns):
         raise ValueError(f&#34;Columns {arg1.columns} and {arg2.columns} do not match&#34;)
 
 
-def assert_same_meta(arg1, arg2, assert_dtype=True):
+def assert_same_meta(arg1, arg2):
+    &#34;&#34;&#34;Raise exception if `arg1` and `arg2` have different metadata.&#34;&#34;&#34;
     assert_same_type(arg1, arg2)
     assert_same_shape(arg1, arg2)
     if is_pandas(arg1) or is_pandas(arg2):
         assert_same_index(arg1, arg2)
         assert_same_columns(reshape_fns.to_2d(arg1), reshape_fns.to_2d(arg2))
-    if is_array_like(arg1) or is_array_like(arg2):
-        if assert_dtype:
-            assert_same_dtype(arg1, arg2)
 
 
 def assert_same(arg1, arg2):
+    &#34;&#34;&#34;Raise exception if `arg1` and `arg2` have different metadata or values.&#34;&#34;&#34;
     assert_same_meta(arg1, arg2)
     if is_pandas(arg1):
         if arg1.equals(arg2):
@@ -186,6 +209,7 @@ def assert_same(arg1, arg2):
 
 
 def assert_level_not_exists(arg, level_name):
+    &#34;&#34;&#34;Raise exception if `arg` has column level `level_name`.&#34;&#34;&#34;
     if not is_frame(arg):
         return
     if isinstance(arg.columns, pd.MultiIndex):
@@ -207,12 +231,15 @@ def assert_level_not_exists(arg, level_name):
 <span>def <span class="ident">assert_dtype</span></span>(<span>arg, dtype)</span>
 </code></dt>
 <dd>
-<div class="desc"></div>
+<div class="desc"><p>Raise exception if <code>arg</code> is not of data type <code>dtype</code>.</p></div>
 <details class="source">
 <summary>
 <span>Expand source code</span>
 </summary>
 <pre><code class="python">def assert_dtype(arg, dtype):
+    &#34;&#34;&#34;Raise exception if `arg` is not of data type `dtype`.&#34;&#34;&#34;
+    if not is_array(arg):
+        arg = np.asarray(arg)
     if is_frame(arg):
         if (arg.dtypes != dtype).any():
             raise ValueError(f&#34;Data type must be {dtype}, not {arg.dtypes}&#34;)
@@ -225,12 +252,13 @@ def assert_level_not_exists(arg, level_name):
 <span>def <span class="ident">assert_level_not_exists</span></span>(<span>arg, level_name)</span>
 </code></dt>
 <dd>
-<div class="desc"></div>
+<div class="desc"><p>Raise exception if <code>arg</code> has column level <code>level_name</code>.</p></div>
 <details class="source">
 <summary>
 <span>Expand source code</span>
 </summary>
 <pre><code class="python">def assert_level_not_exists(arg, level_name):
+    &#34;&#34;&#34;Raise exception if `arg` has column level `level_name`.&#34;&#34;&#34;
     if not is_frame(arg):
         return
     if isinstance(arg.columns, pd.MultiIndex):
@@ -245,13 +273,14 @@ def assert_level_not_exists(arg, level_name):
 <span>def <span class="ident">assert_ndim</span></span>(<span>arg, ndims)</span>
 </code></dt>
 <dd>
-<div class="desc"></div>
+<div class="desc"><p>Raise exception if <code>arg</code> has a different number of dimensions than <code>ndims</code>.</p></div>
 <details class="source">
 <summary>
 <span>Expand source code</span>
 </summary>
 <pre><code class="python">def assert_ndim(arg, ndims):
-    if not is_array_like(arg):
+    &#34;&#34;&#34;Raise exception if `arg` has a different number of dimensions than `ndims`.&#34;&#34;&#34;
+    if not is_array(arg):
         arg = np.asarray(arg)
     if isinstance(ndims, tuple):
         if arg.ndim not in ndims:
@@ -265,12 +294,13 @@ def assert_level_not_exists(arg, level_name):
 <span>def <span class="ident">assert_not_none</span></span>(<span>arg)</span>
 </code></dt>
 <dd>
-<div class="desc"></div>
+<div class="desc"><p>Raise exception if <code>arg</code> is None.</p></div>
 <details class="source">
 <summary>
 <span>Expand source code</span>
 </summary>
 <pre><code class="python">def assert_not_none(arg):
+    &#34;&#34;&#34;Raise exception if `arg` is None.&#34;&#34;&#34;
     if arg is None:
         raise TypeError(f&#34;Cannot be None&#34;)</code></pre>
 </details>
@@ -279,12 +309,13 @@ def assert_level_not_exists(arg, level_name):
 <span>def <span class="ident">assert_not_type</span></span>(<span>arg, types)</span>
 </code></dt>
 <dd>
-<div class="desc"></div>
+<div class="desc"><p>Raise exception if <code>arg</code> is any of types <code>types</code>.</p></div>
 <details class="source">
 <summary>
 <span>Expand source code</span>
 </summary>
 <pre><code class="python">def assert_not_type(arg, types):
+    &#34;&#34;&#34;Raise exception if `arg` is any of types `types`.&#34;&#34;&#34;
     if isinstance(arg, types):
         if isinstance(types, tuple):
             raise TypeError(f&#34;Type cannot be any of {types}&#34;)
@@ -292,16 +323,32 @@ def assert_level_not_exists(arg, level_name):
             raise TypeError(f&#34;Type cannot be {types}&#34;)</code></pre>
 </details>
 </dd>
+<dt id="vectorbt.utils.checks.assert_numba_func"><code class="name flex">
+<span>def <span class="ident">assert_numba_func</span></span>(<span>func)</span>
+</code></dt>
+<dd>
+<div class="desc"><p>Raise exception if <code>func</code> is not Numba-compiled.</p></div>
+<details class="source">
+<summary>
+<span>Expand source code</span>
+</summary>
+<pre><code class="python">def assert_numba_func(func):
+    &#34;&#34;&#34;Raise exception if `func` is not Numba-compiled.&#34;&#34;&#34;
+    if not is_numba_func(func):
+        raise TypeError(f&#34;Function {func} must be Numba compiled&#34;)</code></pre>
+</details>
+</dd>
 <dt id="vectorbt.utils.checks.assert_same"><code class="name flex">
 <span>def <span class="ident">assert_same</span></span>(<span>arg1, arg2)</span>
 </code></dt>
 <dd>
-<div class="desc"></div>
+<div class="desc"><p>Raise exception if <code>arg1</code> and <code>arg2</code> have different metadata or values.</p></div>
 <details class="source">
 <summary>
 <span>Expand source code</span>
 </summary>
 <pre><code class="python">def assert_same(arg1, arg2):
+    &#34;&#34;&#34;Raise exception if `arg1` and `arg2` have different metadata or values.&#34;&#34;&#34;
     assert_same_meta(arg1, arg2)
     if is_pandas(arg1):
         if arg1.equals(arg2):
@@ -318,12 +365,13 @@ def assert_level_not_exists(arg, level_name):
 <span>def <span class="ident">assert_same_columns</span></span>(<span>arg1, arg2)</span>
 </code></dt>
 <dd>
-<div class="desc"></div>
+<div class="desc"><p>Raise exception if <code>arg1</code> and <code>arg2</code> have different columns.</p></div>
 <details class="source">
 <summary>
 <span>Expand source code</span>
 </summary>
 <pre><code class="python">def assert_same_columns(arg1, arg2):
+    &#34;&#34;&#34;Raise exception if `arg1` and `arg2` have different columns.&#34;&#34;&#34;
     if not pd.Index.equals(arg1.columns, arg2.columns):
         raise ValueError(f&#34;Columns {arg1.columns} and {arg2.columns} do not match&#34;)</code></pre>
 </details>
@@ -332,15 +380,16 @@ def assert_level_not_exists(arg, level_name):
 <span>def <span class="ident">assert_same_dtype</span></span>(<span>arg1, arg2)</span>
 </code></dt>
 <dd>
-<div class="desc"></div>
+<div class="desc"><p>Raise exception if <code>arg1</code> and <code>arg2</code> have different data types.</p></div>
 <details class="source">
 <summary>
 <span>Expand source code</span>
 </summary>
 <pre><code class="python">def assert_same_dtype(arg1, arg2):
-    if not is_array_like(arg1):
+    &#34;&#34;&#34;Raise exception if `arg1` and `arg2` have different data types.&#34;&#34;&#34;
+    if not is_array(arg1):
         arg1 = np.asarray(arg1)
-    if not is_array_like(arg2):
+    if not is_array(arg2):
         arg2 = np.asarray(arg2)
     if is_frame(arg1):
         dtypes1 = arg1.dtypes.to_numpy()
@@ -363,12 +412,13 @@ def assert_level_not_exists(arg, level_name):
 <span>def <span class="ident">assert_same_index</span></span>(<span>arg1, arg2)</span>
 </code></dt>
 <dd>
-<div class="desc"></div>
+<div class="desc"><p>Raise exception if <code>arg1</code> and <code>arg2</code> have different index.</p></div>
 <details class="source">
 <summary>
 <span>Expand source code</span>
 </summary>
 <pre><code class="python">def assert_same_index(arg1, arg2):
+    &#34;&#34;&#34;Raise exception if `arg1` and `arg2` have different index.&#34;&#34;&#34;
     if not pd.Index.equals(arg1.index, arg2.index):
         raise ValueError(f&#34;Indexes {arg1.index} and {arg2.index} do not match&#34;)</code></pre>
 </details>
@@ -377,73 +427,77 @@ def assert_level_not_exists(arg, level_name):
 <span>def <span class="ident">assert_same_len</span></span>(<span>arg1, arg2)</span>
 </code></dt>
 <dd>
-<div class="desc"></div>
+<div class="desc"><p>Raise exception if <code>arg1</code> and <code>arg2</code> have different length.</p>
+<p>Does not transform arguments to NumPy arrays.</p></div>
 <details class="source">
 <summary>
 <span>Expand source code</span>
 </summary>
 <pre><code class="python">def assert_same_len(arg1, arg2):
+    &#34;&#34;&#34;Raise exception if `arg1` and `arg2` have different length.
+    
+    Does not transform arguments to NumPy arrays.&#34;&#34;&#34;
     if len(arg1) != len(arg2):
         raise ValueError(f&#34;Lengths {len(arg1)} and {len(arg2)} do not match&#34;)</code></pre>
 </details>
 </dd>
 <dt id="vectorbt.utils.checks.assert_same_meta"><code class="name flex">
-<span>def <span class="ident">assert_same_meta</span></span>(<span>arg1, arg2, assert_dtype=True)</span>
+<span>def <span class="ident">assert_same_meta</span></span>(<span>arg1, arg2)</span>
 </code></dt>
 <dd>
-<div class="desc"></div>
+<div class="desc"><p>Raise exception if <code>arg1</code> and <code>arg2</code> have different metadata.</p></div>
 <details class="source">
 <summary>
 <span>Expand source code</span>
 </summary>
-<pre><code class="python">def assert_same_meta(arg1, arg2, assert_dtype=True):
+<pre><code class="python">def assert_same_meta(arg1, arg2):
+    &#34;&#34;&#34;Raise exception if `arg1` and `arg2` have different metadata.&#34;&#34;&#34;
     assert_same_type(arg1, arg2)
     assert_same_shape(arg1, arg2)
     if is_pandas(arg1) or is_pandas(arg2):
         assert_same_index(arg1, arg2)
-        assert_same_columns(reshape_fns.to_2d(arg1), reshape_fns.to_2d(arg2))
-    if is_array_like(arg1) or is_array_like(arg2):
-        if assert_dtype:
-            assert_same_dtype(arg1, arg2)</code></pre>
+        assert_same_columns(reshape_fns.to_2d(arg1), reshape_fns.to_2d(arg2))</code></pre>
 </details>
 </dd>
 <dt id="vectorbt.utils.checks.assert_same_shape"><code class="name flex">
-<span>def <span class="ident">assert_same_shape</span></span>(<span>arg1, arg2, along_axis=None)</span>
+<span>def <span class="ident">assert_same_shape</span></span>(<span>arg1, arg2, axis=None)</span>
 </code></dt>
 <dd>
-<div class="desc"></div>
+<div class="desc"><p>Raise exception if <code>arg1</code> and <code>arg2</code> have different shapes along <code>axis</code>.</p></div>
 <details class="source">
 <summary>
 <span>Expand source code</span>
 </summary>
-<pre><code class="python">def assert_same_shape(arg1, arg2, along_axis=None):
-    if not is_array_like(arg1):
+<pre><code class="python">def assert_same_shape(arg1, arg2, axis=None):
+    &#34;&#34;&#34;Raise exception if `arg1` and `arg2` have different shapes along `axis`.&#34;&#34;&#34;
+    if not is_array(arg1):
         arg1 = np.asarray(arg1)
-    if not is_array_like(arg2):
+    if not is_array(arg2):
         arg2 = np.asarray(arg2)
-    if along_axis is None:
+    if axis is None:
         if arg1.shape != arg2.shape:
             raise ValueError(f&#34;Shapes {arg1.shape} and {arg2.shape} do not match&#34;)
     else:
-        if isinstance(along_axis, tuple):
-            if arg1.shape[along_axis[0]] != arg2.shape[along_axis[1]]:
+        if isinstance(axis, tuple):
+            if arg1.shape[axis[0]] != arg2.shape[axis[1]]:
                 raise ValueError(
-                    f&#34;Axis {along_axis[0]} of {arg1.shape} and axis {along_axis[1]} of {arg2.shape} do not match&#34;)
+                    f&#34;Axis {axis[0]} of {arg1.shape} and axis {axis[1]} of {arg2.shape} do not match&#34;)
         else:
-            if arg1.shape[along_axis] != arg2.shape[along_axis]:
-                raise ValueError(f&#34;Axis {along_axis} of {arg1.shape} and {arg2.shape} do not match&#34;)</code></pre>
+            if arg1.shape[axis] != arg2.shape[axis]:
+                raise ValueError(f&#34;Axis {axis} of {arg1.shape} and {arg2.shape} do not match&#34;)</code></pre>
 </details>
 </dd>
 <dt id="vectorbt.utils.checks.assert_same_type"><code class="name flex">
 <span>def <span class="ident">assert_same_type</span></span>(<span>arg1, arg2)</span>
 </code></dt>
 <dd>
-<div class="desc"></div>
+<div class="desc"><p>Raise exception if <code>arg1</code> and <code>arg2</code> have different types.</p></div>
 <details class="source">
 <summary>
 <span>Expand source code</span>
 </summary>
 <pre><code class="python">def assert_same_type(arg1, arg2):
+    &#34;&#34;&#34;Raise exception if `arg1` and `arg2` have different types.&#34;&#34;&#34;
     if type(arg1) != type(arg2):
         raise TypeError(f&#34;Types {type(arg1)} and {type(arg2)} do not match&#34;)</code></pre>
 </details>
@@ -452,12 +506,13 @@ def assert_level_not_exists(arg, level_name):
 <span>def <span class="ident">assert_type</span></span>(<span>arg, types)</span>
 </code></dt>
 <dd>
-<div class="desc"></div>
+<div class="desc"><p>Raise exception if <code>arg</code> is none of types <code>types</code>.</p></div>
 <details class="source">
 <summary>
 <span>Expand source code</span>
 </summary>
 <pre><code class="python">def assert_type(arg, types):
+    &#34;&#34;&#34;Raise exception if `arg` is none of types `types`.&#34;&#34;&#34;
     if not isinstance(arg, types):
         if isinstance(types, tuple):
             raise TypeError(f&#34;Type must be one of {types}, not {type(arg)}&#34;)
@@ -469,38 +524,27 @@ def assert_level_not_exists(arg, level_name):
 <span>def <span class="ident">is_array</span></span>(<span>arg)</span>
 </code></dt>
 <dd>
-<div class="desc"></div>
+<div class="desc"><p>Return whether <code>arg</code> is any of <code>numpy.ndarray</code>, <code>pandas.Series</code> or <code>pandas.DataFrame</code>.</p></div>
 <details class="source">
 <summary>
 <span>Expand source code</span>
 </summary>
 <pre><code class="python">def is_array(arg):
-    return isinstance(arg, np.ndarray)</code></pre>
-</details>
-</dd>
-<dt id="vectorbt.utils.checks.is_array_like"><code class="name flex">
-<span>def <span class="ident">is_array_like</span></span>(<span>arg)</span>
-</code></dt>
-<dd>
-<div class="desc"></div>
-<details class="source">
-<summary>
-<span>Expand source code</span>
-</summary>
-<pre><code class="python">def is_array_like(arg):
-    return is_pandas(arg) or is_array(arg)</code></pre>
+    &#34;&#34;&#34;Return whether `arg` is any of `numpy.ndarray`, `pandas.Series` or `pandas.DataFrame`.&#34;&#34;&#34;
+    return is_pandas(arg) or isinstance(arg, np.ndarray)</code></pre>
 </details>
 </dd>
 <dt id="vectorbt.utils.checks.is_frame"><code class="name flex">
 <span>def <span class="ident">is_frame</span></span>(<span>arg)</span>
 </code></dt>
 <dd>
-<div class="desc"></div>
+<div class="desc"><p>Return whether <code>arg</code> is <code>pandas.DataFrame</code>.</p></div>
 <details class="source">
 <summary>
 <span>Expand source code</span>
 </summary>
 <pre><code class="python">def is_frame(arg):
+    &#34;&#34;&#34;Return whether `arg` is `pandas.DataFrame`.&#34;&#34;&#34;
     return isinstance(arg, pd.DataFrame)</code></pre>
 </details>
 </dd>
@@ -508,12 +552,13 @@ def assert_level_not_exists(arg, level_name):
 <span>def <span class="ident">is_numba_func</span></span>(<span>arg)</span>
 </code></dt>
 <dd>
-<div class="desc"></div>
+<div class="desc"><p>Return whether <code>arg</code> is a Numba-compiled function.</p></div>
 <details class="source">
 <summary>
 <span>Expand source code</span>
 </summary>
 <pre><code class="python">def is_numba_func(arg):
+    &#34;&#34;&#34;Return whether `arg` is a Numba-compiled function.&#34;&#34;&#34;
     return isinstance(arg, CPUDispatcher)</code></pre>
 </details>
 </dd>
@@ -521,12 +566,13 @@ def assert_level_not_exists(arg, level_name):
 <span>def <span class="ident">is_pandas</span></span>(<span>arg)</span>
 </code></dt>
 <dd>
-<div class="desc"></div>
+<div class="desc"><p>Return whether <code>arg</code> is <code>pandas.Series</code> or <code>pandas.DataFrame</code>.</p></div>
 <details class="source">
 <summary>
 <span>Expand source code</span>
 </summary>
 <pre><code class="python">def is_pandas(arg):
+    &#34;&#34;&#34;Return whether `arg` is `pandas.Series` or `pandas.DataFrame`.&#34;&#34;&#34;
     return is_series(arg) or is_frame(arg)</code></pre>
 </details>
 </dd>
@@ -534,12 +580,13 @@ def assert_level_not_exists(arg, level_name):
 <span>def <span class="ident">is_series</span></span>(<span>arg)</span>
 </code></dt>
 <dd>
-<div class="desc"></div>
+<div class="desc"><p>Return whether <code>arg</code> is <code>pandas.Series</code>.</p></div>
 <details class="source">
 <summary>
 <span>Expand source code</span>
 </summary>
 <pre><code class="python">def is_series(arg):
+    &#34;&#34;&#34;Return whether `arg` is `pandas.Series`.&#34;&#34;&#34;
     return isinstance(arg, pd.Series)</code></pre>
 </details>
 </dd>
@@ -566,6 +613,7 @@ def assert_level_not_exists(arg, level_name):
 <li><code><a title="vectorbt.utils.checks.assert_ndim" href="#vectorbt.utils.checks.assert_ndim">assert_ndim</a></code></li>
 <li><code><a title="vectorbt.utils.checks.assert_not_none" href="#vectorbt.utils.checks.assert_not_none">assert_not_none</a></code></li>
 <li><code><a title="vectorbt.utils.checks.assert_not_type" href="#vectorbt.utils.checks.assert_not_type">assert_not_type</a></code></li>
+<li><code><a title="vectorbt.utils.checks.assert_numba_func" href="#vectorbt.utils.checks.assert_numba_func">assert_numba_func</a></code></li>
 <li><code><a title="vectorbt.utils.checks.assert_same" href="#vectorbt.utils.checks.assert_same">assert_same</a></code></li>
 <li><code><a title="vectorbt.utils.checks.assert_same_columns" href="#vectorbt.utils.checks.assert_same_columns">assert_same_columns</a></code></li>
 <li><code><a title="vectorbt.utils.checks.assert_same_dtype" href="#vectorbt.utils.checks.assert_same_dtype">assert_same_dtype</a></code></li>
@@ -576,7 +624,6 @@ def assert_level_not_exists(arg, level_name):
 <li><code><a title="vectorbt.utils.checks.assert_same_type" href="#vectorbt.utils.checks.assert_same_type">assert_same_type</a></code></li>
 <li><code><a title="vectorbt.utils.checks.assert_type" href="#vectorbt.utils.checks.assert_type">assert_type</a></code></li>
 <li><code><a title="vectorbt.utils.checks.is_array" href="#vectorbt.utils.checks.is_array">is_array</a></code></li>
-<li><code><a title="vectorbt.utils.checks.is_array_like" href="#vectorbt.utils.checks.is_array_like">is_array_like</a></code></li>
 <li><code><a title="vectorbt.utils.checks.is_frame" href="#vectorbt.utils.checks.is_frame">is_frame</a></code></li>
 <li><code><a title="vectorbt.utils.checks.is_numba_func" href="#vectorbt.utils.checks.is_numba_func">is_numba_func</a></code></li>
 <li><code><a title="vectorbt.utils.checks.is_pandas" href="#vectorbt.utils.checks.is_pandas">is_pandas</a></code></li>
