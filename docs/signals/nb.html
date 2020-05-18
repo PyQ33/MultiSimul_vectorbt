@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1, minimum-scale=1" />
 <meta name="generator" content="pdoc 0.8.1" />
 <title>vectorbt.signals.nb API documentation</title>
-<meta name="description" content="Numba-compiled functions for signals …" />
+<meta name="description" content="Numba-compiled 1-dim and 2-dim functions …" />
 <link href='https://cdnjs.cloudflare.com/ajax/libs/normalize/8.0.0/normalize.min.css' rel='stylesheet'>
 <link href='https://cdnjs.cloudflare.com/ajax/libs/10up-sanitize.css/8.0.0/sanitize.min.css' rel='stylesheet'>
 <link href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/9.12.0/styles/github.min.css" rel="stylesheet">
@@ -20,7 +20,7 @@
 <h1 class="title">Module <code>vectorbt.signals.nb</code></h1>
 </header>
 <section id="section-intro">
-<p>Numba-compiled functions for signals.</p>
+<p>Numba-compiled 1-dim and 2-dim functions.</p>
 <div class="admonition note">
 <p class="admonition-title">Note</p>
 <p><code><a title="vectorbt" href="../index.html">vectorbt</a></code> treats matrices as first-class citizens and expects input arrays to be
@@ -31,7 +31,7 @@ Data is processed along index (axis 0).</p>
 <summary>
 <span>Expand source code</span>
 </summary>
-<pre><code class="python">&#34;&#34;&#34;Numba-compiled functions for signals.
+<pre><code class="python">&#34;&#34;&#34;Numba-compiled 1-dim and 2-dim functions.
 
 !!! note
     `vectorbt` treats matrices as first-class citizens and expects input arrays to be
@@ -206,38 +206,60 @@ def generate_random_after_nb(a, n_range, n_prob=None, min_space=None, seed=None)
 
 
 @njit(cache=True)
-def stop_loss_choice_func_nb(col, from_i, to_i, ts, stop, trailing):
-    &#34;&#34;&#34;Return index of the first `ts` value that is below `stop` defined at `from_i-1`.&#34;&#34;&#34;
-    # Set range starting from last entry until next entry
+def stop_loss_choice_func_nb(col, from_i, to_i, ts, stop, trailing, relative):
+    &#34;&#34;&#34;`choice_func_nb` that returns the first index of `ts` being below `stop` defined at `from_i-1`.&#34;&#34;&#34;
     ts = ts[from_i-1:to_i+1, col]
     stop = stop[from_i-1:to_i+1, col]
     if trailing:
         # Propagate the maximum value from the entry using expanding max
         peak_ts = timeseries.nb.expanding_max_1d_nb(ts)
-        stop = (1 - stop) * peak_ts
-        # Get the absolute index of the first value below that stop
-        return from_i + np.flatnonzero(ts[1:] &lt; stop[1:])[:1]
+        if relative:
+            stop = (1 - stop) * peak_ts
+            # Get the absolute index of the first ts being below that stop
+        return from_i + np.flatnonzero(ts[1:] &lt;= stop[1:])[:1]
     else:
-        # Calculate the stop
-        stop_val = (1 - stop[0]) * ts[0]
-        # Get the absolute index of the first value below that stop
-        return from_i + np.flatnonzero(ts[1:] &lt; stop_val)[:1]
+        if relative:
+            stop_val = (1 - stop[0]) * ts[0]
+        else:
+            stop_val = stop[0]
+        return from_i + np.flatnonzero(ts[1:] &lt;= stop_val)[:1]
+
+
+@njit(cache=True)
+def take_profit_choice_func_nb(col, from_i, to_i, ts, stop, relative):
+    &#34;&#34;&#34;`choice_func_nb` that returns the first index of `ts` being above `stop` defined at `from_i-1`.&#34;&#34;&#34;
+    ts = ts[from_i-1:to_i+1, col]
+    stop = stop[from_i-1:to_i+1, col]
+    if relative:
+        stop_val = (1 + stop[0]) * ts[0]
+    else:
+        stop_val = stop[0]
+    return from_i + np.flatnonzero(ts[1:] &gt;= stop_val)[:1]
 
 
 @njit
-def stop_loss_apply_func_nb(i, entries, ts, stops, trailing):
-    &#34;&#34;&#34;`apply_func_nb` for `vectorbt.utils.combine_fns.apply_and_concat_one_nb` for stop loss.&#34;&#34;&#34;
-    return generate_after_nb(entries, stop_loss_choice_func_nb, ts, stops[i, :, :], trailing)
+def stop_loss_apply_func_nb(i, entries, ts, stops, trailing, relative):
+    &#34;&#34;&#34;`apply_func_nb` for stop loss used in `vectorbt.utils.combine_fns.apply_and_concat_one_nb`.&#34;&#34;&#34;
+    return generate_after_nb(entries, stop_loss_choice_func_nb, ts, stops[i, :, :], trailing, relative)
 
 
 @njit
-def generate_stop_loss_nb(entries, ts, stops, trailing):
+def take_profit_apply_func_nb(i, entries, ts, stops, relative):
+    &#34;&#34;&#34;`apply_func_nb` for take profit used in `vectorbt.utils.combine_fns.apply_and_concat_one_nb`.&#34;&#34;&#34;
+    return generate_after_nb(entries, take_profit_choice_func_nb, ts, stops[i, :, :], relative)
+
+
+@njit
+def generate_stop_loss_nb(entries, ts, stops, trailing, relative):
     &#34;&#34;&#34;For each `True` in `entries`, find the first value in `ts` that is below the (trailing) stop.
 
-    `stops` must be a 3D array - an array out of 2-dim arrays each of `ts` shape. Each of 
-    these arrays will correspond to a different stop loss configuration. Set `trailing` to
-    `True` to use trailing stop.
-    
+    Set `trailing` to `True` to use trailing stop. 
+    Set `relative` to `True` to define stop in percentage of `ts`.
+
+    !!! note
+        `stops` must be a 3D array - an array out of 2-dim arrays each of `ts` shape. Each of 
+        these arrays will correspond to a different stop configuration.
+        
     Example:
         ```python-repl
         &gt;&gt;&gt; import numpy as np
@@ -249,14 +271,28 @@ def generate_stop_loss_nb(entries, ts, stops, trailing):
         &gt;&gt;&gt; ts = np.asarray([1, 2, 3, 2, 1])[:, None]
         &gt;&gt;&gt; stops = broadcast_to_array_of([0.1, 0.5], ts)
 
-        &gt;&gt;&gt; print(generate_stop_loss_nb(entries, ts, stops, True))
+        &gt;&gt;&gt; print(generate_stop_loss_nb(entries, ts, stops, True, True))
         [[False False]
          [False False]
          [False False]
          [ True False]
          [False  True]]
         ```&#34;&#34;&#34;
-    return combine_fns.apply_and_concat_one_nb(len(stops), stop_loss_apply_func_nb, entries, ts, stops, trailing)
+    return combine_fns.apply_and_concat_one_nb(
+        len(stops), stop_loss_apply_func_nb, entries, ts, stops, trailing, relative)
+
+
+@njit
+def generate_take_profit_nb(entries, ts, stops, relative):
+    &#34;&#34;&#34;For each `True` in `entries`, find the first value in `ts` that is above the stop.
+
+    Set `relative` to `True` to define stop in percentage of `ts`.
+
+    !!! note
+        `stops` must be a 3D array - an array out of 2-dim arrays each of `ts` shape. Each of 
+        these arrays will correspond to a different stop configuration.&#34;&#34;&#34;
+    return combine_fns.apply_and_concat_one_nb(
+        len(stops), take_profit_apply_func_nb, entries, ts, stops, relative)
 
 # ############# Map and reduce ############# #
 
@@ -358,7 +394,25 @@ def rank_nb(a, reset_by=None, after_false=False, allow_gaps=False):
 
     Partition is some number of `True` values in a row. You can reset partitions by `True` values 
     from `reset_by` (must have the same shape). If `after_false` is `True`, the first partition 
-    must come after at least one `False`. If `allow_gaps` is `True`, ignores gaps between partitions.&#34;&#34;&#34;
+    must come after at least one `False`. If `allow_gaps` is `True`, ignores gaps between partitions.
+    
+    Example:
+        ```python-repl
+        &gt;&gt;&gt; import numpy as np
+        &gt;&gt;&gt; from vectorbt.signals.nb import rank_nb
+
+        &gt;&gt;&gt; signals = np.asarray([True, True, False, True, True, True, False])[:, None]
+        &gt;&gt;&gt; reset_by = np.asarray([False, False, True, False, False, False, False])[:, None]
+
+        &gt;&gt;&gt; print(rank_nb(signals)[:, 0])
+        [1 2 0 1 2 3 0]
+        &gt;&gt;&gt; print(rank_nb(signals, after_false=True)[:, 0])
+        [0 0 0 1 2 3 0]
+        &gt;&gt;&gt; print(rank_nb(signals, allow_gaps=True)[:, 0])
+        [1 2 0 3 4 5 0]
+        &gt;&gt;&gt; print(rank_nb(signals, allow_gaps=True, reset_by=reset_by)[:, 0])
+        [1 2 0 1 2 3 0]
+        ```&#34;&#34;&#34;
     result = np.zeros(a.shape, dtype=i8)
 
     for col in range(a.shape[1]):
@@ -370,9 +424,10 @@ def rank_nb(a, reset_by=None, after_false=False, allow_gaps=False):
                     # Signal in b_ref resets rank
                     false_seen = ~after_false
                     inc = 0
-            if a[i, col] and false_seen:
-                inc += 1
-                result[i, col] = inc
+            if a[i, col]:
+                if false_seen:
+                    inc += 1
+                    result[i, col] = inc
             else:
                 false_seen = True
                 if not allow_gaps:
@@ -618,13 +673,17 @@ def generate_random_nb(shape, n_range, n_prob=None, min_space=None, seed=None):
 </details>
 </dd>
 <dt id="vectorbt.signals.nb.generate_stop_loss_nb"><code class="name flex">
-<span>def <span class="ident">generate_stop_loss_nb</span></span>(<span>entries, ts, stops, trailing)</span>
+<span>def <span class="ident">generate_stop_loss_nb</span></span>(<span>entries, ts, stops, trailing, relative)</span>
 </code></dt>
 <dd>
 <div class="desc"><p>For each <code>True</code> in <code>entries</code>, find the first value in <code>ts</code> that is below the (trailing) stop.</p>
+<p>Set <code>trailing</code> to <code>True</code> to use trailing stop.
+Set <code>relative</code> to <code>True</code> to define stop in percentage of <code>ts</code>.</p>
+<div class="admonition note">
+<p class="admonition-title">Note</p>
 <p><code>stops</code> must be a 3D array - an array out of 2-dim arrays each of <code>ts</code> shape. Each of
-these arrays will correspond to a different stop loss configuration. Set <code>trailing</code> to
-<code>True</code> to use trailing stop.</p>
+these arrays will correspond to a different stop configuration.</p>
+</div>
 <h2 id="example">Example</h2>
 <pre><code class="python-repl">&gt;&gt;&gt; import numpy as np
 &gt;&gt;&gt; from numba import njit
@@ -635,7 +694,7 @@ these arrays will correspond to a different stop loss configuration. Set <code>t
 &gt;&gt;&gt; ts = np.asarray([1, 2, 3, 2, 1])[:, None]
 &gt;&gt;&gt; stops = broadcast_to_array_of([0.1, 0.5], ts)
 
-&gt;&gt;&gt; print(generate_stop_loss_nb(entries, ts, stops, True))
+&gt;&gt;&gt; print(generate_stop_loss_nb(entries, ts, stops, True, True))
 [[False False]
  [False False]
  [False False]
@@ -647,13 +706,16 @@ these arrays will correspond to a different stop loss configuration. Set <code>t
 <span>Expand source code</span>
 </summary>
 <pre><code class="python">@njit
-def generate_stop_loss_nb(entries, ts, stops, trailing):
+def generate_stop_loss_nb(entries, ts, stops, trailing, relative):
     &#34;&#34;&#34;For each `True` in `entries`, find the first value in `ts` that is below the (trailing) stop.
 
-    `stops` must be a 3D array - an array out of 2-dim arrays each of `ts` shape. Each of 
-    these arrays will correspond to a different stop loss configuration. Set `trailing` to
-    `True` to use trailing stop.
-    
+    Set `trailing` to `True` to use trailing stop. 
+    Set `relative` to `True` to define stop in percentage of `ts`.
+
+    !!! note
+        `stops` must be a 3D array - an array out of 2-dim arrays each of `ts` shape. Each of 
+        these arrays will correspond to a different stop configuration.
+        
     Example:
         ```python-repl
         &gt;&gt;&gt; import numpy as np
@@ -665,14 +727,43 @@ def generate_stop_loss_nb(entries, ts, stops, trailing):
         &gt;&gt;&gt; ts = np.asarray([1, 2, 3, 2, 1])[:, None]
         &gt;&gt;&gt; stops = broadcast_to_array_of([0.1, 0.5], ts)
 
-        &gt;&gt;&gt; print(generate_stop_loss_nb(entries, ts, stops, True))
+        &gt;&gt;&gt; print(generate_stop_loss_nb(entries, ts, stops, True, True))
         [[False False]
          [False False]
          [False False]
          [ True False]
          [False  True]]
         ```&#34;&#34;&#34;
-    return combine_fns.apply_and_concat_one_nb(len(stops), stop_loss_apply_func_nb, entries, ts, stops, trailing)</code></pre>
+    return combine_fns.apply_and_concat_one_nb(
+        len(stops), stop_loss_apply_func_nb, entries, ts, stops, trailing, relative)</code></pre>
+</details>
+</dd>
+<dt id="vectorbt.signals.nb.generate_take_profit_nb"><code class="name flex">
+<span>def <span class="ident">generate_take_profit_nb</span></span>(<span>entries, ts, stops, relative)</span>
+</code></dt>
+<dd>
+<div class="desc"><p>For each <code>True</code> in <code>entries</code>, find the first value in <code>ts</code> that is above the stop.</p>
+<p>Set <code>relative</code> to <code>True</code> to define stop in percentage of <code>ts</code>.</p>
+<div class="admonition note">
+<p class="admonition-title">Note</p>
+<p><code>stops</code> must be a 3D array - an array out of 2-dim arrays each of <code>ts</code> shape. Each of
+these arrays will correspond to a different stop configuration.</p>
+</div></div>
+<details class="source">
+<summary>
+<span>Expand source code</span>
+</summary>
+<pre><code class="python">@njit
+def generate_take_profit_nb(entries, ts, stops, relative):
+    &#34;&#34;&#34;For each `True` in `entries`, find the first value in `ts` that is above the stop.
+
+    Set `relative` to `True` to define stop in percentage of `ts`.
+
+    !!! note
+        `stops` must be a 3D array - an array out of 2-dim arrays each of `ts` shape. Each of 
+        these arrays will correspond to a different stop configuration.&#34;&#34;&#34;
+    return combine_fns.apply_and_concat_one_nb(
+        len(stops), take_profit_apply_func_nb, entries, ts, stops, relative)</code></pre>
 </details>
 </dd>
 <dt id="vectorbt.signals.nb.map_reduce_between_nb"><code class="name flex">
@@ -874,7 +965,23 @@ def random_prob_choice_1d_nb(a, prob_b):
 <div class="desc"><p>Rank over each partition of <code>True</code> values.</p>
 <p>Partition is some number of <code>True</code> values in a row. You can reset partitions by <code>True</code> values
 from <code>reset_by</code> (must have the same shape). If <code>after_false</code> is <code>True</code>, the first partition
-must come after at least one <code>False</code>. If <code>allow_gaps</code> is <code>True</code>, ignores gaps between partitions.</p></div>
+must come after at least one <code>False</code>. If <code>allow_gaps</code> is <code>True</code>, ignores gaps between partitions.</p>
+<h2 id="example">Example</h2>
+<pre><code class="python-repl">&gt;&gt;&gt; import numpy as np
+&gt;&gt;&gt; from vectorbt.signals.nb import rank_nb
+
+&gt;&gt;&gt; signals = np.asarray([True, True, False, True, True, True, False])[:, None]
+&gt;&gt;&gt; reset_by = np.asarray([False, False, True, False, False, False, False])[:, None]
+
+&gt;&gt;&gt; print(rank_nb(signals)[:, 0])
+[1 2 0 1 2 3 0]
+&gt;&gt;&gt; print(rank_nb(signals, after_false=True)[:, 0])
+[0 0 0 1 2 3 0]
+&gt;&gt;&gt; print(rank_nb(signals, allow_gaps=True)[:, 0])
+[1 2 0 3 4 5 0]
+&gt;&gt;&gt; print(rank_nb(signals, allow_gaps=True, reset_by=reset_by)[:, 0])
+[1 2 0 1 2 3 0]
+</code></pre></div>
 <details class="source">
 <summary>
 <span>Expand source code</span>
@@ -885,7 +992,25 @@ def rank_nb(a, reset_by=None, after_false=False, allow_gaps=False):
 
     Partition is some number of `True` values in a row. You can reset partitions by `True` values 
     from `reset_by` (must have the same shape). If `after_false` is `True`, the first partition 
-    must come after at least one `False`. If `allow_gaps` is `True`, ignores gaps between partitions.&#34;&#34;&#34;
+    must come after at least one `False`. If `allow_gaps` is `True`, ignores gaps between partitions.
+    
+    Example:
+        ```python-repl
+        &gt;&gt;&gt; import numpy as np
+        &gt;&gt;&gt; from vectorbt.signals.nb import rank_nb
+
+        &gt;&gt;&gt; signals = np.asarray([True, True, False, True, True, True, False])[:, None]
+        &gt;&gt;&gt; reset_by = np.asarray([False, False, True, False, False, False, False])[:, None]
+
+        &gt;&gt;&gt; print(rank_nb(signals)[:, 0])
+        [1 2 0 1 2 3 0]
+        &gt;&gt;&gt; print(rank_nb(signals, after_false=True)[:, 0])
+        [0 0 0 1 2 3 0]
+        &gt;&gt;&gt; print(rank_nb(signals, allow_gaps=True)[:, 0])
+        [1 2 0 3 4 5 0]
+        &gt;&gt;&gt; print(rank_nb(signals, allow_gaps=True, reset_by=reset_by)[:, 0])
+        [1 2 0 1 2 3 0]
+        ```&#34;&#34;&#34;
     result = np.zeros(a.shape, dtype=i8)
 
     for col in range(a.shape[1]):
@@ -897,9 +1022,10 @@ def rank_nb(a, reset_by=None, after_false=False, allow_gaps=False):
                     # Signal in b_ref resets rank
                     false_seen = ~after_false
                     inc = 0
-            if a[i, col] and false_seen:
-                inc += 1
-                result[i, col] = inc
+            if a[i, col]:
+                if false_seen:
+                    inc += 1
+                    result[i, col] = inc
             else:
                 false_seen = True
                 if not allow_gaps:
@@ -932,46 +1058,83 @@ def shuffle_nb(a, seed=None):
 </details>
 </dd>
 <dt id="vectorbt.signals.nb.stop_loss_apply_func_nb"><code class="name flex">
-<span>def <span class="ident">stop_loss_apply_func_nb</span></span>(<span>i, entries, ts, stops, trailing)</span>
+<span>def <span class="ident">stop_loss_apply_func_nb</span></span>(<span>i, entries, ts, stops, trailing, relative)</span>
 </code></dt>
 <dd>
-<div class="desc"><p><code>apply_func_nb</code> for <code><a title="vectorbt.utils.combine_fns.apply_and_concat_one_nb" href="../utils/combine_fns.html#vectorbt.utils.combine_fns.apply_and_concat_one_nb">apply_and_concat_one_nb()</a></code> for stop loss.</p></div>
+<div class="desc"><p><code>apply_func_nb</code> for stop loss used in <code><a title="vectorbt.utils.combine_fns.apply_and_concat_one_nb" href="../utils/combine_fns.html#vectorbt.utils.combine_fns.apply_and_concat_one_nb">apply_and_concat_one_nb()</a></code>.</p></div>
 <details class="source">
 <summary>
 <span>Expand source code</span>
 </summary>
 <pre><code class="python">@njit
-def stop_loss_apply_func_nb(i, entries, ts, stops, trailing):
-    &#34;&#34;&#34;`apply_func_nb` for `vectorbt.utils.combine_fns.apply_and_concat_one_nb` for stop loss.&#34;&#34;&#34;
-    return generate_after_nb(entries, stop_loss_choice_func_nb, ts, stops[i, :, :], trailing)</code></pre>
+def stop_loss_apply_func_nb(i, entries, ts, stops, trailing, relative):
+    &#34;&#34;&#34;`apply_func_nb` for stop loss used in `vectorbt.utils.combine_fns.apply_and_concat_one_nb`.&#34;&#34;&#34;
+    return generate_after_nb(entries, stop_loss_choice_func_nb, ts, stops[i, :, :], trailing, relative)</code></pre>
 </details>
 </dd>
 <dt id="vectorbt.signals.nb.stop_loss_choice_func_nb"><code class="name flex">
-<span>def <span class="ident">stop_loss_choice_func_nb</span></span>(<span>col, from_i, to_i, ts, stop, trailing)</span>
+<span>def <span class="ident">stop_loss_choice_func_nb</span></span>(<span>col, from_i, to_i, ts, stop, trailing, relative)</span>
 </code></dt>
 <dd>
-<div class="desc"><p>Return index of the first <code>ts</code> value that is below <code>stop</code> defined at <code>from_i-1</code>.</p></div>
+<div class="desc"><p><code>choice_func_nb</code> that returns the first index of <code>ts</code> being below <code>stop</code> defined at <code>from_i-1</code>.</p></div>
 <details class="source">
 <summary>
 <span>Expand source code</span>
 </summary>
 <pre><code class="python">@njit(cache=True)
-def stop_loss_choice_func_nb(col, from_i, to_i, ts, stop, trailing):
-    &#34;&#34;&#34;Return index of the first `ts` value that is below `stop` defined at `from_i-1`.&#34;&#34;&#34;
-    # Set range starting from last entry until next entry
+def stop_loss_choice_func_nb(col, from_i, to_i, ts, stop, trailing, relative):
+    &#34;&#34;&#34;`choice_func_nb` that returns the first index of `ts` being below `stop` defined at `from_i-1`.&#34;&#34;&#34;
     ts = ts[from_i-1:to_i+1, col]
     stop = stop[from_i-1:to_i+1, col]
     if trailing:
         # Propagate the maximum value from the entry using expanding max
         peak_ts = timeseries.nb.expanding_max_1d_nb(ts)
-        stop = (1 - stop) * peak_ts
-        # Get the absolute index of the first value below that stop
-        return from_i + np.flatnonzero(ts[1:] &lt; stop[1:])[:1]
+        if relative:
+            stop = (1 - stop) * peak_ts
+            # Get the absolute index of the first ts being below that stop
+        return from_i + np.flatnonzero(ts[1:] &lt;= stop[1:])[:1]
     else:
-        # Calculate the stop
-        stop_val = (1 - stop[0]) * ts[0]
-        # Get the absolute index of the first value below that stop
-        return from_i + np.flatnonzero(ts[1:] &lt; stop_val)[:1]</code></pre>
+        if relative:
+            stop_val = (1 - stop[0]) * ts[0]
+        else:
+            stop_val = stop[0]
+        return from_i + np.flatnonzero(ts[1:] &lt;= stop_val)[:1]</code></pre>
+</details>
+</dd>
+<dt id="vectorbt.signals.nb.take_profit_apply_func_nb"><code class="name flex">
+<span>def <span class="ident">take_profit_apply_func_nb</span></span>(<span>i, entries, ts, stops, relative)</span>
+</code></dt>
+<dd>
+<div class="desc"><p><code>apply_func_nb</code> for take profit used in <code><a title="vectorbt.utils.combine_fns.apply_and_concat_one_nb" href="../utils/combine_fns.html#vectorbt.utils.combine_fns.apply_and_concat_one_nb">apply_and_concat_one_nb()</a></code>.</p></div>
+<details class="source">
+<summary>
+<span>Expand source code</span>
+</summary>
+<pre><code class="python">@njit
+def take_profit_apply_func_nb(i, entries, ts, stops, relative):
+    &#34;&#34;&#34;`apply_func_nb` for take profit used in `vectorbt.utils.combine_fns.apply_and_concat_one_nb`.&#34;&#34;&#34;
+    return generate_after_nb(entries, take_profit_choice_func_nb, ts, stops[i, :, :], relative)</code></pre>
+</details>
+</dd>
+<dt id="vectorbt.signals.nb.take_profit_choice_func_nb"><code class="name flex">
+<span>def <span class="ident">take_profit_choice_func_nb</span></span>(<span>col, from_i, to_i, ts, stop, relative)</span>
+</code></dt>
+<dd>
+<div class="desc"><p><code>choice_func_nb</code> that returns the first index of <code>ts</code> being above <code>stop</code> defined at <code>from_i-1</code>.</p></div>
+<details class="source">
+<summary>
+<span>Expand source code</span>
+</summary>
+<pre><code class="python">@njit(cache=True)
+def take_profit_choice_func_nb(col, from_i, to_i, ts, stop, relative):
+    &#34;&#34;&#34;`choice_func_nb` that returns the first index of `ts` being above `stop` defined at `from_i-1`.&#34;&#34;&#34;
+    ts = ts[from_i-1:to_i+1, col]
+    stop = stop[from_i-1:to_i+1, col]
+    if relative:
+        stop_val = (1 + stop[0]) * ts[0]
+    else:
+        stop_val = stop[0]
+    return from_i + np.flatnonzero(ts[1:] &gt;= stop_val)[:1]</code></pre>
 </details>
 </dd>
 </dl>
@@ -1000,6 +1163,7 @@ def stop_loss_choice_func_nb(col, from_i, to_i, ts, stop, trailing):
 <li><code><a title="vectorbt.signals.nb.generate_random_after_nb" href="#vectorbt.signals.nb.generate_random_after_nb">generate_random_after_nb</a></code></li>
 <li><code><a title="vectorbt.signals.nb.generate_random_nb" href="#vectorbt.signals.nb.generate_random_nb">generate_random_nb</a></code></li>
 <li><code><a title="vectorbt.signals.nb.generate_stop_loss_nb" href="#vectorbt.signals.nb.generate_stop_loss_nb">generate_stop_loss_nb</a></code></li>
+<li><code><a title="vectorbt.signals.nb.generate_take_profit_nb" href="#vectorbt.signals.nb.generate_take_profit_nb">generate_take_profit_nb</a></code></li>
 <li><code><a title="vectorbt.signals.nb.map_reduce_between_nb" href="#vectorbt.signals.nb.map_reduce_between_nb">map_reduce_between_nb</a></code></li>
 <li><code><a title="vectorbt.signals.nb.map_reduce_between_two_nb" href="#vectorbt.signals.nb.map_reduce_between_two_nb">map_reduce_between_two_nb</a></code></li>
 <li><code><a title="vectorbt.signals.nb.mean_reduce_nb" href="#vectorbt.signals.nb.mean_reduce_nb">mean_reduce_nb</a></code></li>
@@ -1009,6 +1173,8 @@ def stop_loss_choice_func_nb(col, from_i, to_i, ts, stop, trailing):
 <li><code><a title="vectorbt.signals.nb.shuffle_nb" href="#vectorbt.signals.nb.shuffle_nb">shuffle_nb</a></code></li>
 <li><code><a title="vectorbt.signals.nb.stop_loss_apply_func_nb" href="#vectorbt.signals.nb.stop_loss_apply_func_nb">stop_loss_apply_func_nb</a></code></li>
 <li><code><a title="vectorbt.signals.nb.stop_loss_choice_func_nb" href="#vectorbt.signals.nb.stop_loss_choice_func_nb">stop_loss_choice_func_nb</a></code></li>
+<li><code><a title="vectorbt.signals.nb.take_profit_apply_func_nb" href="#vectorbt.signals.nb.take_profit_apply_func_nb">take_profit_apply_func_nb</a></code></li>
+<li><code><a title="vectorbt.signals.nb.take_profit_choice_func_nb" href="#vectorbt.signals.nb.take_profit_choice_func_nb">take_profit_choice_func_nb</a></code></li>
 </ul>
 </li>
 </ul>

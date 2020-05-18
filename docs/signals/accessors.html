@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1, minimum-scale=1" />
 <meta name="generator" content="pdoc 0.8.1" />
 <title>vectorbt.signals.accessors API documentation</title>
-<meta name="description" content="Custom pandas accessors for working with signals …" />
+<meta name="description" content="Custom pandas accessors …" />
 <link href='https://cdnjs.cloudflare.com/ajax/libs/normalize/8.0.0/normalize.min.css' rel='stylesheet'>
 <link href='https://cdnjs.cloudflare.com/ajax/libs/10up-sanitize.css/8.0.0/sanitize.min.css' rel='stylesheet'>
 <link href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/9.12.0/styles/github.min.css" rel="stylesheet">
@@ -20,12 +20,11 @@
 <h1 class="title">Module <code>vectorbt.signals.accessors</code></h1>
 </header>
 <section id="section-intro">
-<p>Custom pandas accessors for working with signals.</p>
+<p>Custom pandas accessors.</p>
 <div class="admonition note">
 <p class="admonition-title">Note</p>
 <p>Input arrays must be <code>numpy.bool</code>.</p>
 </div>
-<p>Before running the examples:</p>
 <pre><code class="py">import vectorbt as vbt
 import numpy as np
 import pandas as pd
@@ -59,12 +58,11 @@ ts = pd.DataFrame([
 <summary>
 <span>Expand source code</span>
 </summary>
-<pre><code class="python">&#34;&#34;&#34;Custom pandas accessors for working with signals.
+<pre><code class="python">&#34;&#34;&#34;Custom pandas accessors.
 
 !!! note
     Input arrays must be `numpy.bool`.
     
-Before running the examples:
 ```py
 import vectorbt as vbt
 import numpy as np
@@ -102,7 +100,7 @@ import plotly.graph_objects as go
 
 from vectorbt.accessors import register_dataframe_accessor, register_series_accessor
 from vectorbt.utils import checks, reshape_fns, index_fns, common
-from vectorbt.utils.common import add_nb_methods, cached_property
+from vectorbt.utils.decorators import add_nb_methods, cached_property
 from vectorbt.utils.accessors import Base_Accessor, Base_DFAccessor, Base_SRAccessor
 from vectorbt.signals import nb
 from vectorbt.widgets import DefaultFigureWidget
@@ -318,8 +316,8 @@ class Signals_Accessor():
         return self.wrap_array(nb.generate_random_after_nb(
             self.to_2d_array(), n_range, n_prob=n_prob, min_space=min_space, seed=seed))
 
-    def generate_stop_loss(self, ts, stops, trailing=False, as_columns=None, broadcast_kwargs={}):
-        &#34;&#34;&#34;See `vectorbt.signals.nb.stop_loss_nb`.
+    def generate_stop_loss(self, ts, stops, trailing=False, relative=True, as_columns=None, broadcast_kwargs={}):
+        &#34;&#34;&#34;See `vectorbt.signals.nb.generate_stop_loss_nb`.
 
         Arguments will be broadcasted using `vectorbt.utils.reshape_fns.broadcast`
         with `broadcast_kwargs`. Argument `stops` can be either a single number, an array of 
@@ -327,10 +325,10 @@ class Signals_Accessor():
         Use `as_columns` as a top-level column level.
 
         Example:
-            For each entry in `signals`, set stop-loss order for 10% and 20% below the price `ts`:
+            For each entry in `signals`, set stop loss for 10% and 20% below the price `ts`:
 
             ```python-repl
-            &gt;&gt;&gt; print(entries.vbt.signals.generate_stop_loss(ts, [0.1, 0.2]))
+            &gt;&gt;&gt; print(signals.vbt.signals.generate_stop_loss(ts, [0.1, 0.2]))
             stop_loss                   0.1                  0.2
                             a      b      c      a      b      c
             2018-01-01  False  False  False  False  False  False
@@ -344,15 +342,57 @@ class Signals_Accessor():
 
         entries, ts = reshape_fns.broadcast(entries, ts, **broadcast_kwargs, writeable=True)
         stops = reshape_fns.broadcast_to_array_of(stops, entries.vbt.to_2d_array())
-        exits = nb.generate_stop_loss_nb(entries.vbt.to_2d_array(), ts.vbt.to_2d_array(), stops, trailing)
+        exits = nb.generate_stop_loss_nb(
+            entries.vbt.to_2d_array(), 
+            ts.vbt.to_2d_array(), 
+            stops, trailing, relative)
 
         # Build column hierarchy
         if as_columns is not None:
             param_columns = as_columns
         else:
             name = &#39;trail_stop&#39; if trailing else &#39;stop_loss&#39;
-            param_columns = index_fns.from_values(stops, name=name)
-        columns = index_fns.combine(param_columns, entries.vbt.columns)
+            param_columns = index_fns.index_from_values(stops, name=name)
+        columns = index_fns.combine_indexes(param_columns, entries.vbt.columns)
+        return entries.vbt.wrap_array(exits, columns=columns)
+
+    def generate_take_profit(self, ts, stops, relative=True, as_columns=None, broadcast_kwargs={}):
+        &#34;&#34;&#34;See `vectorbt.signals.nb.generate_take_profit_nb`.
+
+        Arguments will be broadcasted using `vectorbt.utils.reshape_fns.broadcast`
+        with `broadcast_kwargs`. Argument `stops` can be either a single number, an array of 
+        numbers, or a 3D array, where each matrix corresponds to a single configuration. 
+        Use `as_columns` as a top-level column level.
+
+        Example:
+            For each entry in `signals`, set take profit for 10% and 20% above the price `ts`:
+
+            ```python-repl
+            &gt;&gt;&gt; print(signals.vbt.signals.generate_take_profit(ts, [0.1, 0.2]))
+            take_profit                  0.1                  0.2              
+                             a      b      c      a      b      c
+            2018-01-01   False  False  False  False  False  False
+            2018-01-02    True  False  False   True  False  False
+            2018-01-03   False  False  False  False  False  False
+            2018-01-04   False  False  False  False  False  False
+            2018-01-05    True  False  False   True  False  False
+            ```&#34;&#34;&#34;
+        entries = self._obj
+        checks.assert_type(ts, (pd.Series, pd.DataFrame))
+
+        entries, ts = reshape_fns.broadcast(entries, ts, **broadcast_kwargs, writeable=True)
+        stops = reshape_fns.broadcast_to_array_of(stops, entries.vbt.to_2d_array())
+        exits = nb.generate_take_profit_nb(
+            entries.vbt.to_2d_array(), 
+            ts.vbt.to_2d_array(), 
+            stops, relative)
+
+        # Build column hierarchy
+        if as_columns is not None:
+            param_columns = as_columns
+        else:
+            param_columns = index_fns.index_from_values(stops, name=&#39;take_profit&#39;)
+        columns = index_fns.combine_indexes(param_columns, entries.vbt.columns)
         return entries.vbt.wrap_array(exits, columns=columns)
 
     def map_reduce_between(self, *args, other=None, map_func_nb=None, reduce_func_nb=None, broadcast_kwargs={}):
@@ -400,16 +440,7 @@ class Signals_Accessor():
 
     @cached_property
     def num_signals(self):
-        &#34;&#34;&#34;Sum up `True` values.
-
-        Example:
-            ```python-repl
-            &gt;&gt;&gt; print(signals.vbt.signals.num_signals)
-            a    2
-            b    2
-            c    1
-            dtype: int64
-            ```&#34;&#34;&#34;
+        &#34;&#34;&#34;Sum up `True` values.&#34;&#34;&#34;
         num_signals = self.to_array().sum(axis=0)
         if self.is_series():
             return num_signals
@@ -419,33 +450,13 @@ class Signals_Accessor():
     def avg_distance(self):
         &#34;&#34;&#34;Calculate the average distance between `True` values.
 
-        See `Signals_Accessor.map_reduce_between`.
-
-        Example:
-            ```python-repl
-            &gt;&gt;&gt; print(signals.vbt.signals.avg_distance)
-            a    3.0
-            b    3.0
-            c    NaN
-            dtype: float64
-            ```&#34;&#34;&#34;
+        See `Signals_Accessor.map_reduce_between`.&#34;&#34;&#34;
         return self.map_reduce_between(map_func_nb=nb.distance_map_nb, reduce_func_nb=nb.mean_reduce_nb)
 
     def avg_distance_to(self, other, **kwargs):
         &#34;&#34;&#34;Calculate the average distance between `True` values in `self` and `other`.
 
-        See `Signals_Accessor.map_reduce_between`.
-
-        Example:
-            Get average distance of `signals` to `signals` shifted by one:
-
-            ```python-repl
-            &gt;&gt;&gt; print(signals.vbt.signals.avg_distance_to(signals.vbt.signals.fshift(1)))
-            a    1.0
-            b    1.0
-            c    1.0
-            dtype: float64
-            ```&#34;&#34;&#34;
+        See `Signals_Accessor.map_reduce_between`.&#34;&#34;&#34;
         return self.map_reduce_between(other=other, map_func_nb=nb.distance_map_nb, reduce_func_nb=nb.mean_reduce_nb, **kwargs)
 
     def rank(self, reset_by=None, after_false=False, allow_gaps=False, broadcast_kwargs={}):
@@ -456,6 +467,13 @@ class Signals_Accessor():
 
             ```python-repl
             &gt;&gt;&gt; not_signals = ~signals
+            &gt;&gt;&gt; print(not_signals)
+                            a      b      c
+            2018-01-01  False   True   True
+            2018-01-02   True  False   True
+            2018-01-03   True   True  False
+            2018-01-04  False   True   True
+            2018-01-05   True  False   True
             &gt;&gt;&gt; print(not_signals.vbt.signals.rank())
                         a  b  c
             2018-01-01  0  1  1
@@ -466,7 +484,7 @@ class Signals_Accessor():
             &gt;&gt;&gt; print(not_signals.vbt.signals.rank(after_false=True))
                         a  b  c
             2018-01-01  0  0  0
-            2018-01-02  1  0  1
+            2018-01-02  1  0  0
             2018-01-03  2  1  0
             2018-01-04  0  2  1
             2018-01-05  1  0  2
@@ -498,57 +516,15 @@ class Signals_Accessor():
         return obj.vbt.wrap_array(ranked)
 
     def first(self, **kwargs):
-        &#34;&#34;&#34;For each partition of `True` values, get the first `True`.
-
-        See `vectorbt.signals.nb.rank_nb`.
-
-        Example:
-            ```python-repl
-            &gt;&gt;&gt; not_signals = ~signals
-            &gt;&gt;&gt; print(not_signals.vbt.signals.first())
-                            a      b      c
-            2018-01-01  False   True   True
-            2018-01-02   True  False  False
-            2018-01-03  False   True  False
-            2018-01-04  False  False   True
-            2018-01-05   True  False  False
-            ```&#34;&#34;&#34;
+        &#34;&#34;&#34;`vectorbt.signals.nb.rank_nb` == 1.&#34;&#34;&#34;
         return self.wrap_array(self.rank(**kwargs).values == 1)
 
     def nst(self, n, **kwargs):
-        &#34;&#34;&#34;For each partition of `True` values, get the nst `True`.
-
-        See `vectorbt.signals.nb.rank_nb`.
-
-        Example:
-            ```python-repl
-            &gt;&gt;&gt; not_signals = ~signals
-            &gt;&gt;&gt; print(not_signals.vbt.signals.nst(2, allow_gaps=True))
-                            a      b      c
-            2018-01-01  False  False  False
-            2018-01-02  False  False   True
-            2018-01-03   True   True  False
-            2018-01-04  False  False  False
-            2018-01-05  False  False  False
-            ```&#34;&#34;&#34;
+        &#34;&#34;&#34;`vectorbt.signals.nb.rank_nb` == n.&#34;&#34;&#34;
         return self.wrap_array(self.rank(**kwargs).values == n)
 
     def from_nst(self, n, **kwargs):
-        &#34;&#34;&#34;For each partition of `True` values, get the nst `True` and beyond.
-
-        See `vectorbt.signals.nb.rank_nb`.
-
-        Example:
-            ```python-repl
-            &gt;&gt;&gt; not_signals = ~signals
-            &gt;&gt;&gt; print(not_signals.vbt.signals.from_nst(2, allow_gaps=True))
-                            a      b      c
-            2018-01-01  False  False  False
-            2018-01-02  False  False   True
-            2018-01-03   True   True  False
-            2018-01-04  False   True   True
-            2018-01-05   True  False   True
-            ```&#34;&#34;&#34;
+        &#34;&#34;&#34;`vectorbt.signals.nb.rank_nb` &gt;= n.&#34;&#34;&#34;
         return self.wrap_array(self.rank(**kwargs).values &gt;= n)
 
     def AND(self, *others, **kwargs):
@@ -596,7 +572,7 @@ class Signals_SRAccessor(Signals_Accessor, Base_SRAccessor):
 
         Args:
             name (str): Name of the signals.
-            trace_kwargs (dict): Keyword arguments passed to [`plotly.graph_objects.Scatter`](https://plotly.com/python-api-reference/generated/plotly.graph_objects.Scatter.html).
+            trace_kwargs (dict): Keyword arguments passed to `plotly.graph_objects.Scatter`.
             fig (plotly.graph_objects.Figure): Figure to add traces to.
             **layout_kwargs: Keyword arguments for layout.
         Example:
@@ -638,10 +614,10 @@ class Signals_SRAccessor(Signals_Accessor, Base_SRAccessor):
             ts (pandas.Series): Time series to plot markers on.
 
                 !!! note
-                    Doesn&#39;t plot `ts` itself.
+                    Doesn&#39;t plot `ts`.
 
             name (str): Name of the signals.
-            trace_kwargs (dict): Keyword arguments passed to [`plotly.graph_objects.Scatter`](https://plotly.com/python-api-reference/generated/plotly.graph_objects.Scatter.html).
+            trace_kwargs (dict): Keyword arguments passed to `plotly.graph_objects.Scatter`.
             fig (plotly.graph_objects.Figure): Figure to add traces to.
             **layout_kwargs: Keyword arguments for layout.
         Example:
@@ -711,7 +687,7 @@ class Signals_DFAccessor(Signals_Accessor, Base_DFAccessor):
         &#34;&#34;&#34;Plot each column in DataFrame as a line.
 
         Args:
-            trace_kwargs (dict or list of dict): Keyword arguments passed to each [`plotly.graph_objects.Scatter`](https://plotly.com/python-api-reference/generated/plotly.graph_objects.Scatter.html).
+            trace_kwargs (dict or list of dict): Keyword arguments passed to each `plotly.graph_objects.Scatter`.
             fig (plotly.graph_objects.Figure): Figure to add traces to.
             **layout_kwargs: Keyword arguments for layout.
         Example:
@@ -955,8 +931,8 @@ class Signals_DFAccessor(Signals_Accessor, Base_DFAccessor):
         return self.wrap_array(nb.generate_random_after_nb(
             self.to_2d_array(), n_range, n_prob=n_prob, min_space=min_space, seed=seed))
 
-    def generate_stop_loss(self, ts, stops, trailing=False, as_columns=None, broadcast_kwargs={}):
-        &#34;&#34;&#34;See `vectorbt.signals.nb.stop_loss_nb`.
+    def generate_stop_loss(self, ts, stops, trailing=False, relative=True, as_columns=None, broadcast_kwargs={}):
+        &#34;&#34;&#34;See `vectorbt.signals.nb.generate_stop_loss_nb`.
 
         Arguments will be broadcasted using `vectorbt.utils.reshape_fns.broadcast`
         with `broadcast_kwargs`. Argument `stops` can be either a single number, an array of 
@@ -964,10 +940,10 @@ class Signals_DFAccessor(Signals_Accessor, Base_DFAccessor):
         Use `as_columns` as a top-level column level.
 
         Example:
-            For each entry in `signals`, set stop-loss order for 10% and 20% below the price `ts`:
+            For each entry in `signals`, set stop loss for 10% and 20% below the price `ts`:
 
             ```python-repl
-            &gt;&gt;&gt; print(entries.vbt.signals.generate_stop_loss(ts, [0.1, 0.2]))
+            &gt;&gt;&gt; print(signals.vbt.signals.generate_stop_loss(ts, [0.1, 0.2]))
             stop_loss                   0.1                  0.2
                             a      b      c      a      b      c
             2018-01-01  False  False  False  False  False  False
@@ -981,15 +957,57 @@ class Signals_DFAccessor(Signals_Accessor, Base_DFAccessor):
 
         entries, ts = reshape_fns.broadcast(entries, ts, **broadcast_kwargs, writeable=True)
         stops = reshape_fns.broadcast_to_array_of(stops, entries.vbt.to_2d_array())
-        exits = nb.generate_stop_loss_nb(entries.vbt.to_2d_array(), ts.vbt.to_2d_array(), stops, trailing)
+        exits = nb.generate_stop_loss_nb(
+            entries.vbt.to_2d_array(), 
+            ts.vbt.to_2d_array(), 
+            stops, trailing, relative)
 
         # Build column hierarchy
         if as_columns is not None:
             param_columns = as_columns
         else:
             name = &#39;trail_stop&#39; if trailing else &#39;stop_loss&#39;
-            param_columns = index_fns.from_values(stops, name=name)
-        columns = index_fns.combine(param_columns, entries.vbt.columns)
+            param_columns = index_fns.index_from_values(stops, name=name)
+        columns = index_fns.combine_indexes(param_columns, entries.vbt.columns)
+        return entries.vbt.wrap_array(exits, columns=columns)
+
+    def generate_take_profit(self, ts, stops, relative=True, as_columns=None, broadcast_kwargs={}):
+        &#34;&#34;&#34;See `vectorbt.signals.nb.generate_take_profit_nb`.
+
+        Arguments will be broadcasted using `vectorbt.utils.reshape_fns.broadcast`
+        with `broadcast_kwargs`. Argument `stops` can be either a single number, an array of 
+        numbers, or a 3D array, where each matrix corresponds to a single configuration. 
+        Use `as_columns` as a top-level column level.
+
+        Example:
+            For each entry in `signals`, set take profit for 10% and 20% above the price `ts`:
+
+            ```python-repl
+            &gt;&gt;&gt; print(signals.vbt.signals.generate_take_profit(ts, [0.1, 0.2]))
+            take_profit                  0.1                  0.2              
+                             a      b      c      a      b      c
+            2018-01-01   False  False  False  False  False  False
+            2018-01-02    True  False  False   True  False  False
+            2018-01-03   False  False  False  False  False  False
+            2018-01-04   False  False  False  False  False  False
+            2018-01-05    True  False  False   True  False  False
+            ```&#34;&#34;&#34;
+        entries = self._obj
+        checks.assert_type(ts, (pd.Series, pd.DataFrame))
+
+        entries, ts = reshape_fns.broadcast(entries, ts, **broadcast_kwargs, writeable=True)
+        stops = reshape_fns.broadcast_to_array_of(stops, entries.vbt.to_2d_array())
+        exits = nb.generate_take_profit_nb(
+            entries.vbt.to_2d_array(), 
+            ts.vbt.to_2d_array(), 
+            stops, relative)
+
+        # Build column hierarchy
+        if as_columns is not None:
+            param_columns = as_columns
+        else:
+            param_columns = index_fns.index_from_values(stops, name=&#39;take_profit&#39;)
+        columns = index_fns.combine_indexes(param_columns, entries.vbt.columns)
         return entries.vbt.wrap_array(exits, columns=columns)
 
     def map_reduce_between(self, *args, other=None, map_func_nb=None, reduce_func_nb=None, broadcast_kwargs={}):
@@ -1037,16 +1055,7 @@ class Signals_DFAccessor(Signals_Accessor, Base_DFAccessor):
 
     @cached_property
     def num_signals(self):
-        &#34;&#34;&#34;Sum up `True` values.
-
-        Example:
-            ```python-repl
-            &gt;&gt;&gt; print(signals.vbt.signals.num_signals)
-            a    2
-            b    2
-            c    1
-            dtype: int64
-            ```&#34;&#34;&#34;
+        &#34;&#34;&#34;Sum up `True` values.&#34;&#34;&#34;
         num_signals = self.to_array().sum(axis=0)
         if self.is_series():
             return num_signals
@@ -1056,33 +1065,13 @@ class Signals_DFAccessor(Signals_Accessor, Base_DFAccessor):
     def avg_distance(self):
         &#34;&#34;&#34;Calculate the average distance between `True` values.
 
-        See `Signals_Accessor.map_reduce_between`.
-
-        Example:
-            ```python-repl
-            &gt;&gt;&gt; print(signals.vbt.signals.avg_distance)
-            a    3.0
-            b    3.0
-            c    NaN
-            dtype: float64
-            ```&#34;&#34;&#34;
+        See `Signals_Accessor.map_reduce_between`.&#34;&#34;&#34;
         return self.map_reduce_between(map_func_nb=nb.distance_map_nb, reduce_func_nb=nb.mean_reduce_nb)
 
     def avg_distance_to(self, other, **kwargs):
         &#34;&#34;&#34;Calculate the average distance between `True` values in `self` and `other`.
 
-        See `Signals_Accessor.map_reduce_between`.
-
-        Example:
-            Get average distance of `signals` to `signals` shifted by one:
-
-            ```python-repl
-            &gt;&gt;&gt; print(signals.vbt.signals.avg_distance_to(signals.vbt.signals.fshift(1)))
-            a    1.0
-            b    1.0
-            c    1.0
-            dtype: float64
-            ```&#34;&#34;&#34;
+        See `Signals_Accessor.map_reduce_between`.&#34;&#34;&#34;
         return self.map_reduce_between(other=other, map_func_nb=nb.distance_map_nb, reduce_func_nb=nb.mean_reduce_nb, **kwargs)
 
     def rank(self, reset_by=None, after_false=False, allow_gaps=False, broadcast_kwargs={}):
@@ -1093,6 +1082,13 @@ class Signals_DFAccessor(Signals_Accessor, Base_DFAccessor):
 
             ```python-repl
             &gt;&gt;&gt; not_signals = ~signals
+            &gt;&gt;&gt; print(not_signals)
+                            a      b      c
+            2018-01-01  False   True   True
+            2018-01-02   True  False   True
+            2018-01-03   True   True  False
+            2018-01-04  False   True   True
+            2018-01-05   True  False   True
             &gt;&gt;&gt; print(not_signals.vbt.signals.rank())
                         a  b  c
             2018-01-01  0  1  1
@@ -1103,7 +1099,7 @@ class Signals_DFAccessor(Signals_Accessor, Base_DFAccessor):
             &gt;&gt;&gt; print(not_signals.vbt.signals.rank(after_false=True))
                         a  b  c
             2018-01-01  0  0  0
-            2018-01-02  1  0  1
+            2018-01-02  1  0  0
             2018-01-03  2  1  0
             2018-01-04  0  2  1
             2018-01-05  1  0  2
@@ -1135,57 +1131,15 @@ class Signals_DFAccessor(Signals_Accessor, Base_DFAccessor):
         return obj.vbt.wrap_array(ranked)
 
     def first(self, **kwargs):
-        &#34;&#34;&#34;For each partition of `True` values, get the first `True`.
-
-        See `vectorbt.signals.nb.rank_nb`.
-
-        Example:
-            ```python-repl
-            &gt;&gt;&gt; not_signals = ~signals
-            &gt;&gt;&gt; print(not_signals.vbt.signals.first())
-                            a      b      c
-            2018-01-01  False   True   True
-            2018-01-02   True  False  False
-            2018-01-03  False   True  False
-            2018-01-04  False  False   True
-            2018-01-05   True  False  False
-            ```&#34;&#34;&#34;
+        &#34;&#34;&#34;`vectorbt.signals.nb.rank_nb` == 1.&#34;&#34;&#34;
         return self.wrap_array(self.rank(**kwargs).values == 1)
 
     def nst(self, n, **kwargs):
-        &#34;&#34;&#34;For each partition of `True` values, get the nst `True`.
-
-        See `vectorbt.signals.nb.rank_nb`.
-
-        Example:
-            ```python-repl
-            &gt;&gt;&gt; not_signals = ~signals
-            &gt;&gt;&gt; print(not_signals.vbt.signals.nst(2, allow_gaps=True))
-                            a      b      c
-            2018-01-01  False  False  False
-            2018-01-02  False  False   True
-            2018-01-03   True   True  False
-            2018-01-04  False  False  False
-            2018-01-05  False  False  False
-            ```&#34;&#34;&#34;
+        &#34;&#34;&#34;`vectorbt.signals.nb.rank_nb` == n.&#34;&#34;&#34;
         return self.wrap_array(self.rank(**kwargs).values == n)
 
     def from_nst(self, n, **kwargs):
-        &#34;&#34;&#34;For each partition of `True` values, get the nst `True` and beyond.
-
-        See `vectorbt.signals.nb.rank_nb`.
-
-        Example:
-            ```python-repl
-            &gt;&gt;&gt; not_signals = ~signals
-            &gt;&gt;&gt; print(not_signals.vbt.signals.from_nst(2, allow_gaps=True))
-                            a      b      c
-            2018-01-01  False  False  False
-            2018-01-02  False  False   True
-            2018-01-03   True   True  False
-            2018-01-04  False   True   True
-            2018-01-05   True  False   True
-            ```&#34;&#34;&#34;
+        &#34;&#34;&#34;`vectorbt.signals.nb.rank_nb` &gt;= n.&#34;&#34;&#34;
         return self.wrap_array(self.rank(**kwargs).values &gt;= n)
 
     def AND(self, *others, **kwargs):
@@ -1512,65 +1466,50 @@ def generate_random(cls, shape, n_range, n_prob=None, min_space=None, seed=None,
 <dt id="vectorbt.signals.accessors.Signals_Accessor.avg_distance"><code class="name">var <span class="ident">avg_distance</span></code></dt>
 <dd>
 <div class="desc"><p>Calculate the average distance between <code>True</code> values.</p>
-<p>See <code><a title="vectorbt.signals.accessors.Signals_Accessor.map_reduce_between" href="#vectorbt.signals.accessors.Signals_Accessor.map_reduce_between">Signals_Accessor.map_reduce_between()</a></code>.</p>
-<h2 id="example">Example</h2>
-<pre><code class="python-repl">&gt;&gt;&gt; print(signals.vbt.signals.avg_distance)
-a    3.0
-b    3.0
-c    NaN
-dtype: float64
-</code></pre></div>
+<p>See <code><a title="vectorbt.signals.accessors.Signals_Accessor.map_reduce_between" href="#vectorbt.signals.accessors.Signals_Accessor.map_reduce_between">Signals_Accessor.map_reduce_between()</a></code>.</p></div>
 <details class="source">
 <summary>
 <span>Expand source code</span>
 </summary>
-<pre><code class="python">@cached_property
-def avg_distance(self):
-    &#34;&#34;&#34;Calculate the average distance between `True` values.
-
-    See `Signals_Accessor.map_reduce_between`.
-
-    Example:
-        ```python-repl
-        &gt;&gt;&gt; print(signals.vbt.signals.avg_distance)
-        a    3.0
-        b    3.0
-        c    NaN
-        dtype: float64
-        ```&#34;&#34;&#34;
-    return self.map_reduce_between(map_func_nb=nb.distance_map_nb, reduce_func_nb=nb.mean_reduce_nb)</code></pre>
+<pre><code class="python">def __get__(self, instance, owner=None):
+    if instance is None:
+        return self
+    if not defaults.caching: # you can manually disable cache here
+        return super().__get__(instance, owner=owner)
+    cache = instance.__dict__
+    val = cache.get(self.attrname, _NOT_FOUND)
+    if val is _NOT_FOUND:
+        with self.lock:
+            # check if another thread filled cache while we awaited lock
+            val = cache.get(self.attrname, _NOT_FOUND)
+            if val is _NOT_FOUND:
+                val = self.func(instance)
+                cache[self.attrname] = val
+    return val</code></pre>
 </details>
 </dd>
 <dt id="vectorbt.signals.accessors.Signals_Accessor.num_signals"><code class="name">var <span class="ident">num_signals</span></code></dt>
 <dd>
-<div class="desc"><p>Sum up <code>True</code> values.</p>
-<h2 id="example">Example</h2>
-<pre><code class="python-repl">&gt;&gt;&gt; print(signals.vbt.signals.num_signals)
-a    2
-b    2
-c    1
-dtype: int64
-</code></pre></div>
+<div class="desc"><p>Sum up <code>True</code> values.</p></div>
 <details class="source">
 <summary>
 <span>Expand source code</span>
 </summary>
-<pre><code class="python">@cached_property
-def num_signals(self):
-    &#34;&#34;&#34;Sum up `True` values.
-
-    Example:
-        ```python-repl
-        &gt;&gt;&gt; print(signals.vbt.signals.num_signals)
-        a    2
-        b    2
-        c    1
-        dtype: int64
-        ```&#34;&#34;&#34;
-    num_signals = self.to_array().sum(axis=0)
-    if self.is_series():
-        return num_signals
-    return pd.Series(num_signals, index=self.columns)</code></pre>
+<pre><code class="python">def __get__(self, instance, owner=None):
+    if instance is None:
+        return self
+    if not defaults.caching: # you can manually disable cache here
+        return super().__get__(instance, owner=owner)
+    cache = instance.__dict__
+    val = cache.get(self.attrname, _NOT_FOUND)
+    if val is _NOT_FOUND:
+        with self.lock:
+            # check if another thread filled cache while we awaited lock
+            val = cache.get(self.attrname, _NOT_FOUND)
+            if val is _NOT_FOUND:
+                val = self.func(instance)
+                cache[self.attrname] = val
+    return val</code></pre>
 </details>
 </dd>
 </dl>
@@ -1658,15 +1597,7 @@ def num_signals(self):
 </code></dt>
 <dd>
 <div class="desc"><p>Calculate the average distance between <code>True</code> values in <code>self</code> and <code>other</code>.</p>
-<p>See <code><a title="vectorbt.signals.accessors.Signals_Accessor.map_reduce_between" href="#vectorbt.signals.accessors.Signals_Accessor.map_reduce_between">Signals_Accessor.map_reduce_between()</a></code>.</p>
-<h2 id="example">Example</h2>
-<p>Get average distance of <code>signals</code> to <code>signals</code> shifted by one:</p>
-<pre><code class="python-repl">&gt;&gt;&gt; print(signals.vbt.signals.avg_distance_to(signals.vbt.signals.fshift(1)))
-a    1.0
-b    1.0
-c    1.0
-dtype: float64
-</code></pre></div>
+<p>See <code><a title="vectorbt.signals.accessors.Signals_Accessor.map_reduce_between" href="#vectorbt.signals.accessors.Signals_Accessor.map_reduce_between">Signals_Accessor.map_reduce_between()</a></code>.</p></div>
 <details class="source">
 <summary>
 <span>Expand source code</span>
@@ -1674,18 +1605,7 @@ dtype: float64
 <pre><code class="python">def avg_distance_to(self, other, **kwargs):
     &#34;&#34;&#34;Calculate the average distance between `True` values in `self` and `other`.
 
-    See `Signals_Accessor.map_reduce_between`.
-
-    Example:
-        Get average distance of `signals` to `signals` shifted by one:
-
-        ```python-repl
-        &gt;&gt;&gt; print(signals.vbt.signals.avg_distance_to(signals.vbt.signals.fshift(1)))
-        a    1.0
-        b    1.0
-        c    1.0
-        dtype: float64
-        ```&#34;&#34;&#34;
+    See `Signals_Accessor.map_reduce_between`.&#34;&#34;&#34;
     return self.map_reduce_between(other=other, map_func_nb=nb.distance_map_nb, reduce_func_nb=nb.mean_reduce_nb, **kwargs)</code></pre>
 </details>
 </dd>
@@ -1693,38 +1613,13 @@ dtype: float64
 <span>def <span class="ident">first</span></span>(<span>self, **kwargs)</span>
 </code></dt>
 <dd>
-<div class="desc"><p>For each partition of <code>True</code> values, get the first <code>True</code>.</p>
-<p>See <code><a title="vectorbt.signals.nb.rank_nb" href="nb.html#vectorbt.signals.nb.rank_nb">rank_nb()</a></code>.</p>
-<h2 id="example">Example</h2>
-<pre><code class="python-repl">&gt;&gt;&gt; not_signals = ~signals
-&gt;&gt;&gt; print(not_signals.vbt.signals.first())
-                a      b      c
-2018-01-01  False   True   True
-2018-01-02   True  False  False
-2018-01-03  False   True  False
-2018-01-04  False  False   True
-2018-01-05   True  False  False
-</code></pre></div>
+<div class="desc"><p><code><a title="vectorbt.signals.nb.rank_nb" href="nb.html#vectorbt.signals.nb.rank_nb">rank_nb()</a></code> == 1.</p></div>
 <details class="source">
 <summary>
 <span>Expand source code</span>
 </summary>
 <pre><code class="python">def first(self, **kwargs):
-    &#34;&#34;&#34;For each partition of `True` values, get the first `True`.
-
-    See `vectorbt.signals.nb.rank_nb`.
-
-    Example:
-        ```python-repl
-        &gt;&gt;&gt; not_signals = ~signals
-        &gt;&gt;&gt; print(not_signals.vbt.signals.first())
-                        a      b      c
-        2018-01-01  False   True   True
-        2018-01-02   True  False  False
-        2018-01-03  False   True  False
-        2018-01-04  False  False   True
-        2018-01-05   True  False  False
-        ```&#34;&#34;&#34;
+    &#34;&#34;&#34;`vectorbt.signals.nb.rank_nb` == 1.&#34;&#34;&#34;
     return self.wrap_array(self.rank(**kwargs).values == 1)</code></pre>
 </details>
 </dd>
@@ -1732,38 +1627,13 @@ dtype: float64
 <span>def <span class="ident">from_nst</span></span>(<span>self, n, **kwargs)</span>
 </code></dt>
 <dd>
-<div class="desc"><p>For each partition of <code>True</code> values, get the nst <code>True</code> and beyond.</p>
-<p>See <code><a title="vectorbt.signals.nb.rank_nb" href="nb.html#vectorbt.signals.nb.rank_nb">rank_nb()</a></code>.</p>
-<h2 id="example">Example</h2>
-<pre><code class="python-repl">&gt;&gt;&gt; not_signals = ~signals
-&gt;&gt;&gt; print(not_signals.vbt.signals.from_nst(2, allow_gaps=True))
-                a      b      c
-2018-01-01  False  False  False
-2018-01-02  False  False   True
-2018-01-03   True   True  False
-2018-01-04  False   True   True
-2018-01-05   True  False   True
-</code></pre></div>
+<div class="desc"><p><code><a title="vectorbt.signals.nb.rank_nb" href="nb.html#vectorbt.signals.nb.rank_nb">rank_nb()</a></code> &gt;= n.</p></div>
 <details class="source">
 <summary>
 <span>Expand source code</span>
 </summary>
 <pre><code class="python">def from_nst(self, n, **kwargs):
-    &#34;&#34;&#34;For each partition of `True` values, get the nst `True` and beyond.
-
-    See `vectorbt.signals.nb.rank_nb`.
-
-    Example:
-        ```python-repl
-        &gt;&gt;&gt; not_signals = ~signals
-        &gt;&gt;&gt; print(not_signals.vbt.signals.from_nst(2, allow_gaps=True))
-                        a      b      c
-        2018-01-01  False  False  False
-        2018-01-02  False  False   True
-        2018-01-03   True   True  False
-        2018-01-04  False   True   True
-        2018-01-05   True  False   True
-        ```&#34;&#34;&#34;
+    &#34;&#34;&#34;`vectorbt.signals.nb.rank_nb` &gt;= n.&#34;&#34;&#34;
     return self.wrap_array(self.rank(**kwargs).values &gt;= n)</code></pre>
 </details>
 </dd>
@@ -1874,17 +1744,17 @@ dtype: float64
 </details>
 </dd>
 <dt id="vectorbt.signals.accessors.Signals_Accessor.generate_stop_loss"><code class="name flex">
-<span>def <span class="ident">generate_stop_loss</span></span>(<span>self, ts, stops, trailing=False, as_columns=None, broadcast_kwargs={})</span>
+<span>def <span class="ident">generate_stop_loss</span></span>(<span>self, ts, stops, trailing=False, relative=True, as_columns=None, broadcast_kwargs={})</span>
 </code></dt>
 <dd>
-<div class="desc"><p>See <code>vectorbt.signals.nb.stop_loss_nb</code>.</p>
+<div class="desc"><p>See <code><a title="vectorbt.signals.nb.generate_stop_loss_nb" href="nb.html#vectorbt.signals.nb.generate_stop_loss_nb">generate_stop_loss_nb()</a></code>.</p>
 <p>Arguments will be broadcasted using <code><a title="vectorbt.utils.reshape_fns.broadcast" href="../utils/reshape_fns.html#vectorbt.utils.reshape_fns.broadcast">broadcast()</a></code>
 with <code>broadcast_kwargs</code>. Argument <code>stops</code> can be either a single number, an array of
 numbers, or a 3D array, where each matrix corresponds to a single configuration.
 Use <code>as_columns</code> as a top-level column level.</p>
 <h2 id="example">Example</h2>
-<p>For each entry in <code>signals</code>, set stop-loss order for 10% and 20% below the price <code>ts</code>:</p>
-<pre><code class="python-repl">&gt;&gt;&gt; print(entries.vbt.signals.generate_stop_loss(ts, [0.1, 0.2]))
+<p>For each entry in <code>signals</code>, set stop loss for 10% and 20% below the price <code>ts</code>:</p>
+<pre><code class="python-repl">&gt;&gt;&gt; print(signals.vbt.signals.generate_stop_loss(ts, [0.1, 0.2]))
 stop_loss                   0.1                  0.2
                 a      b      c      a      b      c
 2018-01-01  False  False  False  False  False  False
@@ -1897,8 +1767,8 @@ stop_loss                   0.1                  0.2
 <summary>
 <span>Expand source code</span>
 </summary>
-<pre><code class="python">def generate_stop_loss(self, ts, stops, trailing=False, as_columns=None, broadcast_kwargs={}):
-    &#34;&#34;&#34;See `vectorbt.signals.nb.stop_loss_nb`.
+<pre><code class="python">def generate_stop_loss(self, ts, stops, trailing=False, relative=True, as_columns=None, broadcast_kwargs={}):
+    &#34;&#34;&#34;See `vectorbt.signals.nb.generate_stop_loss_nb`.
 
     Arguments will be broadcasted using `vectorbt.utils.reshape_fns.broadcast`
     with `broadcast_kwargs`. Argument `stops` can be either a single number, an array of 
@@ -1906,10 +1776,10 @@ stop_loss                   0.1                  0.2
     Use `as_columns` as a top-level column level.
 
     Example:
-        For each entry in `signals`, set stop-loss order for 10% and 20% below the price `ts`:
+        For each entry in `signals`, set stop loss for 10% and 20% below the price `ts`:
 
         ```python-repl
-        &gt;&gt;&gt; print(entries.vbt.signals.generate_stop_loss(ts, [0.1, 0.2]))
+        &gt;&gt;&gt; print(signals.vbt.signals.generate_stop_loss(ts, [0.1, 0.2]))
         stop_loss                   0.1                  0.2
                         a      b      c      a      b      c
         2018-01-01  False  False  False  False  False  False
@@ -1923,15 +1793,82 @@ stop_loss                   0.1                  0.2
 
     entries, ts = reshape_fns.broadcast(entries, ts, **broadcast_kwargs, writeable=True)
     stops = reshape_fns.broadcast_to_array_of(stops, entries.vbt.to_2d_array())
-    exits = nb.generate_stop_loss_nb(entries.vbt.to_2d_array(), ts.vbt.to_2d_array(), stops, trailing)
+    exits = nb.generate_stop_loss_nb(
+        entries.vbt.to_2d_array(), 
+        ts.vbt.to_2d_array(), 
+        stops, trailing, relative)
 
     # Build column hierarchy
     if as_columns is not None:
         param_columns = as_columns
     else:
         name = &#39;trail_stop&#39; if trailing else &#39;stop_loss&#39;
-        param_columns = index_fns.from_values(stops, name=name)
-    columns = index_fns.combine(param_columns, entries.vbt.columns)
+        param_columns = index_fns.index_from_values(stops, name=name)
+    columns = index_fns.combine_indexes(param_columns, entries.vbt.columns)
+    return entries.vbt.wrap_array(exits, columns=columns)</code></pre>
+</details>
+</dd>
+<dt id="vectorbt.signals.accessors.Signals_Accessor.generate_take_profit"><code class="name flex">
+<span>def <span class="ident">generate_take_profit</span></span>(<span>self, ts, stops, relative=True, as_columns=None, broadcast_kwargs={})</span>
+</code></dt>
+<dd>
+<div class="desc"><p>See <code><a title="vectorbt.signals.nb.generate_take_profit_nb" href="nb.html#vectorbt.signals.nb.generate_take_profit_nb">generate_take_profit_nb()</a></code>.</p>
+<p>Arguments will be broadcasted using <code><a title="vectorbt.utils.reshape_fns.broadcast" href="../utils/reshape_fns.html#vectorbt.utils.reshape_fns.broadcast">broadcast()</a></code>
+with <code>broadcast_kwargs</code>. Argument <code>stops</code> can be either a single number, an array of
+numbers, or a 3D array, where each matrix corresponds to a single configuration.
+Use <code>as_columns</code> as a top-level column level.</p>
+<h2 id="example">Example</h2>
+<p>For each entry in <code>signals</code>, set take profit for 10% and 20% above the price <code>ts</code>:</p>
+<pre><code class="python-repl">&gt;&gt;&gt; print(signals.vbt.signals.generate_take_profit(ts, [0.1, 0.2]))
+take_profit                  0.1                  0.2              
+                 a      b      c      a      b      c
+2018-01-01   False  False  False  False  False  False
+2018-01-02    True  False  False   True  False  False
+2018-01-03   False  False  False  False  False  False
+2018-01-04   False  False  False  False  False  False
+2018-01-05    True  False  False   True  False  False
+</code></pre></div>
+<details class="source">
+<summary>
+<span>Expand source code</span>
+</summary>
+<pre><code class="python">def generate_take_profit(self, ts, stops, relative=True, as_columns=None, broadcast_kwargs={}):
+    &#34;&#34;&#34;See `vectorbt.signals.nb.generate_take_profit_nb`.
+
+    Arguments will be broadcasted using `vectorbt.utils.reshape_fns.broadcast`
+    with `broadcast_kwargs`. Argument `stops` can be either a single number, an array of 
+    numbers, or a 3D array, where each matrix corresponds to a single configuration. 
+    Use `as_columns` as a top-level column level.
+
+    Example:
+        For each entry in `signals`, set take profit for 10% and 20% above the price `ts`:
+
+        ```python-repl
+        &gt;&gt;&gt; print(signals.vbt.signals.generate_take_profit(ts, [0.1, 0.2]))
+        take_profit                  0.1                  0.2              
+                         a      b      c      a      b      c
+        2018-01-01   False  False  False  False  False  False
+        2018-01-02    True  False  False   True  False  False
+        2018-01-03   False  False  False  False  False  False
+        2018-01-04   False  False  False  False  False  False
+        2018-01-05    True  False  False   True  False  False
+        ```&#34;&#34;&#34;
+    entries = self._obj
+    checks.assert_type(ts, (pd.Series, pd.DataFrame))
+
+    entries, ts = reshape_fns.broadcast(entries, ts, **broadcast_kwargs, writeable=True)
+    stops = reshape_fns.broadcast_to_array_of(stops, entries.vbt.to_2d_array())
+    exits = nb.generate_take_profit_nb(
+        entries.vbt.to_2d_array(), 
+        ts.vbt.to_2d_array(), 
+        stops, relative)
+
+    # Build column hierarchy
+    if as_columns is not None:
+        param_columns = as_columns
+    else:
+        param_columns = index_fns.index_from_values(stops, name=&#39;take_profit&#39;)
+    columns = index_fns.combine_indexes(param_columns, entries.vbt.columns)
     return entries.vbt.wrap_array(exits, columns=columns)</code></pre>
 </details>
 </dd>
@@ -2007,38 +1944,13 @@ dtype: float64
 <span>def <span class="ident">nst</span></span>(<span>self, n, **kwargs)</span>
 </code></dt>
 <dd>
-<div class="desc"><p>For each partition of <code>True</code> values, get the nst <code>True</code>.</p>
-<p>See <code><a title="vectorbt.signals.nb.rank_nb" href="nb.html#vectorbt.signals.nb.rank_nb">rank_nb()</a></code>.</p>
-<h2 id="example">Example</h2>
-<pre><code class="python-repl">&gt;&gt;&gt; not_signals = ~signals
-&gt;&gt;&gt; print(not_signals.vbt.signals.nst(2, allow_gaps=True))
-                a      b      c
-2018-01-01  False  False  False
-2018-01-02  False  False   True
-2018-01-03   True   True  False
-2018-01-04  False  False  False
-2018-01-05  False  False  False
-</code></pre></div>
+<div class="desc"><p><code><a title="vectorbt.signals.nb.rank_nb" href="nb.html#vectorbt.signals.nb.rank_nb">rank_nb()</a></code> == n.</p></div>
 <details class="source">
 <summary>
 <span>Expand source code</span>
 </summary>
 <pre><code class="python">def nst(self, n, **kwargs):
-    &#34;&#34;&#34;For each partition of `True` values, get the nst `True`.
-
-    See `vectorbt.signals.nb.rank_nb`.
-
-    Example:
-        ```python-repl
-        &gt;&gt;&gt; not_signals = ~signals
-        &gt;&gt;&gt; print(not_signals.vbt.signals.nst(2, allow_gaps=True))
-                        a      b      c
-        2018-01-01  False  False  False
-        2018-01-02  False  False   True
-        2018-01-03   True   True  False
-        2018-01-04  False  False  False
-        2018-01-05  False  False  False
-        ```&#34;&#34;&#34;
+    &#34;&#34;&#34;`vectorbt.signals.nb.rank_nb` == n.&#34;&#34;&#34;
     return self.wrap_array(self.rank(**kwargs).values == n)</code></pre>
 </details>
 </dd>
@@ -2050,6 +1962,13 @@ dtype: float64
 <h2 id="example">Example</h2>
 <p>Rank <code>False</code> values in <code>signals</code>:</p>
 <pre><code class="python-repl">&gt;&gt;&gt; not_signals = ~signals
+&gt;&gt;&gt; print(not_signals)
+                a      b      c
+2018-01-01  False   True   True
+2018-01-02   True  False   True
+2018-01-03   True   True  False
+2018-01-04  False   True   True
+2018-01-05   True  False   True
 &gt;&gt;&gt; print(not_signals.vbt.signals.rank())
             a  b  c
 2018-01-01  0  1  1
@@ -2060,7 +1979,7 @@ dtype: float64
 &gt;&gt;&gt; print(not_signals.vbt.signals.rank(after_false=True))
             a  b  c
 2018-01-01  0  0  0
-2018-01-02  1  0  1
+2018-01-02  1  0  0
 2018-01-03  2  1  0
 2018-01-04  0  2  1
 2018-01-05  1  0  2
@@ -2091,6 +2010,13 @@ dtype: float64
 
         ```python-repl
         &gt;&gt;&gt; not_signals = ~signals
+        &gt;&gt;&gt; print(not_signals)
+                        a      b      c
+        2018-01-01  False   True   True
+        2018-01-02   True  False   True
+        2018-01-03   True   True  False
+        2018-01-04  False   True   True
+        2018-01-05   True  False   True
         &gt;&gt;&gt; print(not_signals.vbt.signals.rank())
                     a  b  c
         2018-01-01  0  1  1
@@ -2101,7 +2027,7 @@ dtype: float64
         &gt;&gt;&gt; print(not_signals.vbt.signals.rank(after_false=True))
                     a  b  c
         2018-01-01  0  0  0
-        2018-01-02  1  0  1
+        2018-01-02  1  0  0
         2018-01-03  2  1  0
         2018-01-04  0  2  1
         2018-01-05  1  0  2
@@ -2172,7 +2098,7 @@ dtype: float64
         &#34;&#34;&#34;Plot each column in DataFrame as a line.
 
         Args:
-            trace_kwargs (dict or list of dict): Keyword arguments passed to each [`plotly.graph_objects.Scatter`](https://plotly.com/python-api-reference/generated/plotly.graph_objects.Scatter.html).
+            trace_kwargs (dict or list of dict): Keyword arguments passed to each `plotly.graph_objects.Scatter`.
             fig (plotly.graph_objects.Figure): Figure to add traces to.
             **layout_kwargs: Keyword arguments for layout.
         Example:
@@ -2206,7 +2132,7 @@ dtype: float64
 <h2 id="args">Args</h2>
 <dl>
 <dt><strong><code>trace_kwargs</code></strong> :&ensp;<code>dict</code> or <code>list</code> of <code>dict</code></dt>
-<dd>Keyword arguments passed to each <a href="https://plotly.com/python-api-reference/generated/plotly.graph_objects.Scatter.html"><code>plotly.graph_objects.Scatter</code></a>.</dd>
+<dd>Keyword arguments passed to each <code>plotly.graph_objects.Scatter</code>.</dd>
 <dt><strong><code>fig</code></strong> :&ensp;<code>plotly.graph_objects.Figure</code></dt>
 <dd>Figure to add traces to.</dd>
 <dt><strong><code>**layout_kwargs</code></strong></dt>
@@ -2224,7 +2150,7 @@ dtype: float64
     &#34;&#34;&#34;Plot each column in DataFrame as a line.
 
     Args:
-        trace_kwargs (dict or list of dict): Keyword arguments passed to each [`plotly.graph_objects.Scatter`](https://plotly.com/python-api-reference/generated/plotly.graph_objects.Scatter.html).
+        trace_kwargs (dict or list of dict): Keyword arguments passed to each `plotly.graph_objects.Scatter`.
         fig (plotly.graph_objects.Figure): Figure to add traces to.
         **layout_kwargs: Keyword arguments for layout.
     Example:
@@ -2264,6 +2190,7 @@ dtype: float64
 <li><code><a title="vectorbt.signals.accessors.Signals_Accessor.generate_random" href="#vectorbt.signals.accessors.Signals_Accessor.generate_random">generate_random</a></code></li>
 <li><code><a title="vectorbt.signals.accessors.Signals_Accessor.generate_random_after" href="#vectorbt.signals.accessors.Signals_Accessor.generate_random_after">generate_random_after</a></code></li>
 <li><code><a title="vectorbt.signals.accessors.Signals_Accessor.generate_stop_loss" href="#vectorbt.signals.accessors.Signals_Accessor.generate_stop_loss">generate_stop_loss</a></code></li>
+<li><code><a title="vectorbt.signals.accessors.Signals_Accessor.generate_take_profit" href="#vectorbt.signals.accessors.Signals_Accessor.generate_take_profit">generate_take_profit</a></code></li>
 <li><code><a title="vectorbt.signals.accessors.Signals_Accessor.map_reduce_between" href="#vectorbt.signals.accessors.Signals_Accessor.map_reduce_between">map_reduce_between</a></code></li>
 <li><code><a title="vectorbt.signals.accessors.Signals_Accessor.nst" href="#vectorbt.signals.accessors.Signals_Accessor.nst">nst</a></code></li>
 <li><code><a title="vectorbt.signals.accessors.Signals_Accessor.num_signals" href="#vectorbt.signals.accessors.Signals_Accessor.num_signals">num_signals</a></code></li>
@@ -2317,7 +2244,7 @@ dtype: float64
 
         Args:
             name (str): Name of the signals.
-            trace_kwargs (dict): Keyword arguments passed to [`plotly.graph_objects.Scatter`](https://plotly.com/python-api-reference/generated/plotly.graph_objects.Scatter.html).
+            trace_kwargs (dict): Keyword arguments passed to `plotly.graph_objects.Scatter`.
             fig (plotly.graph_objects.Figure): Figure to add traces to.
             **layout_kwargs: Keyword arguments for layout.
         Example:
@@ -2359,10 +2286,10 @@ dtype: float64
             ts (pandas.Series): Time series to plot markers on.
 
                 !!! note
-                    Doesn&#39;t plot `ts` itself.
+                    Doesn&#39;t plot `ts`.
 
             name (str): Name of the signals.
-            trace_kwargs (dict): Keyword arguments passed to [`plotly.graph_objects.Scatter`](https://plotly.com/python-api-reference/generated/plotly.graph_objects.Scatter.html).
+            trace_kwargs (dict): Keyword arguments passed to `plotly.graph_objects.Scatter`.
             fig (plotly.graph_objects.Figure): Figure to add traces to.
             **layout_kwargs: Keyword arguments for layout.
         Example:
@@ -2439,7 +2366,7 @@ dtype: float64
 <dt><strong><code>name</code></strong> :&ensp;<code>str</code></dt>
 <dd>Name of the signals.</dd>
 <dt><strong><code>trace_kwargs</code></strong> :&ensp;<code>dict</code></dt>
-<dd>Keyword arguments passed to <a href="https://plotly.com/python-api-reference/generated/plotly.graph_objects.Scatter.html"><code>plotly.graph_objects.Scatter</code></a>.</dd>
+<dd>Keyword arguments passed to <code>plotly.graph_objects.Scatter</code>.</dd>
 <dt><strong><code>fig</code></strong> :&ensp;<code>plotly.graph_objects.Figure</code></dt>
 <dd>Figure to add traces to.</dd>
 <dt><strong><code>**layout_kwargs</code></strong></dt>
@@ -2458,7 +2385,7 @@ dtype: float64
 
     Args:
         name (str): Name of the signals.
-        trace_kwargs (dict): Keyword arguments passed to [`plotly.graph_objects.Scatter`](https://plotly.com/python-api-reference/generated/plotly.graph_objects.Scatter.html).
+        trace_kwargs (dict): Keyword arguments passed to `plotly.graph_objects.Scatter`.
         fig (plotly.graph_objects.Figure): Figure to add traces to.
         **layout_kwargs: Keyword arguments for layout.
     Example:
@@ -2552,13 +2479,13 @@ dtype: float64
 <p>Time series to plot markers on.</p>
 <div class="admonition note">
 <p class="admonition-title">Note</p>
-<p>Doesn't plot <code>ts</code> itself.</p>
+<p>Doesn't plot <code>ts</code>.</p>
 </div>
 </dd>
 <dt><strong><code>name</code></strong> :&ensp;<code>str</code></dt>
 <dd>Name of the signals.</dd>
 <dt><strong><code>trace_kwargs</code></strong> :&ensp;<code>dict</code></dt>
-<dd>Keyword arguments passed to <a href="https://plotly.com/python-api-reference/generated/plotly.graph_objects.Scatter.html"><code>plotly.graph_objects.Scatter</code></a>.</dd>
+<dd>Keyword arguments passed to <code>plotly.graph_objects.Scatter</code>.</dd>
 <dt><strong><code>fig</code></strong> :&ensp;<code>plotly.graph_objects.Figure</code></dt>
 <dd>Figure to add traces to.</dd>
 <dt><strong><code>**layout_kwargs</code></strong></dt>
@@ -2581,10 +2508,10 @@ signals['b'].vbt.signals.plot_exit_markers(ts['a'], fig=fig)
         ts (pandas.Series): Time series to plot markers on.
 
             !!! note
-                Doesn&#39;t plot `ts` itself.
+                Doesn&#39;t plot `ts`.
 
         name (str): Name of the signals.
-        trace_kwargs (dict): Keyword arguments passed to [`plotly.graph_objects.Scatter`](https://plotly.com/python-api-reference/generated/plotly.graph_objects.Scatter.html).
+        trace_kwargs (dict): Keyword arguments passed to `plotly.graph_objects.Scatter`.
         fig (plotly.graph_objects.Figure): Figure to add traces to.
         **layout_kwargs: Keyword arguments for layout.
     Example:
@@ -2641,6 +2568,7 @@ signals['b'].vbt.signals.plot_exit_markers(ts['a'], fig=fig)
 <li><code><a title="vectorbt.signals.accessors.Signals_Accessor.generate_random" href="#vectorbt.signals.accessors.Signals_Accessor.generate_random">generate_random</a></code></li>
 <li><code><a title="vectorbt.signals.accessors.Signals_Accessor.generate_random_after" href="#vectorbt.signals.accessors.Signals_Accessor.generate_random_after">generate_random_after</a></code></li>
 <li><code><a title="vectorbt.signals.accessors.Signals_Accessor.generate_stop_loss" href="#vectorbt.signals.accessors.Signals_Accessor.generate_stop_loss">generate_stop_loss</a></code></li>
+<li><code><a title="vectorbt.signals.accessors.Signals_Accessor.generate_take_profit" href="#vectorbt.signals.accessors.Signals_Accessor.generate_take_profit">generate_take_profit</a></code></li>
 <li><code><a title="vectorbt.signals.accessors.Signals_Accessor.map_reduce_between" href="#vectorbt.signals.accessors.Signals_Accessor.map_reduce_between">map_reduce_between</a></code></li>
 <li><code><a title="vectorbt.signals.accessors.Signals_Accessor.nst" href="#vectorbt.signals.accessors.Signals_Accessor.nst">nst</a></code></li>
 <li><code><a title="vectorbt.signals.accessors.Signals_Accessor.num_signals" href="#vectorbt.signals.accessors.Signals_Accessor.num_signals">num_signals</a></code></li>
@@ -2708,6 +2636,7 @@ signals['b'].vbt.signals.plot_exit_markers(ts['a'], fig=fig)
 <li><code><a title="vectorbt.signals.accessors.Signals_Accessor.generate_random" href="#vectorbt.signals.accessors.Signals_Accessor.generate_random">generate_random</a></code></li>
 <li><code><a title="vectorbt.signals.accessors.Signals_Accessor.generate_random_after" href="#vectorbt.signals.accessors.Signals_Accessor.generate_random_after">generate_random_after</a></code></li>
 <li><code><a title="vectorbt.signals.accessors.Signals_Accessor.generate_stop_loss" href="#vectorbt.signals.accessors.Signals_Accessor.generate_stop_loss">generate_stop_loss</a></code></li>
+<li><code><a title="vectorbt.signals.accessors.Signals_Accessor.generate_take_profit" href="#vectorbt.signals.accessors.Signals_Accessor.generate_take_profit">generate_take_profit</a></code></li>
 <li><code><a title="vectorbt.signals.accessors.Signals_Accessor.map_reduce_between" href="#vectorbt.signals.accessors.Signals_Accessor.map_reduce_between">map_reduce_between</a></code></li>
 <li><code><a title="vectorbt.signals.accessors.Signals_Accessor.nst" href="#vectorbt.signals.accessors.Signals_Accessor.nst">nst</a></code></li>
 <li><code><a title="vectorbt.signals.accessors.Signals_Accessor.num_signals" href="#vectorbt.signals.accessors.Signals_Accessor.num_signals">num_signals</a></code></li>

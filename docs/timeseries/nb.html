@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1, minimum-scale=1" />
 <meta name="generator" content="pdoc 0.8.1" />
 <title>vectorbt.timeseries.nb API documentation</title>
-<meta name="description" content="Numba-compiled 1-dim and 2-dim functions for time series …" />
+<meta name="description" content="Numba-compiled 1-dim and 2-dim functions …" />
 <link href='https://cdnjs.cloudflare.com/ajax/libs/normalize/8.0.0/normalize.min.css' rel='stylesheet'>
 <link href='https://cdnjs.cloudflare.com/ajax/libs/10up-sanitize.css/8.0.0/sanitize.min.css' rel='stylesheet'>
 <link href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/9.12.0/styles/github.min.css" rel="stylesheet">
@@ -20,27 +20,27 @@
 <h1 class="title">Module <code>vectorbt.timeseries.nb</code></h1>
 </header>
 <section id="section-intro">
-<p>Numba-compiled 1-dim and 2-dim functions for time series.</p>
+<p>Numba-compiled 1-dim and 2-dim functions.</p>
 <div class="admonition note">
 <p class="admonition-title">Note</p>
 <p><code><a title="vectorbt" href="../index.html">vectorbt</a></code> treats matrices as first-class citizens and expects input arrays to be
 2-dim, unless function has suffix <code>_1d</code> or is meant to be input to another function.
 Data is processed along index (axis 0).</p>
-<p>Input arrays can be of any data type, but output arrays are always <code>numpy.float64</code>.</p>
+<p>Input arrays can be of any data type, but most output arrays are <code>numpy.float64</code>.</p>
 <p>Rolling functions with <code>minp=None</code> have <code>min_periods</code> set to the window size.</p>
 </div>
 <details class="source">
 <summary>
 <span>Expand source code</span>
 </summary>
-<pre><code class="python">&#34;&#34;&#34;Numba-compiled 1-dim and 2-dim functions for time series.
+<pre><code class="python">&#34;&#34;&#34;Numba-compiled 1-dim and 2-dim functions.
 
 !!! note
     `vectorbt` treats matrices as first-class citizens and expects input arrays to be
     2-dim, unless function has suffix `_1d` or is meant to be input to another function. 
     Data is processed along index (axis 0).
     
-    Input arrays can be of any data type, but output arrays are always `numpy.float64`.
+    Input arrays can be of any data type, but most output arrays are `numpy.float64`.
     
     Rolling functions with `minp=None` have `min_periods` set to the window size.&#34;&#34;&#34;
 
@@ -282,6 +282,71 @@ def nanmax_cube_nb(a):
     for i in range(a.shape[1]):
         for j in range(a.shape[2]):
             result[i, j] = np.nanmax(a[:, i, j])
+    return result
+
+
+@njit(cache=True)
+def nancnt_nb(a):
+    &#34;&#34;&#34;Compute count while ignoring NaNs.&#34;&#34;&#34;
+    result = np.empty(a.shape[1], dtype=f8)
+    for col in range(a.shape[1]):
+        result[col] = np.sum(~np.isnan(a[:, col]))
+    return result
+
+
+@njit(cache=True)
+def nansum_nb(a):
+    &#34;&#34;&#34;Compute sum while ignoring NaNs.&#34;&#34;&#34;
+    result = np.empty(a.shape[1], dtype=f8)
+    for col in range(a.shape[1]):
+        result[col] = np.nansum(a[:, col])
+    return result
+
+
+@njit(cache=True)
+def nanmin_nb(a):
+    &#34;&#34;&#34;Compute minimum while ignoring NaNs.&#34;&#34;&#34;
+    result = np.empty(a.shape[1], dtype=f8)
+    for col in range(a.shape[1]):
+        result[col] = np.nanmin(a[:, col])
+    return result
+
+
+@njit(cache=True)
+def nanmax_nb(a):
+    &#34;&#34;&#34;Compute maximum while ignoring NaNs.&#34;&#34;&#34;
+    result = np.empty(a.shape[1], dtype=f8)
+    for col in range(a.shape[1]):
+        result[col] = np.nanmax(a[:, col])
+    return result
+
+
+@njit(cache=True)
+def nanmean_nb(a):
+    &#34;&#34;&#34;Compute mean while ignoring NaNs.&#34;&#34;&#34;
+    result = np.empty(a.shape[1], dtype=f8)
+    for col in range(a.shape[1]):
+        result[col] = np.nanmean(a[:, col])
+    return result
+
+
+@njit(cache=True)
+def nanstd_1d_nb(a, ddof=1):
+    &#34;&#34;&#34;Compute the standard deviation while ignoring NaNs.&#34;&#34;&#34;
+    a = a[~np.isnan(a)]
+    rcount = max(a.shape[0] - ddof, 0)
+    if rcount == 0:
+        return np.nan
+    else:
+        return np.std(a) * np.sqrt(a.shape[0] / rcount)
+
+
+@njit(cache=True)
+def nanstd_nb(a, ddof=1):
+    &#34;&#34;&#34;2-dim version of `nanstd_1d_nb`.&#34;&#34;&#34;
+    result = np.empty(a.shape[1], dtype=f8)
+    for col in range(a.shape[1]):
+        result[col] = nanstd_1d_nb(a[:, col], ddof=ddof)
     return result
 
 # ############# Rolling functions ############# #
@@ -886,11 +951,7 @@ def describe_reduce_func_nb(col, a, percentiles):
     result[0] = len(a)
     if len(a) &gt; 0:
         result[1] = np.mean(a)
-        rcount = max(len(a) - 1, 0)
-        if rcount == 0:
-            result[2] = np.nan
-        else:
-            result[2] = np.std(a) * np.sqrt(len(a) / rcount)  # ddof = 1
+        result[2] = nanstd_1d_nb(a, ddof=1)
         result[3] = np.min(a)
         for i, percentile in enumerate(percentiles):
             result[4:-1] = np.percentile(a, percentiles * 100)
@@ -1085,11 +1146,7 @@ def describe_reduce_func_nb(col, a, percentiles):
     result[0] = len(a)
     if len(a) &gt; 0:
         result[1] = np.mean(a)
-        rcount = max(len(a) - 1, 0)
-        if rcount == 0:
-            result[2] = np.nan
-        else:
-            result[2] = np.std(a) * np.sqrt(len(a) / rcount)  # ddof = 1
+        result[2] = nanstd_1d_nb(a, ddof=1)
         result[3] = np.min(a)
         for i, percentile in enumerate(percentiles):
             result[4:-1] = np.percentile(a, percentiles * 100)
@@ -1727,6 +1784,24 @@ def groupby_apply_nb(a, groups, apply_func_nb, *args):
     return result</code></pre>
 </details>
 </dd>
+<dt id="vectorbt.timeseries.nb.nancnt_nb"><code class="name flex">
+<span>def <span class="ident">nancnt_nb</span></span>(<span>a)</span>
+</code></dt>
+<dd>
+<div class="desc"><p>Compute count while ignoring NaNs.</p></div>
+<details class="source">
+<summary>
+<span>Expand source code</span>
+</summary>
+<pre><code class="python">@njit(cache=True)
+def nancnt_nb(a):
+    &#34;&#34;&#34;Compute count while ignoring NaNs.&#34;&#34;&#34;
+    result = np.empty(a.shape[1], dtype=f8)
+    for col in range(a.shape[1]):
+        result[col] = np.sum(~np.isnan(a[:, col]))
+    return result</code></pre>
+</details>
+</dd>
 <dt id="vectorbt.timeseries.nb.nanmax_cube_nb"><code class="name flex">
 <span>def <span class="ident">nanmax_cube_nb</span></span>(<span>a)</span>
 </code></dt>
@@ -1743,6 +1818,116 @@ def nanmax_cube_nb(a):
     for i in range(a.shape[1]):
         for j in range(a.shape[2]):
             result[i, j] = np.nanmax(a[:, i, j])
+    return result</code></pre>
+</details>
+</dd>
+<dt id="vectorbt.timeseries.nb.nanmax_nb"><code class="name flex">
+<span>def <span class="ident">nanmax_nb</span></span>(<span>a)</span>
+</code></dt>
+<dd>
+<div class="desc"><p>Compute maximum while ignoring NaNs.</p></div>
+<details class="source">
+<summary>
+<span>Expand source code</span>
+</summary>
+<pre><code class="python">@njit(cache=True)
+def nanmax_nb(a):
+    &#34;&#34;&#34;Compute maximum while ignoring NaNs.&#34;&#34;&#34;
+    result = np.empty(a.shape[1], dtype=f8)
+    for col in range(a.shape[1]):
+        result[col] = np.nanmax(a[:, col])
+    return result</code></pre>
+</details>
+</dd>
+<dt id="vectorbt.timeseries.nb.nanmean_nb"><code class="name flex">
+<span>def <span class="ident">nanmean_nb</span></span>(<span>a)</span>
+</code></dt>
+<dd>
+<div class="desc"><p>Compute mean while ignoring NaNs.</p></div>
+<details class="source">
+<summary>
+<span>Expand source code</span>
+</summary>
+<pre><code class="python">@njit(cache=True)
+def nanmean_nb(a):
+    &#34;&#34;&#34;Compute mean while ignoring NaNs.&#34;&#34;&#34;
+    result = np.empty(a.shape[1], dtype=f8)
+    for col in range(a.shape[1]):
+        result[col] = np.nanmean(a[:, col])
+    return result</code></pre>
+</details>
+</dd>
+<dt id="vectorbt.timeseries.nb.nanmin_nb"><code class="name flex">
+<span>def <span class="ident">nanmin_nb</span></span>(<span>a)</span>
+</code></dt>
+<dd>
+<div class="desc"><p>Compute minimum while ignoring NaNs.</p></div>
+<details class="source">
+<summary>
+<span>Expand source code</span>
+</summary>
+<pre><code class="python">@njit(cache=True)
+def nanmin_nb(a):
+    &#34;&#34;&#34;Compute minimum while ignoring NaNs.&#34;&#34;&#34;
+    result = np.empty(a.shape[1], dtype=f8)
+    for col in range(a.shape[1]):
+        result[col] = np.nanmin(a[:, col])
+    return result</code></pre>
+</details>
+</dd>
+<dt id="vectorbt.timeseries.nb.nanstd_1d_nb"><code class="name flex">
+<span>def <span class="ident">nanstd_1d_nb</span></span>(<span>a, ddof=1)</span>
+</code></dt>
+<dd>
+<div class="desc"><p>Compute the standard deviation while ignoring NaNs.</p></div>
+<details class="source">
+<summary>
+<span>Expand source code</span>
+</summary>
+<pre><code class="python">@njit(cache=True)
+def nanstd_1d_nb(a, ddof=1):
+    &#34;&#34;&#34;Compute the standard deviation while ignoring NaNs.&#34;&#34;&#34;
+    a = a[~np.isnan(a)]
+    rcount = max(a.shape[0] - ddof, 0)
+    if rcount == 0:
+        return np.nan
+    else:
+        return np.std(a) * np.sqrt(a.shape[0] / rcount)</code></pre>
+</details>
+</dd>
+<dt id="vectorbt.timeseries.nb.nanstd_nb"><code class="name flex">
+<span>def <span class="ident">nanstd_nb</span></span>(<span>a, ddof=1)</span>
+</code></dt>
+<dd>
+<div class="desc"><p>2-dim version of <code><a title="vectorbt.timeseries.nb.nanstd_1d_nb" href="#vectorbt.timeseries.nb.nanstd_1d_nb">nanstd_1d_nb()</a></code>.</p></div>
+<details class="source">
+<summary>
+<span>Expand source code</span>
+</summary>
+<pre><code class="python">@njit(cache=True)
+def nanstd_nb(a, ddof=1):
+    &#34;&#34;&#34;2-dim version of `nanstd_1d_nb`.&#34;&#34;&#34;
+    result = np.empty(a.shape[1], dtype=f8)
+    for col in range(a.shape[1]):
+        result[col] = nanstd_1d_nb(a[:, col], ddof=ddof)
+    return result</code></pre>
+</details>
+</dd>
+<dt id="vectorbt.timeseries.nb.nansum_nb"><code class="name flex">
+<span>def <span class="ident">nansum_nb</span></span>(<span>a)</span>
+</code></dt>
+<dd>
+<div class="desc"><p>Compute sum while ignoring NaNs.</p></div>
+<details class="source">
+<summary>
+<span>Expand source code</span>
+</summary>
+<pre><code class="python">@njit(cache=True)
+def nansum_nb(a):
+    &#34;&#34;&#34;Compute sum while ignoring NaNs.&#34;&#34;&#34;
+    result = np.empty(a.shape[1], dtype=f8)
+    for col in range(a.shape[1]):
+        result[col] = np.nansum(a[:, col])
     return result</code></pre>
 </details>
 </dd>
@@ -2400,7 +2585,14 @@ def set_by_mask_nb(a, mask, value):
 <li><code><a title="vectorbt.timeseries.nb.fshift_nb" href="#vectorbt.timeseries.nb.fshift_nb">fshift_nb</a></code></li>
 <li><code><a title="vectorbt.timeseries.nb.groupby_apply_matrix_nb" href="#vectorbt.timeseries.nb.groupby_apply_matrix_nb">groupby_apply_matrix_nb</a></code></li>
 <li><code><a title="vectorbt.timeseries.nb.groupby_apply_nb" href="#vectorbt.timeseries.nb.groupby_apply_nb">groupby_apply_nb</a></code></li>
+<li><code><a title="vectorbt.timeseries.nb.nancnt_nb" href="#vectorbt.timeseries.nb.nancnt_nb">nancnt_nb</a></code></li>
 <li><code><a title="vectorbt.timeseries.nb.nanmax_cube_nb" href="#vectorbt.timeseries.nb.nanmax_cube_nb">nanmax_cube_nb</a></code></li>
+<li><code><a title="vectorbt.timeseries.nb.nanmax_nb" href="#vectorbt.timeseries.nb.nanmax_nb">nanmax_nb</a></code></li>
+<li><code><a title="vectorbt.timeseries.nb.nanmean_nb" href="#vectorbt.timeseries.nb.nanmean_nb">nanmean_nb</a></code></li>
+<li><code><a title="vectorbt.timeseries.nb.nanmin_nb" href="#vectorbt.timeseries.nb.nanmin_nb">nanmin_nb</a></code></li>
+<li><code><a title="vectorbt.timeseries.nb.nanstd_1d_nb" href="#vectorbt.timeseries.nb.nanstd_1d_nb">nanstd_1d_nb</a></code></li>
+<li><code><a title="vectorbt.timeseries.nb.nanstd_nb" href="#vectorbt.timeseries.nb.nanstd_nb">nanstd_nb</a></code></li>
+<li><code><a title="vectorbt.timeseries.nb.nansum_nb" href="#vectorbt.timeseries.nb.nansum_nb">nansum_nb</a></code></li>
 <li><code><a title="vectorbt.timeseries.nb.pct_change_1d_nb" href="#vectorbt.timeseries.nb.pct_change_1d_nb">pct_change_1d_nb</a></code></li>
 <li><code><a title="vectorbt.timeseries.nb.pct_change_nb" href="#vectorbt.timeseries.nb.pct_change_nb">pct_change_nb</a></code></li>
 <li><code><a title="vectorbt.timeseries.nb.prepend_1d_nb" href="#vectorbt.timeseries.nb.prepend_1d_nb">prepend_1d_nb</a></code></li>

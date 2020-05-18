@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1, minimum-scale=1" />
 <meta name="generator" content="pdoc 0.8.1" />
 <title>vectorbt.portfolio.nb API documentation</title>
-<meta name="description" content="Numba-compiled functions for portfolio …" />
+<meta name="description" content="Numba-compiled 1-dim and 2-dim functions …" />
 <link href='https://cdnjs.cloudflare.com/ajax/libs/normalize/8.0.0/normalize.min.css' rel='stylesheet'>
 <link href='https://cdnjs.cloudflare.com/ajax/libs/10up-sanitize.css/8.0.0/sanitize.min.css' rel='stylesheet'>
 <link href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/9.12.0/styles/github.min.css" rel="stylesheet">
@@ -20,7 +20,7 @@
 <h1 class="title">Module <code>vectorbt.portfolio.nb</code></h1>
 </header>
 <section id="section-intro">
-<p>Numba-compiled functions for portfolio.</p>
+<p>Numba-compiled 1-dim and 2-dim functions.</p>
 <div class="admonition note">
 <p class="admonition-title">Note</p>
 <p><code><a title="vectorbt" href="../index.html">vectorbt</a></code> treats matrices as first-class citizens and expects input arrays to be
@@ -31,7 +31,7 @@ Data is processed along index (axis 0).</p>
 <summary>
 <span>Expand source code</span>
 </summary>
-<pre><code class="python">&#34;&#34;&#34;Numba-compiled functions for portfolio.
+<pre><code class="python">&#34;&#34;&#34;Numba-compiled 1-dim and 2-dim functions.
 
 !!! note
     `vectorbt` treats matrices as first-class citizens and expects input arrays to be
@@ -42,6 +42,8 @@ import numpy as np
 from numba import njit, b1, i1, i8, f8
 from numba.core.types import UniTuple
 
+from vectorbt.utils.common import list_module_keys
+from vectorbt.portfolio.common import PositionType
 from vectorbt import timeseries
 
 # ############# Portfolio ############# #
@@ -86,7 +88,7 @@ def portfolio_nb(price, init_capital, fees, slippage, order_func_nb, *args):
         ... def order_func_nb(col, i, run_cash, run_shares):
         ...     return 1 if i == 0 else 0 # buy and hold
 
-        &gt;&gt;&gt; cash, shares, paid_fees, paid_slippage = \\
+        &gt;&gt;&gt; cash, shares, fees_paid, slippage_paid = \\
         ...     portfolio_nb(price, 100, 0.1, 0.1, order_func_nb)
         &gt;&gt;&gt; print(cash)
         [[98.79  93.95  98.79]
@@ -100,13 +102,13 @@ def portfolio_nb(price, init_capital, fees, slippage, order_func_nb, *args):
          [0. 0. 0.]
          [0. 0. 0.]
          [0. 0. 0.]]
-        &gt;&gt;&gt; print(paid_fees)
+        &gt;&gt;&gt; print(fees_paid)
         [[0.11 0.55 0.11]
          [0.   0.   0.  ]
          [0.   0.   0.  ]
          [0.   0.   0.  ]
          [0.   0.   0.  ]]
-        &gt;&gt;&gt; print(paid_slippage)
+        &gt;&gt;&gt; print(slippage_paid)
         [[0.1 0.5 0.1]
          [0.  0.  0. ]
          [0.  0.  0. ]
@@ -116,8 +118,8 @@ def portfolio_nb(price, init_capital, fees, slippage, order_func_nb, *args):
     &#34;&#34;&#34;
     cash = np.empty_like(price, dtype=f8)
     shares = np.empty_like(price, dtype=f8)
-    paid_fees = np.zeros_like(price, dtype=f8)
-    paid_slippage = np.zeros_like(price, dtype=f8)
+    fees_paid = np.zeros_like(price, dtype=f8)
+    slippage_paid = np.zeros_like(price, dtype=f8)
 
     for col in range(price.shape[1]):
         run_cash = init_capital
@@ -126,15 +128,15 @@ def portfolio_nb(price, init_capital, fees, slippage, order_func_nb, *args):
             amount = order_func_nb(col, i, run_cash, run_shares, *args)  # the amount of shares to order
             if amount &gt; 0:
                 # Buy amount
-                run_cash, run_shares, paid_fees[i, col], paid_slippage[i, col] = buy(
+                run_cash, run_shares, fees_paid[i, col], slippage_paid[i, col] = buy(
                     run_cash, run_shares, amount, price[i, col], fees[i, col], slippage[i, col])
             elif amount &lt; 0:
                 # Sell amount
-                run_cash, run_shares, paid_fees[i, col], paid_slippage[i, col] = sell(
+                run_cash, run_shares, fees_paid[i, col], slippage_paid[i, col] = sell(
                     run_cash, run_shares, amount, price[i, col], fees[i, col], slippage[i, col])
             cash[i, col], shares[i, col] = run_cash, run_shares
 
-    return cash, shares, paid_fees, paid_slippage
+    return cash, shares, fees_paid, slippage_paid
 
 
 @njit(cache=True)
@@ -149,22 +151,22 @@ def buy(run_cash, run_shares, amount, price, fees, slippage):
         # Sufficient cash
         new_run_shares = run_shares + amount
         new_run_cash = run_cash - req_cash_wcom
-        paid_fees = req_cash_wcom - req_cash
+        fees_paid = req_cash_wcom - req_cash
     else:
         # Insufficient cash, amount will be less than requested
         # For fees of 10%, you can buy shares for 90.9$ to spend 100$ in total
         run_cash_wcom = run_cash / (1 + fees)
         new_run_shares = run_shares + run_cash_wcom / adj_price
         new_run_cash = 0
-        paid_fees = run_cash - run_cash_wcom
-    # Difference in equity is the total cost of transaction = paid_fees + paid_slippage
+        fees_paid = run_cash - run_cash_wcom
+    # Difference in equity is the total cost of transaction = fees_paid + slippage_paid
     old_equity = run_cash + price * run_shares
     new_equity = new_run_cash + price * new_run_shares
     if slippage == 0:
-        paid_slippage = 0. # otherwise you will get numbers such as 7.105427e-15
+        slippage_paid = 0.  # otherwise you will get numbers such as 7.105427e-15
     else:
-        paid_slippage = old_equity - new_equity - paid_fees
-    return new_run_cash, new_run_shares, paid_fees, paid_slippage
+        slippage_paid = old_equity - new_equity - fees_paid
+    return new_run_cash, new_run_shares, fees_paid, slippage_paid
 
 
 @njit(cache=True)
@@ -179,15 +181,15 @@ def sell(run_cash, run_shares, amount, price, fees, slippage):
     adj_cash_wcom = adj_cash * (1 - fees)
     new_run_shares = run_shares - adj_shares
     new_run_cash = run_cash + adj_cash_wcom
-    paid_fees = adj_cash - adj_cash_wcom
-    # Difference in equity is the total cost of transaction = paid_fees + paid_slippage
+    fees_paid = adj_cash - adj_cash_wcom
+    # Difference in equity is the total cost of transaction = fees_paid + slippage_paid
     old_equity = run_cash + price * run_shares
     new_equity = new_run_cash + price * new_run_shares
     if slippage == 0:
-        paid_slippage = 0.
+        slippage_paid = 0.
     else:
-        paid_slippage = old_equity - new_equity - paid_fees
-    return new_run_cash, new_run_shares, paid_fees, paid_slippage
+        slippage_paid = old_equity - new_equity - fees_paid
+    return new_run_cash, new_run_shares, fees_paid, slippage_paid
 
 
 @njit(cache=True)
@@ -215,10 +217,8 @@ def amount_order_func_nb(col, i, run_cash, run_shares, amount, is_target):
 # ############# Mappers ############# #
 
 
-OPEN = 0
-&#34;&#34;&#34;Open position.&#34;&#34;&#34;
-CLOSED = 1
-&#34;&#34;&#34;Closed position.&#34;&#34;&#34;
+OPEN = PositionType.OPEN
+CLOSED = PositionType.CLOSED
 
 
 @njit
@@ -375,27 +375,452 @@ def is_accumulated_nb(positions):
     result = np.empty(positions.shape[1], b1)
     for col in range(positions.shape[1]):
         result[col] = is_accumulated_1d_nb(positions[:, col])
-    return result</code></pre>
+    return result
+
+# ############# Financial risk and performance metrics ############# #
+
+# Functions from empyrical but Numba-compiled
+
+
+@njit(cache=True)
+def cum_returns_1d_nb(returns, starting_value=0):
+    &#34;&#34;&#34;See `empyrical.cum_returns`.&#34;&#34;&#34;
+    if returns.shape[0] &lt; 1:
+        return returns.copy()
+
+    result = timeseries.nb.cumprod_1d_nb(returns + 1)
+    if starting_value == 0:
+        result -= 1
+    else:
+        result *= starting_value
+    return result
+
+
+@njit(cache=True)
+def cum_returns_nb(returns, starting_value=0):
+    &#34;&#34;&#34;2-dim version of `cum_returns_1d_nb`.&#34;&#34;&#34;
+    result = np.empty_like(returns, dtype=f8)
+    for col in range(returns.shape[1]):
+        result[:, col] = cum_returns_1d_nb(returns[:, col], starting_value=starting_value)
+    return result
+
+
+@njit(cache=True)
+def cum_returns_final_1d_nb(returns, starting_value=0):
+    &#34;&#34;&#34;See `empyrical.cum_returns_final`.&#34;&#34;&#34;
+    if returns.shape[0] == 0:
+        return np.nan
+
+    result = timeseries.nb.product_1d_nb(returns + 1)
+    if starting_value == 0:
+        result -= 1
+    else:
+        result *= starting_value
+    return result
+
+
+@njit(cache=True)
+def cum_returns_final_nb(returns, starting_value=0):
+    &#34;&#34;&#34;2-dim version of `cum_returns_final_1d_nb`.&#34;&#34;&#34;
+    result = np.empty(returns.shape[1], dtype=f8)
+    for col in range(returns.shape[1]):
+        result[col] = cum_returns_final_1d_nb(returns[:, col], starting_value=starting_value)
+    return result
+
+
+@njit(cache=True)
+def annualized_return_1d_nb(returns, ann_factor):
+    &#34;&#34;&#34;See `empyrical.annual_return`.&#34;&#34;&#34;
+    if returns.shape[0] &lt; 1:
+        return np.nan
+
+    ending_value = cum_returns_final_1d_nb(returns, starting_value=1)
+    return ending_value ** (ann_factor / returns.shape[0]) - 1
+
+
+@njit(cache=True)
+def annualized_return_nb(returns, ann_factor):
+    &#34;&#34;&#34;2-dim version of `annualized_return_1d_nb`.&#34;&#34;&#34;
+    result = np.empty(returns.shape[1], dtype=f8)
+    for col in range(returns.shape[1]):
+        result[col] = annualized_return_1d_nb(returns[:, col], ann_factor)
+    return result
+
+
+@njit(cache=True)
+def annualized_volatility_1d_nb(returns, ann_factor, alpha=2.0):
+    &#34;&#34;&#34;See `empyrical.annual_volatility`.&#34;&#34;&#34;
+    if returns.shape[0] &lt; 2:
+        return np.nan
+
+    return timeseries.nb.nanstd_1d_nb(returns, ddof=1) * ann_factor ** (1.0 / alpha)
+
+
+@njit(cache=True)
+def annualized_volatility_nb(returns, ann_factor, alpha=2.0):
+    &#34;&#34;&#34;2-dim version of `annualized_volatility_1d_nb`.&#34;&#34;&#34;
+    result = np.empty(returns.shape[1], dtype=f8)
+    for col in range(returns.shape[1]):
+        result[col] = annualized_volatility_1d_nb(returns[:, col], ann_factor, alpha=alpha)
+    return result
+
+
+@njit(cache=True)
+def calmar_ratio_1d_nb(returns, annualized_return, max_drawdown, ann_factor):
+    &#34;&#34;&#34;See `empyrical.calmar_ratio`.&#34;&#34;&#34;
+    if max_drawdown == 0.:
+        return np.nan
+    return annualized_return / np.abs(max_drawdown)
+
+
+@njit(cache=True)
+def calmar_ratio_nb(returns, annualized_return, max_drawdown, ann_factor):
+    &#34;&#34;&#34;2-dim version of `calmar_ratio_1d_nb`.&#34;&#34;&#34;
+    result = np.empty(returns.shape[1], dtype=f8)
+    for col in range(returns.shape[1]):
+        result[col] = calmar_ratio_1d_nb(returns[:, col], annualized_return[col], max_drawdown[col], ann_factor)
+    return result
+
+
+@njit(cache=True)
+def omega_ratio_1d_nb(returns, ann_factor, risk_free=0., required_return=0.):
+    &#34;&#34;&#34;See `empyrical.omega_ratio`.&#34;&#34;&#34;
+    if returns.shape[0] &lt; 1:
+        return np.nan
+
+    if ann_factor == 1:
+        return_threshold = required_return
+    elif ann_factor &lt;= -1:
+        return np.nan
+    else:
+        return_threshold = (1 + required_return) ** (1. / ann_factor) - 1
+    returns_less_thresh = returns - risk_free - return_threshold
+    numer = np.sum(returns_less_thresh[returns_less_thresh &gt; 0.0])
+    denom = -1.0 * np.sum(returns_less_thresh[returns_less_thresh &lt; 0.0])
+    if denom == 0.:
+        return np.nan
+    return numer / denom
+
+
+@njit(cache=True)
+def omega_ratio_nb(returns, ann_factor, risk_free=0., required_return=0.):
+    &#34;&#34;&#34;2-dim version of `omega_ratio_1d_nb`.&#34;&#34;&#34;
+    result = np.empty(returns.shape[1], dtype=f8)
+    for col in range(returns.shape[1]):
+        result[col] = omega_ratio_1d_nb(
+            returns[:, col], ann_factor, risk_free=risk_free, required_return=required_return)
+    return result
+
+
+@njit(cache=True)
+def sharpe_ratio_1d_nb(returns, ann_factor, risk_free=0.):
+    &#34;&#34;&#34;See `empyrical.sharpe_ratio`.&#34;&#34;&#34;
+    if returns.shape[0] &lt; 2:
+        return np.nan
+
+    returns_risk_adj = returns - risk_free
+    mean = np.nanmean(returns_risk_adj)
+    std = timeseries.nb.nanstd_1d_nb(returns_risk_adj, ddof=1)
+    if std == 0.:
+        return np.nan
+    return mean / std * np.sqrt(ann_factor)
+
+
+@njit(cache=True)
+def sharpe_ratio_nb(returns, ann_factor, risk_free=0.):
+    &#34;&#34;&#34;2-dim version of `sharpe_ratio_1d_nb`.&#34;&#34;&#34;
+    result = np.empty(returns.shape[1], dtype=f8)
+    for col in range(returns.shape[1]):
+        result[col] = sharpe_ratio_1d_nb(returns[:, col], ann_factor, risk_free=risk_free)
+    return result
+
+
+@njit(cache=True)
+def downside_risk_1d_nb(returns, ann_factor, required_return=0.):
+    &#34;&#34;&#34;See `empyrical.downside_risk`.&#34;&#34;&#34;
+    if returns.shape[0] &lt; 1:
+        return np.nan
+
+    adj_returns = returns - required_return
+    adj_returns[adj_returns &gt; 0] = 0
+    return np.sqrt(np.nanmean(adj_returns ** 2)) * np.sqrt(ann_factor)
+
+
+@njit(cache=True)
+def downside_risk_nb(returns, ann_factor, required_return=0.):
+    &#34;&#34;&#34;2-dim version of `downside_risk_1d_nb`.&#34;&#34;&#34;
+    result = np.empty(returns.shape[1], dtype=f8)
+    for col in range(returns.shape[1]):
+        result[col] = downside_risk_1d_nb(returns[:, col], ann_factor, required_return=required_return)
+    return result
+
+
+@njit(cache=True)
+def sortino_ratio_1d_nb(returns, downside_risk, ann_factor, required_return=0.):
+    &#34;&#34;&#34;See `empyrical.sortino_ratio`.&#34;&#34;&#34;
+    if returns.shape[0] &lt; 2:
+        return np.nan
+
+    adj_returns = returns - required_return
+    average_annualized_return = np.nanmean(adj_returns) * ann_factor
+    if downside_risk == 0.:
+        return np.nan
+    return average_annualized_return / downside_risk
+
+
+@njit(cache=True)
+def sortino_ratio_nb(returns, downside_risk, ann_factor, required_return=0.):
+    &#34;&#34;&#34;2-dim version of `sortino_ratio_1d_nb`.&#34;&#34;&#34;
+    result = np.empty(returns.shape[1], dtype=f8)
+    for col in range(returns.shape[1]):
+        result[col] = sortino_ratio_1d_nb(
+            returns[:, col], downside_risk[col], ann_factor, required_return=required_return)
+    return result
+
+
+@njit(cache=True)
+def information_ratio_1d_nb(returns, factor_returns):
+    &#34;&#34;&#34;See `empyrical.excess_sharpe`.&#34;&#34;&#34;
+    if returns.shape[0] &lt; 2:
+        return np.nan
+
+    active_return = returns - factor_returns
+    return np.nanmean(active_return) / timeseries.nb.nanstd_1d_nb(active_return, ddof=1)
+
+
+@njit(cache=True)
+def information_ratio_nb(returns, factor_returns):
+    &#34;&#34;&#34;2-dim version of `information_ratio_1d_nb`.&#34;&#34;&#34;
+    result = np.empty(returns.shape[1], dtype=f8)
+    for col in range(returns.shape[1]):
+        result[col] = information_ratio_1d_nb(returns[:, col], factor_returns[:, col])
+    return result
+
+
+@njit(cache=True)
+def beta_1d_nb(returns, factor_returns, risk_free=0.):
+    &#34;&#34;&#34;See `empyrical.beta`.&#34;&#34;&#34;
+    if returns.shape[0] &lt; 1 or factor_returns.shape[0] &lt; 2:
+        return np.nan
+
+    independent = np.where(
+        np.isnan(returns),
+        np.nan,
+        factor_returns,
+    )
+    ind_residual = independent - np.nanmean(independent)
+    covariances = np.nanmean(ind_residual * returns)
+    ind_residual = ind_residual ** 2
+    ind_variances = np.nanmean(ind_residual)
+    if ind_variances &lt; 1.0e-30:
+        ind_variances = np.nan
+    if ind_variances == 0.:
+        return np.nan
+    return covariances / ind_variances
+
+
+@njit(cache=True)
+def beta_nb(returns, factor_returns, risk_free=0.):
+    &#34;&#34;&#34;2-dim version of `beta_1d_nb`.&#34;&#34;&#34;
+    result = np.empty(returns.shape[1], dtype=f8)
+    for col in range(returns.shape[1]):
+        result[col] = beta_1d_nb(returns[:, col], factor_returns[:, col], risk_free=risk_free)
+    return result
+
+
+@njit(cache=True)
+def alpha_1d_nb(returns, factor_returns, beta, ann_factor, risk_free=0.):
+    &#34;&#34;&#34;See `empyrical.alpha`.&#34;&#34;&#34;
+    if returns.shape[0] &lt; 2:
+        return np.nan
+
+    adj_returns = returns - risk_free
+    adj_factor_returns = factor_returns - risk_free
+    alpha_series = adj_returns - (beta * adj_factor_returns)
+    return (np.nanmean(alpha_series) + 1) ** ann_factor - 1
+
+
+@njit(cache=True)
+def alpha_nb(returns, factor_returns, beta, ann_factor, risk_free=0.):
+    &#34;&#34;&#34;2-dim version of `alpha_1d_nb`.&#34;&#34;&#34;
+    result = np.empty(returns.shape[1], dtype=f8)
+    for col in range(returns.shape[1]):
+        result[col] = alpha_1d_nb(returns[:, col], factor_returns[:, col], beta[col], ann_factor, risk_free=risk_free)
+    return result
+
+
+@njit(cache=True)
+def tail_ratio_1d_nb(returns):
+    &#34;&#34;&#34;See `empyrical.tail_ratio`.&#34;&#34;&#34;
+    if returns.shape[0] &lt; 1:
+        return np.nan
+
+    returns = returns[~np.isnan(returns)]
+    if len(returns) &lt; 1:
+        return np.nan
+    perc_95 = np.abs(np.percentile(returns, 95))
+    perc_5 = np.abs(np.percentile(returns, 5))
+    if perc_5 == 0.:
+        return np.nan
+    return perc_95 / perc_5
+
+
+@njit(cache=True)
+def tail_ratio_nb(returns):
+    &#34;&#34;&#34;2-dim version of `tail_ratio_1d_nb`.&#34;&#34;&#34;
+    result = np.empty(returns.shape[1], dtype=f8)
+    for col in range(returns.shape[1]):
+        result[col] = tail_ratio_1d_nb(returns[:, col])
+    return result
+
+
+@njit(cache=True)
+def value_at_risk_1d_nb(returns, cutoff=0.05):
+    &#34;&#34;&#34;See `empyrical.value_at_risk`.&#34;&#34;&#34;
+    if returns.shape[0] &lt; 1:
+        return np.nan
+
+    returns = returns[~np.isnan(returns)]
+    if len(returns) &lt; 1:
+        return np.nan
+    return np.percentile(returns, 100 * cutoff)
+
+
+@njit(cache=True)
+def value_at_risk_nb(returns, cutoff=0.05):
+    &#34;&#34;&#34;2-dim version of `value_at_risk_1d_nb`.&#34;&#34;&#34;
+    result = np.empty(returns.shape[1], dtype=f8)
+    for col in range(returns.shape[1]):
+        result[col] = value_at_risk_1d_nb(returns[:, col], cutoff=cutoff)
+    return result
+
+
+@njit(cache=True)
+def conditional_value_at_risk_1d_nb(returns, cutoff=0.05):
+    &#34;&#34;&#34;See `empyrical.conditional_value_at_risk`.&#34;&#34;&#34;
+    cutoff_index = int((len(returns) - 1) * cutoff)
+    return np.mean(np.partition(returns, cutoff_index)[:cutoff_index + 1])
+
+
+@njit(cache=True)
+def conditional_value_at_risk_nb(returns, cutoff=0.05):
+    &#34;&#34;&#34;2-dim version of `conditional_value_at_risk_1d_nb`.&#34;&#34;&#34;
+    result = np.empty(returns.shape[1], dtype=f8)
+    for col in range(returns.shape[1]):
+        result[col] = conditional_value_at_risk_1d_nb(returns[:, col], cutoff=cutoff)
+    return result
+
+
+@njit(cache=True)
+def capture_1d_nb(returns, factor_returns, ann_factor):
+    &#34;&#34;&#34;See `empyrical.capture`.&#34;&#34;&#34;
+    annualized_return1 = annualized_return_1d_nb(returns, ann_factor)
+    annualized_return2 = annualized_return_1d_nb(factor_returns, ann_factor)
+    if annualized_return2 == 0.:
+        return np.nan
+    return annualized_return1 / annualized_return2
+
+
+@njit(cache=True)
+def capture_nb(returns, factor_returns, ann_factor):
+    &#34;&#34;&#34;2-dim version of `capture_1d_nb`.&#34;&#34;&#34;
+    result = np.empty(returns.shape[1], dtype=f8)
+    for col in range(returns.shape[1]):
+        result[col] = capture_1d_nb(returns[:, col], factor_returns[:, col], ann_factor)
+    return result
+
+
+@njit(cache=True)
+def up_capture_1d_nb(returns, factor_returns, ann_factor):
+    &#34;&#34;&#34;See `empyrical.up_capture`.&#34;&#34;&#34;
+    returns = returns[factor_returns &gt; 0]
+    factor_returns = factor_returns[factor_returns &gt; 0]
+    annualized_return1 = annualized_return_1d_nb(returns, ann_factor)
+    annualized_return2 = annualized_return_1d_nb(factor_returns, ann_factor)
+    if annualized_return2 == 0.:
+        return np.nan
+    return annualized_return1 / annualized_return2
+
+
+@njit(cache=True)
+def up_capture_nb(returns, factor_returns, ann_factor):
+    &#34;&#34;&#34;2-dim version of `up_capture_1d_nb`.&#34;&#34;&#34;
+    result = np.empty(returns.shape[1], dtype=f8)
+    for col in range(returns.shape[1]):
+        result[col] = up_capture_1d_nb(returns[:, col], factor_returns[:, col], ann_factor)
+    return result
+
+
+@njit(cache=True)
+def down_capture_1d_nb(returns, factor_returns, ann_factor):
+    &#34;&#34;&#34;See `empyrical.down_capture`.&#34;&#34;&#34;
+    returns = returns[factor_returns &lt; 0]
+    factor_returns = factor_returns[factor_returns &lt; 0]
+    annualized_return1 = annualized_return_1d_nb(returns, ann_factor)
+    annualized_return2 = annualized_return_1d_nb(factor_returns, ann_factor)
+    if annualized_return2 == 0.:
+        return np.nan
+    return annualized_return1 / annualized_return2
+
+
+@njit(cache=True)
+def down_capture_nb(returns, factor_returns, ann_factor):
+    &#34;&#34;&#34;2-dim version of `down_capture_1d_nb`.&#34;&#34;&#34;
+    result = np.empty(returns.shape[1], dtype=f8)
+    for col in range(returns.shape[1]):
+        result[col] = down_capture_1d_nb(returns[:, col], factor_returns[:, col], ann_factor)
+    return result
+
+
+__all__ = list_module_keys(__name__, blacklist=[&#39;OPEN&#39;, &#39;CLOSED&#39;])</code></pre>
 </details>
 </section>
 <section>
 </section>
 <section>
-<h2 class="section-title" id="header-variables">Global variables</h2>
-<dl>
-<dt id="vectorbt.portfolio.nb.CLOSED"><code class="name">var <span class="ident">CLOSED</span></code></dt>
-<dd>
-<div class="desc"><p>Closed position.</p></div>
-</dd>
-<dt id="vectorbt.portfolio.nb.OPEN"><code class="name">var <span class="ident">OPEN</span></code></dt>
-<dd>
-<div class="desc"><p>Open position.</p></div>
-</dd>
-</dl>
 </section>
 <section>
 <h2 class="section-title" id="header-functions">Functions</h2>
 <dl>
+<dt id="vectorbt.portfolio.nb.alpha_1d_nb"><code class="name flex">
+<span>def <span class="ident">alpha_1d_nb</span></span>(<span>returns, factor_returns, beta, ann_factor, risk_free=0.0)</span>
+</code></dt>
+<dd>
+<div class="desc"><p>See <code>empyrical.alpha</code>.</p></div>
+<details class="source">
+<summary>
+<span>Expand source code</span>
+</summary>
+<pre><code class="python">@njit(cache=True)
+def alpha_1d_nb(returns, factor_returns, beta, ann_factor, risk_free=0.):
+    &#34;&#34;&#34;See `empyrical.alpha`.&#34;&#34;&#34;
+    if returns.shape[0] &lt; 2:
+        return np.nan
+
+    adj_returns = returns - risk_free
+    adj_factor_returns = factor_returns - risk_free
+    alpha_series = adj_returns - (beta * adj_factor_returns)
+    return (np.nanmean(alpha_series) + 1) ** ann_factor - 1</code></pre>
+</details>
+</dd>
+<dt id="vectorbt.portfolio.nb.alpha_nb"><code class="name flex">
+<span>def <span class="ident">alpha_nb</span></span>(<span>returns, factor_returns, beta, ann_factor, risk_free=0.0)</span>
+</code></dt>
+<dd>
+<div class="desc"><p>2-dim version of <code><a title="vectorbt.portfolio.nb.alpha_1d_nb" href="#vectorbt.portfolio.nb.alpha_1d_nb">alpha_1d_nb()</a></code>.</p></div>
+<details class="source">
+<summary>
+<span>Expand source code</span>
+</summary>
+<pre><code class="python">@njit(cache=True)
+def alpha_nb(returns, factor_returns, beta, ann_factor, risk_free=0.):
+    &#34;&#34;&#34;2-dim version of `alpha_1d_nb`.&#34;&#34;&#34;
+    result = np.empty(returns.shape[1], dtype=f8)
+    for col in range(returns.shape[1]):
+        result[col] = alpha_1d_nb(returns[:, col], factor_returns[:, col], beta[col], ann_factor, risk_free=risk_free)
+    return result</code></pre>
+</details>
+</dd>
 <dt id="vectorbt.portfolio.nb.amount_order_func_nb"><code class="name flex">
 <span>def <span class="ident">amount_order_func_nb</span></span>(<span>col, i, run_cash, run_shares, amount, is_target)</span>
 </code></dt>
@@ -415,6 +840,128 @@ def amount_order_func_nb(col, i, run_cash, run_shares, amount, is_target):
         return amount[i, col] - run_shares
     else:
         return amount[i, col]</code></pre>
+</details>
+</dd>
+<dt id="vectorbt.portfolio.nb.annualized_return_1d_nb"><code class="name flex">
+<span>def <span class="ident">annualized_return_1d_nb</span></span>(<span>returns, ann_factor)</span>
+</code></dt>
+<dd>
+<div class="desc"><p>See <code>empyrical.annual_return</code>.</p></div>
+<details class="source">
+<summary>
+<span>Expand source code</span>
+</summary>
+<pre><code class="python">@njit(cache=True)
+def annualized_return_1d_nb(returns, ann_factor):
+    &#34;&#34;&#34;See `empyrical.annual_return`.&#34;&#34;&#34;
+    if returns.shape[0] &lt; 1:
+        return np.nan
+
+    ending_value = cum_returns_final_1d_nb(returns, starting_value=1)
+    return ending_value ** (ann_factor / returns.shape[0]) - 1</code></pre>
+</details>
+</dd>
+<dt id="vectorbt.portfolio.nb.annualized_return_nb"><code class="name flex">
+<span>def <span class="ident">annualized_return_nb</span></span>(<span>returns, ann_factor)</span>
+</code></dt>
+<dd>
+<div class="desc"><p>2-dim version of <code><a title="vectorbt.portfolio.nb.annualized_return_1d_nb" href="#vectorbt.portfolio.nb.annualized_return_1d_nb">annualized_return_1d_nb()</a></code>.</p></div>
+<details class="source">
+<summary>
+<span>Expand source code</span>
+</summary>
+<pre><code class="python">@njit(cache=True)
+def annualized_return_nb(returns, ann_factor):
+    &#34;&#34;&#34;2-dim version of `annualized_return_1d_nb`.&#34;&#34;&#34;
+    result = np.empty(returns.shape[1], dtype=f8)
+    for col in range(returns.shape[1]):
+        result[col] = annualized_return_1d_nb(returns[:, col], ann_factor)
+    return result</code></pre>
+</details>
+</dd>
+<dt id="vectorbt.portfolio.nb.annualized_volatility_1d_nb"><code class="name flex">
+<span>def <span class="ident">annualized_volatility_1d_nb</span></span>(<span>returns, ann_factor, alpha=2.0)</span>
+</code></dt>
+<dd>
+<div class="desc"><p>See <code>empyrical.annual_volatility</code>.</p></div>
+<details class="source">
+<summary>
+<span>Expand source code</span>
+</summary>
+<pre><code class="python">@njit(cache=True)
+def annualized_volatility_1d_nb(returns, ann_factor, alpha=2.0):
+    &#34;&#34;&#34;See `empyrical.annual_volatility`.&#34;&#34;&#34;
+    if returns.shape[0] &lt; 2:
+        return np.nan
+
+    return timeseries.nb.nanstd_1d_nb(returns, ddof=1) * ann_factor ** (1.0 / alpha)</code></pre>
+</details>
+</dd>
+<dt id="vectorbt.portfolio.nb.annualized_volatility_nb"><code class="name flex">
+<span>def <span class="ident">annualized_volatility_nb</span></span>(<span>returns, ann_factor, alpha=2.0)</span>
+</code></dt>
+<dd>
+<div class="desc"><p>2-dim version of <code><a title="vectorbt.portfolio.nb.annualized_volatility_1d_nb" href="#vectorbt.portfolio.nb.annualized_volatility_1d_nb">annualized_volatility_1d_nb()</a></code>.</p></div>
+<details class="source">
+<summary>
+<span>Expand source code</span>
+</summary>
+<pre><code class="python">@njit(cache=True)
+def annualized_volatility_nb(returns, ann_factor, alpha=2.0):
+    &#34;&#34;&#34;2-dim version of `annualized_volatility_1d_nb`.&#34;&#34;&#34;
+    result = np.empty(returns.shape[1], dtype=f8)
+    for col in range(returns.shape[1]):
+        result[col] = annualized_volatility_1d_nb(returns[:, col], ann_factor, alpha=alpha)
+    return result</code></pre>
+</details>
+</dd>
+<dt id="vectorbt.portfolio.nb.beta_1d_nb"><code class="name flex">
+<span>def <span class="ident">beta_1d_nb</span></span>(<span>returns, factor_returns, risk_free=0.0)</span>
+</code></dt>
+<dd>
+<div class="desc"><p>See <code>empyrical.beta</code>.</p></div>
+<details class="source">
+<summary>
+<span>Expand source code</span>
+</summary>
+<pre><code class="python">@njit(cache=True)
+def beta_1d_nb(returns, factor_returns, risk_free=0.):
+    &#34;&#34;&#34;See `empyrical.beta`.&#34;&#34;&#34;
+    if returns.shape[0] &lt; 1 or factor_returns.shape[0] &lt; 2:
+        return np.nan
+
+    independent = np.where(
+        np.isnan(returns),
+        np.nan,
+        factor_returns,
+    )
+    ind_residual = independent - np.nanmean(independent)
+    covariances = np.nanmean(ind_residual * returns)
+    ind_residual = ind_residual ** 2
+    ind_variances = np.nanmean(ind_residual)
+    if ind_variances &lt; 1.0e-30:
+        ind_variances = np.nan
+    if ind_variances == 0.:
+        return np.nan
+    return covariances / ind_variances</code></pre>
+</details>
+</dd>
+<dt id="vectorbt.portfolio.nb.beta_nb"><code class="name flex">
+<span>def <span class="ident">beta_nb</span></span>(<span>returns, factor_returns, risk_free=0.0)</span>
+</code></dt>
+<dd>
+<div class="desc"><p>2-dim version of <code><a title="vectorbt.portfolio.nb.beta_1d_nb" href="#vectorbt.portfolio.nb.beta_1d_nb">beta_1d_nb()</a></code>.</p></div>
+<details class="source">
+<summary>
+<span>Expand source code</span>
+</summary>
+<pre><code class="python">@njit(cache=True)
+def beta_nb(returns, factor_returns, risk_free=0.):
+    &#34;&#34;&#34;2-dim version of `beta_1d_nb`.&#34;&#34;&#34;
+    result = np.empty(returns.shape[1], dtype=f8)
+    for col in range(returns.shape[1]):
+        result[col] = beta_1d_nb(returns[:, col], factor_returns[:, col], risk_free=risk_free)
+    return result</code></pre>
 </details>
 </dd>
 <dt id="vectorbt.portfolio.nb.buy"><code class="name flex">
@@ -438,22 +985,287 @@ def buy(run_cash, run_shares, amount, price, fees, slippage):
         # Sufficient cash
         new_run_shares = run_shares + amount
         new_run_cash = run_cash - req_cash_wcom
-        paid_fees = req_cash_wcom - req_cash
+        fees_paid = req_cash_wcom - req_cash
     else:
         # Insufficient cash, amount will be less than requested
         # For fees of 10%, you can buy shares for 90.9$ to spend 100$ in total
         run_cash_wcom = run_cash / (1 + fees)
         new_run_shares = run_shares + run_cash_wcom / adj_price
         new_run_cash = 0
-        paid_fees = run_cash - run_cash_wcom
-    # Difference in equity is the total cost of transaction = paid_fees + paid_slippage
+        fees_paid = run_cash - run_cash_wcom
+    # Difference in equity is the total cost of transaction = fees_paid + slippage_paid
     old_equity = run_cash + price * run_shares
     new_equity = new_run_cash + price * new_run_shares
     if slippage == 0:
-        paid_slippage = 0. # otherwise you will get numbers such as 7.105427e-15
+        slippage_paid = 0.  # otherwise you will get numbers such as 7.105427e-15
     else:
-        paid_slippage = old_equity - new_equity - paid_fees
-    return new_run_cash, new_run_shares, paid_fees, paid_slippage</code></pre>
+        slippage_paid = old_equity - new_equity - fees_paid
+    return new_run_cash, new_run_shares, fees_paid, slippage_paid</code></pre>
+</details>
+</dd>
+<dt id="vectorbt.portfolio.nb.calmar_ratio_1d_nb"><code class="name flex">
+<span>def <span class="ident">calmar_ratio_1d_nb</span></span>(<span>returns, annualized_return, max_drawdown, ann_factor)</span>
+</code></dt>
+<dd>
+<div class="desc"><p>See <code>empyrical.calmar_ratio</code>.</p></div>
+<details class="source">
+<summary>
+<span>Expand source code</span>
+</summary>
+<pre><code class="python">@njit(cache=True)
+def calmar_ratio_1d_nb(returns, annualized_return, max_drawdown, ann_factor):
+    &#34;&#34;&#34;See `empyrical.calmar_ratio`.&#34;&#34;&#34;
+    if max_drawdown == 0.:
+        return np.nan
+    return annualized_return / np.abs(max_drawdown)</code></pre>
+</details>
+</dd>
+<dt id="vectorbt.portfolio.nb.calmar_ratio_nb"><code class="name flex">
+<span>def <span class="ident">calmar_ratio_nb</span></span>(<span>returns, annualized_return, max_drawdown, ann_factor)</span>
+</code></dt>
+<dd>
+<div class="desc"><p>2-dim version of <code><a title="vectorbt.portfolio.nb.calmar_ratio_1d_nb" href="#vectorbt.portfolio.nb.calmar_ratio_1d_nb">calmar_ratio_1d_nb()</a></code>.</p></div>
+<details class="source">
+<summary>
+<span>Expand source code</span>
+</summary>
+<pre><code class="python">@njit(cache=True)
+def calmar_ratio_nb(returns, annualized_return, max_drawdown, ann_factor):
+    &#34;&#34;&#34;2-dim version of `calmar_ratio_1d_nb`.&#34;&#34;&#34;
+    result = np.empty(returns.shape[1], dtype=f8)
+    for col in range(returns.shape[1]):
+        result[col] = calmar_ratio_1d_nb(returns[:, col], annualized_return[col], max_drawdown[col], ann_factor)
+    return result</code></pre>
+</details>
+</dd>
+<dt id="vectorbt.portfolio.nb.capture_1d_nb"><code class="name flex">
+<span>def <span class="ident">capture_1d_nb</span></span>(<span>returns, factor_returns, ann_factor)</span>
+</code></dt>
+<dd>
+<div class="desc"><p>See <code>empyrical.capture</code>.</p></div>
+<details class="source">
+<summary>
+<span>Expand source code</span>
+</summary>
+<pre><code class="python">@njit(cache=True)
+def capture_1d_nb(returns, factor_returns, ann_factor):
+    &#34;&#34;&#34;See `empyrical.capture`.&#34;&#34;&#34;
+    annualized_return1 = annualized_return_1d_nb(returns, ann_factor)
+    annualized_return2 = annualized_return_1d_nb(factor_returns, ann_factor)
+    if annualized_return2 == 0.:
+        return np.nan
+    return annualized_return1 / annualized_return2</code></pre>
+</details>
+</dd>
+<dt id="vectorbt.portfolio.nb.capture_nb"><code class="name flex">
+<span>def <span class="ident">capture_nb</span></span>(<span>returns, factor_returns, ann_factor)</span>
+</code></dt>
+<dd>
+<div class="desc"><p>2-dim version of <code><a title="vectorbt.portfolio.nb.capture_1d_nb" href="#vectorbt.portfolio.nb.capture_1d_nb">capture_1d_nb()</a></code>.</p></div>
+<details class="source">
+<summary>
+<span>Expand source code</span>
+</summary>
+<pre><code class="python">@njit(cache=True)
+def capture_nb(returns, factor_returns, ann_factor):
+    &#34;&#34;&#34;2-dim version of `capture_1d_nb`.&#34;&#34;&#34;
+    result = np.empty(returns.shape[1], dtype=f8)
+    for col in range(returns.shape[1]):
+        result[col] = capture_1d_nb(returns[:, col], factor_returns[:, col], ann_factor)
+    return result</code></pre>
+</details>
+</dd>
+<dt id="vectorbt.portfolio.nb.conditional_value_at_risk_1d_nb"><code class="name flex">
+<span>def <span class="ident">conditional_value_at_risk_1d_nb</span></span>(<span>returns, cutoff=0.05)</span>
+</code></dt>
+<dd>
+<div class="desc"><p>See <code>empyrical.conditional_value_at_risk</code>.</p></div>
+<details class="source">
+<summary>
+<span>Expand source code</span>
+</summary>
+<pre><code class="python">@njit(cache=True)
+def conditional_value_at_risk_1d_nb(returns, cutoff=0.05):
+    &#34;&#34;&#34;See `empyrical.conditional_value_at_risk`.&#34;&#34;&#34;
+    cutoff_index = int((len(returns) - 1) * cutoff)
+    return np.mean(np.partition(returns, cutoff_index)[:cutoff_index + 1])</code></pre>
+</details>
+</dd>
+<dt id="vectorbt.portfolio.nb.conditional_value_at_risk_nb"><code class="name flex">
+<span>def <span class="ident">conditional_value_at_risk_nb</span></span>(<span>returns, cutoff=0.05)</span>
+</code></dt>
+<dd>
+<div class="desc"><p>2-dim version of <code><a title="vectorbt.portfolio.nb.conditional_value_at_risk_1d_nb" href="#vectorbt.portfolio.nb.conditional_value_at_risk_1d_nb">conditional_value_at_risk_1d_nb()</a></code>.</p></div>
+<details class="source">
+<summary>
+<span>Expand source code</span>
+</summary>
+<pre><code class="python">@njit(cache=True)
+def conditional_value_at_risk_nb(returns, cutoff=0.05):
+    &#34;&#34;&#34;2-dim version of `conditional_value_at_risk_1d_nb`.&#34;&#34;&#34;
+    result = np.empty(returns.shape[1], dtype=f8)
+    for col in range(returns.shape[1]):
+        result[col] = conditional_value_at_risk_1d_nb(returns[:, col], cutoff=cutoff)
+    return result</code></pre>
+</details>
+</dd>
+<dt id="vectorbt.portfolio.nb.cum_returns_1d_nb"><code class="name flex">
+<span>def <span class="ident">cum_returns_1d_nb</span></span>(<span>returns, starting_value=0)</span>
+</code></dt>
+<dd>
+<div class="desc"><p>See <code>empyrical.cum_returns</code>.</p></div>
+<details class="source">
+<summary>
+<span>Expand source code</span>
+</summary>
+<pre><code class="python">@njit(cache=True)
+def cum_returns_1d_nb(returns, starting_value=0):
+    &#34;&#34;&#34;See `empyrical.cum_returns`.&#34;&#34;&#34;
+    if returns.shape[0] &lt; 1:
+        return returns.copy()
+
+    result = timeseries.nb.cumprod_1d_nb(returns + 1)
+    if starting_value == 0:
+        result -= 1
+    else:
+        result *= starting_value
+    return result</code></pre>
+</details>
+</dd>
+<dt id="vectorbt.portfolio.nb.cum_returns_final_1d_nb"><code class="name flex">
+<span>def <span class="ident">cum_returns_final_1d_nb</span></span>(<span>returns, starting_value=0)</span>
+</code></dt>
+<dd>
+<div class="desc"><p>See <code>empyrical.cum_returns_final</code>.</p></div>
+<details class="source">
+<summary>
+<span>Expand source code</span>
+</summary>
+<pre><code class="python">@njit(cache=True)
+def cum_returns_final_1d_nb(returns, starting_value=0):
+    &#34;&#34;&#34;See `empyrical.cum_returns_final`.&#34;&#34;&#34;
+    if returns.shape[0] == 0:
+        return np.nan
+
+    result = timeseries.nb.product_1d_nb(returns + 1)
+    if starting_value == 0:
+        result -= 1
+    else:
+        result *= starting_value
+    return result</code></pre>
+</details>
+</dd>
+<dt id="vectorbt.portfolio.nb.cum_returns_final_nb"><code class="name flex">
+<span>def <span class="ident">cum_returns_final_nb</span></span>(<span>returns, starting_value=0)</span>
+</code></dt>
+<dd>
+<div class="desc"><p>2-dim version of <code><a title="vectorbt.portfolio.nb.cum_returns_final_1d_nb" href="#vectorbt.portfolio.nb.cum_returns_final_1d_nb">cum_returns_final_1d_nb()</a></code>.</p></div>
+<details class="source">
+<summary>
+<span>Expand source code</span>
+</summary>
+<pre><code class="python">@njit(cache=True)
+def cum_returns_final_nb(returns, starting_value=0):
+    &#34;&#34;&#34;2-dim version of `cum_returns_final_1d_nb`.&#34;&#34;&#34;
+    result = np.empty(returns.shape[1], dtype=f8)
+    for col in range(returns.shape[1]):
+        result[col] = cum_returns_final_1d_nb(returns[:, col], starting_value=starting_value)
+    return result</code></pre>
+</details>
+</dd>
+<dt id="vectorbt.portfolio.nb.cum_returns_nb"><code class="name flex">
+<span>def <span class="ident">cum_returns_nb</span></span>(<span>returns, starting_value=0)</span>
+</code></dt>
+<dd>
+<div class="desc"><p>2-dim version of <code><a title="vectorbt.portfolio.nb.cum_returns_1d_nb" href="#vectorbt.portfolio.nb.cum_returns_1d_nb">cum_returns_1d_nb()</a></code>.</p></div>
+<details class="source">
+<summary>
+<span>Expand source code</span>
+</summary>
+<pre><code class="python">@njit(cache=True)
+def cum_returns_nb(returns, starting_value=0):
+    &#34;&#34;&#34;2-dim version of `cum_returns_1d_nb`.&#34;&#34;&#34;
+    result = np.empty_like(returns, dtype=f8)
+    for col in range(returns.shape[1]):
+        result[:, col] = cum_returns_1d_nb(returns[:, col], starting_value=starting_value)
+    return result</code></pre>
+</details>
+</dd>
+<dt id="vectorbt.portfolio.nb.down_capture_1d_nb"><code class="name flex">
+<span>def <span class="ident">down_capture_1d_nb</span></span>(<span>returns, factor_returns, ann_factor)</span>
+</code></dt>
+<dd>
+<div class="desc"><p>See <code>empyrical.down_capture</code>.</p></div>
+<details class="source">
+<summary>
+<span>Expand source code</span>
+</summary>
+<pre><code class="python">@njit(cache=True)
+def down_capture_1d_nb(returns, factor_returns, ann_factor):
+    &#34;&#34;&#34;See `empyrical.down_capture`.&#34;&#34;&#34;
+    returns = returns[factor_returns &lt; 0]
+    factor_returns = factor_returns[factor_returns &lt; 0]
+    annualized_return1 = annualized_return_1d_nb(returns, ann_factor)
+    annualized_return2 = annualized_return_1d_nb(factor_returns, ann_factor)
+    if annualized_return2 == 0.:
+        return np.nan
+    return annualized_return1 / annualized_return2</code></pre>
+</details>
+</dd>
+<dt id="vectorbt.portfolio.nb.down_capture_nb"><code class="name flex">
+<span>def <span class="ident">down_capture_nb</span></span>(<span>returns, factor_returns, ann_factor)</span>
+</code></dt>
+<dd>
+<div class="desc"><p>2-dim version of <code><a title="vectorbt.portfolio.nb.down_capture_1d_nb" href="#vectorbt.portfolio.nb.down_capture_1d_nb">down_capture_1d_nb()</a></code>.</p></div>
+<details class="source">
+<summary>
+<span>Expand source code</span>
+</summary>
+<pre><code class="python">@njit(cache=True)
+def down_capture_nb(returns, factor_returns, ann_factor):
+    &#34;&#34;&#34;2-dim version of `down_capture_1d_nb`.&#34;&#34;&#34;
+    result = np.empty(returns.shape[1], dtype=f8)
+    for col in range(returns.shape[1]):
+        result[col] = down_capture_1d_nb(returns[:, col], factor_returns[:, col], ann_factor)
+    return result</code></pre>
+</details>
+</dd>
+<dt id="vectorbt.portfolio.nb.downside_risk_1d_nb"><code class="name flex">
+<span>def <span class="ident">downside_risk_1d_nb</span></span>(<span>returns, ann_factor, required_return=0.0)</span>
+</code></dt>
+<dd>
+<div class="desc"><p>See <code>empyrical.downside_risk</code>.</p></div>
+<details class="source">
+<summary>
+<span>Expand source code</span>
+</summary>
+<pre><code class="python">@njit(cache=True)
+def downside_risk_1d_nb(returns, ann_factor, required_return=0.):
+    &#34;&#34;&#34;See `empyrical.downside_risk`.&#34;&#34;&#34;
+    if returns.shape[0] &lt; 1:
+        return np.nan
+
+    adj_returns = returns - required_return
+    adj_returns[adj_returns &gt; 0] = 0
+    return np.sqrt(np.nanmean(adj_returns ** 2)) * np.sqrt(ann_factor)</code></pre>
+</details>
+</dd>
+<dt id="vectorbt.portfolio.nb.downside_risk_nb"><code class="name flex">
+<span>def <span class="ident">downside_risk_nb</span></span>(<span>returns, ann_factor, required_return=0.0)</span>
+</code></dt>
+<dd>
+<div class="desc"><p>2-dim version of <code><a title="vectorbt.portfolio.nb.downside_risk_1d_nb" href="#vectorbt.portfolio.nb.downside_risk_1d_nb">downside_risk_1d_nb()</a></code>.</p></div>
+<details class="source">
+<summary>
+<span>Expand source code</span>
+</summary>
+<pre><code class="python">@njit(cache=True)
+def downside_risk_nb(returns, ann_factor, required_return=0.):
+    &#34;&#34;&#34;2-dim version of `downside_risk_1d_nb`.&#34;&#34;&#34;
+    result = np.empty(returns.shape[1], dtype=f8)
+    for col in range(returns.shape[1]):
+        result[col] = downside_risk_1d_nb(returns[:, col], ann_factor, required_return=required_return)
+    return result</code></pre>
 </details>
 </dd>
 <dt id="vectorbt.portfolio.nb.duration_map_func_nb"><code class="name flex">
@@ -504,6 +1316,43 @@ def get_position_equities_nb(col, entry_i, exit_i, price, cash, shares, init_cap
         # A bit optimistic, since it doesn&#39;t include sale cost
         equity_after = cash[price.shape[0]-1, col] + shares[price.shape[0]-1, col] * price[price.shape[0]-1, col]
     return equity_before, equity_after</code></pre>
+</details>
+</dd>
+<dt id="vectorbt.portfolio.nb.information_ratio_1d_nb"><code class="name flex">
+<span>def <span class="ident">information_ratio_1d_nb</span></span>(<span>returns, factor_returns)</span>
+</code></dt>
+<dd>
+<div class="desc"><p>See <code>empyrical.excess_sharpe</code>.</p></div>
+<details class="source">
+<summary>
+<span>Expand source code</span>
+</summary>
+<pre><code class="python">@njit(cache=True)
+def information_ratio_1d_nb(returns, factor_returns):
+    &#34;&#34;&#34;See `empyrical.excess_sharpe`.&#34;&#34;&#34;
+    if returns.shape[0] &lt; 2:
+        return np.nan
+
+    active_return = returns - factor_returns
+    return np.nanmean(active_return) / timeseries.nb.nanstd_1d_nb(active_return, ddof=1)</code></pre>
+</details>
+</dd>
+<dt id="vectorbt.portfolio.nb.information_ratio_nb"><code class="name flex">
+<span>def <span class="ident">information_ratio_nb</span></span>(<span>returns, factor_returns)</span>
+</code></dt>
+<dd>
+<div class="desc"><p>2-dim version of <code><a title="vectorbt.portfolio.nb.information_ratio_1d_nb" href="#vectorbt.portfolio.nb.information_ratio_1d_nb">information_ratio_1d_nb()</a></code>.</p></div>
+<details class="source">
+<summary>
+<span>Expand source code</span>
+</summary>
+<pre><code class="python">@njit(cache=True)
+def information_ratio_nb(returns, factor_returns):
+    &#34;&#34;&#34;2-dim version of `information_ratio_1d_nb`.&#34;&#34;&#34;
+    result = np.empty(returns.shape[1], dtype=f8)
+    for col in range(returns.shape[1]):
+        result[col] = information_ratio_1d_nb(returns[:, col], factor_returns[:, col])
+    return result</code></pre>
 </details>
 </dd>
 <dt id="vectorbt.portfolio.nb.is_accumulated_1d_nb"><code class="name flex">
@@ -564,7 +1413,7 @@ def losing_filter_func_nb(col, i, map_result, pnl):
 </code></dt>
 <dd>
 <div class="desc"><p>Apply <code>map_func_nb</code> on each position in <code>positions</code>.</p>
-<p><code>pos_type</code> can be either <code>None</code>, <code><a title="vectorbt.portfolio.nb.OPEN" href="#vectorbt.portfolio.nb.OPEN">OPEN</a></code> or <code><a title="vectorbt.portfolio.nb.CLOSED" href="#vectorbt.portfolio.nb.CLOSED">CLOSED</a></code>.</p>
+<p><code>pos_type</code> can be either <code>None</code>, <code>OPEN</code> or <code>CLOSED</code>.</p>
 <p>For each position in range <code>[entry_i, exit_i]</code>, <code>map_func_nb</code> must return a number
 that is then stored either at index <code>exit_i</code> or the last index if position is still open.
 <code>map_func_nb</code> must accept index of the current column <code>col</code>, index of the entry <code>entry_i</code>,
@@ -661,6 +1510,54 @@ def map_positions_nb(positions, pos_type, map_func_nb, *args):
     return result</code></pre>
 </details>
 </dd>
+<dt id="vectorbt.portfolio.nb.omega_ratio_1d_nb"><code class="name flex">
+<span>def <span class="ident">omega_ratio_1d_nb</span></span>(<span>returns, ann_factor, risk_free=0.0, required_return=0.0)</span>
+</code></dt>
+<dd>
+<div class="desc"><p>See <code>empyrical.omega_ratio</code>.</p></div>
+<details class="source">
+<summary>
+<span>Expand source code</span>
+</summary>
+<pre><code class="python">@njit(cache=True)
+def omega_ratio_1d_nb(returns, ann_factor, risk_free=0., required_return=0.):
+    &#34;&#34;&#34;See `empyrical.omega_ratio`.&#34;&#34;&#34;
+    if returns.shape[0] &lt; 1:
+        return np.nan
+
+    if ann_factor == 1:
+        return_threshold = required_return
+    elif ann_factor &lt;= -1:
+        return np.nan
+    else:
+        return_threshold = (1 + required_return) ** (1. / ann_factor) - 1
+    returns_less_thresh = returns - risk_free - return_threshold
+    numer = np.sum(returns_less_thresh[returns_less_thresh &gt; 0.0])
+    denom = -1.0 * np.sum(returns_less_thresh[returns_less_thresh &lt; 0.0])
+    if denom == 0.:
+        return np.nan
+    return numer / denom</code></pre>
+</details>
+</dd>
+<dt id="vectorbt.portfolio.nb.omega_ratio_nb"><code class="name flex">
+<span>def <span class="ident">omega_ratio_nb</span></span>(<span>returns, ann_factor, risk_free=0.0, required_return=0.0)</span>
+</code></dt>
+<dd>
+<div class="desc"><p>2-dim version of <code><a title="vectorbt.portfolio.nb.omega_ratio_1d_nb" href="#vectorbt.portfolio.nb.omega_ratio_1d_nb">omega_ratio_1d_nb()</a></code>.</p></div>
+<details class="source">
+<summary>
+<span>Expand source code</span>
+</summary>
+<pre><code class="python">@njit(cache=True)
+def omega_ratio_nb(returns, ann_factor, risk_free=0., required_return=0.):
+    &#34;&#34;&#34;2-dim version of `omega_ratio_1d_nb`.&#34;&#34;&#34;
+    result = np.empty(returns.shape[1], dtype=f8)
+    for col in range(returns.shape[1]):
+        result[col] = omega_ratio_1d_nb(
+            returns[:, col], ann_factor, risk_free=risk_free, required_return=required_return)
+    return result</code></pre>
+</details>
+</dd>
 <dt id="vectorbt.portfolio.nb.pnl_map_func_nb"><code class="name flex">
 <span>def <span class="ident">pnl_map_func_nb</span></span>(<span>*args)</span>
 </code></dt>
@@ -716,7 +1613,7 @@ It must return a positive/negative number to buy/sell. Return 0 to do nothing.</
 ... def order_func_nb(col, i, run_cash, run_shares):
 ...     return 1 if i == 0 else 0 # buy and hold
 
-&gt;&gt;&gt; cash, shares, paid_fees, paid_slippage = \
+&gt;&gt;&gt; cash, shares, fees_paid, slippage_paid = \
 ...     portfolio_nb(price, 100, 0.1, 0.1, order_func_nb)
 &gt;&gt;&gt; print(cash)
 [[98.79  93.95  98.79]
@@ -730,13 +1627,13 @@ It must return a positive/negative number to buy/sell. Return 0 to do nothing.</
  [0. 0. 0.]
  [0. 0. 0.]
  [0. 0. 0.]]
-&gt;&gt;&gt; print(paid_fees)
+&gt;&gt;&gt; print(fees_paid)
 [[0.11 0.55 0.11]
  [0.   0.   0.  ]
  [0.   0.   0.  ]
  [0.   0.   0.  ]
  [0.   0.   0.  ]]
-&gt;&gt;&gt; print(paid_slippage)
+&gt;&gt;&gt; print(slippage_paid)
 [[0.1 0.5 0.1]
  [0.  0.  0. ]
  [0.  0.  0. ]
@@ -786,7 +1683,7 @@ def portfolio_nb(price, init_capital, fees, slippage, order_func_nb, *args):
         ... def order_func_nb(col, i, run_cash, run_shares):
         ...     return 1 if i == 0 else 0 # buy and hold
 
-        &gt;&gt;&gt; cash, shares, paid_fees, paid_slippage = \\
+        &gt;&gt;&gt; cash, shares, fees_paid, slippage_paid = \\
         ...     portfolio_nb(price, 100, 0.1, 0.1, order_func_nb)
         &gt;&gt;&gt; print(cash)
         [[98.79  93.95  98.79]
@@ -800,13 +1697,13 @@ def portfolio_nb(price, init_capital, fees, slippage, order_func_nb, *args):
          [0. 0. 0.]
          [0. 0. 0.]
          [0. 0. 0.]]
-        &gt;&gt;&gt; print(paid_fees)
+        &gt;&gt;&gt; print(fees_paid)
         [[0.11 0.55 0.11]
          [0.   0.   0.  ]
          [0.   0.   0.  ]
          [0.   0.   0.  ]
          [0.   0.   0.  ]]
-        &gt;&gt;&gt; print(paid_slippage)
+        &gt;&gt;&gt; print(slippage_paid)
         [[0.1 0.5 0.1]
          [0.  0.  0. ]
          [0.  0.  0. ]
@@ -816,8 +1713,8 @@ def portfolio_nb(price, init_capital, fees, slippage, order_func_nb, *args):
     &#34;&#34;&#34;
     cash = np.empty_like(price, dtype=f8)
     shares = np.empty_like(price, dtype=f8)
-    paid_fees = np.zeros_like(price, dtype=f8)
-    paid_slippage = np.zeros_like(price, dtype=f8)
+    fees_paid = np.zeros_like(price, dtype=f8)
+    slippage_paid = np.zeros_like(price, dtype=f8)
 
     for col in range(price.shape[1]):
         run_cash = init_capital
@@ -826,15 +1723,15 @@ def portfolio_nb(price, init_capital, fees, slippage, order_func_nb, *args):
             amount = order_func_nb(col, i, run_cash, run_shares, *args)  # the amount of shares to order
             if amount &gt; 0:
                 # Buy amount
-                run_cash, run_shares, paid_fees[i, col], paid_slippage[i, col] = buy(
+                run_cash, run_shares, fees_paid[i, col], slippage_paid[i, col] = buy(
                     run_cash, run_shares, amount, price[i, col], fees[i, col], slippage[i, col])
             elif amount &lt; 0:
                 # Sell amount
-                run_cash, run_shares, paid_fees[i, col], paid_slippage[i, col] = sell(
+                run_cash, run_shares, fees_paid[i, col], slippage_paid[i, col] = sell(
                     run_cash, run_shares, amount, price[i, col], fees[i, col], slippage[i, col])
             cash[i, col], shares[i, col] = run_cash, run_shares
 
-    return cash, shares, paid_fees, paid_slippage</code></pre>
+    return cash, shares, fees_paid, slippage_paid</code></pre>
 </details>
 </dd>
 <dt id="vectorbt.portfolio.nb.returns_map_func_nb"><code class="name flex">
@@ -877,15 +1774,56 @@ def sell(run_cash, run_shares, amount, price, fees, slippage):
     adj_cash_wcom = adj_cash * (1 - fees)
     new_run_shares = run_shares - adj_shares
     new_run_cash = run_cash + adj_cash_wcom
-    paid_fees = adj_cash - adj_cash_wcom
-    # Difference in equity is the total cost of transaction = paid_fees + paid_slippage
+    fees_paid = adj_cash - adj_cash_wcom
+    # Difference in equity is the total cost of transaction = fees_paid + slippage_paid
     old_equity = run_cash + price * run_shares
     new_equity = new_run_cash + price * new_run_shares
     if slippage == 0:
-        paid_slippage = 0.
+        slippage_paid = 0.
     else:
-        paid_slippage = old_equity - new_equity - paid_fees
-    return new_run_cash, new_run_shares, paid_fees, paid_slippage</code></pre>
+        slippage_paid = old_equity - new_equity - fees_paid
+    return new_run_cash, new_run_shares, fees_paid, slippage_paid</code></pre>
+</details>
+</dd>
+<dt id="vectorbt.portfolio.nb.sharpe_ratio_1d_nb"><code class="name flex">
+<span>def <span class="ident">sharpe_ratio_1d_nb</span></span>(<span>returns, ann_factor, risk_free=0.0)</span>
+</code></dt>
+<dd>
+<div class="desc"><p>See <code>empyrical.sharpe_ratio</code>.</p></div>
+<details class="source">
+<summary>
+<span>Expand source code</span>
+</summary>
+<pre><code class="python">@njit(cache=True)
+def sharpe_ratio_1d_nb(returns, ann_factor, risk_free=0.):
+    &#34;&#34;&#34;See `empyrical.sharpe_ratio`.&#34;&#34;&#34;
+    if returns.shape[0] &lt; 2:
+        return np.nan
+
+    returns_risk_adj = returns - risk_free
+    mean = np.nanmean(returns_risk_adj)
+    std = timeseries.nb.nanstd_1d_nb(returns_risk_adj, ddof=1)
+    if std == 0.:
+        return np.nan
+    return mean / std * np.sqrt(ann_factor)</code></pre>
+</details>
+</dd>
+<dt id="vectorbt.portfolio.nb.sharpe_ratio_nb"><code class="name flex">
+<span>def <span class="ident">sharpe_ratio_nb</span></span>(<span>returns, ann_factor, risk_free=0.0)</span>
+</code></dt>
+<dd>
+<div class="desc"><p>2-dim version of <code><a title="vectorbt.portfolio.nb.sharpe_ratio_1d_nb" href="#vectorbt.portfolio.nb.sharpe_ratio_1d_nb">sharpe_ratio_1d_nb()</a></code>.</p></div>
+<details class="source">
+<summary>
+<span>Expand source code</span>
+</summary>
+<pre><code class="python">@njit(cache=True)
+def sharpe_ratio_nb(returns, ann_factor, risk_free=0.):
+    &#34;&#34;&#34;2-dim version of `sharpe_ratio_1d_nb`.&#34;&#34;&#34;
+    result = np.empty(returns.shape[1], dtype=f8)
+    for col in range(returns.shape[1]):
+        result[col] = sharpe_ratio_1d_nb(returns[:, col], ann_factor, risk_free=risk_free)
+    return result</code></pre>
 </details>
 </dd>
 <dt id="vectorbt.portfolio.nb.signals_order_func_nb"><code class="name flex">
@@ -910,6 +1848,47 @@ def signals_order_func_nb(col, i, run_cash, run_shares, entries, exits, amount):
     return 0.</code></pre>
 </details>
 </dd>
+<dt id="vectorbt.portfolio.nb.sortino_ratio_1d_nb"><code class="name flex">
+<span>def <span class="ident">sortino_ratio_1d_nb</span></span>(<span>returns, downside_risk, ann_factor, required_return=0.0)</span>
+</code></dt>
+<dd>
+<div class="desc"><p>See <code>empyrical.sortino_ratio</code>.</p></div>
+<details class="source">
+<summary>
+<span>Expand source code</span>
+</summary>
+<pre><code class="python">@njit(cache=True)
+def sortino_ratio_1d_nb(returns, downside_risk, ann_factor, required_return=0.):
+    &#34;&#34;&#34;See `empyrical.sortino_ratio`.&#34;&#34;&#34;
+    if returns.shape[0] &lt; 2:
+        return np.nan
+
+    adj_returns = returns - required_return
+    average_annualized_return = np.nanmean(adj_returns) * ann_factor
+    if downside_risk == 0.:
+        return np.nan
+    return average_annualized_return / downside_risk</code></pre>
+</details>
+</dd>
+<dt id="vectorbt.portfolio.nb.sortino_ratio_nb"><code class="name flex">
+<span>def <span class="ident">sortino_ratio_nb</span></span>(<span>returns, downside_risk, ann_factor, required_return=0.0)</span>
+</code></dt>
+<dd>
+<div class="desc"><p>2-dim version of <code><a title="vectorbt.portfolio.nb.sortino_ratio_1d_nb" href="#vectorbt.portfolio.nb.sortino_ratio_1d_nb">sortino_ratio_1d_nb()</a></code>.</p></div>
+<details class="source">
+<summary>
+<span>Expand source code</span>
+</summary>
+<pre><code class="python">@njit(cache=True)
+def sortino_ratio_nb(returns, downside_risk, ann_factor, required_return=0.):
+    &#34;&#34;&#34;2-dim version of `sortino_ratio_1d_nb`.&#34;&#34;&#34;
+    result = np.empty(returns.shape[1], dtype=f8)
+    for col in range(returns.shape[1]):
+        result[col] = sortino_ratio_1d_nb(
+            returns[:, col], downside_risk[col], ann_factor, required_return=required_return)
+    return result</code></pre>
+</details>
+</dd>
 <dt id="vectorbt.portfolio.nb.status_map_func_nb"><code class="name flex">
 <span>def <span class="ident">status_map_func_nb</span></span>(<span>col, entry_i, exit_i)</span>
 </code></dt>
@@ -927,6 +1906,49 @@ def status_map_func_nb(col, entry_i, exit_i):
     return 1</code></pre>
 </details>
 </dd>
+<dt id="vectorbt.portfolio.nb.tail_ratio_1d_nb"><code class="name flex">
+<span>def <span class="ident">tail_ratio_1d_nb</span></span>(<span>returns)</span>
+</code></dt>
+<dd>
+<div class="desc"><p>See <code>empyrical.tail_ratio</code>.</p></div>
+<details class="source">
+<summary>
+<span>Expand source code</span>
+</summary>
+<pre><code class="python">@njit(cache=True)
+def tail_ratio_1d_nb(returns):
+    &#34;&#34;&#34;See `empyrical.tail_ratio`.&#34;&#34;&#34;
+    if returns.shape[0] &lt; 1:
+        return np.nan
+
+    returns = returns[~np.isnan(returns)]
+    if len(returns) &lt; 1:
+        return np.nan
+    perc_95 = np.abs(np.percentile(returns, 95))
+    perc_5 = np.abs(np.percentile(returns, 5))
+    if perc_5 == 0.:
+        return np.nan
+    return perc_95 / perc_5</code></pre>
+</details>
+</dd>
+<dt id="vectorbt.portfolio.nb.tail_ratio_nb"><code class="name flex">
+<span>def <span class="ident">tail_ratio_nb</span></span>(<span>returns)</span>
+</code></dt>
+<dd>
+<div class="desc"><p>2-dim version of <code><a title="vectorbt.portfolio.nb.tail_ratio_1d_nb" href="#vectorbt.portfolio.nb.tail_ratio_1d_nb">tail_ratio_1d_nb()</a></code>.</p></div>
+<details class="source">
+<summary>
+<span>Expand source code</span>
+</summary>
+<pre><code class="python">@njit(cache=True)
+def tail_ratio_nb(returns):
+    &#34;&#34;&#34;2-dim version of `tail_ratio_1d_nb`.&#34;&#34;&#34;
+    result = np.empty(returns.shape[1], dtype=f8)
+    for col in range(returns.shape[1]):
+        result[col] = tail_ratio_1d_nb(returns[:, col])
+    return result</code></pre>
+</details>
+</dd>
 <dt id="vectorbt.portfolio.nb.total_return_apply_func_nb"><code class="name flex">
 <span>def <span class="ident">total_return_apply_func_nb</span></span>(<span>col, idxs, returns)</span>
 </code></dt>
@@ -940,6 +1962,84 @@ def status_map_func_nb(col, entry_i, exit_i):
 def total_return_apply_func_nb(col, idxs, returns):
     &#34;&#34;&#34;Calculate total return from returns.&#34;&#34;&#34;
     return timeseries.nb.product_1d_nb(returns + 1) - 1</code></pre>
+</details>
+</dd>
+<dt id="vectorbt.portfolio.nb.up_capture_1d_nb"><code class="name flex">
+<span>def <span class="ident">up_capture_1d_nb</span></span>(<span>returns, factor_returns, ann_factor)</span>
+</code></dt>
+<dd>
+<div class="desc"><p>See <code>empyrical.up_capture</code>.</p></div>
+<details class="source">
+<summary>
+<span>Expand source code</span>
+</summary>
+<pre><code class="python">@njit(cache=True)
+def up_capture_1d_nb(returns, factor_returns, ann_factor):
+    &#34;&#34;&#34;See `empyrical.up_capture`.&#34;&#34;&#34;
+    returns = returns[factor_returns &gt; 0]
+    factor_returns = factor_returns[factor_returns &gt; 0]
+    annualized_return1 = annualized_return_1d_nb(returns, ann_factor)
+    annualized_return2 = annualized_return_1d_nb(factor_returns, ann_factor)
+    if annualized_return2 == 0.:
+        return np.nan
+    return annualized_return1 / annualized_return2</code></pre>
+</details>
+</dd>
+<dt id="vectorbt.portfolio.nb.up_capture_nb"><code class="name flex">
+<span>def <span class="ident">up_capture_nb</span></span>(<span>returns, factor_returns, ann_factor)</span>
+</code></dt>
+<dd>
+<div class="desc"><p>2-dim version of <code><a title="vectorbt.portfolio.nb.up_capture_1d_nb" href="#vectorbt.portfolio.nb.up_capture_1d_nb">up_capture_1d_nb()</a></code>.</p></div>
+<details class="source">
+<summary>
+<span>Expand source code</span>
+</summary>
+<pre><code class="python">@njit(cache=True)
+def up_capture_nb(returns, factor_returns, ann_factor):
+    &#34;&#34;&#34;2-dim version of `up_capture_1d_nb`.&#34;&#34;&#34;
+    result = np.empty(returns.shape[1], dtype=f8)
+    for col in range(returns.shape[1]):
+        result[col] = up_capture_1d_nb(returns[:, col], factor_returns[:, col], ann_factor)
+    return result</code></pre>
+</details>
+</dd>
+<dt id="vectorbt.portfolio.nb.value_at_risk_1d_nb"><code class="name flex">
+<span>def <span class="ident">value_at_risk_1d_nb</span></span>(<span>returns, cutoff=0.05)</span>
+</code></dt>
+<dd>
+<div class="desc"><p>See <code>empyrical.value_at_risk</code>.</p></div>
+<details class="source">
+<summary>
+<span>Expand source code</span>
+</summary>
+<pre><code class="python">@njit(cache=True)
+def value_at_risk_1d_nb(returns, cutoff=0.05):
+    &#34;&#34;&#34;See `empyrical.value_at_risk`.&#34;&#34;&#34;
+    if returns.shape[0] &lt; 1:
+        return np.nan
+
+    returns = returns[~np.isnan(returns)]
+    if len(returns) &lt; 1:
+        return np.nan
+    return np.percentile(returns, 100 * cutoff)</code></pre>
+</details>
+</dd>
+<dt id="vectorbt.portfolio.nb.value_at_risk_nb"><code class="name flex">
+<span>def <span class="ident">value_at_risk_nb</span></span>(<span>returns, cutoff=0.05)</span>
+</code></dt>
+<dd>
+<div class="desc"><p>2-dim version of <code><a title="vectorbt.portfolio.nb.value_at_risk_1d_nb" href="#vectorbt.portfolio.nb.value_at_risk_1d_nb">value_at_risk_1d_nb()</a></code>.</p></div>
+<details class="source">
+<summary>
+<span>Expand source code</span>
+</summary>
+<pre><code class="python">@njit(cache=True)
+def value_at_risk_nb(returns, cutoff=0.05):
+    &#34;&#34;&#34;2-dim version of `value_at_risk_1d_nb`.&#34;&#34;&#34;
+    result = np.empty(returns.shape[1], dtype=f8)
+    for col in range(returns.shape[1]):
+        result[col] = value_at_risk_1d_nb(returns[:, col], cutoff=cutoff)
+    return result</code></pre>
 </details>
 </dd>
 <dt id="vectorbt.portfolio.nb.winning_filter_func_nb"><code class="name flex">
@@ -973,29 +2073,59 @@ def winning_filter_func_nb(col, i, map_result, pnl):
 <li><code><a title="vectorbt.portfolio" href="index.html">vectorbt.portfolio</a></code></li>
 </ul>
 </li>
-<li><h3><a href="#header-variables">Global variables</a></h3>
-<ul class="">
-<li><code><a title="vectorbt.portfolio.nb.CLOSED" href="#vectorbt.portfolio.nb.CLOSED">CLOSED</a></code></li>
-<li><code><a title="vectorbt.portfolio.nb.OPEN" href="#vectorbt.portfolio.nb.OPEN">OPEN</a></code></li>
-</ul>
-</li>
 <li><h3><a href="#header-functions">Functions</a></h3>
 <ul class="">
+<li><code><a title="vectorbt.portfolio.nb.alpha_1d_nb" href="#vectorbt.portfolio.nb.alpha_1d_nb">alpha_1d_nb</a></code></li>
+<li><code><a title="vectorbt.portfolio.nb.alpha_nb" href="#vectorbt.portfolio.nb.alpha_nb">alpha_nb</a></code></li>
 <li><code><a title="vectorbt.portfolio.nb.amount_order_func_nb" href="#vectorbt.portfolio.nb.amount_order_func_nb">amount_order_func_nb</a></code></li>
+<li><code><a title="vectorbt.portfolio.nb.annualized_return_1d_nb" href="#vectorbt.portfolio.nb.annualized_return_1d_nb">annualized_return_1d_nb</a></code></li>
+<li><code><a title="vectorbt.portfolio.nb.annualized_return_nb" href="#vectorbt.portfolio.nb.annualized_return_nb">annualized_return_nb</a></code></li>
+<li><code><a title="vectorbt.portfolio.nb.annualized_volatility_1d_nb" href="#vectorbt.portfolio.nb.annualized_volatility_1d_nb">annualized_volatility_1d_nb</a></code></li>
+<li><code><a title="vectorbt.portfolio.nb.annualized_volatility_nb" href="#vectorbt.portfolio.nb.annualized_volatility_nb">annualized_volatility_nb</a></code></li>
+<li><code><a title="vectorbt.portfolio.nb.beta_1d_nb" href="#vectorbt.portfolio.nb.beta_1d_nb">beta_1d_nb</a></code></li>
+<li><code><a title="vectorbt.portfolio.nb.beta_nb" href="#vectorbt.portfolio.nb.beta_nb">beta_nb</a></code></li>
 <li><code><a title="vectorbt.portfolio.nb.buy" href="#vectorbt.portfolio.nb.buy">buy</a></code></li>
+<li><code><a title="vectorbt.portfolio.nb.calmar_ratio_1d_nb" href="#vectorbt.portfolio.nb.calmar_ratio_1d_nb">calmar_ratio_1d_nb</a></code></li>
+<li><code><a title="vectorbt.portfolio.nb.calmar_ratio_nb" href="#vectorbt.portfolio.nb.calmar_ratio_nb">calmar_ratio_nb</a></code></li>
+<li><code><a title="vectorbt.portfolio.nb.capture_1d_nb" href="#vectorbt.portfolio.nb.capture_1d_nb">capture_1d_nb</a></code></li>
+<li><code><a title="vectorbt.portfolio.nb.capture_nb" href="#vectorbt.portfolio.nb.capture_nb">capture_nb</a></code></li>
+<li><code><a title="vectorbt.portfolio.nb.conditional_value_at_risk_1d_nb" href="#vectorbt.portfolio.nb.conditional_value_at_risk_1d_nb">conditional_value_at_risk_1d_nb</a></code></li>
+<li><code><a title="vectorbt.portfolio.nb.conditional_value_at_risk_nb" href="#vectorbt.portfolio.nb.conditional_value_at_risk_nb">conditional_value_at_risk_nb</a></code></li>
+<li><code><a title="vectorbt.portfolio.nb.cum_returns_1d_nb" href="#vectorbt.portfolio.nb.cum_returns_1d_nb">cum_returns_1d_nb</a></code></li>
+<li><code><a title="vectorbt.portfolio.nb.cum_returns_final_1d_nb" href="#vectorbt.portfolio.nb.cum_returns_final_1d_nb">cum_returns_final_1d_nb</a></code></li>
+<li><code><a title="vectorbt.portfolio.nb.cum_returns_final_nb" href="#vectorbt.portfolio.nb.cum_returns_final_nb">cum_returns_final_nb</a></code></li>
+<li><code><a title="vectorbt.portfolio.nb.cum_returns_nb" href="#vectorbt.portfolio.nb.cum_returns_nb">cum_returns_nb</a></code></li>
+<li><code><a title="vectorbt.portfolio.nb.down_capture_1d_nb" href="#vectorbt.portfolio.nb.down_capture_1d_nb">down_capture_1d_nb</a></code></li>
+<li><code><a title="vectorbt.portfolio.nb.down_capture_nb" href="#vectorbt.portfolio.nb.down_capture_nb">down_capture_nb</a></code></li>
+<li><code><a title="vectorbt.portfolio.nb.downside_risk_1d_nb" href="#vectorbt.portfolio.nb.downside_risk_1d_nb">downside_risk_1d_nb</a></code></li>
+<li><code><a title="vectorbt.portfolio.nb.downside_risk_nb" href="#vectorbt.portfolio.nb.downside_risk_nb">downside_risk_nb</a></code></li>
 <li><code><a title="vectorbt.portfolio.nb.duration_map_func_nb" href="#vectorbt.portfolio.nb.duration_map_func_nb">duration_map_func_nb</a></code></li>
 <li><code><a title="vectorbt.portfolio.nb.get_position_equities_nb" href="#vectorbt.portfolio.nb.get_position_equities_nb">get_position_equities_nb</a></code></li>
+<li><code><a title="vectorbt.portfolio.nb.information_ratio_1d_nb" href="#vectorbt.portfolio.nb.information_ratio_1d_nb">information_ratio_1d_nb</a></code></li>
+<li><code><a title="vectorbt.portfolio.nb.information_ratio_nb" href="#vectorbt.portfolio.nb.information_ratio_nb">information_ratio_nb</a></code></li>
 <li><code><a title="vectorbt.portfolio.nb.is_accumulated_1d_nb" href="#vectorbt.portfolio.nb.is_accumulated_1d_nb">is_accumulated_1d_nb</a></code></li>
 <li><code><a title="vectorbt.portfolio.nb.is_accumulated_nb" href="#vectorbt.portfolio.nb.is_accumulated_nb">is_accumulated_nb</a></code></li>
 <li><code><a title="vectorbt.portfolio.nb.losing_filter_func_nb" href="#vectorbt.portfolio.nb.losing_filter_func_nb">losing_filter_func_nb</a></code></li>
 <li><code><a title="vectorbt.portfolio.nb.map_positions_nb" href="#vectorbt.portfolio.nb.map_positions_nb">map_positions_nb</a></code></li>
+<li><code><a title="vectorbt.portfolio.nb.omega_ratio_1d_nb" href="#vectorbt.portfolio.nb.omega_ratio_1d_nb">omega_ratio_1d_nb</a></code></li>
+<li><code><a title="vectorbt.portfolio.nb.omega_ratio_nb" href="#vectorbt.portfolio.nb.omega_ratio_nb">omega_ratio_nb</a></code></li>
 <li><code><a title="vectorbt.portfolio.nb.pnl_map_func_nb" href="#vectorbt.portfolio.nb.pnl_map_func_nb">pnl_map_func_nb</a></code></li>
 <li><code><a title="vectorbt.portfolio.nb.portfolio_nb" href="#vectorbt.portfolio.nb.portfolio_nb">portfolio_nb</a></code></li>
 <li><code><a title="vectorbt.portfolio.nb.returns_map_func_nb" href="#vectorbt.portfolio.nb.returns_map_func_nb">returns_map_func_nb</a></code></li>
 <li><code><a title="vectorbt.portfolio.nb.sell" href="#vectorbt.portfolio.nb.sell">sell</a></code></li>
+<li><code><a title="vectorbt.portfolio.nb.sharpe_ratio_1d_nb" href="#vectorbt.portfolio.nb.sharpe_ratio_1d_nb">sharpe_ratio_1d_nb</a></code></li>
+<li><code><a title="vectorbt.portfolio.nb.sharpe_ratio_nb" href="#vectorbt.portfolio.nb.sharpe_ratio_nb">sharpe_ratio_nb</a></code></li>
 <li><code><a title="vectorbt.portfolio.nb.signals_order_func_nb" href="#vectorbt.portfolio.nb.signals_order_func_nb">signals_order_func_nb</a></code></li>
+<li><code><a title="vectorbt.portfolio.nb.sortino_ratio_1d_nb" href="#vectorbt.portfolio.nb.sortino_ratio_1d_nb">sortino_ratio_1d_nb</a></code></li>
+<li><code><a title="vectorbt.portfolio.nb.sortino_ratio_nb" href="#vectorbt.portfolio.nb.sortino_ratio_nb">sortino_ratio_nb</a></code></li>
 <li><code><a title="vectorbt.portfolio.nb.status_map_func_nb" href="#vectorbt.portfolio.nb.status_map_func_nb">status_map_func_nb</a></code></li>
+<li><code><a title="vectorbt.portfolio.nb.tail_ratio_1d_nb" href="#vectorbt.portfolio.nb.tail_ratio_1d_nb">tail_ratio_1d_nb</a></code></li>
+<li><code><a title="vectorbt.portfolio.nb.tail_ratio_nb" href="#vectorbt.portfolio.nb.tail_ratio_nb">tail_ratio_nb</a></code></li>
 <li><code><a title="vectorbt.portfolio.nb.total_return_apply_func_nb" href="#vectorbt.portfolio.nb.total_return_apply_func_nb">total_return_apply_func_nb</a></code></li>
+<li><code><a title="vectorbt.portfolio.nb.up_capture_1d_nb" href="#vectorbt.portfolio.nb.up_capture_1d_nb">up_capture_1d_nb</a></code></li>
+<li><code><a title="vectorbt.portfolio.nb.up_capture_nb" href="#vectorbt.portfolio.nb.up_capture_nb">up_capture_nb</a></code></li>
+<li><code><a title="vectorbt.portfolio.nb.value_at_risk_1d_nb" href="#vectorbt.portfolio.nb.value_at_risk_1d_nb">value_at_risk_1d_nb</a></code></li>
+<li><code><a title="vectorbt.portfolio.nb.value_at_risk_nb" href="#vectorbt.portfolio.nb.value_at_risk_nb">value_at_risk_nb</a></code></li>
 <li><code><a title="vectorbt.portfolio.nb.winning_filter_func_nb" href="#vectorbt.portfolio.nb.winning_filter_func_nb">winning_filter_func_nb</a></code></li>
 </ul>
 </li>
