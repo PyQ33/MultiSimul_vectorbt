@@ -49,10 +49,10 @@ marked as read-only. To change an attribute, you need to create a new Portfolio 
 </div>
 <h3 id="property-hierarchy">Property hierarchy</h3>
 <p>All those properties are building a hierarchy with time series and metrics as leafs, and group
-objects as nodes. By implementing custom cachable property classes <code><a title="vectorbt.portfolio.common.timeseries_property" href="common.html#vectorbt.portfolio.common.timeseries_property">timeseries_property</a></code>
-and <code><a title="vectorbt.portfolio.common.metric_property" href="common.html#vectorbt.portfolio.common.metric_property">metric_property</a></code>, we are also able to encode information into each property,
+objects as nodes. By implementing custom cachable property classes <code>vectorbt.portfolio.properties.timeseries_property</code>
+and <code>vectorbt.portfolio.properties.metric_property</code>, we are also able to encode information into each property,
 such as the full name of a metric and its display format. And by defining the group properties with
-<code><a title="vectorbt.portfolio.common.group_property" href="common.html#vectorbt.portfolio.common.group_property">group_property</a></code>, we are able to define gateaway points that can be easily traversed.</p>
+<code>vectorbt.portfolio.properties.group_property</code>, we are able to define gateaway points that can be easily traversed.</p>
 <pre><code class="plaintext">Portfolio
 +-- @timeseries_property
 +-- @metric_property
@@ -62,7 +62,7 @@ such as the full name of a metric and its display format. And by defining the gr
 </code></pre>
 <p>This way, the <code><a title="vectorbt.portfolio.portfolio.Portfolio" href="#vectorbt.portfolio.portfolio.Portfolio">Portfolio</a></code> class acts as an extendable tree data structure for properties with
 annotations. Instead of hard-coding the list of available time series and metrics with something
-like <code>_PERFORMANCE_METRICS_PROPS</code>, we can call <code><a title="vectorbt.portfolio.common.traverse_timeseries" href="common.html#vectorbt.portfolio.common.traverse_timeseries">traverse_timeseries()</a></code>
+like <code>_PERFORMANCE_METRICS_PROPS</code>, we can call <code>vectorbt.portfolio.properties.traverse_timeseries</code>
 and build the list on the fly.</p>
 <div class="admonition note">
 <p class="admonition-title">Note</p>
@@ -72,7 +72,7 @@ properties there. Each property must be a subclass of <code><a title="vectorbt.u
 </div>
 <h2 id="indexing">Indexing</h2>
 <p>In addition, you can use pandas indexing on the <code><a title="vectorbt.portfolio.portfolio.Portfolio" href="#vectorbt.portfolio.portfolio.Portfolio">Portfolio</a></code> class itself, which forwards
-indexing operation to each <code>__init__</code> argument with pandas type (see <code>portfolio_indexing_func</code>):</p>
+indexing operation to each <code>__init__</code> argument with pandas type (see <code><a title="vectorbt.portfolio.portfolio.portfolio_indexing_func" href="#vectorbt.portfolio.portfolio.portfolio_indexing_func">portfolio_indexing_func()</a></code>):</p>
 <pre><code class="python-repl">&gt;&gt;&gt; import vectorbt as vbt
 &gt;&gt;&gt; import numpy as np
 &gt;&gt;&gt; import pandas as pd
@@ -161,10 +161,10 @@ would have re-calculated everything starting from equity, each time.
 ### Property hierarchy
 
 All those properties are building a hierarchy with time series and metrics as leafs, and group 
-objects as nodes. By implementing custom cachable property classes `vectorbt.portfolio.common.timeseries_property` 
-and `vectorbt.portfolio.common.metric_property`, we are also able to encode information into each property, 
+objects as nodes. By implementing custom cachable property classes `vectorbt.portfolio.properties.timeseries_property` 
+and `vectorbt.portfolio.properties.metric_property`, we are also able to encode information into each property, 
 such as the full name of a metric and its display format. And by defining the group properties with 
-`vectorbt.portfolio.common.group_property`, we are able to define gateaway points that can be easily traversed.
+`vectorbt.portfolio.properties.group_property`, we are able to define gateaway points that can be easily traversed.
 
 ```plaintext
 Portfolio
@@ -177,7 +177,7 @@ Portfolio
 
 This way, the `Portfolio` class acts as an extendable tree data structure for properties with 
 annotations. Instead of hard-coding the list of available time series and metrics with something 
-like `_PERFORMANCE_METRICS_PROPS`, we can call `vectorbt.portfolio.common.traverse_timeseries` 
+like `_PERFORMANCE_METRICS_PROPS`, we can call `vectorbt.portfolio.properties.traverse_timeseries` 
 and build the list on the fly.
 
 !!! note
@@ -252,16 +252,18 @@ from datetime import timedelta
 from scipy import stats
 
 from vectorbt import timeseries, accessors, defaults
-from vectorbt.utils import indexing, checks, reshape_fns, common
-from vectorbt.utils.common import list_module_keys
+from vectorbt.utils import indexing, checks, reshape_fns
+from vectorbt.utils.config import merge_kwargs
+from vectorbt.utils.decorators import class_or_instancemethod
 from vectorbt.portfolio import nb
 from vectorbt.portfolio.positions import Positions
-from vectorbt.portfolio.common import (
-    ArrayWrapper,
+from vectorbt.portfolio.common import ArrayWrapper
+from vectorbt.portfolio.const import OutputFormat
+from vectorbt.portfolio.props import (
     timeseries_property,
     metric_property,
     group_property,
-    OutputFormat
+    traverse_properties
 )
 
 
@@ -847,7 +849,7 @@ class Portfolio(ArrayWrapper):
         # Plot time series
         fig = self.price.vbt.timeseries.plot(fig=fig, **layout_kwargs)
         # Plot markers
-        buy_trace_kwargs = common.merge_kwargs(dict(
+        buy_trace_kwargs = merge_kwargs(dict(
             customdata=self.trades[buy_mask],
             hovertemplate=&#39;(%{x}, %{y})&lt;br&gt;%{customdata:.6g}&#39;,
             marker=dict(
@@ -857,7 +859,7 @@ class Portfolio(ArrayWrapper):
         ), buy_trace_kwargs)
         buy_mask.vbt.signals.plot_markers(
             self.price, name=&#39;Buy&#39;, trace_kwargs=buy_trace_kwargs, fig=fig, **layout_kwargs)
-        sell_trace_kwargs = common.merge_kwargs(dict(
+        sell_trace_kwargs = merge_kwargs(dict(
             customdata=self.trades[sell_mask],
             hovertemplate=&#39;(%{x}, %{y})&lt;br&gt;%{customdata:.6g}&#39;,
             marker=dict(
@@ -1086,8 +1088,24 @@ class Portfolio(ArrayWrapper):
         &#34;&#34;&#34;Kurtosis of returns.&#34;&#34;&#34;
         return self.wrap_reduced_array(stats.kurtosis(self.returns.vbt.to_2d_array(), axis=0, nan_policy=&#39;omit&#39;))
 
+    # ############# Properties traversal ############# #
 
-__all__ = list_module_keys(__name__, blacklist=[&#39;portfolio_indexing_func&#39;])</code></pre>
+    @class_or_instancemethod
+    def traverse_properties(self_or_cls, property_cls):
+        &#34;&#34;&#34;Traverse this class and its group properties for any properties of type `property_cls`.&#34;&#34;&#34;
+        if isinstance(self_or_cls, type):
+            return traverse_properties(self_or_cls, property_cls)
+        return traverse_properties(self_or_cls.__class__, property_cls)
+
+    @class_or_instancemethod
+    def traverse_timeseries(self_or_cls):
+        &#34;&#34;&#34;Traverse this class and its group properties for time series.&#34;&#34;&#34;
+        return self_or_cls.traverse_properties(timeseries_property)
+
+    @class_or_instancemethod
+    def traverse_metrics(self_or_cls):
+        &#34;&#34;&#34;Traverse this class and its group properties for metrics.&#34;&#34;&#34;
+        return self_or_cls.traverse_properties(metric_property)</code></pre>
 </details>
 </section>
 <section>
@@ -1095,6 +1113,42 @@ __all__ = list_module_keys(__name__, blacklist=[&#39;portfolio_indexing_func&#39
 <section>
 </section>
 <section>
+<h2 class="section-title" id="header-functions">Functions</h2>
+<dl>
+<dt id="vectorbt.portfolio.portfolio.portfolio_indexing_func"><code class="name flex">
+<span>def <span class="ident">portfolio_indexing_func</span></span>(<span>obj, pd_indexing_func)</span>
+</code></dt>
+<dd>
+<div class="desc"><p>Perform indexing on <code><a title="vectorbt.portfolio.portfolio.Portfolio" href="#vectorbt.portfolio.portfolio.Portfolio">Portfolio</a></code>. </p>
+<p>See <code><a title="vectorbt.utils.indexing.add_pd_indexing" href="../utils/indexing.html#vectorbt.utils.indexing.add_pd_indexing">add_pd_indexing()</a></code>.</p></div>
+<details class="source">
+<summary>
+<span>Expand source code</span>
+</summary>
+<pre><code class="python">def portfolio_indexing_func(obj, pd_indexing_func):
+    &#34;&#34;&#34;Perform indexing on `Portfolio`. 
+
+    See `vectorbt.utils.indexing.add_pd_indexing`.&#34;&#34;&#34;
+    factor_returns = obj.factor_returns
+    if factor_returns is not None:
+        factor_returns = pd_indexing_func(obj.factor_returns)
+    return obj.__class__(
+        pd_indexing_func(obj.price),
+        pd_indexing_func(obj.cash),
+        pd_indexing_func(obj.shares),
+        obj.init_capital,
+        pd_indexing_func(obj.fees_paid),
+        pd_indexing_func(obj.slippage_paid),
+        data_freq=obj.data_freq,
+        year_freq=obj.year_freq,
+        risk_free=obj.risk_free,
+        required_return=obj.required_return,
+        cutoff=obj.cutoff,
+        factor_returns=factor_returns
+    )</code></pre>
+</details>
+</dd>
+</dl>
 </section>
 <section>
 <h2 class="section-title" id="header-classes">Classes</h2>
@@ -1701,7 +1755,7 @@ The <code>__init__</code> method is reserved for indexing purposes.</p>
         # Plot time series
         fig = self.price.vbt.timeseries.plot(fig=fig, **layout_kwargs)
         # Plot markers
-        buy_trace_kwargs = common.merge_kwargs(dict(
+        buy_trace_kwargs = merge_kwargs(dict(
             customdata=self.trades[buy_mask],
             hovertemplate=&#39;(%{x}, %{y})&lt;br&gt;%{customdata:.6g}&#39;,
             marker=dict(
@@ -1711,7 +1765,7 @@ The <code>__init__</code> method is reserved for indexing purposes.</p>
         ), buy_trace_kwargs)
         buy_mask.vbt.signals.plot_markers(
             self.price, name=&#39;Buy&#39;, trace_kwargs=buy_trace_kwargs, fig=fig, **layout_kwargs)
-        sell_trace_kwargs = common.merge_kwargs(dict(
+        sell_trace_kwargs = merge_kwargs(dict(
             customdata=self.trades[sell_mask],
             hovertemplate=&#39;(%{x}, %{y})&lt;br&gt;%{customdata:.6g}&#39;,
             marker=dict(
@@ -1938,7 +1992,26 @@ The <code>__init__</code> method is reserved for indexing purposes.</p>
     @metric_property(&#39;Kurtosis&#39;, OutputFormat.NONE)
     def kurtosis(self):
         &#34;&#34;&#34;Kurtosis of returns.&#34;&#34;&#34;
-        return self.wrap_reduced_array(stats.kurtosis(self.returns.vbt.to_2d_array(), axis=0, nan_policy=&#39;omit&#39;))</code></pre>
+        return self.wrap_reduced_array(stats.kurtosis(self.returns.vbt.to_2d_array(), axis=0, nan_policy=&#39;omit&#39;))
+
+    # ############# Properties traversal ############# #
+
+    @class_or_instancemethod
+    def traverse_properties(self_or_cls, property_cls):
+        &#34;&#34;&#34;Traverse this class and its group properties for any properties of type `property_cls`.&#34;&#34;&#34;
+        if isinstance(self_or_cls, type):
+            return traverse_properties(self_or_cls, property_cls)
+        return traverse_properties(self_or_cls.__class__, property_cls)
+
+    @class_or_instancemethod
+    def traverse_timeseries(self_or_cls):
+        &#34;&#34;&#34;Traverse this class and its group properties for time series.&#34;&#34;&#34;
+        return self_or_cls.traverse_properties(timeseries_property)
+
+    @class_or_instancemethod
+    def traverse_metrics(self_or_cls):
+        &#34;&#34;&#34;Traverse this class and its group properties for metrics.&#34;&#34;&#34;
+        return self_or_cls.traverse_properties(metric_property)</code></pre>
 </details>
 <h3>Ancestors</h3>
 <ul class="hlist">
@@ -2491,6 +2564,53 @@ def from_signals(cls, price, entries, exits, amount=np.inf, init_capital=None,
     slippage_paid = price.vbt.wrap_array(slippage_paid)
 
     return cls(price, cash, shares, init_capital, fees_paid, slippage_paid, **kwargs)</code></pre>
+</details>
+</dd>
+<dt id="vectorbt.portfolio.portfolio.Portfolio.traverse_metrics"><code class="name flex">
+<span>def <span class="ident">traverse_metrics</span></span>(<span>)</span>
+</code></dt>
+<dd>
+<div class="desc"><p>Traverse this class and its group properties for metrics.</p></div>
+<details class="source">
+<summary>
+<span>Expand source code</span>
+</summary>
+<pre><code class="python">@class_or_instancemethod
+def traverse_metrics(self_or_cls):
+    &#34;&#34;&#34;Traverse this class and its group properties for metrics.&#34;&#34;&#34;
+    return self_or_cls.traverse_properties(metric_property)</code></pre>
+</details>
+</dd>
+<dt id="vectorbt.portfolio.portfolio.Portfolio.traverse_properties"><code class="name flex">
+<span>def <span class="ident">traverse_properties</span></span>(<span>property_cls)</span>
+</code></dt>
+<dd>
+<div class="desc"><p>Traverse this class and its group properties for any properties of type <code>property_cls</code>.</p></div>
+<details class="source">
+<summary>
+<span>Expand source code</span>
+</summary>
+<pre><code class="python">@class_or_instancemethod
+def traverse_properties(self_or_cls, property_cls):
+    &#34;&#34;&#34;Traverse this class and its group properties for any properties of type `property_cls`.&#34;&#34;&#34;
+    if isinstance(self_or_cls, type):
+        return traverse_properties(self_or_cls, property_cls)
+    return traverse_properties(self_or_cls.__class__, property_cls)</code></pre>
+</details>
+</dd>
+<dt id="vectorbt.portfolio.portfolio.Portfolio.traverse_timeseries"><code class="name flex">
+<span>def <span class="ident">traverse_timeseries</span></span>(<span>)</span>
+</code></dt>
+<dd>
+<div class="desc"><p>Traverse this class and its group properties for time series.</p></div>
+<details class="source">
+<summary>
+<span>Expand source code</span>
+</summary>
+<pre><code class="python">@class_or_instancemethod
+def traverse_timeseries(self_or_cls):
+    &#34;&#34;&#34;Traverse this class and its group properties for time series.&#34;&#34;&#34;
+    return self_or_cls.traverse_properties(timeseries_property)</code></pre>
 </details>
 </dd>
 </dl>
@@ -3617,7 +3737,7 @@ def year_freq(self):
     # Plot time series
     fig = self.price.vbt.timeseries.plot(fig=fig, **layout_kwargs)
     # Plot markers
-    buy_trace_kwargs = common.merge_kwargs(dict(
+    buy_trace_kwargs = merge_kwargs(dict(
         customdata=self.trades[buy_mask],
         hovertemplate=&#39;(%{x}, %{y})&lt;br&gt;%{customdata:.6g}&#39;,
         marker=dict(
@@ -3627,7 +3747,7 @@ def year_freq(self):
     ), buy_trace_kwargs)
     buy_mask.vbt.signals.plot_markers(
         self.price, name=&#39;Buy&#39;, trace_kwargs=buy_trace_kwargs, fig=fig, **layout_kwargs)
-    sell_trace_kwargs = common.merge_kwargs(dict(
+    sell_trace_kwargs = merge_kwargs(dict(
         customdata=self.trades[sell_mask],
         hovertemplate=&#39;(%{x}, %{y})&lt;br&gt;%{customdata:.6g}&#39;,
         marker=dict(
@@ -3688,6 +3808,11 @@ operation to each Series/DataFrame and returns a new instance of <code><a title=
 <li><code><a title="vectorbt.portfolio" href="index.html">vectorbt.portfolio</a></code></li>
 </ul>
 </li>
+<li><h3><a href="#header-functions">Functions</a></h3>
+<ul class="">
+<li><code><a title="vectorbt.portfolio.portfolio.portfolio_indexing_func" href="#vectorbt.portfolio.portfolio.portfolio_indexing_func">portfolio_indexing_func</a></code></li>
+</ul>
+</li>
 <li><h3><a href="#header-classes">Classes</a></h3>
 <ul>
 <li>
@@ -3742,6 +3867,9 @@ operation to each Series/DataFrame and returns a new instance of <code><a title=
 <li><code><a title="vectorbt.portfolio.portfolio.Portfolio.total_slippage_paid" href="#vectorbt.portfolio.portfolio.Portfolio.total_slippage_paid">total_slippage_paid</a></code></li>
 <li><code><a title="vectorbt.portfolio.portfolio.Portfolio.trade_count" href="#vectorbt.portfolio.portfolio.Portfolio.trade_count">trade_count</a></code></li>
 <li><code><a title="vectorbt.portfolio.portfolio.Portfolio.trades" href="#vectorbt.portfolio.portfolio.Portfolio.trades">trades</a></code></li>
+<li><code><a title="vectorbt.portfolio.portfolio.Portfolio.traverse_metrics" href="#vectorbt.portfolio.portfolio.Portfolio.traverse_metrics">traverse_metrics</a></code></li>
+<li><code><a title="vectorbt.portfolio.portfolio.Portfolio.traverse_properties" href="#vectorbt.portfolio.portfolio.Portfolio.traverse_properties">traverse_properties</a></code></li>
+<li><code><a title="vectorbt.portfolio.portfolio.Portfolio.traverse_timeseries" href="#vectorbt.portfolio.portfolio.Portfolio.traverse_timeseries">traverse_timeseries</a></code></li>
 <li><code><a title="vectorbt.portfolio.portfolio.Portfolio.up_capture" href="#vectorbt.portfolio.portfolio.Portfolio.up_capture">up_capture</a></code></li>
 <li><code><a title="vectorbt.portfolio.portfolio.Portfolio.value_at_risk" href="#vectorbt.portfolio.portfolio.Portfolio.value_at_risk">value_at_risk</a></code></li>
 <li><code><a title="vectorbt.portfolio.portfolio.Portfolio.xs" href="#vectorbt.portfolio.portfolio.Portfolio.xs">xs</a></code></li>
