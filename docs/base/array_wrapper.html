@@ -4,8 +4,8 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, minimum-scale=1" />
 <meta name="generator" content="pdoc 0.8.2" />
-<title>vectorbt.widgets API documentation</title>
-<meta name="description" content="Modules for creating and displaying widgets …" />
+<title>vectorbt.base.array_wrapper API documentation</title>
+<meta name="description" content="Class for wrapping NumPy arrays into Series/DataFrames." />
 <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/5.12.0-2/css/all.min.css" integrity="sha256-46r060N2LrChLLb5zowXQ72/iKKNiw/lAmygmHExk/o=" crossorigin="anonymous" />
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/docsearch.js@2/dist/cdn/docsearch.min.css" />
 <link href='https://cdnjs.cloudflare.com/ajax/libs/normalize/8.0.0/normalize.min.css' rel='stylesheet'>
@@ -25,52 +25,364 @@ ga('create', 'UA-142521178-3', 'auto'); ga('send', 'pageview');
 <main>
 <article id="content">
 <header>
-<h1 class="title">Module <code>vectorbt.widgets</code></h1>
+<h1 class="title">Module <code>vectorbt.base.array_wrapper</code></h1>
 </header>
 <section id="section-intro">
-<p>Modules for creating and displaying widgets.</p>
-<p>Figure widgets enable interactive data visualization in Jupyter Notebook and JupyterLab environments.</p>
-<p>Each widget is based upon <code>plotly.graph_objects.FigureWidget</code>.
-For more details on using Plotly, see <a href="https://plotly.com/python/getting-started/">Getting Started with Plotly in Python</a>.</p>
+<p>Class for wrapping NumPy arrays into Series/DataFrames.</p>
 <details class="source">
 <summary>
 <span>Expand source code</span>
 </summary>
-<pre><code class="python">&#34;&#34;&#34;Modules for creating and displaying widgets.
+<pre><code class="python">&#34;&#34;&#34;Class for wrapping NumPy arrays into Series/DataFrames.&#34;&#34;&#34;
 
-Figure widgets enable interactive data visualization in Jupyter Notebook and JupyterLab environments.
+import numpy as np
+import pandas as pd
 
-Each widget is based upon `plotly.graph_objects.FigureWidget`.
-For more details on using Plotly, see [Getting Started with Plotly in Python](https://plotly.com/python/getting-started/).&#34;&#34;&#34;
+from vectorbt.utils import checks
+from vectorbt.base import index_fns, reshape_fns
 
-from vectorbt.widgets import accessors, basic, common
 
-from vectorbt.widgets.common import DefaultFigureWidget
-from vectorbt.widgets.basic import Indicator, Bar, Scatter, Histogram, Heatmap</code></pre>
+class ArrayWrapper:
+    &#34;&#34;&#34;Class that stores index, columns and shape metadata for wrapping NumPy arrays.&#34;&#34;&#34;
+
+    def __init__(self, index=None, columns=None, ndim=None):
+        if not isinstance(index, pd.Index):
+            index = pd.Index(index)
+        if not isinstance(columns, pd.Index):
+            columns = pd.Index(columns)
+        self._index = index
+        self._columns = columns
+        self._ndim = ndim
+
+    @property
+    def index(self):
+        &#34;&#34;&#34;Index.&#34;&#34;&#34;
+        return self._index
+
+    @property
+    def columns(self):
+        &#34;&#34;&#34;Columns.&#34;&#34;&#34;
+        return self._columns
+
+    @property
+    def ndim(self):
+        &#34;&#34;&#34;Number of dimensions.&#34;&#34;&#34;
+        return self._ndim
+
+    @property
+    def shape(self):
+        &#34;&#34;&#34;Shape.&#34;&#34;&#34;
+        if self.ndim == 1:
+            return len(self.index),
+        return len(self.index), len(self.columns)
+
+    @classmethod
+    def from_obj(cls, obj, *args, **kwargs):
+        &#34;&#34;&#34;Derive metadata from an object.&#34;&#34;&#34;
+        index = index_fns.get_index(obj, 0)
+        columns = index_fns.get_index(obj, 1)
+        ndim = obj.ndim
+        return cls(*args, index=index, columns=columns, ndim=ndim, **kwargs)
+
+    def wrap(self, arg, index=None, columns=None, ndim=None, dtype=None):
+        &#34;&#34;&#34;Wrap a NumPy array using the stored metadata.&#34;&#34;&#34;
+        arg = np.asarray(arg)
+        if ndim is None:
+            ndim = self.ndim
+        if ndim is not None:
+            arg = reshape_fns.soft_broadcast_to_ndim(arg, self.ndim)
+        if index is None:
+            index = self.index
+        if columns is None:
+            columns = self.columns
+        if columns is not None and len(columns) == 1:
+            name = columns[0]
+        else:
+            name = None
+
+        # Perform checks
+        if index is not None:
+            checks.assert_same_shape(arg, index, axis=(0, 0))
+        if arg.ndim == 2 and columns is not None:
+            checks.assert_same_shape(arg, columns, axis=(1, 0))
+
+        if arg.ndim == 1:
+            return pd.Series(arg, index=index, name=name, dtype=dtype)
+        return pd.DataFrame(arg, index=index, columns=columns, dtype=dtype)
+
+    def wrap_reduced(self, a, index=None):
+        &#34;&#34;&#34;Wrap result of reduction.&#34;&#34;&#34;
+        if a.ndim == 0:
+            return a
+        elif a.ndim == 1:
+            # Each column reduced to a single value
+            a_obj = pd.Series(a, index=self.columns)
+            if self.ndim &gt; 1:
+                return a_obj
+            return a_obj.iloc[0]
+        else:
+            # Each column reduced to an array
+            if index is None:
+                index = pd.Index(range(a.shape[0]))
+            a_obj = self.wrap(a, index=index)
+            return a_obj</code></pre>
 </details>
 </section>
 <section>
-<h2 class="section-title" id="header-submodules">Sub-modules</h2>
+</section>
+<section>
+</section>
+<section>
+</section>
+<section>
+<h2 class="section-title" id="header-classes">Classes</h2>
 <dl>
-<dt><code class="name"><a title="vectorbt.widgets.accessors" href="accessors.html">vectorbt.widgets.accessors</a></code></dt>
+<dt id="vectorbt.base.array_wrapper.ArrayWrapper"><code class="flex name class">
+<span>class <span class="ident parent-fname">ArrayWrapper</span></span>
+<span>(</span><span>index=None, columns=None, ndim=None)</span>
+</code></dt>
 <dd>
-<div class="desc"><p>Custom pandas accessors.</p></div>
-</dd>
-<dt><code class="name"><a title="vectorbt.widgets.basic" href="basic.html">vectorbt.widgets.basic</a></code></dt>
+<div class="desc"><p>Class that stores index, columns and shape metadata for wrapping NumPy arrays.</p></div>
+<details class="source">
+<summary>
+<span>Expand source code</span>
+</summary>
+<pre><code class="python">class ArrayWrapper:
+    &#34;&#34;&#34;Class that stores index, columns and shape metadata for wrapping NumPy arrays.&#34;&#34;&#34;
+
+    def __init__(self, index=None, columns=None, ndim=None):
+        if not isinstance(index, pd.Index):
+            index = pd.Index(index)
+        if not isinstance(columns, pd.Index):
+            columns = pd.Index(columns)
+        self._index = index
+        self._columns = columns
+        self._ndim = ndim
+
+    @property
+    def index(self):
+        &#34;&#34;&#34;Index.&#34;&#34;&#34;
+        return self._index
+
+    @property
+    def columns(self):
+        &#34;&#34;&#34;Columns.&#34;&#34;&#34;
+        return self._columns
+
+    @property
+    def ndim(self):
+        &#34;&#34;&#34;Number of dimensions.&#34;&#34;&#34;
+        return self._ndim
+
+    @property
+    def shape(self):
+        &#34;&#34;&#34;Shape.&#34;&#34;&#34;
+        if self.ndim == 1:
+            return len(self.index),
+        return len(self.index), len(self.columns)
+
+    @classmethod
+    def from_obj(cls, obj, *args, **kwargs):
+        &#34;&#34;&#34;Derive metadata from an object.&#34;&#34;&#34;
+        index = index_fns.get_index(obj, 0)
+        columns = index_fns.get_index(obj, 1)
+        ndim = obj.ndim
+        return cls(*args, index=index, columns=columns, ndim=ndim, **kwargs)
+
+    def wrap(self, arg, index=None, columns=None, ndim=None, dtype=None):
+        &#34;&#34;&#34;Wrap a NumPy array using the stored metadata.&#34;&#34;&#34;
+        arg = np.asarray(arg)
+        if ndim is None:
+            ndim = self.ndim
+        if ndim is not None:
+            arg = reshape_fns.soft_broadcast_to_ndim(arg, self.ndim)
+        if index is None:
+            index = self.index
+        if columns is None:
+            columns = self.columns
+        if columns is not None and len(columns) == 1:
+            name = columns[0]
+        else:
+            name = None
+
+        # Perform checks
+        if index is not None:
+            checks.assert_same_shape(arg, index, axis=(0, 0))
+        if arg.ndim == 2 and columns is not None:
+            checks.assert_same_shape(arg, columns, axis=(1, 0))
+
+        if arg.ndim == 1:
+            return pd.Series(arg, index=index, name=name, dtype=dtype)
+        return pd.DataFrame(arg, index=index, columns=columns, dtype=dtype)
+
+    def wrap_reduced(self, a, index=None):
+        &#34;&#34;&#34;Wrap result of reduction.&#34;&#34;&#34;
+        if a.ndim == 0:
+            return a
+        elif a.ndim == 1:
+            # Each column reduced to a single value
+            a_obj = pd.Series(a, index=self.columns)
+            if self.ndim &gt; 1:
+                return a_obj
+            return a_obj.iloc[0]
+        else:
+            # Each column reduced to an array
+            if index is None:
+                index = pd.Index(range(a.shape[0]))
+            a_obj = self.wrap(a, index=index)
+            return a_obj</code></pre>
+</details>
+<h3 class="section-subtitle">Subclasses</h3>
+<ul class="hlist">
+<li><a title="vectorbt.base.accessors.Base_Accessor" href="accessors.html#vectorbt.base.accessors.Base_Accessor">Base_Accessor</a></li>
+<li><a title="vectorbt.tseries.common.TSArrayWrapper" href="../tseries/common.html#vectorbt.tseries.common.TSArrayWrapper">TSArrayWrapper</a></li>
+</ul>
+<h3 class="section-subtitle">Static methods</h3>
+<dl>
+<dt id="vectorbt.base.array_wrapper.ArrayWrapper.from_obj"><code class="name flex">
+<span>def <span class="ident fname">from_obj</span></span>(<span>obj, *args, **kwargs)</span>
+</code></dt>
 <dd>
-<div class="desc"><p>Basic Plotly widgets.</p></div>
-</dd>
-<dt><code class="name"><a title="vectorbt.widgets.common" href="common.html">vectorbt.widgets.common</a></code></dt>
-<dd>
-<div class="desc"><p>Common functions and classes.</p></div>
+<div class="desc"><p>Derive metadata from an object.</p></div>
+<details class="source">
+<summary>
+<span>Expand source code</span>
+</summary>
+<pre><code class="python">@classmethod
+def from_obj(cls, obj, *args, **kwargs):
+    &#34;&#34;&#34;Derive metadata from an object.&#34;&#34;&#34;
+    index = index_fns.get_index(obj, 0)
+    columns = index_fns.get_index(obj, 1)
+    ndim = obj.ndim
+    return cls(*args, index=index, columns=columns, ndim=ndim, **kwargs)</code></pre>
+</details>
 </dd>
 </dl>
-</section>
-<section>
-</section>
-<section>
-</section>
-<section>
+<h3 class="section-subtitle">Instance variables</h3>
+<dl>
+<dt id="vectorbt.base.array_wrapper.ArrayWrapper.columns"><code class="name">var <span class="ident fname">columns</span></code></dt>
+<dd>
+<div class="desc"><p>Columns.</p></div>
+<details class="source">
+<summary>
+<span>Expand source code</span>
+</summary>
+<pre><code class="python">@property
+def columns(self):
+    &#34;&#34;&#34;Columns.&#34;&#34;&#34;
+    return self._columns</code></pre>
+</details>
+</dd>
+<dt id="vectorbt.base.array_wrapper.ArrayWrapper.index"><code class="name">var <span class="ident fname">index</span></code></dt>
+<dd>
+<div class="desc"><p>Index.</p></div>
+<details class="source">
+<summary>
+<span>Expand source code</span>
+</summary>
+<pre><code class="python">@property
+def index(self):
+    &#34;&#34;&#34;Index.&#34;&#34;&#34;
+    return self._index</code></pre>
+</details>
+</dd>
+<dt id="vectorbt.base.array_wrapper.ArrayWrapper.ndim"><code class="name">var <span class="ident fname">ndim</span></code></dt>
+<dd>
+<div class="desc"><p>Number of dimensions.</p></div>
+<details class="source">
+<summary>
+<span>Expand source code</span>
+</summary>
+<pre><code class="python">@property
+def ndim(self):
+    &#34;&#34;&#34;Number of dimensions.&#34;&#34;&#34;
+    return self._ndim</code></pre>
+</details>
+</dd>
+<dt id="vectorbt.base.array_wrapper.ArrayWrapper.shape"><code class="name">var <span class="ident fname">shape</span></code></dt>
+<dd>
+<div class="desc"><p>Shape.</p></div>
+<details class="source">
+<summary>
+<span>Expand source code</span>
+</summary>
+<pre><code class="python">@property
+def shape(self):
+    &#34;&#34;&#34;Shape.&#34;&#34;&#34;
+    if self.ndim == 1:
+        return len(self.index),
+    return len(self.index), len(self.columns)</code></pre>
+</details>
+</dd>
+</dl>
+<h3 class="section-subtitle">Methods</h3>
+<dl>
+<dt id="vectorbt.base.array_wrapper.ArrayWrapper.wrap"><code class="name flex">
+<span>def <span class="ident fname">wrap</span></span>(<span>self, arg, index=None, columns=None, ndim=None, dtype=None)</span>
+</code></dt>
+<dd>
+<div class="desc"><p>Wrap a NumPy array using the stored metadata.</p></div>
+<details class="source">
+<summary>
+<span>Expand source code</span>
+</summary>
+<pre><code class="python">def wrap(self, arg, index=None, columns=None, ndim=None, dtype=None):
+    &#34;&#34;&#34;Wrap a NumPy array using the stored metadata.&#34;&#34;&#34;
+    arg = np.asarray(arg)
+    if ndim is None:
+        ndim = self.ndim
+    if ndim is not None:
+        arg = reshape_fns.soft_broadcast_to_ndim(arg, self.ndim)
+    if index is None:
+        index = self.index
+    if columns is None:
+        columns = self.columns
+    if columns is not None and len(columns) == 1:
+        name = columns[0]
+    else:
+        name = None
+
+    # Perform checks
+    if index is not None:
+        checks.assert_same_shape(arg, index, axis=(0, 0))
+    if arg.ndim == 2 and columns is not None:
+        checks.assert_same_shape(arg, columns, axis=(1, 0))
+
+    if arg.ndim == 1:
+        return pd.Series(arg, index=index, name=name, dtype=dtype)
+    return pd.DataFrame(arg, index=index, columns=columns, dtype=dtype)</code></pre>
+</details>
+</dd>
+<dt id="vectorbt.base.array_wrapper.ArrayWrapper.wrap_reduced"><code class="name flex">
+<span>def <span class="ident fname">wrap_reduced</span></span>(<span>self, a, index=None)</span>
+</code></dt>
+<dd>
+<div class="desc"><p>Wrap result of reduction.</p></div>
+<details class="source">
+<summary>
+<span>Expand source code</span>
+</summary>
+<pre><code class="python">def wrap_reduced(self, a, index=None):
+    &#34;&#34;&#34;Wrap result of reduction.&#34;&#34;&#34;
+    if a.ndim == 0:
+        return a
+    elif a.ndim == 1:
+        # Each column reduced to a single value
+        a_obj = pd.Series(a, index=self.columns)
+        if self.ndim &gt; 1:
+            return a_obj
+        return a_obj.iloc[0]
+    else:
+        # Each column reduced to an array
+        if index is None:
+            index = pd.Index(range(a.shape[0]))
+        a_obj = self.wrap(a, index=index)
+        return a_obj</code></pre>
+</details>
+</dd>
+</dl>
+</dd>
+</dl>
 </section>
 </article>
 <nav id="sidebar">
@@ -95,14 +407,23 @@ title="Search"
 <ul id="index">
 <li><h3>Super-module</h3>
 <ul>
-<li><code><a title="vectorbt" href="../index.html">vectorbt</a></code></li>
+<li><code><a title="vectorbt.base" href="index.html">vectorbt.base</a></code></li>
 </ul>
 </li>
-<li><h3><a href="#header-submodules">Sub-modules</a></h3>
+<li><h3><a href="#header-classes">Classes</a></h3>
 <ul>
-<li><code><a title="vectorbt.widgets.accessors" href="accessors.html">vectorbt.widgets.accessors</a></code></li>
-<li><code><a title="vectorbt.widgets.basic" href="basic.html">vectorbt.widgets.basic</a></code></li>
-<li><code><a title="vectorbt.widgets.common" href="common.html">vectorbt.widgets.common</a></code></li>
+<li>
+<h4><code><a title="vectorbt.base.array_wrapper.ArrayWrapper" href="#vectorbt.base.array_wrapper.ArrayWrapper">ArrayWrapper</a></code></h4>
+<ul class="two-column">
+<li><code><a title="vectorbt.base.array_wrapper.ArrayWrapper.columns" href="#vectorbt.base.array_wrapper.ArrayWrapper.columns">columns</a></code></li>
+<li><code><a title="vectorbt.base.array_wrapper.ArrayWrapper.from_obj" href="#vectorbt.base.array_wrapper.ArrayWrapper.from_obj">from_obj</a></code></li>
+<li><code><a title="vectorbt.base.array_wrapper.ArrayWrapper.index" href="#vectorbt.base.array_wrapper.ArrayWrapper.index">index</a></code></li>
+<li><code><a title="vectorbt.base.array_wrapper.ArrayWrapper.ndim" href="#vectorbt.base.array_wrapper.ArrayWrapper.ndim">ndim</a></code></li>
+<li><code><a title="vectorbt.base.array_wrapper.ArrayWrapper.shape" href="#vectorbt.base.array_wrapper.ArrayWrapper.shape">shape</a></code></li>
+<li><code><a title="vectorbt.base.array_wrapper.ArrayWrapper.wrap" href="#vectorbt.base.array_wrapper.ArrayWrapper.wrap">wrap</a></code></li>
+<li><code><a title="vectorbt.base.array_wrapper.ArrayWrapper.wrap_reduced" href="#vectorbt.base.array_wrapper.ArrayWrapper.wrap_reduced">wrap_reduced</a></code></li>
+</ul>
+</li>
 </ul>
 </li>
 </ul>
