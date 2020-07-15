@@ -432,6 +432,14 @@ from vectorbt.base.indexing import PandasIndexer, ParamIndexerFactory, indexing_
 from vectorbt.tseries.common import TSArrayWrapper
 
 
+def build_param_product(param_list):
+    &#34;&#34;&#34;Make Cartesian product out of all params in `param_list`.&#34;&#34;&#34;
+    param_list = list(map(reshape_fns.to_1d, param_list))
+    param_list = list(zip(*list(itertools.product(*param_list))))
+    param_list = list(map(np.asarray, param_list))
+    return param_list
+
+
 def build_column_hierarchy(param_list, level_names, ts_columns):
     &#34;&#34;&#34;For each parameter in `param_list`, create a new column level with parameter values. 
     Combine this level with columns `ts_columns` using Cartesian product.
@@ -515,7 +523,7 @@ def from_params_pipeline(
             
     Returns:
         A list of transformed inputs (`pandas_like`), a list of generated outputs (`pandas_like`), 
-        a list of parameter arrays (`numpy.ndarray`), a list of parameter mappers (`pandas.Series`),
+        a list of parameter arrays (`np.ndarray`), a list of parameter mappers (`pd.Series`),
         a list of other generated outputs that are outside of  `num_outputs`.
 
     Explanation:
@@ -618,22 +626,21 @@ def from_params_pipeline(
         ts_list = reshape_fns.broadcast(*ts_list, **broadcast_kwargs, writeable=True)
     # Check time series objects
     checks.assert_type(ts_list[0], (pd.Series, pd.DataFrame))
-    # Check level names
-    checks.assert_type(level_names, (list, tuple))
-    checks.assert_same_len(param_list, level_names)
-    for ts in ts_list:
-        # Every time series object should be free of the specified level names in its columns
-        for level_name in level_names:
-            if level_name is not None:
-                checks.assert_level_not_exists(ts, level_name)
     # Convert params to 1-dim arrays
     param_list = list(map(reshape_fns.to_1d, param_list))
     if len(param_list) &gt; 1:
+        # Check level names
+        checks.assert_type(level_names, (list, tuple))
+        checks.assert_same_len(param_list, level_names)
+        for ts in ts_list:
+            # Every time series object should be free of the specified level names in its columns
+            for level_name in level_names:
+                if level_name is not None:
+                    if checks.is_frame(ts):
+                        checks.assert_level_not_exists(ts.columns, level_name)
         if param_product:
             # Make Cartesian product out of all params
-            param_list = list(map(reshape_fns.to_1d, param_list))
-            param_list = list(zip(*list(itertools.product(*param_list))))
-            param_list = list(map(np.asarray, param_list))
+            param_list = build_param_product(param_list)
         else:
             # Broadcast such that each array has the same length
             param_list = reshape_fns.broadcast(*param_list, writeable=True)
@@ -876,7 +883,8 @@ class IndicatorFactory():
 
         # Add from_params method
         @classmethod
-        def from_params(cls, *args, name=name.lower(), hide_params=[], return_raw=False, pipeline_kwargs=pipeline_kwargs, **kwargs):
+        def from_params(cls, *args, name=name.lower(), hide_params=[],
+                        pipeline_kwargs=pipeline_kwargs, **kwargs):
             level_names = []
             for param_name in param_names:
                 if param_name in hide_params:
@@ -892,21 +900,21 @@ class IndicatorFactory():
             kwargs = {**pipeline_kwargs, **kwargs}  # overwrite default pipeline kwargs
             results = from_params_pipeline(
                 ts_list, param_list, level_names, len(output_names),
-                custom_func, *custom_func_args, return_raw=return_raw, **kwargs)
-            if return_raw or kwargs.get(&#39;return_cache&#39;, False):
+                custom_func, *custom_func_args, **kwargs)
+            if kwargs.get(&#39;return_raw&#39;, False) or kwargs.get(&#39;return_cache&#39;, False):
                 return results
             new_ts_list, output_list, new_param_list, mapper_list, other_list = results
             obj = cls(new_ts_list, output_list, new_param_list, mapper_list, name)
             if len(other_list) &gt; 0:
-                return (obj,) + other_list
+                return (obj, *tuple(other_list))
             return obj
 
         setattr(CustomIndicator, &#39;from_params&#39;, from_params)
 
         # Add user-defined outputs
         for prop_name, prop in custom_outputs.items():
-            prop.__name__ = prop_name
             if not isinstance(prop, (property, cached_property)):
+                prop.__name__ = prop_name
                 prop = cached_property(prop)
             setattr(CustomIndicator, prop_name, prop)
 
@@ -914,7 +922,7 @@ class IndicatorFactory():
         comparison_attrs = set(ts_names + output_names + list(custom_outputs.keys()))
         for attr in comparison_attrs:
             def assign_comparison_method(func_name, compare_func, attr=attr):
-                def comparison_method(self, other, crossed=False, wait=0, name=None, **kwargs):
+                def comparison_method(self, other, crossed=False, wait=0, name=None, after_false=True, **kwargs):
                     if isinstance(other, self.__class__):
                         other = getattr(other, attr)
                     if name is None:
@@ -924,7 +932,7 @@ class IndicatorFactory():
                             name = f&#39;{self.name}_{attr}_{func_name}&#39;
                     result = compare(getattr(self, attr), other, compare_func, name=name, **kwargs)
                     if crossed:
-                        return result.vbt.signals.nst(wait+1, after_false=True)
+                        return result.vbt.signals.nst(wait+1, after_false=after_false)
                     return result
                 comparison_method.__qualname__ = f&#39;{CustomIndicator.__name__}.{attr}_{func_name}&#39;
                 comparison_method.__doc__ = f&#34;&#34;&#34;Return `True` for each element where `{attr}` is {func_name} `other`. 
@@ -1156,6 +1164,23 @@ Combine this level with columns <code>ts_columns</code> using Cartesian product.
     return params_mapper</code></pre>
 </details>
 </dd>
+<dt id="vectorbt.indicators.factory.build_param_product"><code class="name flex">
+<span>def <span class="ident fname">build_param_product</span></span>(<span>param_list)</span>
+</code></dt>
+<dd>
+<div class="desc"><p>Make Cartesian product out of all params in <code>param_list</code>.</p></div>
+<details class="source">
+<summary>
+<span>Expand source code</span>
+</summary>
+<pre><code class="python">def build_param_product(param_list):
+    &#34;&#34;&#34;Make Cartesian product out of all params in `param_list`.&#34;&#34;&#34;
+    param_list = list(map(reshape_fns.to_1d, param_list))
+    param_list = list(zip(*list(itertools.product(*param_list))))
+    param_list = list(map(np.asarray, param_list))
+    return param_list</code></pre>
+</details>
+</dd>
 <dt id="vectorbt.indicators.factory.build_tuple_mapper"><code class="name flex">
 <span>def <span class="ident fname">build_tuple_mapper</span></span>(<span>mappers_list, new_columns, level_names)</span>
 </code></dt>
@@ -1239,7 +1264,7 @@ Those are only applicable to <code>custom_func</code> that supports it (<code>cu
 </dl>
 <h2 id="returns">Returns</h2>
 <p>A list of transformed inputs (<code>pandas_like</code>), a list of generated outputs (<code>pandas_like</code>),
-a list of parameter arrays (<code>numpy.ndarray</code>), a list of parameter mappers (<code>pandas.Series</code>),
+a list of parameter arrays (<code>np.ndarray</code>), a list of parameter mappers (<code>pd.Series</code>),
 a list of other generated outputs that are outside of
 <code>num_outputs</code>.</p>
 <h2 id="explanation">Explanation</h2>
@@ -1368,7 +1393,7 @@ p3  False  False  False  False  False  False
             
     Returns:
         A list of transformed inputs (`pandas_like`), a list of generated outputs (`pandas_like`), 
-        a list of parameter arrays (`numpy.ndarray`), a list of parameter mappers (`pandas.Series`),
+        a list of parameter arrays (`np.ndarray`), a list of parameter mappers (`pd.Series`),
         a list of other generated outputs that are outside of  `num_outputs`.
 
     Explanation:
@@ -1471,22 +1496,21 @@ p3  False  False  False  False  False  False
         ts_list = reshape_fns.broadcast(*ts_list, **broadcast_kwargs, writeable=True)
     # Check time series objects
     checks.assert_type(ts_list[0], (pd.Series, pd.DataFrame))
-    # Check level names
-    checks.assert_type(level_names, (list, tuple))
-    checks.assert_same_len(param_list, level_names)
-    for ts in ts_list:
-        # Every time series object should be free of the specified level names in its columns
-        for level_name in level_names:
-            if level_name is not None:
-                checks.assert_level_not_exists(ts, level_name)
     # Convert params to 1-dim arrays
     param_list = list(map(reshape_fns.to_1d, param_list))
     if len(param_list) &gt; 1:
+        # Check level names
+        checks.assert_type(level_names, (list, tuple))
+        checks.assert_same_len(param_list, level_names)
+        for ts in ts_list:
+            # Every time series object should be free of the specified level names in its columns
+            for level_name in level_names:
+                if level_name is not None:
+                    if checks.is_frame(ts):
+                        checks.assert_level_not_exists(ts.columns, level_name)
         if param_product:
             # Make Cartesian product out of all params
-            param_list = list(map(reshape_fns.to_1d, param_list))
-            param_list = list(zip(*list(itertools.product(*param_list))))
-            param_list = list(map(np.asarray, param_list))
+            param_list = build_param_product(param_list)
         else:
             # Broadcast such that each array has the same length
             param_list = reshape_fns.broadcast(*param_list, writeable=True)
@@ -1773,7 +1797,8 @@ a new indicator object with newly indexed attributes.</p>
 
         # Add from_params method
         @classmethod
-        def from_params(cls, *args, name=name.lower(), hide_params=[], return_raw=False, pipeline_kwargs=pipeline_kwargs, **kwargs):
+        def from_params(cls, *args, name=name.lower(), hide_params=[],
+                        pipeline_kwargs=pipeline_kwargs, **kwargs):
             level_names = []
             for param_name in param_names:
                 if param_name in hide_params:
@@ -1789,21 +1814,21 @@ a new indicator object with newly indexed attributes.</p>
             kwargs = {**pipeline_kwargs, **kwargs}  # overwrite default pipeline kwargs
             results = from_params_pipeline(
                 ts_list, param_list, level_names, len(output_names),
-                custom_func, *custom_func_args, return_raw=return_raw, **kwargs)
-            if return_raw or kwargs.get(&#39;return_cache&#39;, False):
+                custom_func, *custom_func_args, **kwargs)
+            if kwargs.get(&#39;return_raw&#39;, False) or kwargs.get(&#39;return_cache&#39;, False):
                 return results
             new_ts_list, output_list, new_param_list, mapper_list, other_list = results
             obj = cls(new_ts_list, output_list, new_param_list, mapper_list, name)
             if len(other_list) &gt; 0:
-                return (obj,) + other_list
+                return (obj, *tuple(other_list))
             return obj
 
         setattr(CustomIndicator, &#39;from_params&#39;, from_params)
 
         # Add user-defined outputs
         for prop_name, prop in custom_outputs.items():
-            prop.__name__ = prop_name
             if not isinstance(prop, (property, cached_property)):
+                prop.__name__ = prop_name
                 prop = cached_property(prop)
             setattr(CustomIndicator, prop_name, prop)
 
@@ -1811,7 +1836,7 @@ a new indicator object with newly indexed attributes.</p>
         comparison_attrs = set(ts_names + output_names + list(custom_outputs.keys()))
         for attr in comparison_attrs:
             def assign_comparison_method(func_name, compare_func, attr=attr):
-                def comparison_method(self, other, crossed=False, wait=0, name=None, **kwargs):
+                def comparison_method(self, other, crossed=False, wait=0, name=None, after_false=True, **kwargs):
                     if isinstance(other, self.__class__):
                         other = getattr(other, attr)
                     if name is None:
@@ -1821,7 +1846,7 @@ a new indicator object with newly indexed attributes.</p>
                             name = f&#39;{self.name}_{attr}_{func_name}&#39;
                     result = compare(getattr(self, attr), other, compare_func, name=name, **kwargs)
                     if crossed:
-                        return result.vbt.signals.nst(wait+1, after_false=True)
+                        return result.vbt.signals.nst(wait+1, after_false=after_false)
                     return result
                 comparison_method.__qualname__ = f&#39;{CustomIndicator.__name__}.{attr}_{func_name}&#39;
                 comparison_method.__doc__ = f&#34;&#34;&#34;Return `True` for each element where `{attr}` is {func_name} `other`. 
@@ -2404,7 +2429,8 @@ custom_p2              3             4
 
     # Add from_params method
     @classmethod
-    def from_params(cls, *args, name=name.lower(), hide_params=[], return_raw=False, pipeline_kwargs=pipeline_kwargs, **kwargs):
+    def from_params(cls, *args, name=name.lower(), hide_params=[],
+                    pipeline_kwargs=pipeline_kwargs, **kwargs):
         level_names = []
         for param_name in param_names:
             if param_name in hide_params:
@@ -2420,21 +2446,21 @@ custom_p2              3             4
         kwargs = {**pipeline_kwargs, **kwargs}  # overwrite default pipeline kwargs
         results = from_params_pipeline(
             ts_list, param_list, level_names, len(output_names),
-            custom_func, *custom_func_args, return_raw=return_raw, **kwargs)
-        if return_raw or kwargs.get(&#39;return_cache&#39;, False):
+            custom_func, *custom_func_args, **kwargs)
+        if kwargs.get(&#39;return_raw&#39;, False) or kwargs.get(&#39;return_cache&#39;, False):
             return results
         new_ts_list, output_list, new_param_list, mapper_list, other_list = results
         obj = cls(new_ts_list, output_list, new_param_list, mapper_list, name)
         if len(other_list) &gt; 0:
-            return (obj,) + other_list
+            return (obj, *tuple(other_list))
         return obj
 
     setattr(CustomIndicator, &#39;from_params&#39;, from_params)
 
     # Add user-defined outputs
     for prop_name, prop in custom_outputs.items():
-        prop.__name__ = prop_name
         if not isinstance(prop, (property, cached_property)):
+            prop.__name__ = prop_name
             prop = cached_property(prop)
         setattr(CustomIndicator, prop_name, prop)
 
@@ -2442,7 +2468,7 @@ custom_p2              3             4
     comparison_attrs = set(ts_names + output_names + list(custom_outputs.keys()))
     for attr in comparison_attrs:
         def assign_comparison_method(func_name, compare_func, attr=attr):
-            def comparison_method(self, other, crossed=False, wait=0, name=None, **kwargs):
+            def comparison_method(self, other, crossed=False, wait=0, name=None, after_false=True, **kwargs):
                 if isinstance(other, self.__class__):
                     other = getattr(other, attr)
                 if name is None:
@@ -2452,7 +2478,7 @@ custom_p2              3             4
                         name = f&#39;{self.name}_{attr}_{func_name}&#39;
                 result = compare(getattr(self, attr), other, compare_func, name=name, **kwargs)
                 if crossed:
-                    return result.vbt.signals.nst(wait+1, after_false=True)
+                    return result.vbt.signals.nst(wait+1, after_false=after_false)
                 return result
             comparison_method.__qualname__ = f&#39;{CustomIndicator.__name__}.{attr}_{func_name}&#39;
             comparison_method.__doc__ = f&#34;&#34;&#34;Return `True` for each element where `{attr}` is {func_name} `other`. 
@@ -2505,6 +2531,7 @@ title="Search"
 <li><code><a title="vectorbt.indicators.factory.broadcast_ts" href="#vectorbt.indicators.factory.broadcast_ts">broadcast_ts</a></code></li>
 <li><code><a title="vectorbt.indicators.factory.build_column_hierarchy" href="#vectorbt.indicators.factory.build_column_hierarchy">build_column_hierarchy</a></code></li>
 <li><code><a title="vectorbt.indicators.factory.build_mapper" href="#vectorbt.indicators.factory.build_mapper">build_mapper</a></code></li>
+<li><code><a title="vectorbt.indicators.factory.build_param_product" href="#vectorbt.indicators.factory.build_param_product">build_param_product</a></code></li>
 <li><code><a title="vectorbt.indicators.factory.build_tuple_mapper" href="#vectorbt.indicators.factory.build_tuple_mapper">build_tuple_mapper</a></code></li>
 <li><code><a title="vectorbt.indicators.factory.compare" href="#vectorbt.indicators.factory.compare">compare</a></code></li>
 <li><code><a title="vectorbt.indicators.factory.from_params_pipeline" href="#vectorbt.indicators.factory.from_params_pipeline">from_params_pipeline</a></code></li>

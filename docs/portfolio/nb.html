@@ -31,7 +31,7 @@ ga('create', 'UA-142521178-3', 'auto'); ga('send', 'pageview');
 <p>Numba-compiled 1-dim and 2-dim functions.</p>
 <div class="admonition note">
 <p class="admonition-title">Note</p>
-<p><code><a title="vectorbt" href="../index.html">vectorbt</a></code> treats matrices as first-class citizens and expects input arrays to be
+<p>vectorbt treats matrices as first-class citizens and expects input arrays to be
 2-dim, unless function has suffix <code>_1d</code> or is meant to be input to another function.
 Data is processed along index (axis 0).</p>
 <p>All functions passed as argument must be Numba-compiled.</p>
@@ -44,7 +44,7 @@ Data is processed along index (axis 0).</p>
 <pre><code class="python">&#34;&#34;&#34;Numba-compiled 1-dim and 2-dim functions.
 
 !!! note
-    `vectorbt` treats matrices as first-class citizens and expects input arrays to be
+    vectorbt treats matrices as first-class citizens and expects input arrays to be
     2-dim, unless function has suffix `_1d` or is meant to be input to another function. 
     Data is processed along index (axis 0).
     
@@ -53,8 +53,9 @@ Data is processed along index (axis 0).</p>
     Records must remain in the order they were created.&#34;&#34;&#34;
 
 import numpy as np
-from numba import njit, f8
+from numba import njit
 
+from vectorbt.utils.math import is_close_or_less_nb
 from vectorbt.portfolio.enums import (
     Order,
     FilledOrder
@@ -79,7 +80,7 @@ def buy_nb(run_cash, run_shares, order):
     req_cash = order.size * adj_price
     adj_req_cash = req_cash * (1 + order.fees) + order.fixed_fees
 
-    if adj_req_cash &lt;= run_cash:
+    if is_close_or_less_nb(adj_req_cash, run_cash):
         # Sufficient cash
         adj_size = order.size
         fees_paid = adj_req_cash - req_cash
@@ -89,11 +90,12 @@ def buy_nb(run_cash, run_shares, order):
         run_shares += adj_size
     else:
         # Insufficient cash, size will be less than requested
-        # For fees of 10%, you can buy shares for 90.9$ (adj_cash) to spend 100$ (run_cash) in total
-        adj_cash = (run_cash - order.fixed_fees) / (1 + order.fees)
-        if adj_cash &lt;= 0.:
+        if is_close_or_less_nb(run_cash, order.fixed_fees):
             # Can&#39;t cover
             return run_cash, run_shares, None
+
+        # For fees of 10%, you can buy shares for 90.9$ (adj_cash) to spend 100$ (run_cash) in total
+        adj_cash = (run_cash - order.fixed_fees) / (1 + order.fees)
 
         # Update size and feee
         adj_size = adj_cash / adj_price
@@ -120,17 +122,18 @@ def sell_nb(run_cash, run_shares, order):
     cash = adj_size * adj_price
 
     # Minus costs
-    adj_cash = cash * (1 - order.fees) - order.fixed_fees
-    if adj_cash &lt;= 0.:
+    adj_cash = cash * (1 - order.fees)
+    if is_close_or_less_nb(adj_cash, order.fixed_fees):
         # Can&#39;t cover
         return run_cash, run_shares, None
+    adj_cash -= order.fixed_fees
 
     # Update fees
     fees_paid = cash - adj_cash
 
     # Update current cash and shares
     run_cash += adj_size * adj_price - fees_paid
-    if run_shares &lt;= abs(order.size):
+    if is_close_or_less_nb(run_shares, abs(order.size)):
         run_shares = 0.  # numerical stability
     else:
         run_shares -= adj_size
@@ -142,16 +145,16 @@ def fill_order_nb(run_cash, run_shares, order):
     &#34;&#34;&#34;Fill an order.&#34;&#34;&#34;
     if order.size != 0.:
         if order.price &lt;= 0.:
-            raise Exception(&#34;Price must be greater than zero&#34;)
+            raise ValueError(&#34;Price must be greater than zero&#34;)
         if order.fees &lt; 0.:
-            raise Exception(&#34;Fees must be zero or greater&#34;)
+            raise ValueError(&#34;Fees must be zero or greater&#34;)
         if order.fixed_fees &lt; 0.:
-            raise Exception(&#34;Fixed fees must be zero or greater&#34;)
+            raise ValueError(&#34;Fixed fees must be zero or greater&#34;)
         if order.slippage &lt; 0.:
-            raise Exception(&#34;Slippage must be zero or greater&#34;)
-        if order.size &gt; 0.:
+            raise ValueError(&#34;Slippage must be zero or greater&#34;)
+        if order.size &gt; 0. and run_cash &gt; 0.:
             return buy_nb(run_cash, run_shares, order)
-        if order.size &lt; 0.:
+        if order.size &lt; 0. and run_shares &gt; 0.:
             return sell_nb(run_cash, run_shares, order)
     return run_cash, run_shares, None
 
@@ -224,8 +227,8 @@ def simulate_nb(target_shape, init_capital, order_func_nb, *args):
     &#34;&#34;&#34;
     order_records = np.empty(target_shape[0] * target_shape[1], dtype=order_dt)
     j = 0
-    cash = np.empty(target_shape, dtype=f8)
-    shares = np.empty(target_shape, dtype=f8)
+    cash = np.empty(target_shape, dtype=np.float_)
+    shares = np.empty(target_shape, dtype=np.float_)
 
     for col in range(target_shape[1]):
         run_cash = init_capital[col]
@@ -261,8 +264,8 @@ def simulate_from_signals_nb(target_shape, init_capital, entries, exits, size, e
     &#34;&#34;&#34;Adaptation of `simulate_nb` for simulation based on entry and exit signals.&#34;&#34;&#34;
     order_records = np.empty(target_shape[0] * target_shape[1], dtype=order_dt)
     j = 0
-    cash = np.empty(target_shape, dtype=f8)
-    shares = np.empty(target_shape, dtype=f8)
+    cash = np.empty(target_shape, dtype=np.float_)
+    shares = np.empty(target_shape, dtype=np.float_)
 
     for col in range(target_shape[1]):
         run_cash = init_capital[col]
@@ -349,8 +352,8 @@ def simulate_from_orders_nb(target_shape, init_capital, size, price, fees, fixed
     &#34;&#34;&#34;Adaptation of `simulate_nb` for simulation based on orders.&#34;&#34;&#34;
     order_records = np.empty(target_shape[0] * target_shape[1], dtype=order_dt)
     j = 0
-    cash = np.empty(target_shape, dtype=f8)
-    shares = np.empty(target_shape, dtype=f8)
+    cash = np.empty(target_shape, dtype=np.float_)
+    shares = np.empty(target_shape, dtype=np.float_)
 
     for col in range(target_shape[1]):
         run_cash = init_capital[col]
@@ -432,7 +435,7 @@ def buy_nb(run_cash, run_shares, order):
     req_cash = order.size * adj_price
     adj_req_cash = req_cash * (1 + order.fees) + order.fixed_fees
 
-    if adj_req_cash &lt;= run_cash:
+    if is_close_or_less_nb(adj_req_cash, run_cash):
         # Sufficient cash
         adj_size = order.size
         fees_paid = adj_req_cash - req_cash
@@ -442,11 +445,12 @@ def buy_nb(run_cash, run_shares, order):
         run_shares += adj_size
     else:
         # Insufficient cash, size will be less than requested
-        # For fees of 10%, you can buy shares for 90.9$ (adj_cash) to spend 100$ (run_cash) in total
-        adj_cash = (run_cash - order.fixed_fees) / (1 + order.fees)
-        if adj_cash &lt;= 0.:
+        if is_close_or_less_nb(run_cash, order.fixed_fees):
             # Can&#39;t cover
             return run_cash, run_shares, None
+
+        # For fees of 10%, you can buy shares for 90.9$ (adj_cash) to spend 100$ (run_cash) in total
+        adj_cash = (run_cash - order.fixed_fees) / (1 + order.fees)
 
         # Update size and feee
         adj_size = adj_cash / adj_price
@@ -474,16 +478,16 @@ def fill_order_nb(run_cash, run_shares, order):
     &#34;&#34;&#34;Fill an order.&#34;&#34;&#34;
     if order.size != 0.:
         if order.price &lt;= 0.:
-            raise Exception(&#34;Price must be greater than zero&#34;)
+            raise ValueError(&#34;Price must be greater than zero&#34;)
         if order.fees &lt; 0.:
-            raise Exception(&#34;Fees must be zero or greater&#34;)
+            raise ValueError(&#34;Fees must be zero or greater&#34;)
         if order.fixed_fees &lt; 0.:
-            raise Exception(&#34;Fixed fees must be zero or greater&#34;)
+            raise ValueError(&#34;Fixed fees must be zero or greater&#34;)
         if order.slippage &lt; 0.:
-            raise Exception(&#34;Slippage must be zero or greater&#34;)
-        if order.size &gt; 0.:
+            raise ValueError(&#34;Slippage must be zero or greater&#34;)
+        if order.size &gt; 0. and run_cash &gt; 0.:
             return buy_nb(run_cash, run_shares, order)
-        if order.size &lt; 0.:
+        if order.size &lt; 0. and run_shares &gt; 0.:
             return sell_nb(run_cash, run_shares, order)
     return run_cash, run_shares, None</code></pre>
 </details>
@@ -512,17 +516,18 @@ def sell_nb(run_cash, run_shares, order):
     cash = adj_size * adj_price
 
     # Minus costs
-    adj_cash = cash * (1 - order.fees) - order.fixed_fees
-    if adj_cash &lt;= 0.:
+    adj_cash = cash * (1 - order.fees)
+    if is_close_or_less_nb(adj_cash, order.fixed_fees):
         # Can&#39;t cover
         return run_cash, run_shares, None
+    adj_cash -= order.fixed_fees
 
     # Update fees
     fees_paid = cash - adj_cash
 
     # Update current cash and shares
     run_cash += adj_size * adj_price - fees_paid
-    if run_shares &lt;= abs(order.size):
+    if is_close_or_less_nb(run_shares, abs(order.size)):
         run_shares = 0.  # numerical stability
     else:
         run_shares -= adj_size
@@ -593,8 +598,8 @@ def simulate_from_orders_nb(target_shape, init_capital, size, price, fees, fixed
     &#34;&#34;&#34;Adaptation of `simulate_nb` for simulation based on orders.&#34;&#34;&#34;
     order_records = np.empty(target_shape[0] * target_shape[1], dtype=order_dt)
     j = 0
-    cash = np.empty(target_shape, dtype=f8)
-    shares = np.empty(target_shape, dtype=f8)
+    cash = np.empty(target_shape, dtype=np.float_)
+    shares = np.empty(target_shape, dtype=np.float_)
 
     for col in range(target_shape[1]):
         run_cash = init_capital[col]
@@ -646,8 +651,8 @@ def simulate_from_signals_nb(target_shape, init_capital, entries, exits, size, e
     &#34;&#34;&#34;Adaptation of `simulate_nb` for simulation based on entry and exit signals.&#34;&#34;&#34;
     order_records = np.empty(target_shape[0] * target_shape[1], dtype=order_dt)
     j = 0
-    cash = np.empty(target_shape, dtype=f8)
-    shares = np.empty(target_shape, dtype=f8)
+    cash = np.empty(target_shape, dtype=np.float_)
+    shares = np.empty(target_shape, dtype=np.float_)
 
     for col in range(target_shape[1]):
         run_cash = init_capital[col]
@@ -823,8 +828,8 @@ def simulate_nb(target_shape, init_capital, order_func_nb, *args):
     &#34;&#34;&#34;
     order_records = np.empty(target_shape[0] * target_shape[1], dtype=order_dt)
     j = 0
-    cash = np.empty(target_shape, dtype=f8)
-    shares = np.empty(target_shape, dtype=f8)
+    cash = np.empty(target_shape, dtype=np.float_)
+    shares = np.empty(target_shape, dtype=np.float_)
 
     for col in range(target_shape[1]):
         run_cash = init_capital[col]

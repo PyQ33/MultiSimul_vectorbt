@@ -31,7 +31,7 @@ ga('create', 'UA-142521178-3', 'auto'); ga('send', 'pageview');
 <p>Numba-compiled 1-dim and 2-dim functions.</p>
 <div class="admonition note">
 <p class="admonition-title">Note</p>
-<p><code><a title="vectorbt" href="../index.html">vectorbt</a></code> treats matrices as first-class citizens and expects input arrays to be
+<p>vectorbt treats matrices as first-class citizens and expects input arrays to be
 2-dim, unless function has suffix <code>_1d</code> or is meant to be input to another function.
 Data is processed along index (axis 0).</p>
 <p>All functions passed as argument must be Numba-compiled.</p>
@@ -43,13 +43,13 @@ Data is processed along index (axis 0).</p>
 <pre><code class="python">&#34;&#34;&#34;Numba-compiled 1-dim and 2-dim functions.
 
 !!! note
-    `vectorbt` treats matrices as first-class citizens and expects input arrays to be
+    vectorbt treats matrices as first-class citizens and expects input arrays to be
     2-dim, unless function has suffix `_1d` or is meant to be input to another function. 
     Data is processed along index (axis 0).
     
     All functions passed as argument must be Numba-compiled.&#34;&#34;&#34;
 
-from numba import njit, f8, i8, b1
+from numba import njit
 import numpy as np
 
 from vectorbt import tseries
@@ -63,8 +63,8 @@ from vectorbt.base import combine_fns
 def generate_nb(shape, choice_func_nb, *args):
     &#34;&#34;&#34;Create a boolean matrix of `shape` and pick `True` values using `choice_func_nb`.
 
-    `choice_func_nb` must accept index of the current column `col`, index of the start 
-    of the range `from_i`, index of the end of the range `to_i`, and `*args`. 
+    `choice_func_nb` must accept index of the current column `col`, index of the start
+    of the range `from_i`, index of the end of the range `to_i`, and `*args`.
     It must return an array of indices from `[from_i, to_i)` (can be empty).
 
     !!! note
@@ -87,7 +87,7 @@ def generate_nb(shape, choice_func_nb, *args):
          [False False False]
          [False False False]]
         ```&#34;&#34;&#34;
-    result = np.full(shape, False, dtype=b1)
+    result = np.full(shape, False, dtype=np.bool_)
 
     for col in range(result.shape[1]):
         idxs = choice_func_nb(col, 0, shape[0], *args)
@@ -118,7 +118,7 @@ def generate_after_nb(a, choice_func_nb, *args):
                     to_i = next_idx
                     idxs = choice_func_nb(col, from_i, to_i, *args)
                     if np.any(idxs &lt; from_i) or np.any(idxs &gt;= to_i):
-                        raise Exception(&#34;Returned indices are outside of the allowed range&#34;)
+                        raise ValueError(&#34;Returned indices are outside of the allowed range&#34;)
                     result[idxs, col] = True
     return result
 
@@ -145,7 +145,7 @@ def generate_iteratively_nb(shape, choice_func1_nb, choice_func2_nb, *args):
                 idxs = choice_func2_nb(col, from_i, to_i, *args)
                 a = result2
             if np.any(idxs &lt; from_i):
-                raise Exception(&#34;Returned indices are outside of the allowed range&#34;)
+                raise ValueError(&#34;Returned indices are outside of the allowed range&#34;)
             if len(idxs) == 0:
                 break
             a[idxs, col] = True
@@ -158,21 +158,21 @@ def generate_iteratively_nb(shape, choice_func1_nb, choice_func2_nb, *args):
 
 
 @njit(cache=True)
-def random_prob_choice_1d_nb(a, prob_b):
-    &#34;&#34;&#34;Create a random sample from `a` with probabilities `prob_b`.
-
-    `prob_b` must be of the same shape as `a`.&#34;&#34;&#34;
-    return a[np.searchsorted(np.cumsum(prob_b), np.random.random(), side=&#34;right&#34;)]
-
-
-@njit(cache=True)
-def shuffle_nb(a, seed=None):
-    &#34;&#34;&#34;Shuffle each column in `a`. 
+def shuffle_1d_nb(a, seed=None):
+    &#34;&#34;&#34;Shuffle each column in `a`.
 
     Specify seed to make output deterministic.&#34;&#34;&#34;
     if seed is not None:
         np.random.seed(seed)
-    result = np.empty_like(a, dtype=b1)
+    return np.random.permutation(a)
+
+
+@njit(cache=True)
+def shuffle_nb(a, seed=None):
+    &#34;&#34;&#34;2-dim version of `shuffle_1d_nb`.&#34;&#34;&#34;
+    if seed is not None:
+        np.random.seed(seed)
+    result = np.empty_like(a, dtype=np.bool_)
 
     for col in range(a.shape[1]):
         result[:, col] = np.random.permutation(a[:, col])
@@ -180,104 +180,120 @@ def shuffle_nb(a, seed=None):
 
 
 @njit(cache=True)
-def random_choice_nb(col, from_i, to_i, n_range, n_prob, min_space):
-    &#34;&#34;&#34;`choice_func_nb` to randomly pick values from range `[from_i, to_i)`.
-
-    The size of the sample will also be picked randomly from `n_range` with probabilities `n_prob`.
-    Separate generated signals apart by `min_space` positions.
-
-    `n_range` must be of same shape as `n_prob`.&#34;&#34;&#34;
-    from_range = np.arange(from_i, to_i)
-    if min_space is not None:
-        # Pick at every (min_space+1)-th position
-        from_range = from_range[np.random.randint(0, min_space + 1)::min_space + 1]
-    if n_prob is None:
-        # Pick size from n_range
-        size = np.random.choice(n_range)
-    else:
-        # Pick size from n_range with probabilities n_prob
-        size = random_prob_choice_1d_nb(n_range, n_prob)
-    # Sample should not be larger than population
-    size = min(len(from_range), size)
-    return np.random.choice(from_range, size=size, replace=False)
+def rand_choice_nb(col, from_i, to_i, n):
+    &#34;&#34;&#34;`choice_func_nb` to randomly pick `n` values from range `[from_i, to_i)`.&#34;&#34;&#34;
+    return np.random.choice(np.arange(from_i, to_i), size=n, replace=False)
 
 
 @njit
-def generate_random_nb(shape, n_range, n_prob=None, min_space=None, seed=None):
-    &#34;&#34;&#34;Create a boolean matrix of `shape` and pick `True` values randomly.
+def generate_rand_nb(shape, n, seed=None):
+    &#34;&#34;&#34;Create a boolean matrix of `shape` and pick `n` `True` values randomly.
 
     Specify seed to make output deterministic.
-    See `random_choice_nb`.&#34;&#34;&#34;
+    See `rand_choice_nb`.&#34;&#34;&#34;
     if seed is not None:
         np.random.seed(seed)
-    return generate_nb(shape, random_choice_nb, n_range, n_prob, min_space)
-
-
-@njit
-def generate_random_after_nb(a, n_range, n_prob=None, min_space=None, seed=None):
-    &#34;&#34;&#34;Pick `True` values randomly after each `True` in `a`.
-
-    See `generate_random_nb`.&#34;&#34;&#34;
-    if seed is not None:
-        np.random.seed(seed)
-    return generate_after_nb(a, random_choice_nb, n_range, n_prob, min_space)
-
-
-# ############# Stop-loss ############# #
+    return generate_nb(shape, rand_choice_nb, n)
 
 
 @njit(cache=True)
-def stop_loss_choice_nb(col, from_i, to_i, ts, stop, trailing, relative, first):
-    &#34;&#34;&#34;`choice_func_nb` that returns the first index of `ts` being below `stop` defined at `from_i-1`.&#34;&#34;&#34;
+def rand_choice_by_prob_nb(col, from_i, to_i, probs):
+    &#34;&#34;&#34;`choice_func_nb` to randomly pick values from range `[from_i, to_i)` with probabilities `probs`.
+
+    `probs` must be a 1-dim array.&#34;&#34;&#34;
+    result = np.empty(to_i - from_i, dtype=np.int_)
+    j = 0
+    for i in np.arange(from_i, to_i):
+        if np.random.uniform(0, 1) &lt;= probs[i, col]:
+            result[j] = i
+            j += 1
+    return result[:j]
+
+
+@njit
+def generate_rand_by_prob_nb(shape, probs, seed=None):
+    &#34;&#34;&#34;Create a boolean matrix of `shape` and pick `True` values randomly with probabilities `probs`.
+
+    `probs` must be a 2-dim array of shape `shape`.
+
+    Specify seed to make output deterministic.
+    See `rand_choice_by_prob_nb`.&#34;&#34;&#34;
+    if seed is not None:
+        np.random.seed(seed)
+    return generate_nb(shape, rand_choice_by_prob_nb, probs)
+
+
+# ############# Exits ############# #
+
+@njit
+def generate_rand_exits_nb(entries, seed=None):
+    &#34;&#34;&#34;Pick an exit `True` after each entry `True` in `entries`.
+
+    Specify seed to make output deterministic.&#34;&#34;&#34;
+    if seed is not None:
+        np.random.seed(seed)
+    return generate_after_nb(entries, rand_choice_nb, 1)
+
+
+@njit
+def generate_rand_entries_and_exits_nb(shape, n_entries, seed=None):
+    &#34;&#34;&#34;Pick `n_entries` entries and the same number of exits one after another.
+
+    Specify seed to make output deterministic.&#34;&#34;&#34;
+    entries = np.full(shape, False)
+    exits = np.full(shape, False)
+    both = generate_rand_nb(shape, n_entries * 2, seed=seed)
+
+    for col in range(both.shape[1]):
+        both_idxs = np.flatnonzero(both[:, col])
+        entries[both_idxs[0::2], col] = True
+        exits[both_idxs[1::2], col] = True
+
+    return entries, exits
+
+
+@njit(cache=True)
+def stop_loss_choice_nb(col, from_i, to_i, ts, stop, trailing, first):
+    &#34;&#34;&#34;`choice_func_nb` that returns the first index of `ts` being below the stop defined at `from_i-1`.&#34;&#34;&#34;
     ts = ts[from_i - 1:to_i, col]
     stop = stop[from_i - 1:to_i, col]
     if trailing:
         # Propagate the maximum value from the entry using expanding max
-        peak_ts = tseries.nb.expanding_max_1d_nb(ts)
-        if relative:
-            stop = (1 - stop) * peak_ts
-            # Get the absolute index of the first ts being below that stop
+        stop = (1 - stop) * tseries.nb.expanding_max_1d_nb(ts)
+        # Get the absolute index of the first ts being below that stop
         exits = from_i + np.flatnonzero(ts[1:] &lt;= stop[1:])
     else:
-        if relative:
-            stop_val = (1 - stop[0]) * ts[0]
-        else:
-            stop_val = stop[0]
-        exits = from_i + np.flatnonzero(ts[1:] &lt;= stop_val)
+        exits = from_i + np.flatnonzero(ts[1:] &lt;= (1 - stop[0]) * ts[0])
     if first:
         return exits[:1]
     return exits
 
 
 @njit(cache=True)
-def take_profit_choice_nb(col, from_i, to_i, ts, stop, relative, first):
-    &#34;&#34;&#34;`choice_func_nb` that returns the first index of `ts` being above `stop` defined at `from_i-1`.&#34;&#34;&#34;
+def take_profit_choice_nb(col, from_i, to_i, ts, stop, first):
+    &#34;&#34;&#34;`choice_func_nb` that returns the first index of `ts` being above the stop defined at `from_i-1`.&#34;&#34;&#34;
     ts = ts[from_i - 1:to_i, col]
     stop = stop[from_i - 1:to_i, col]
-    if relative:
-        stop_val = (1 + stop[0]) * ts[0]
-    else:
-        stop_val = stop[0]
-    exits = from_i + np.flatnonzero(ts[1:] &gt;= stop_val)
+    exits = from_i + np.flatnonzero(ts[1:] &gt;= (1 + stop[0]) * ts[0])
     if first:
         return exits[:1]
     return exits
 
 
 @njit
-def stop_loss_apply_nb(i, entries, ts, stops, trailing, relative, first):
+def stop_loss_apply_nb(i, entries, ts, stops, trailing, first):
     &#34;&#34;&#34;`apply_func_nb` for stop loss used in `vectorbt.base.combine_fns.apply_and_concat_one_nb`.&#34;&#34;&#34;
-    return generate_after_nb(entries, stop_loss_choice_nb, ts, stops[i, :, :], trailing, relative, first)
+    return generate_after_nb(entries, stop_loss_choice_nb, ts, stops[i, :, :], trailing, first)
 
 
 @njit
-def take_profit_apply_nb(i, entries, ts, stops, relative, first):
+def take_profit_apply_nb(i, entries, ts, stops, first):
     &#34;&#34;&#34;`apply_func_nb` for take profit used in `vectorbt.base.combine_fns.apply_and_concat_one_nb`.&#34;&#34;&#34;
-    return generate_after_nb(entries, take_profit_choice_nb, ts, stops[i, :, :], relative, first)
+    return generate_after_nb(entries, take_profit_choice_nb, ts, stops[i, :, :], first)
 
 
 @njit
-def generate_stop_loss_nb(entries, ts, stops, trailing=False, relative=True, first=True):
+def generate_stop_loss_exits_nb(entries, ts, stops, trailing=False, first=True):
     &#34;&#34;&#34;For each `True` in `entries`, find the first value in `ts` that is below the (trailing) stop.
 
     Args:
@@ -289,22 +305,20 @@ def generate_stop_loss_nb(entries, ts, stops, trailing=False, relative=True, fir
                 `stops` must be a 3D array - an array out of 2-dim arrays each of `ts` shape.
                 Each of these arrays will correspond to a different stop configuration.
         trailing (bool): If `True`, uses trailing stop, otherwise constant stop.
-        relative (bool): If `True`, treats stop as percentage of `ts`, otherwise as absolute number.
         first (bool): If `True`, selects the first signal, otherwise returns the whole sequence.
 
     Example:
         ```python-repl
         &gt;&gt;&gt; import numpy as np
-        &gt;&gt;&gt; from numba import njit
-        &gt;&gt;&gt; from vectorbt.signals.nb import generate_stop_loss_nb
+        &gt;&gt;&gt; from vectorbt.signals.nb import generate_stop_loss_exits_nb
         &gt;&gt;&gt; from vectorbt.base.reshape_fns import broadcast_to_array_of
 
         &gt;&gt;&gt; entries = np.asarray([False, True, False, False, False])[:, None]
         &gt;&gt;&gt; ts = np.asarray([1, 2, 3, 2, 1])[:, None]
         &gt;&gt;&gt; stops = broadcast_to_array_of([0.1, 0.5], ts)
 
-        &gt;&gt;&gt; print(generate_stop_loss_nb(entries, ts, stops,
-        ...     trailing=True, relative=True, first=True))
+        &gt;&gt;&gt; print(generate_stop_loss_exits_nb(entries, ts, stops,
+        ...     trailing=True, first=True))
         [[False False]
          [False False]
          [False False]
@@ -312,16 +326,16 @@ def generate_stop_loss_nb(entries, ts, stops, trailing=False, relative=True, fir
          [False  True]]
         ```&#34;&#34;&#34;
     return combine_fns.apply_and_concat_one_nb(
-        len(stops), stop_loss_apply_nb, entries, ts, stops, trailing, relative, first)
+        len(stops), stop_loss_apply_nb, entries, ts, stops, trailing, first)
 
 
 @njit
-def generate_take_profit_nb(entries, ts, stops, relative, first):
+def generate_take_profit_exits_nb(entries, ts, stops, first):
     &#34;&#34;&#34;For each `True` in `entries`, find the first value in `ts` that is above the stop.
 
     For arguments, see `generate_stop_loss_nb`.&#34;&#34;&#34;
     return combine_fns.apply_and_concat_one_nb(
-        len(stops), take_profit_apply_nb, entries, ts, stops, relative, first)
+        len(stops), take_profit_apply_nb, entries, ts, stops, first)
 
 
 # ############# Map and reduce ############# #
@@ -358,7 +372,7 @@ def map_reduce_between_nb(a, map_func_nb, reduce_func_nb, *args):
         &gt;&gt;&gt; print(map_reduce_between_nb(a, map_func_nb, reduce_func_nb))
         [1.5]
         ```&#34;&#34;&#34;
-    result = np.full(a.shape[1], np.nan, dtype=f8)
+    result = np.full(a.shape[1], np.nan, dtype=np.float_)
 
     for col in range(a.shape[1]):
         a_idxs = np.flatnonzero(a[:, col])
@@ -383,7 +397,7 @@ def map_reduce_between_two_nb(a, b, map_func_nb, reduce_func_nb, *args):
     Iterates over `b`, and for each found `True` value, looks for the preceding `True` value in `a`.
 
     `map_func_nb` and `reduce_func_nb` are same as for `map_reduce_between_nb`.&#34;&#34;&#34;
-    result = np.full((a.shape[1],), np.nan, dtype=f8)
+    result = np.full((a.shape[1],), np.nan, dtype=np.float_)
 
     for col in range(a.shape[1]):
         a_idxs = np.flatnonzero(a[:, col])
@@ -408,7 +422,7 @@ def map_reduce_partitions_nb(a, map_func_nb, reduce_func_nb, *args):
     &#34;&#34;&#34;Map using `map_func_nb` and reduce using `reduce_func_nb` each partition of `True` values in `a`.
 
     `map_func_nb` and `reduce_func_nb` are same as for `map_reduce_between_nb`.&#34;&#34;&#34;
-    result = np.full(a.shape[1], np.nan, dtype=f8)
+    result = np.full(a.shape[1], np.nan, dtype=np.float_)
 
     for col in range(a.shape[1]):
         is_partition = False
@@ -451,54 +465,68 @@ def mean_reduce_nb(col, a):
 
 
 @njit(cache=True)
-def rank_nb(a, reset_by=None, after_false=False, allow_gaps=False):
+def rank_1d_nb(a, reset_by=None, after_false=False, allow_gaps=False):
     &#34;&#34;&#34;Rank values in each partition of `True` values.
 
-    Partition is some number of `True` values in a row. You can reset partitions by `True` values 
-    from `reset_by` (must have the same shape). If `after_false` is `True`, the first partition 
+    Partition is some number of `True` values in a row. You can reset partitions by `True` values
+    from `reset_by` (must have the same shape). If `after_false` is `True`, the first partition
     must come after at least one `False`. If `allow_gaps` is `True`, ignores gaps between partitions.
 
     Example:
         ```python-repl
         &gt;&gt;&gt; import numpy as np
-        &gt;&gt;&gt; from vectorbt.signals.nb import rank_nb
+        &gt;&gt;&gt; from vectorbt.signals.nb import rank_1d_nb
 
-        &gt;&gt;&gt; signals = np.asarray([True, True, False, True, True])[:, None]
-        &gt;&gt;&gt; reset_by = np.asarray([False, True, False, False, True])[:, None]
+        &gt;&gt;&gt; signals = np.asarray([True, True, False, True, True])
+        &gt;&gt;&gt; reset_by = np.asarray([False, True, False, False, True])
 
-        &gt;&gt;&gt; print(rank_nb(signals)[:, 0])
+        &gt;&gt;&gt; print(rank_1d_nb(signals))
         [1 2 0 1 2]
-        &gt;&gt;&gt; print(rank_nb(signals, after_false=True)[:, 0])
+        &gt;&gt;&gt; print(rank_1d_nb(signals, after_false=True))
         [0 0 0 1 2]
-        &gt;&gt;&gt; print(rank_nb(signals, allow_gaps=True)[:, 0])
+        &gt;&gt;&gt; print(rank_1d_nb(signals, allow_gaps=True))
         [1 2 0 3 4]
-        &gt;&gt;&gt; print(rank_nb(signals, allow_gaps=True, reset_by=reset_by)[:, 0])
+        &gt;&gt;&gt; print(rank_1d_nb(signals, allow_gaps=True, reset_by=reset_by))
         [1 1 0 2 1]
         ```&#34;&#34;&#34;
-    result = np.zeros(a.shape, dtype=i8)
+    result = np.zeros(a.shape, dtype=np.int_)
 
-    for col in range(a.shape[1]):
-        false_seen = ~after_false
-        inc = 0
-        for i in range(a.shape[0]):
-            if reset_by is not None:
-                if reset_by[i, col]:
-                    # Signal in b_ref resets rank
-                    false_seen = ~after_false
-                    inc = 0
-            if a[i, col]:
-                if false_seen:
-                    inc += 1
-                    result[i, col] = inc
-            else:
-                false_seen = True
-                if not allow_gaps:
-                    inc = 0
+    false_seen = not after_false
+    inc = 0
+    for i in range(a.shape[0]):
+        if reset_by is not None:
+            if reset_by[i]:
+                # Signal in b_ref resets rank
+                false_seen = not after_false
+                inc = 0
+        if a[i]:
+            if false_seen:
+                inc += 1
+                result[i] = inc
+        else:
+            false_seen = True
+            if not allow_gaps:
+                inc = 0
     return result
 
 
 @njit(cache=True)
-def rank_partitions_nb(a, reset_by=None, after_false=False):
+def rank_nb(a, reset_by=None, after_false=False, allow_gaps=False):
+    &#34;&#34;&#34;2-dim version of `rank_1d_nb`.&#34;&#34;&#34;
+    result = np.zeros(a.shape, dtype=np.int_)
+
+    for col in range(a.shape[1]):
+        result[:, col] = rank_1d_nb(
+            a[:, col],
+            None if reset_by is None else reset_by[:, col],
+            after_false=after_false,
+            allow_gaps=allow_gaps
+        )
+    return result
+
+
+@njit(cache=True)
+def rank_partitions_1d_nb(a, reset_by=None, after_false=False):
     &#34;&#34;&#34;Rank each partition of `True` values.
 
     For keyword arguments, see `rank_nb`.
@@ -506,40 +534,53 @@ def rank_partitions_nb(a, reset_by=None, after_false=False):
     Example:
         ```python-repl
         &gt;&gt;&gt; import numpy as np
-        &gt;&gt;&gt; from vectorbt.signals.nb import rank_partitions_nb
+        &gt;&gt;&gt; from vectorbt.signals.nb import rank_partitions_1d_nb
 
-        &gt;&gt;&gt; signals = np.asarray([True, True, False, True, True])[:, None]
-        &gt;&gt;&gt; reset_by = np.asarray([False, True, False, False, True])[:, None]
+        &gt;&gt;&gt; signals = np.asarray([True, True, False, True, True])
+        &gt;&gt;&gt; reset_by = np.asarray([False, True, False, False, True])
 
-        &gt;&gt;&gt; print(rank_partitions_nb(signals)[:, 0])
+        &gt;&gt;&gt; print(rank_partitions_1d_nb(signals))
         [1 1 0 2 2]
-        &gt;&gt;&gt; print(rank_partitions_nb(signals, after_false=True)[:, 0])
+        &gt;&gt;&gt; print(rank_partitions_1d_nb(signals, after_false=True))
         [0 0 0 1 1]
-        &gt;&gt;&gt; print(rank_partitions_nb(signals, reset_by=reset_by)[:, 0])
+        &gt;&gt;&gt; print(rank_partitions_1d_nb(signals, reset_by=reset_by))
         [1 1 0 2 1]
         ```&#34;&#34;&#34;
-    result = np.zeros(a.shape, dtype=i8)
+    result = np.zeros(a.shape, dtype=np.int_)
+
+    false_seen = not after_false
+    first_seen = False
+    inc = 0
+    for i in range(a.shape[0]):
+        if reset_by is not None:
+            if reset_by[i]:
+                # Signal in b_ref resets rank
+                false_seen = not after_false
+                first_seen = False
+                inc = 0
+        if a[i]:
+            if false_seen:
+                if not first_seen:
+                    inc += 1
+                    first_seen = True
+                result[i] = inc
+        else:
+            false_seen = True
+            first_seen = False
+    return result
+
+
+@njit(cache=True)
+def rank_partitions_nb(a, reset_by=None, after_false=False):
+    &#34;&#34;&#34;2-dim version of `rank_partitions_1d_nb`.&#34;&#34;&#34;
+    result = np.zeros(a.shape, dtype=np.int_)
 
     for col in range(a.shape[1]):
-        false_seen = ~after_false
-        first_seen = False
-        inc = 0
-        for i in range(a.shape[0]):
-            if reset_by is not None:
-                if reset_by[i, col]:
-                    # Signal in b_ref resets rank
-                    false_seen = ~after_false
-                    first_seen = False
-                    inc = 0
-            if a[i, col]:
-                if false_seen:
-                    if not first_seen:
-                        inc += 1
-                        first_seen = True
-                    result[i, col] = inc
-            else:
-                false_seen = True
-                first_seen = False
+        result[:, col] = rank_partitions_1d_nb(
+            a[:, col],
+            None if reset_by is None else reset_by[:, col],
+            after_false=after_false
+        )
     return result
 
 
@@ -549,13 +590,21 @@ def rank_partitions_nb(a, reset_by=None, after_false=False):
 # You can, for example, perform Signals_1 &amp; Signals_2 to get logical AND of both arrays
 # NOTE: We don&#39;t implement backward operations to avoid look-ahead bias!
 
+@njit(cache=True)
+def fshift_1d_nb(a, n):
+    &#34;&#34;&#34;Shift forward `a` by `n` positions.&#34;&#34;&#34;
+    result = np.empty_like(a, dtype=np.bool_)
+    result[:n, :] = False
+    result[n:, :] = a[:-n, :]
+    return result
+
 
 @njit(cache=True)
 def fshift_nb(a, n):
-    &#34;&#34;&#34;Shift forward `a` by `n` positions.&#34;&#34;&#34;
-    result = np.empty_like(a, dtype=b1)
-    result[:n, :] = False
-    result[n:, :] = a[:-n, :]
+    &#34;&#34;&#34;2-dim version of `fshift_1d_nb`.&#34;&#34;&#34;
+    result = np.empty_like(a, dtype=np.bool_)
+    result[:n] = False
+    result[n:] = a[:-n]
     return result</code></pre>
 </details>
 </section>
@@ -581,8 +630,8 @@ def distance_map_nb(col, from_i, to_i):
     return to_i - from_i</code></pre>
 </details>
 </dd>
-<dt id="vectorbt.signals.nb.fshift_nb"><code class="name flex">
-<span>def <span class="ident fname">fshift_nb</span></span>(<span>a, n)</span>
+<dt id="vectorbt.signals.nb.fshift_1d_nb"><code class="name flex">
+<span>def <span class="ident fname">fshift_1d_nb</span></span>(<span>a, n)</span>
 </code></dt>
 <dd>
 <div class="desc"><p>Shift forward <code>a</code> by <code>n</code> positions.</p></div>
@@ -591,11 +640,29 @@ def distance_map_nb(col, from_i, to_i):
 <span>Expand source code</span>
 </summary>
 <pre><code class="python">@njit(cache=True)
-def fshift_nb(a, n):
+def fshift_1d_nb(a, n):
     &#34;&#34;&#34;Shift forward `a` by `n` positions.&#34;&#34;&#34;
-    result = np.empty_like(a, dtype=b1)
+    result = np.empty_like(a, dtype=np.bool_)
     result[:n, :] = False
     result[n:, :] = a[:-n, :]
+    return result</code></pre>
+</details>
+</dd>
+<dt id="vectorbt.signals.nb.fshift_nb"><code class="name flex">
+<span>def <span class="ident fname">fshift_nb</span></span>(<span>a, n)</span>
+</code></dt>
+<dd>
+<div class="desc"><p>2-dim version of <code><a title="vectorbt.signals.nb.fshift_1d_nb" href="#vectorbt.signals.nb.fshift_1d_nb">fshift_1d_nb()</a></code>.</p></div>
+<details class="source">
+<summary>
+<span>Expand source code</span>
+</summary>
+<pre><code class="python">@njit(cache=True)
+def fshift_nb(a, n):
+    &#34;&#34;&#34;2-dim version of `fshift_1d_nb`.&#34;&#34;&#34;
+    result = np.empty_like(a, dtype=np.bool_)
+    result[:n] = False
+    result[n:] = a[:-n]
     return result</code></pre>
 </details>
 </dd>
@@ -632,7 +699,7 @@ def generate_after_nb(a, choice_func_nb, *args):
                     to_i = next_idx
                     idxs = choice_func_nb(col, from_i, to_i, *args)
                     if np.any(idxs &lt; from_i) or np.any(idxs &gt;= to_i):
-                        raise Exception(&#34;Returned indices are outside of the allowed range&#34;)
+                        raise ValueError(&#34;Returned indices are outside of the allowed range&#34;)
                     result[idxs, col] = True
     return result</code></pre>
 </details>
@@ -669,7 +736,7 @@ def generate_iteratively_nb(shape, choice_func1_nb, choice_func2_nb, *args):
                 idxs = choice_func2_nb(col, from_i, to_i, *args)
                 a = result2
             if np.any(idxs &lt; from_i):
-                raise Exception(&#34;Returned indices are outside of the allowed range&#34;)
+                raise ValueError(&#34;Returned indices are outside of the allowed range&#34;)
             if len(idxs) == 0:
                 break
             a[idxs, col] = True
@@ -714,8 +781,8 @@ It must return an array of indices from <code>[from_i, to_i)</code> (can be empt
 def generate_nb(shape, choice_func_nb, *args):
     &#34;&#34;&#34;Create a boolean matrix of `shape` and pick `True` values using `choice_func_nb`.
 
-    `choice_func_nb` must accept index of the current column `col`, index of the start 
-    of the range `from_i`, index of the end of the range `to_i`, and `*args`. 
+    `choice_func_nb` must accept index of the current column `col`, index of the start
+    of the range `from_i`, index of the end of the range `to_i`, and `*args`.
     It must return an array of indices from `[from_i, to_i)` (can be empty).
 
     !!! note
@@ -738,7 +805,7 @@ def generate_nb(shape, choice_func_nb, *args):
          [False False False]
          [False False False]]
         ```&#34;&#34;&#34;
-    result = np.full(shape, False, dtype=b1)
+    result = np.full(shape, False, dtype=np.bool_)
 
     for col in range(result.shape[1]):
         idxs = choice_func_nb(col, 0, shape[0], *args)
@@ -746,50 +813,102 @@ def generate_nb(shape, choice_func_nb, *args):
     return result</code></pre>
 </details>
 </dd>
-<dt id="vectorbt.signals.nb.generate_random_after_nb"><code class="name flex">
-<span>def <span class="ident fname">generate_random_after_nb</span></span>(<span>a, n_range, n_prob=None, min_space=None, seed=None)</span>
+<dt id="vectorbt.signals.nb.generate_rand_by_prob_nb"><code class="name flex">
+<span>def <span class="ident fname">generate_rand_by_prob_nb</span></span>(<span>shape, probs, seed=None)</span>
 </code></dt>
 <dd>
-<div class="desc"><p>Pick <code>True</code> values randomly after each <code>True</code> in <code>a</code>.</p>
-<p>See <code><a title="vectorbt.signals.nb.generate_random_nb" href="#vectorbt.signals.nb.generate_random_nb">generate_random_nb()</a></code>.</p></div>
-<details class="source">
-<summary>
-<span>Expand source code</span>
-</summary>
-<pre><code class="python">@njit
-def generate_random_after_nb(a, n_range, n_prob=None, min_space=None, seed=None):
-    &#34;&#34;&#34;Pick `True` values randomly after each `True` in `a`.
-
-    See `generate_random_nb`.&#34;&#34;&#34;
-    if seed is not None:
-        np.random.seed(seed)
-    return generate_after_nb(a, random_choice_nb, n_range, n_prob, min_space)</code></pre>
-</details>
-</dd>
-<dt id="vectorbt.signals.nb.generate_random_nb"><code class="name flex">
-<span>def <span class="ident fname">generate_random_nb</span></span>(<span>shape, n_range, n_prob=None, min_space=None, seed=None)</span>
-</code></dt>
-<dd>
-<div class="desc"><p>Create a boolean matrix of <code>shape</code> and pick <code>True</code> values randomly.</p>
+<div class="desc"><p>Create a boolean matrix of <code>shape</code> and pick <code>True</code> values randomly with probabilities <code>probs</code>.</p>
+<p><code>probs</code> must be a 2-dim array of shape <code>shape</code>.</p>
 <p>Specify seed to make output deterministic.
-See <code><a title="vectorbt.signals.nb.random_choice_nb" href="#vectorbt.signals.nb.random_choice_nb">random_choice_nb()</a></code>.</p></div>
+See <code><a title="vectorbt.signals.nb.rand_choice_by_prob_nb" href="#vectorbt.signals.nb.rand_choice_by_prob_nb">rand_choice_by_prob_nb()</a></code>.</p></div>
 <details class="source">
 <summary>
 <span>Expand source code</span>
 </summary>
 <pre><code class="python">@njit
-def generate_random_nb(shape, n_range, n_prob=None, min_space=None, seed=None):
-    &#34;&#34;&#34;Create a boolean matrix of `shape` and pick `True` values randomly.
+def generate_rand_by_prob_nb(shape, probs, seed=None):
+    &#34;&#34;&#34;Create a boolean matrix of `shape` and pick `True` values randomly with probabilities `probs`.
+
+    `probs` must be a 2-dim array of shape `shape`.
 
     Specify seed to make output deterministic.
-    See `random_choice_nb`.&#34;&#34;&#34;
+    See `rand_choice_by_prob_nb`.&#34;&#34;&#34;
     if seed is not None:
         np.random.seed(seed)
-    return generate_nb(shape, random_choice_nb, n_range, n_prob, min_space)</code></pre>
+    return generate_nb(shape, rand_choice_by_prob_nb, probs)</code></pre>
 </details>
 </dd>
-<dt id="vectorbt.signals.nb.generate_stop_loss_nb"><code class="name flex">
-<span>def <span class="ident fname">generate_stop_loss_nb</span></span>(<span>entries, ts, stops, trailing=False, relative=True, first=True)</span>
+<dt id="vectorbt.signals.nb.generate_rand_entries_and_exits_nb"><code class="name flex">
+<span>def <span class="ident fname">generate_rand_entries_and_exits_nb</span></span>(<span>shape, n_entries, seed=None)</span>
+</code></dt>
+<dd>
+<div class="desc"><p>Pick <code>n_entries</code> entries and the same number of exits one after another.</p>
+<p>Specify seed to make output deterministic.</p></div>
+<details class="source">
+<summary>
+<span>Expand source code</span>
+</summary>
+<pre><code class="python">@njit
+def generate_rand_entries_and_exits_nb(shape, n_entries, seed=None):
+    &#34;&#34;&#34;Pick `n_entries` entries and the same number of exits one after another.
+
+    Specify seed to make output deterministic.&#34;&#34;&#34;
+    entries = np.full(shape, False)
+    exits = np.full(shape, False)
+    both = generate_rand_nb(shape, n_entries * 2, seed=seed)
+
+    for col in range(both.shape[1]):
+        both_idxs = np.flatnonzero(both[:, col])
+        entries[both_idxs[0::2], col] = True
+        exits[both_idxs[1::2], col] = True
+
+    return entries, exits</code></pre>
+</details>
+</dd>
+<dt id="vectorbt.signals.nb.generate_rand_exits_nb"><code class="name flex">
+<span>def <span class="ident fname">generate_rand_exits_nb</span></span>(<span>entries, seed=None)</span>
+</code></dt>
+<dd>
+<div class="desc"><p>Pick an exit <code>True</code> after each entry <code>True</code> in <code>entries</code>.</p>
+<p>Specify seed to make output deterministic.</p></div>
+<details class="source">
+<summary>
+<span>Expand source code</span>
+</summary>
+<pre><code class="python">@njit
+def generate_rand_exits_nb(entries, seed=None):
+    &#34;&#34;&#34;Pick an exit `True` after each entry `True` in `entries`.
+
+    Specify seed to make output deterministic.&#34;&#34;&#34;
+    if seed is not None:
+        np.random.seed(seed)
+    return generate_after_nb(entries, rand_choice_nb, 1)</code></pre>
+</details>
+</dd>
+<dt id="vectorbt.signals.nb.generate_rand_nb"><code class="name flex">
+<span>def <span class="ident fname">generate_rand_nb</span></span>(<span>shape, n, seed=None)</span>
+</code></dt>
+<dd>
+<div class="desc"><p>Create a boolean matrix of <code>shape</code> and pick <code>n</code> <code>True</code> values randomly.</p>
+<p>Specify seed to make output deterministic.
+See <code><a title="vectorbt.signals.nb.rand_choice_nb" href="#vectorbt.signals.nb.rand_choice_nb">rand_choice_nb()</a></code>.</p></div>
+<details class="source">
+<summary>
+<span>Expand source code</span>
+</summary>
+<pre><code class="python">@njit
+def generate_rand_nb(shape, n, seed=None):
+    &#34;&#34;&#34;Create a boolean matrix of `shape` and pick `n` `True` values randomly.
+
+    Specify seed to make output deterministic.
+    See `rand_choice_nb`.&#34;&#34;&#34;
+    if seed is not None:
+        np.random.seed(seed)
+    return generate_nb(shape, rand_choice_nb, n)</code></pre>
+</details>
+</dd>
+<dt id="vectorbt.signals.nb.generate_stop_loss_exits_nb"><code class="name flex">
+<span>def <span class="ident fname">generate_stop_loss_exits_nb</span></span>(<span>entries, ts, stops, trailing=False, first=True)</span>
 </code></dt>
 <dd>
 <div class="desc"><p>For each <code>True</code> in <code>entries</code>, find the first value in <code>ts</code> that is below the (trailing) stop.</p>
@@ -810,23 +929,20 @@ Each of these arrays will correspond to a different stop configuration.</p>
 </dd>
 <dt><strong><code>trailing</code></strong> :&ensp;<code>bool</code></dt>
 <dd>If <code>True</code>, uses trailing stop, otherwise constant stop.</dd>
-<dt><strong><code>relative</code></strong> :&ensp;<code>bool</code></dt>
-<dd>If <code>True</code>, treats stop as percentage of <code>ts</code>, otherwise as absolute number.</dd>
 <dt><strong><code>first</code></strong> :&ensp;<code>bool</code></dt>
 <dd>If <code>True</code>, selects the first signal, otherwise returns the whole sequence.</dd>
 </dl>
 <h2 id="example">Example</h2>
 <pre><code class="python-repl">&gt;&gt;&gt; import numpy as np
-&gt;&gt;&gt; from numba import njit
-&gt;&gt;&gt; from vectorbt.signals.nb import generate_stop_loss_nb
+&gt;&gt;&gt; from vectorbt.signals.nb import generate_stop_loss_exits_nb
 &gt;&gt;&gt; from vectorbt.base.reshape_fns import broadcast_to_array_of
 
 &gt;&gt;&gt; entries = np.asarray([False, True, False, False, False])[:, None]
 &gt;&gt;&gt; ts = np.asarray([1, 2, 3, 2, 1])[:, None]
 &gt;&gt;&gt; stops = broadcast_to_array_of([0.1, 0.5], ts)
 
-&gt;&gt;&gt; print(generate_stop_loss_nb(entries, ts, stops,
-...     trailing=True, relative=True, first=True))
+&gt;&gt;&gt; print(generate_stop_loss_exits_nb(entries, ts, stops,
+...     trailing=True, first=True))
 [[False False]
  [False False]
  [False False]
@@ -838,7 +954,7 @@ Each of these arrays will correspond to a different stop configuration.</p>
 <span>Expand source code</span>
 </summary>
 <pre><code class="python">@njit
-def generate_stop_loss_nb(entries, ts, stops, trailing=False, relative=True, first=True):
+def generate_stop_loss_exits_nb(entries, ts, stops, trailing=False, first=True):
     &#34;&#34;&#34;For each `True` in `entries`, find the first value in `ts` that is below the (trailing) stop.
 
     Args:
@@ -850,22 +966,20 @@ def generate_stop_loss_nb(entries, ts, stops, trailing=False, relative=True, fir
                 `stops` must be a 3D array - an array out of 2-dim arrays each of `ts` shape.
                 Each of these arrays will correspond to a different stop configuration.
         trailing (bool): If `True`, uses trailing stop, otherwise constant stop.
-        relative (bool): If `True`, treats stop as percentage of `ts`, otherwise as absolute number.
         first (bool): If `True`, selects the first signal, otherwise returns the whole sequence.
 
     Example:
         ```python-repl
         &gt;&gt;&gt; import numpy as np
-        &gt;&gt;&gt; from numba import njit
-        &gt;&gt;&gt; from vectorbt.signals.nb import generate_stop_loss_nb
+        &gt;&gt;&gt; from vectorbt.signals.nb import generate_stop_loss_exits_nb
         &gt;&gt;&gt; from vectorbt.base.reshape_fns import broadcast_to_array_of
 
         &gt;&gt;&gt; entries = np.asarray([False, True, False, False, False])[:, None]
         &gt;&gt;&gt; ts = np.asarray([1, 2, 3, 2, 1])[:, None]
         &gt;&gt;&gt; stops = broadcast_to_array_of([0.1, 0.5], ts)
 
-        &gt;&gt;&gt; print(generate_stop_loss_nb(entries, ts, stops,
-        ...     trailing=True, relative=True, first=True))
+        &gt;&gt;&gt; print(generate_stop_loss_exits_nb(entries, ts, stops,
+        ...     trailing=True, first=True))
         [[False False]
          [False False]
          [False False]
@@ -873,26 +987,26 @@ def generate_stop_loss_nb(entries, ts, stops, trailing=False, relative=True, fir
          [False  True]]
         ```&#34;&#34;&#34;
     return combine_fns.apply_and_concat_one_nb(
-        len(stops), stop_loss_apply_nb, entries, ts, stops, trailing, relative, first)</code></pre>
+        len(stops), stop_loss_apply_nb, entries, ts, stops, trailing, first)</code></pre>
 </details>
 </dd>
-<dt id="vectorbt.signals.nb.generate_take_profit_nb"><code class="name flex">
-<span>def <span class="ident fname">generate_take_profit_nb</span></span>(<span>entries, ts, stops, relative, first)</span>
+<dt id="vectorbt.signals.nb.generate_take_profit_exits_nb"><code class="name flex">
+<span>def <span class="ident fname">generate_take_profit_exits_nb</span></span>(<span>entries, ts, stops, first)</span>
 </code></dt>
 <dd>
 <div class="desc"><p>For each <code>True</code> in <code>entries</code>, find the first value in <code>ts</code> that is above the stop.</p>
-<p>For arguments, see <code><a title="vectorbt.signals.nb.generate_stop_loss_nb" href="#vectorbt.signals.nb.generate_stop_loss_nb">generate_stop_loss_nb()</a></code>.</p></div>
+<p>For arguments, see <code>generate_stop_loss_nb</code>.</p></div>
 <details class="source">
 <summary>
 <span>Expand source code</span>
 </summary>
 <pre><code class="python">@njit
-def generate_take_profit_nb(entries, ts, stops, relative, first):
+def generate_take_profit_exits_nb(entries, ts, stops, first):
     &#34;&#34;&#34;For each `True` in `entries`, find the first value in `ts` that is above the stop.
 
     For arguments, see `generate_stop_loss_nb`.&#34;&#34;&#34;
     return combine_fns.apply_and_concat_one_nb(
-        len(stops), take_profit_apply_nb, entries, ts, stops, relative, first)</code></pre>
+        len(stops), take_profit_apply_nb, entries, ts, stops, first)</code></pre>
 </details>
 </dd>
 <dt id="vectorbt.signals.nb.map_reduce_between_nb"><code class="name flex">
@@ -960,7 +1074,7 @@ def map_reduce_between_nb(a, map_func_nb, reduce_func_nb, *args):
         &gt;&gt;&gt; print(map_reduce_between_nb(a, map_func_nb, reduce_func_nb))
         [1.5]
         ```&#34;&#34;&#34;
-    result = np.full(a.shape[1], np.nan, dtype=f8)
+    result = np.full(a.shape[1], np.nan, dtype=np.float_)
 
     for col in range(a.shape[1]):
         a_idxs = np.flatnonzero(a[:, col])
@@ -997,7 +1111,7 @@ def map_reduce_between_two_nb(a, b, map_func_nb, reduce_func_nb, *args):
     Iterates over `b`, and for each found `True` value, looks for the preceding `True` value in `a`.
 
     `map_func_nb` and `reduce_func_nb` are same as for `map_reduce_between_nb`.&#34;&#34;&#34;
-    result = np.full((a.shape[1],), np.nan, dtype=f8)
+    result = np.full((a.shape[1],), np.nan, dtype=np.float_)
 
     for col in range(a.shape[1]):
         a_idxs = np.flatnonzero(a[:, col])
@@ -1032,7 +1146,7 @@ def map_reduce_partitions_nb(a, map_func_nb, reduce_func_nb, *args):
     &#34;&#34;&#34;Map using `map_func_nb` and reduce using `reduce_func_nb` each partition of `True` values in `a`.
 
     `map_func_nb` and `reduce_func_nb` are same as for `map_reduce_between_nb`.&#34;&#34;&#34;
-    result = np.full(a.shape[1], np.nan, dtype=f8)
+    result = np.full(a.shape[1], np.nan, dtype=np.float_)
 
     for col in range(a.shape[1]):
         is_partition = False
@@ -1074,61 +1188,47 @@ def mean_reduce_nb(col, a):
     return np.nanmean(a)</code></pre>
 </details>
 </dd>
-<dt id="vectorbt.signals.nb.random_choice_nb"><code class="name flex">
-<span>def <span class="ident fname">random_choice_nb</span></span>(<span>col, from_i, to_i, n_range, n_prob, min_space)</span>
+<dt id="vectorbt.signals.nb.rand_choice_by_prob_nb"><code class="name flex">
+<span>def <span class="ident fname">rand_choice_by_prob_nb</span></span>(<span>col, from_i, to_i, probs)</span>
 </code></dt>
 <dd>
-<div class="desc"><p><code>choice_func_nb</code> to randomly pick values from range <code>[from_i, to_i)</code>.</p>
-<p>The size of the sample will also be picked randomly from <code>n_range</code> with probabilities <code>n_prob</code>.
-Separate generated signals apart by <code>min_space</code> positions.</p>
-<p><code>n_range</code> must be of same shape as <code>n_prob</code>.</p></div>
+<div class="desc"><p><code>choice_func_nb</code> to randomly pick values from range <code>[from_i, to_i)</code> with probabilities <code>probs</code>.</p>
+<p><code>probs</code> must be a 1-dim array.</p></div>
 <details class="source">
 <summary>
 <span>Expand source code</span>
 </summary>
 <pre><code class="python">@njit(cache=True)
-def random_choice_nb(col, from_i, to_i, n_range, n_prob, min_space):
-    &#34;&#34;&#34;`choice_func_nb` to randomly pick values from range `[from_i, to_i)`.
+def rand_choice_by_prob_nb(col, from_i, to_i, probs):
+    &#34;&#34;&#34;`choice_func_nb` to randomly pick values from range `[from_i, to_i)` with probabilities `probs`.
 
-    The size of the sample will also be picked randomly from `n_range` with probabilities `n_prob`.
-    Separate generated signals apart by `min_space` positions.
-
-    `n_range` must be of same shape as `n_prob`.&#34;&#34;&#34;
-    from_range = np.arange(from_i, to_i)
-    if min_space is not None:
-        # Pick at every (min_space+1)-th position
-        from_range = from_range[np.random.randint(0, min_space + 1)::min_space + 1]
-    if n_prob is None:
-        # Pick size from n_range
-        size = np.random.choice(n_range)
-    else:
-        # Pick size from n_range with probabilities n_prob
-        size = random_prob_choice_1d_nb(n_range, n_prob)
-    # Sample should not be larger than population
-    size = min(len(from_range), size)
-    return np.random.choice(from_range, size=size, replace=False)</code></pre>
+    `probs` must be a 1-dim array.&#34;&#34;&#34;
+    result = np.empty(to_i - from_i, dtype=np.int_)
+    j = 0
+    for i in np.arange(from_i, to_i):
+        if np.random.uniform(0, 1) &lt;= probs[i, col]:
+            result[j] = i
+            j += 1
+    return result[:j]</code></pre>
 </details>
 </dd>
-<dt id="vectorbt.signals.nb.random_prob_choice_1d_nb"><code class="name flex">
-<span>def <span class="ident fname">random_prob_choice_1d_nb</span></span>(<span>a, prob_b)</span>
+<dt id="vectorbt.signals.nb.rand_choice_nb"><code class="name flex">
+<span>def <span class="ident fname">rand_choice_nb</span></span>(<span>col, from_i, to_i, n)</span>
 </code></dt>
 <dd>
-<div class="desc"><p>Create a random sample from <code>a</code> with probabilities <code>prob_b</code>.</p>
-<p><code>prob_b</code> must be of the same shape as <code>a</code>.</p></div>
+<div class="desc"><p><code>choice_func_nb</code> to randomly pick <code>n</code> values from range <code>[from_i, to_i)</code>.</p></div>
 <details class="source">
 <summary>
 <span>Expand source code</span>
 </summary>
 <pre><code class="python">@njit(cache=True)
-def random_prob_choice_1d_nb(a, prob_b):
-    &#34;&#34;&#34;Create a random sample from `a` with probabilities `prob_b`.
-
-    `prob_b` must be of the same shape as `a`.&#34;&#34;&#34;
-    return a[np.searchsorted(np.cumsum(prob_b), np.random.random(), side=&#34;right&#34;)]</code></pre>
+def rand_choice_nb(col, from_i, to_i, n):
+    &#34;&#34;&#34;`choice_func_nb` to randomly pick `n` values from range `[from_i, to_i)`.&#34;&#34;&#34;
+    return np.random.choice(np.arange(from_i, to_i), size=n, replace=False)</code></pre>
 </details>
 </dd>
-<dt id="vectorbt.signals.nb.rank_nb"><code class="name flex">
-<span>def <span class="ident fname">rank_nb</span></span>(<span>a, reset_by=None, after_false=False, allow_gaps=False)</span>
+<dt id="vectorbt.signals.nb.rank_1d_nb"><code class="name flex">
+<span>def <span class="ident fname">rank_1d_nb</span></span>(<span>a, reset_by=None, after_false=False, allow_gaps=False)</span>
 </code></dt>
 <dd>
 <div class="desc"><p>Rank values in each partition of <code>True</code> values.</p>
@@ -1137,89 +1237,112 @@ from <code>reset_by</code> (must have the same shape). If <code>after_false</cod
 must come after at least one <code>False</code>. If <code>allow_gaps</code> is <code>True</code>, ignores gaps between partitions.</p>
 <h2 id="example">Example</h2>
 <pre><code class="python-repl">&gt;&gt;&gt; import numpy as np
-&gt;&gt;&gt; from vectorbt.signals.nb import rank_nb
+&gt;&gt;&gt; from vectorbt.signals.nb import rank_1d_nb
 
-&gt;&gt;&gt; signals = np.asarray([True, True, False, True, True])[:, None]
-&gt;&gt;&gt; reset_by = np.asarray([False, True, False, False, True])[:, None]
+&gt;&gt;&gt; signals = np.asarray([True, True, False, True, True])
+&gt;&gt;&gt; reset_by = np.asarray([False, True, False, False, True])
 
-&gt;&gt;&gt; print(rank_nb(signals)[:, 0])
+&gt;&gt;&gt; print(rank_1d_nb(signals))
 [1 2 0 1 2]
-&gt;&gt;&gt; print(rank_nb(signals, after_false=True)[:, 0])
+&gt;&gt;&gt; print(rank_1d_nb(signals, after_false=True))
 [0 0 0 1 2]
-&gt;&gt;&gt; print(rank_nb(signals, allow_gaps=True)[:, 0])
+&gt;&gt;&gt; print(rank_1d_nb(signals, allow_gaps=True))
 [1 2 0 3 4]
-&gt;&gt;&gt; print(rank_nb(signals, allow_gaps=True, reset_by=reset_by)[:, 0])
+&gt;&gt;&gt; print(rank_1d_nb(signals, allow_gaps=True, reset_by=reset_by))
 [1 1 0 2 1]
 </code></pre></div>
+<details class="source">
+<summary>
+<span>Expand source code</span>
+</summary>
+<pre><code class="python">@njit(cache=True)
+def rank_1d_nb(a, reset_by=None, after_false=False, allow_gaps=False):
+    &#34;&#34;&#34;Rank values in each partition of `True` values.
+
+    Partition is some number of `True` values in a row. You can reset partitions by `True` values
+    from `reset_by` (must have the same shape). If `after_false` is `True`, the first partition
+    must come after at least one `False`. If `allow_gaps` is `True`, ignores gaps between partitions.
+
+    Example:
+        ```python-repl
+        &gt;&gt;&gt; import numpy as np
+        &gt;&gt;&gt; from vectorbt.signals.nb import rank_1d_nb
+
+        &gt;&gt;&gt; signals = np.asarray([True, True, False, True, True])
+        &gt;&gt;&gt; reset_by = np.asarray([False, True, False, False, True])
+
+        &gt;&gt;&gt; print(rank_1d_nb(signals))
+        [1 2 0 1 2]
+        &gt;&gt;&gt; print(rank_1d_nb(signals, after_false=True))
+        [0 0 0 1 2]
+        &gt;&gt;&gt; print(rank_1d_nb(signals, allow_gaps=True))
+        [1 2 0 3 4]
+        &gt;&gt;&gt; print(rank_1d_nb(signals, allow_gaps=True, reset_by=reset_by))
+        [1 1 0 2 1]
+        ```&#34;&#34;&#34;
+    result = np.zeros(a.shape, dtype=np.int_)
+
+    false_seen = not after_false
+    inc = 0
+    for i in range(a.shape[0]):
+        if reset_by is not None:
+            if reset_by[i]:
+                # Signal in b_ref resets rank
+                false_seen = not after_false
+                inc = 0
+        if a[i]:
+            if false_seen:
+                inc += 1
+                result[i] = inc
+        else:
+            false_seen = True
+            if not allow_gaps:
+                inc = 0
+    return result</code></pre>
+</details>
+</dd>
+<dt id="vectorbt.signals.nb.rank_nb"><code class="name flex">
+<span>def <span class="ident fname">rank_nb</span></span>(<span>a, reset_by=None, after_false=False, allow_gaps=False)</span>
+</code></dt>
+<dd>
+<div class="desc"><p>2-dim version of <code><a title="vectorbt.signals.nb.rank_1d_nb" href="#vectorbt.signals.nb.rank_1d_nb">rank_1d_nb()</a></code>.</p></div>
 <details class="source">
 <summary>
 <span>Expand source code</span>
 </summary>
 <pre><code class="python">@njit(cache=True)
 def rank_nb(a, reset_by=None, after_false=False, allow_gaps=False):
-    &#34;&#34;&#34;Rank values in each partition of `True` values.
-
-    Partition is some number of `True` values in a row. You can reset partitions by `True` values 
-    from `reset_by` (must have the same shape). If `after_false` is `True`, the first partition 
-    must come after at least one `False`. If `allow_gaps` is `True`, ignores gaps between partitions.
-
-    Example:
-        ```python-repl
-        &gt;&gt;&gt; import numpy as np
-        &gt;&gt;&gt; from vectorbt.signals.nb import rank_nb
-
-        &gt;&gt;&gt; signals = np.asarray([True, True, False, True, True])[:, None]
-        &gt;&gt;&gt; reset_by = np.asarray([False, True, False, False, True])[:, None]
-
-        &gt;&gt;&gt; print(rank_nb(signals)[:, 0])
-        [1 2 0 1 2]
-        &gt;&gt;&gt; print(rank_nb(signals, after_false=True)[:, 0])
-        [0 0 0 1 2]
-        &gt;&gt;&gt; print(rank_nb(signals, allow_gaps=True)[:, 0])
-        [1 2 0 3 4]
-        &gt;&gt;&gt; print(rank_nb(signals, allow_gaps=True, reset_by=reset_by)[:, 0])
-        [1 1 0 2 1]
-        ```&#34;&#34;&#34;
-    result = np.zeros(a.shape, dtype=i8)
+    &#34;&#34;&#34;2-dim version of `rank_1d_nb`.&#34;&#34;&#34;
+    result = np.zeros(a.shape, dtype=np.int_)
 
     for col in range(a.shape[1]):
-        false_seen = ~after_false
-        inc = 0
-        for i in range(a.shape[0]):
-            if reset_by is not None:
-                if reset_by[i, col]:
-                    # Signal in b_ref resets rank
-                    false_seen = ~after_false
-                    inc = 0
-            if a[i, col]:
-                if false_seen:
-                    inc += 1
-                    result[i, col] = inc
-            else:
-                false_seen = True
-                if not allow_gaps:
-                    inc = 0
+        result[:, col] = rank_1d_nb(
+            a[:, col],
+            None if reset_by is None else reset_by[:, col],
+            after_false=after_false,
+            allow_gaps=allow_gaps
+        )
     return result</code></pre>
 </details>
 </dd>
-<dt id="vectorbt.signals.nb.rank_partitions_nb"><code class="name flex">
-<span>def <span class="ident fname">rank_partitions_nb</span></span>(<span>a, reset_by=None, after_false=False)</span>
+<dt id="vectorbt.signals.nb.rank_partitions_1d_nb"><code class="name flex">
+<span>def <span class="ident fname">rank_partitions_1d_nb</span></span>(<span>a, reset_by=None, after_false=False)</span>
 </code></dt>
 <dd>
 <div class="desc"><p>Rank each partition of <code>True</code> values.</p>
 <p>For keyword arguments, see <code><a title="vectorbt.signals.nb.rank_nb" href="#vectorbt.signals.nb.rank_nb">rank_nb()</a></code>.</p>
 <h2 id="example">Example</h2>
 <pre><code class="python-repl">&gt;&gt;&gt; import numpy as np
-&gt;&gt;&gt; from vectorbt.signals.nb import rank_partitions_nb
+&gt;&gt;&gt; from vectorbt.signals.nb import rank_partitions_1d_nb
 
-&gt;&gt;&gt; signals = np.asarray([True, True, False, True, True])[:, None]
-&gt;&gt;&gt; reset_by = np.asarray([False, True, False, False, True])[:, None]
+&gt;&gt;&gt; signals = np.asarray([True, True, False, True, True])
+&gt;&gt;&gt; reset_by = np.asarray([False, True, False, False, True])
 
-&gt;&gt;&gt; print(rank_partitions_nb(signals)[:, 0])
+&gt;&gt;&gt; print(rank_partitions_1d_nb(signals))
 [1 1 0 2 2]
-&gt;&gt;&gt; print(rank_partitions_nb(signals, after_false=True)[:, 0])
+&gt;&gt;&gt; print(rank_partitions_1d_nb(signals, after_false=True))
 [0 0 0 1 1]
-&gt;&gt;&gt; print(rank_partitions_nb(signals, reset_by=reset_by)[:, 0])
+&gt;&gt;&gt; print(rank_partitions_1d_nb(signals, reset_by=reset_by))
 [1 1 0 2 1]
 </code></pre></div>
 <details class="source">
@@ -1227,7 +1350,7 @@ def rank_nb(a, reset_by=None, after_false=False, allow_gaps=False):
 <span>Expand source code</span>
 </summary>
 <pre><code class="python">@njit(cache=True)
-def rank_partitions_nb(a, reset_by=None, after_false=False):
+def rank_partitions_1d_nb(a, reset_by=None, after_false=False):
     &#34;&#34;&#34;Rank each partition of `True` values.
 
     For keyword arguments, see `rank_nb`.
@@ -1235,61 +1358,100 @@ def rank_partitions_nb(a, reset_by=None, after_false=False):
     Example:
         ```python-repl
         &gt;&gt;&gt; import numpy as np
-        &gt;&gt;&gt; from vectorbt.signals.nb import rank_partitions_nb
+        &gt;&gt;&gt; from vectorbt.signals.nb import rank_partitions_1d_nb
 
-        &gt;&gt;&gt; signals = np.asarray([True, True, False, True, True])[:, None]
-        &gt;&gt;&gt; reset_by = np.asarray([False, True, False, False, True])[:, None]
+        &gt;&gt;&gt; signals = np.asarray([True, True, False, True, True])
+        &gt;&gt;&gt; reset_by = np.asarray([False, True, False, False, True])
 
-        &gt;&gt;&gt; print(rank_partitions_nb(signals)[:, 0])
+        &gt;&gt;&gt; print(rank_partitions_1d_nb(signals))
         [1 1 0 2 2]
-        &gt;&gt;&gt; print(rank_partitions_nb(signals, after_false=True)[:, 0])
+        &gt;&gt;&gt; print(rank_partitions_1d_nb(signals, after_false=True))
         [0 0 0 1 1]
-        &gt;&gt;&gt; print(rank_partitions_nb(signals, reset_by=reset_by)[:, 0])
+        &gt;&gt;&gt; print(rank_partitions_1d_nb(signals, reset_by=reset_by))
         [1 1 0 2 1]
         ```&#34;&#34;&#34;
-    result = np.zeros(a.shape, dtype=i8)
+    result = np.zeros(a.shape, dtype=np.int_)
 
-    for col in range(a.shape[1]):
-        false_seen = ~after_false
-        first_seen = False
-        inc = 0
-        for i in range(a.shape[0]):
-            if reset_by is not None:
-                if reset_by[i, col]:
-                    # Signal in b_ref resets rank
-                    false_seen = ~after_false
-                    first_seen = False
-                    inc = 0
-            if a[i, col]:
-                if false_seen:
-                    if not first_seen:
-                        inc += 1
-                        first_seen = True
-                    result[i, col] = inc
-            else:
-                false_seen = True
+    false_seen = not after_false
+    first_seen = False
+    inc = 0
+    for i in range(a.shape[0]):
+        if reset_by is not None:
+            if reset_by[i]:
+                # Signal in b_ref resets rank
+                false_seen = not after_false
                 first_seen = False
+                inc = 0
+        if a[i]:
+            if false_seen:
+                if not first_seen:
+                    inc += 1
+                    first_seen = True
+                result[i] = inc
+        else:
+            false_seen = True
+            first_seen = False
     return result</code></pre>
 </details>
 </dd>
-<dt id="vectorbt.signals.nb.shuffle_nb"><code class="name flex">
-<span>def <span class="ident fname">shuffle_nb</span></span>(<span>a, seed=None)</span>
+<dt id="vectorbt.signals.nb.rank_partitions_nb"><code class="name flex">
+<span>def <span class="ident fname">rank_partitions_nb</span></span>(<span>a, reset_by=None, after_false=False)</span>
 </code></dt>
 <dd>
-<div class="desc"><p>Shuffle each column in <code>a</code>. </p>
+<div class="desc"><p>2-dim version of <code><a title="vectorbt.signals.nb.rank_partitions_1d_nb" href="#vectorbt.signals.nb.rank_partitions_1d_nb">rank_partitions_1d_nb()</a></code>.</p></div>
+<details class="source">
+<summary>
+<span>Expand source code</span>
+</summary>
+<pre><code class="python">@njit(cache=True)
+def rank_partitions_nb(a, reset_by=None, after_false=False):
+    &#34;&#34;&#34;2-dim version of `rank_partitions_1d_nb`.&#34;&#34;&#34;
+    result = np.zeros(a.shape, dtype=np.int_)
+
+    for col in range(a.shape[1]):
+        result[:, col] = rank_partitions_1d_nb(
+            a[:, col],
+            None if reset_by is None else reset_by[:, col],
+            after_false=after_false
+        )
+    return result</code></pre>
+</details>
+</dd>
+<dt id="vectorbt.signals.nb.shuffle_1d_nb"><code class="name flex">
+<span>def <span class="ident fname">shuffle_1d_nb</span></span>(<span>a, seed=None)</span>
+</code></dt>
+<dd>
+<div class="desc"><p>Shuffle each column in <code>a</code>.</p>
 <p>Specify seed to make output deterministic.</p></div>
 <details class="source">
 <summary>
 <span>Expand source code</span>
 </summary>
 <pre><code class="python">@njit(cache=True)
-def shuffle_nb(a, seed=None):
-    &#34;&#34;&#34;Shuffle each column in `a`. 
+def shuffle_1d_nb(a, seed=None):
+    &#34;&#34;&#34;Shuffle each column in `a`.
 
     Specify seed to make output deterministic.&#34;&#34;&#34;
     if seed is not None:
         np.random.seed(seed)
-    result = np.empty_like(a, dtype=b1)
+    return np.random.permutation(a)</code></pre>
+</details>
+</dd>
+<dt id="vectorbt.signals.nb.shuffle_nb"><code class="name flex">
+<span>def <span class="ident fname">shuffle_nb</span></span>(<span>a, seed=None)</span>
+</code></dt>
+<dd>
+<div class="desc"><p>2-dim version of <code><a title="vectorbt.signals.nb.shuffle_1d_nb" href="#vectorbt.signals.nb.shuffle_1d_nb">shuffle_1d_nb()</a></code>.</p></div>
+<details class="source">
+<summary>
+<span>Expand source code</span>
+</summary>
+<pre><code class="python">@njit(cache=True)
+def shuffle_nb(a, seed=None):
+    &#34;&#34;&#34;2-dim version of `shuffle_1d_nb`.&#34;&#34;&#34;
+    if seed is not None:
+        np.random.seed(seed)
+    result = np.empty_like(a, dtype=np.bool_)
 
     for col in range(a.shape[1]):
         result[:, col] = np.random.permutation(a[:, col])
@@ -1297,7 +1459,7 @@ def shuffle_nb(a, seed=None):
 </details>
 </dd>
 <dt id="vectorbt.signals.nb.stop_loss_apply_nb"><code class="name flex">
-<span>def <span class="ident fname">stop_loss_apply_nb</span></span>(<span>i, entries, ts, stops, trailing, relative, first)</span>
+<span>def <span class="ident fname">stop_loss_apply_nb</span></span>(<span>i, entries, ts, stops, trailing, first)</span>
 </code></dt>
 <dd>
 <div class="desc"><p><code>apply_func_nb</code> for stop loss used in <code><a title="vectorbt.base.combine_fns.apply_and_concat_one_nb" href="../base/combine_fns.html#vectorbt.base.combine_fns.apply_and_concat_one_nb">apply_and_concat_one_nb()</a></code>.</p></div>
@@ -1306,45 +1468,39 @@ def shuffle_nb(a, seed=None):
 <span>Expand source code</span>
 </summary>
 <pre><code class="python">@njit
-def stop_loss_apply_nb(i, entries, ts, stops, trailing, relative, first):
+def stop_loss_apply_nb(i, entries, ts, stops, trailing, first):
     &#34;&#34;&#34;`apply_func_nb` for stop loss used in `vectorbt.base.combine_fns.apply_and_concat_one_nb`.&#34;&#34;&#34;
-    return generate_after_nb(entries, stop_loss_choice_nb, ts, stops[i, :, :], trailing, relative, first)</code></pre>
+    return generate_after_nb(entries, stop_loss_choice_nb, ts, stops[i, :, :], trailing, first)</code></pre>
 </details>
 </dd>
 <dt id="vectorbt.signals.nb.stop_loss_choice_nb"><code class="name flex">
-<span>def <span class="ident fname">stop_loss_choice_nb</span></span>(<span>col, from_i, to_i, ts, stop, trailing, relative, first)</span>
+<span>def <span class="ident fname">stop_loss_choice_nb</span></span>(<span>col, from_i, to_i, ts, stop, trailing, first)</span>
 </code></dt>
 <dd>
-<div class="desc"><p><code>choice_func_nb</code> that returns the first index of <code>ts</code> being below <code>stop</code> defined at <code>from_i-1</code>.</p></div>
+<div class="desc"><p><code>choice_func_nb</code> that returns the first index of <code>ts</code> being below the stop defined at <code>from_i-1</code>.</p></div>
 <details class="source">
 <summary>
 <span>Expand source code</span>
 </summary>
 <pre><code class="python">@njit(cache=True)
-def stop_loss_choice_nb(col, from_i, to_i, ts, stop, trailing, relative, first):
-    &#34;&#34;&#34;`choice_func_nb` that returns the first index of `ts` being below `stop` defined at `from_i-1`.&#34;&#34;&#34;
+def stop_loss_choice_nb(col, from_i, to_i, ts, stop, trailing, first):
+    &#34;&#34;&#34;`choice_func_nb` that returns the first index of `ts` being below the stop defined at `from_i-1`.&#34;&#34;&#34;
     ts = ts[from_i - 1:to_i, col]
     stop = stop[from_i - 1:to_i, col]
     if trailing:
         # Propagate the maximum value from the entry using expanding max
-        peak_ts = tseries.nb.expanding_max_1d_nb(ts)
-        if relative:
-            stop = (1 - stop) * peak_ts
-            # Get the absolute index of the first ts being below that stop
+        stop = (1 - stop) * tseries.nb.expanding_max_1d_nb(ts)
+        # Get the absolute index of the first ts being below that stop
         exits = from_i + np.flatnonzero(ts[1:] &lt;= stop[1:])
     else:
-        if relative:
-            stop_val = (1 - stop[0]) * ts[0]
-        else:
-            stop_val = stop[0]
-        exits = from_i + np.flatnonzero(ts[1:] &lt;= stop_val)
+        exits = from_i + np.flatnonzero(ts[1:] &lt;= (1 - stop[0]) * ts[0])
     if first:
         return exits[:1]
     return exits</code></pre>
 </details>
 </dd>
 <dt id="vectorbt.signals.nb.take_profit_apply_nb"><code class="name flex">
-<span>def <span class="ident fname">take_profit_apply_nb</span></span>(<span>i, entries, ts, stops, relative, first)</span>
+<span>def <span class="ident fname">take_profit_apply_nb</span></span>(<span>i, entries, ts, stops, first)</span>
 </code></dt>
 <dd>
 <div class="desc"><p><code>apply_func_nb</code> for take profit used in <code><a title="vectorbt.base.combine_fns.apply_and_concat_one_nb" href="../base/combine_fns.html#vectorbt.base.combine_fns.apply_and_concat_one_nb">apply_and_concat_one_nb()</a></code>.</p></div>
@@ -1353,30 +1509,26 @@ def stop_loss_choice_nb(col, from_i, to_i, ts, stop, trailing, relative, first):
 <span>Expand source code</span>
 </summary>
 <pre><code class="python">@njit
-def take_profit_apply_nb(i, entries, ts, stops, relative, first):
+def take_profit_apply_nb(i, entries, ts, stops, first):
     &#34;&#34;&#34;`apply_func_nb` for take profit used in `vectorbt.base.combine_fns.apply_and_concat_one_nb`.&#34;&#34;&#34;
-    return generate_after_nb(entries, take_profit_choice_nb, ts, stops[i, :, :], relative, first)</code></pre>
+    return generate_after_nb(entries, take_profit_choice_nb, ts, stops[i, :, :], first)</code></pre>
 </details>
 </dd>
 <dt id="vectorbt.signals.nb.take_profit_choice_nb"><code class="name flex">
-<span>def <span class="ident fname">take_profit_choice_nb</span></span>(<span>col, from_i, to_i, ts, stop, relative, first)</span>
+<span>def <span class="ident fname">take_profit_choice_nb</span></span>(<span>col, from_i, to_i, ts, stop, first)</span>
 </code></dt>
 <dd>
-<div class="desc"><p><code>choice_func_nb</code> that returns the first index of <code>ts</code> being above <code>stop</code> defined at <code>from_i-1</code>.</p></div>
+<div class="desc"><p><code>choice_func_nb</code> that returns the first index of <code>ts</code> being above the stop defined at <code>from_i-1</code>.</p></div>
 <details class="source">
 <summary>
 <span>Expand source code</span>
 </summary>
 <pre><code class="python">@njit(cache=True)
-def take_profit_choice_nb(col, from_i, to_i, ts, stop, relative, first):
-    &#34;&#34;&#34;`choice_func_nb` that returns the first index of `ts` being above `stop` defined at `from_i-1`.&#34;&#34;&#34;
+def take_profit_choice_nb(col, from_i, to_i, ts, stop, first):
+    &#34;&#34;&#34;`choice_func_nb` that returns the first index of `ts` being above the stop defined at `from_i-1`.&#34;&#34;&#34;
     ts = ts[from_i - 1:to_i, col]
     stop = stop[from_i - 1:to_i, col]
-    if relative:
-        stop_val = (1 + stop[0]) * ts[0]
-    else:
-        stop_val = stop[0]
-    exits = from_i + np.flatnonzero(ts[1:] &gt;= stop_val)
+    exits = from_i + np.flatnonzero(ts[1:] &gt;= (1 + stop[0]) * ts[0])
     if first:
         return exits[:1]
     return exits</code></pre>
@@ -1415,22 +1567,28 @@ title="Search"
 <li><h3><a href="#header-functions">Functions</a></h3>
 <ul class="">
 <li><code><a title="vectorbt.signals.nb.distance_map_nb" href="#vectorbt.signals.nb.distance_map_nb">distance_map_nb</a></code></li>
+<li><code><a title="vectorbt.signals.nb.fshift_1d_nb" href="#vectorbt.signals.nb.fshift_1d_nb">fshift_1d_nb</a></code></li>
 <li><code><a title="vectorbt.signals.nb.fshift_nb" href="#vectorbt.signals.nb.fshift_nb">fshift_nb</a></code></li>
 <li><code><a title="vectorbt.signals.nb.generate_after_nb" href="#vectorbt.signals.nb.generate_after_nb">generate_after_nb</a></code></li>
 <li><code><a title="vectorbt.signals.nb.generate_iteratively_nb" href="#vectorbt.signals.nb.generate_iteratively_nb">generate_iteratively_nb</a></code></li>
 <li><code><a title="vectorbt.signals.nb.generate_nb" href="#vectorbt.signals.nb.generate_nb">generate_nb</a></code></li>
-<li><code><a title="vectorbt.signals.nb.generate_random_after_nb" href="#vectorbt.signals.nb.generate_random_after_nb">generate_random_after_nb</a></code></li>
-<li><code><a title="vectorbt.signals.nb.generate_random_nb" href="#vectorbt.signals.nb.generate_random_nb">generate_random_nb</a></code></li>
-<li><code><a title="vectorbt.signals.nb.generate_stop_loss_nb" href="#vectorbt.signals.nb.generate_stop_loss_nb">generate_stop_loss_nb</a></code></li>
-<li><code><a title="vectorbt.signals.nb.generate_take_profit_nb" href="#vectorbt.signals.nb.generate_take_profit_nb">generate_take_profit_nb</a></code></li>
+<li><code><a title="vectorbt.signals.nb.generate_rand_by_prob_nb" href="#vectorbt.signals.nb.generate_rand_by_prob_nb">generate_rand_by_prob_nb</a></code></li>
+<li><code><a title="vectorbt.signals.nb.generate_rand_entries_and_exits_nb" href="#vectorbt.signals.nb.generate_rand_entries_and_exits_nb">generate_rand_entries_and_exits_nb</a></code></li>
+<li><code><a title="vectorbt.signals.nb.generate_rand_exits_nb" href="#vectorbt.signals.nb.generate_rand_exits_nb">generate_rand_exits_nb</a></code></li>
+<li><code><a title="vectorbt.signals.nb.generate_rand_nb" href="#vectorbt.signals.nb.generate_rand_nb">generate_rand_nb</a></code></li>
+<li><code><a title="vectorbt.signals.nb.generate_stop_loss_exits_nb" href="#vectorbt.signals.nb.generate_stop_loss_exits_nb">generate_stop_loss_exits_nb</a></code></li>
+<li><code><a title="vectorbt.signals.nb.generate_take_profit_exits_nb" href="#vectorbt.signals.nb.generate_take_profit_exits_nb">generate_take_profit_exits_nb</a></code></li>
 <li><code><a title="vectorbt.signals.nb.map_reduce_between_nb" href="#vectorbt.signals.nb.map_reduce_between_nb">map_reduce_between_nb</a></code></li>
 <li><code><a title="vectorbt.signals.nb.map_reduce_between_two_nb" href="#vectorbt.signals.nb.map_reduce_between_two_nb">map_reduce_between_two_nb</a></code></li>
 <li><code><a title="vectorbt.signals.nb.map_reduce_partitions_nb" href="#vectorbt.signals.nb.map_reduce_partitions_nb">map_reduce_partitions_nb</a></code></li>
 <li><code><a title="vectorbt.signals.nb.mean_reduce_nb" href="#vectorbt.signals.nb.mean_reduce_nb">mean_reduce_nb</a></code></li>
-<li><code><a title="vectorbt.signals.nb.random_choice_nb" href="#vectorbt.signals.nb.random_choice_nb">random_choice_nb</a></code></li>
-<li><code><a title="vectorbt.signals.nb.random_prob_choice_1d_nb" href="#vectorbt.signals.nb.random_prob_choice_1d_nb">random_prob_choice_1d_nb</a></code></li>
+<li><code><a title="vectorbt.signals.nb.rand_choice_by_prob_nb" href="#vectorbt.signals.nb.rand_choice_by_prob_nb">rand_choice_by_prob_nb</a></code></li>
+<li><code><a title="vectorbt.signals.nb.rand_choice_nb" href="#vectorbt.signals.nb.rand_choice_nb">rand_choice_nb</a></code></li>
+<li><code><a title="vectorbt.signals.nb.rank_1d_nb" href="#vectorbt.signals.nb.rank_1d_nb">rank_1d_nb</a></code></li>
 <li><code><a title="vectorbt.signals.nb.rank_nb" href="#vectorbt.signals.nb.rank_nb">rank_nb</a></code></li>
+<li><code><a title="vectorbt.signals.nb.rank_partitions_1d_nb" href="#vectorbt.signals.nb.rank_partitions_1d_nb">rank_partitions_1d_nb</a></code></li>
 <li><code><a title="vectorbt.signals.nb.rank_partitions_nb" href="#vectorbt.signals.nb.rank_partitions_nb">rank_partitions_nb</a></code></li>
+<li><code><a title="vectorbt.signals.nb.shuffle_1d_nb" href="#vectorbt.signals.nb.shuffle_1d_nb">shuffle_1d_nb</a></code></li>
 <li><code><a title="vectorbt.signals.nb.shuffle_nb" href="#vectorbt.signals.nb.shuffle_nb">shuffle_nb</a></code></li>
 <li><code><a title="vectorbt.signals.nb.stop_loss_apply_nb" href="#vectorbt.signals.nb.stop_loss_apply_nb">stop_loss_apply_nb</a></code></li>
 <li><code><a title="vectorbt.signals.nb.stop_loss_choice_nb" href="#vectorbt.signals.nb.stop_loss_choice_nb">stop_loss_choice_nb</a></code></li>

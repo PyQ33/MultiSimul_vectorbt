@@ -44,16 +44,14 @@ from vectorbt.utils.decorators import cached_property
 from vectorbt.utils.colors import adjust_lightness
 from vectorbt.base.indexing import PandasIndexer
 from vectorbt.tseries.common import TSArrayWrapper
-from vectorbt.records.base import Records
+from vectorbt.records.base import Records, indexing_on_records
 from vectorbt.records.enums import OrderSide, order_dt
-from vectorbt.records.common import indexing_on_records
-from vectorbt.records import nb
 
 
 def _indexing_func(obj, pd_indexing_func):
     &#34;&#34;&#34;Perform indexing on `BaseOrders`.&#34;&#34;&#34;
     records_arr, _ = indexing_on_records(obj, pd_indexing_func)
-    return obj.__class__(records_arr, pd_indexing_func(obj.main_price), freq=obj.wrapper.freq)
+    return obj.__class__(records_arr, pd_indexing_func(obj.main_price), freq=obj.wrapper.freq, idx_field=obj.idx_field)
 
 
 class BaseOrders(Records):
@@ -71,21 +69,30 @@ class BaseOrders(Records):
         ...      init_capital=100, freq=&#39;1D&#39;)
 
         &gt;&gt;&gt; print(portfolio.orders.buy.count)
-        4.0
+        4
         &gt;&gt;&gt; print(portfolio.orders.sell.count)
-        1.0
+        1
         ```&#34;&#34;&#34;
 
-    def __init__(self, records_arr, main_price, freq=None):
-        Records.__init__(self, records_arr, TSArrayWrapper.from_obj(main_price, freq=freq))
+    def __init__(self, records_arr, main_price, freq=None, idx_field=&#39;idx&#39;):
+        Records.__init__(self, records_arr, TSArrayWrapper.from_obj(main_price, freq=freq), idx_field=idx_field)
         PandasIndexer.__init__(self, _indexing_func)
 
         if not all(field in records_arr.dtype.names for field in order_dt.names):
-            raise Exception(&#34;Records array must have all fields defined in order_dt&#34;)
+            raise ValueError(&#34;Records array must have all fields defined in order_dt&#34;)
 
         self.main_price = main_price
 
-    def plot(self, main_price_trace_kwargs={}, buy_trace_kwargs={}, sell_trace_kwargs={}, fig=None, **layout_kwargs):
+    def filter_by_mask(self, mask):
+        &#34;&#34;&#34;Return a new class instance, filtered by mask.&#34;&#34;&#34;
+        return self.__class__(self.records_arr[mask], self.main_price, freq=self.wrapper.freq, idx_field=self.idx_field)
+
+    def plot(self,
+             main_price_trace_kwargs={},
+             buy_trace_kwargs={},
+             sell_trace_kwargs={},
+             fig=None,
+             **layout_kwargs):  # pragma: no cover
         &#34;&#34;&#34;Plot orders.
 
         Args:
@@ -101,7 +108,7 @@ class BaseOrders(Records):
 
             ![](/vectorbt/docs/img/orders.png)&#34;&#34;&#34;
         if self.wrapper.ndim &gt; 1:
-            raise Exception(&#34;You must select a column first&#34;)
+            raise TypeError(&#34;You must select a column first&#34;)
 
         # Plot main price
         fig = self.main_price.vbt.tseries.plot(trace_kwargs=main_price_trace_kwargs, fig=fig, **layout_kwargs)
@@ -164,42 +171,17 @@ class BaseOrders(Records):
     @cached_property
     def size(self):
         &#34;&#34;&#34;Size of each order.&#34;&#34;&#34;
-        return self.map_field_to_matrix(&#39;size&#39;)
-
-    @cached_property
-    def avg_size(self):
-        &#34;&#34;&#34;Average size of an order.&#34;&#34;&#34;
-        return self.map_reduce_records(nb.order_size_map_nb, nb.mean_reduce_nb)
-
-    @cached_property
-    def total_size(self):
-        &#34;&#34;&#34;Total size of all orders.&#34;&#34;&#34;
-        return self.map_reduce_records(nb.order_size_map_nb, nb.sum_reduce_nb)
+        return self.map_field(&#39;size&#39;)
 
     @cached_property
     def price(self):
         &#34;&#34;&#34;Price of each order.&#34;&#34;&#34;
-        return self.map_field_to_matrix(&#39;price&#39;)
-
-    @cached_property
-    def avg_price(self):
-        &#34;&#34;&#34;Average price of an order.&#34;&#34;&#34;
-        return self.map_reduce_records(nb.order_price_map_nb, nb.mean_reduce_nb)
+        return self.map_field(&#39;price&#39;)
 
     @cached_property
     def fees(self):
         &#34;&#34;&#34;Fees paid for each order.&#34;&#34;&#34;
-        return self.map_field_to_matrix(&#39;fees&#39;)
-
-    @cached_property
-    def avg_fees(self):
-        &#34;&#34;&#34;Average fees paid for an order.&#34;&#34;&#34;
-        return self.map_reduce_records(nb.order_fees_map_nb, nb.mean_reduce_nb)
-
-    @cached_property
-    def total_fees(self):
-        &#34;&#34;&#34;Total fees paid for all orders.&#34;&#34;&#34;
-        return self.map_reduce_records(nb.order_fees_map_nb, nb.sum_reduce_nb)
+        return self.map_field(&#39;fees&#39;)
 
 
 class Orders(BaseOrders):
@@ -210,19 +192,29 @@ class Orders(BaseOrders):
         &#34;&#34;&#34;Side of each order.
 
         See `vectorbt.records.enums.OrderSide`.&#34;&#34;&#34;
-        return self.map_field_to_matrix(&#39;side&#39;)
+        return self.map_field(&#39;side&#39;)
 
     @cached_property
     def buy(self):
         &#34;&#34;&#34;Buy operations of type `BaseOrders`.&#34;&#34;&#34;
         filter_mask = self.records_arr[&#39;side&#39;] == OrderSide.Buy
-        return BaseOrders(self.records_arr[filter_mask], self.main_price, freq=self.wrapper.freq)
+        return BaseOrders(
+            self.records_arr[filter_mask],
+            self.main_price,
+            freq=self.wrapper.freq,
+            idx_field=self.idx_field
+        )
 
     @cached_property
     def sell(self):
         &#34;&#34;&#34;Sell operations of type `BaseOrders`.&#34;&#34;&#34;
         filter_mask = self.records_arr[&#39;side&#39;] == OrderSide.Sell
-        return BaseOrders(self.records_arr[filter_mask], self.main_price, freq=self.wrapper.freq)</code></pre>
+        return BaseOrders(
+            self.records_arr[filter_mask],
+            self.main_price,
+            freq=self.wrapper.freq,
+            idx_field=self.idx_field
+        )</code></pre>
 </details>
 </section>
 <section>
@@ -236,7 +228,7 @@ class Orders(BaseOrders):
 <dl>
 <dt id="vectorbt.records.orders.BaseOrders"><code class="flex name class">
 <span>class <span class="ident parent-fname">BaseOrders</span></span>
-<span>(</span><span>records_arr, main_price, freq=None)</span>
+<span>(</span><span>records_arr, main_price, freq=None, idx_field='idx')</span>
 </code></dt>
 <dd>
 <div class="desc"><p>Extends <code>Records</code> for working with order records.</p>
@@ -251,9 +243,9 @@ class Orders(BaseOrders):
 ...      init_capital=100, freq='1D')
 
 &gt;&gt;&gt; print(portfolio.orders.buy.count)
-4.0
+4
 &gt;&gt;&gt; print(portfolio.orders.sell.count)
-1.0
+1
 </code></pre></div>
 <details class="source">
 <summary>
@@ -274,21 +266,30 @@ class Orders(BaseOrders):
         ...      init_capital=100, freq=&#39;1D&#39;)
 
         &gt;&gt;&gt; print(portfolio.orders.buy.count)
-        4.0
+        4
         &gt;&gt;&gt; print(portfolio.orders.sell.count)
-        1.0
+        1
         ```&#34;&#34;&#34;
 
-    def __init__(self, records_arr, main_price, freq=None):
-        Records.__init__(self, records_arr, TSArrayWrapper.from_obj(main_price, freq=freq))
+    def __init__(self, records_arr, main_price, freq=None, idx_field=&#39;idx&#39;):
+        Records.__init__(self, records_arr, TSArrayWrapper.from_obj(main_price, freq=freq), idx_field=idx_field)
         PandasIndexer.__init__(self, _indexing_func)
 
         if not all(field in records_arr.dtype.names for field in order_dt.names):
-            raise Exception(&#34;Records array must have all fields defined in order_dt&#34;)
+            raise ValueError(&#34;Records array must have all fields defined in order_dt&#34;)
 
         self.main_price = main_price
 
-    def plot(self, main_price_trace_kwargs={}, buy_trace_kwargs={}, sell_trace_kwargs={}, fig=None, **layout_kwargs):
+    def filter_by_mask(self, mask):
+        &#34;&#34;&#34;Return a new class instance, filtered by mask.&#34;&#34;&#34;
+        return self.__class__(self.records_arr[mask], self.main_price, freq=self.wrapper.freq, idx_field=self.idx_field)
+
+    def plot(self,
+             main_price_trace_kwargs={},
+             buy_trace_kwargs={},
+             sell_trace_kwargs={},
+             fig=None,
+             **layout_kwargs):  # pragma: no cover
         &#34;&#34;&#34;Plot orders.
 
         Args:
@@ -304,7 +305,7 @@ class Orders(BaseOrders):
 
             ![](/vectorbt/docs/img/orders.png)&#34;&#34;&#34;
         if self.wrapper.ndim &gt; 1:
-            raise Exception(&#34;You must select a column first&#34;)
+            raise TypeError(&#34;You must select a column first&#34;)
 
         # Plot main price
         fig = self.main_price.vbt.tseries.plot(trace_kwargs=main_price_trace_kwargs, fig=fig, **layout_kwargs)
@@ -367,42 +368,17 @@ class Orders(BaseOrders):
     @cached_property
     def size(self):
         &#34;&#34;&#34;Size of each order.&#34;&#34;&#34;
-        return self.map_field_to_matrix(&#39;size&#39;)
-
-    @cached_property
-    def avg_size(self):
-        &#34;&#34;&#34;Average size of an order.&#34;&#34;&#34;
-        return self.map_reduce_records(nb.order_size_map_nb, nb.mean_reduce_nb)
-
-    @cached_property
-    def total_size(self):
-        &#34;&#34;&#34;Total size of all orders.&#34;&#34;&#34;
-        return self.map_reduce_records(nb.order_size_map_nb, nb.sum_reduce_nb)
+        return self.map_field(&#39;size&#39;)
 
     @cached_property
     def price(self):
         &#34;&#34;&#34;Price of each order.&#34;&#34;&#34;
-        return self.map_field_to_matrix(&#39;price&#39;)
-
-    @cached_property
-    def avg_price(self):
-        &#34;&#34;&#34;Average price of an order.&#34;&#34;&#34;
-        return self.map_reduce_records(nb.order_price_map_nb, nb.mean_reduce_nb)
+        return self.map_field(&#39;price&#39;)
 
     @cached_property
     def fees(self):
         &#34;&#34;&#34;Fees paid for each order.&#34;&#34;&#34;
-        return self.map_field_to_matrix(&#39;fees&#39;)
-
-    @cached_property
-    def avg_fees(self):
-        &#34;&#34;&#34;Average fees paid for an order.&#34;&#34;&#34;
-        return self.map_reduce_records(nb.order_fees_map_nb, nb.mean_reduce_nb)
-
-    @cached_property
-    def total_fees(self):
-        &#34;&#34;&#34;Total fees paid for all orders.&#34;&#34;&#34;
-        return self.map_reduce_records(nb.order_fees_map_nb, nb.sum_reduce_nb)</code></pre>
+        return self.map_field(&#39;fees&#39;)</code></pre>
 </details>
 <h3 class="section-subtitle">Ancestors</h3>
 <ul class="hlist">
@@ -415,78 +391,6 @@ class Orders(BaseOrders):
 </ul>
 <h3 class="section-subtitle">Instance variables</h3>
 <dl>
-<dt id="vectorbt.records.orders.BaseOrders.avg_fees"><code class="name">var <span class="ident fname">avg_fees</span></code></dt>
-<dd>
-<div class="desc"><p>Average fees paid for an order.</p></div>
-<details class="source">
-<summary>
-<span>Expand source code</span>
-</summary>
-<pre><code class="python">def __get__(self, instance, owner=None):
-    if instance is None:
-        return self
-    if not defaults.caching or self.disabled:  # you can manually disable cache here
-        return super().__get__(instance, owner=owner)
-    cache = instance.__dict__
-    val = cache.get(self.attrname, _NOT_FOUND)
-    if val is _NOT_FOUND:
-        with self.lock:
-            # check if another thread filled cache while we awaited lock
-            val = cache.get(self.attrname, _NOT_FOUND)
-            if val is _NOT_FOUND:
-                val = self.func(instance)
-                cache[self.attrname] = val
-    return val</code></pre>
-</details>
-</dd>
-<dt id="vectorbt.records.orders.BaseOrders.avg_price"><code class="name">var <span class="ident fname">avg_price</span></code></dt>
-<dd>
-<div class="desc"><p>Average price of an order.</p></div>
-<details class="source">
-<summary>
-<span>Expand source code</span>
-</summary>
-<pre><code class="python">def __get__(self, instance, owner=None):
-    if instance is None:
-        return self
-    if not defaults.caching or self.disabled:  # you can manually disable cache here
-        return super().__get__(instance, owner=owner)
-    cache = instance.__dict__
-    val = cache.get(self.attrname, _NOT_FOUND)
-    if val is _NOT_FOUND:
-        with self.lock:
-            # check if another thread filled cache while we awaited lock
-            val = cache.get(self.attrname, _NOT_FOUND)
-            if val is _NOT_FOUND:
-                val = self.func(instance)
-                cache[self.attrname] = val
-    return val</code></pre>
-</details>
-</dd>
-<dt id="vectorbt.records.orders.BaseOrders.avg_size"><code class="name">var <span class="ident fname">avg_size</span></code></dt>
-<dd>
-<div class="desc"><p>Average size of an order.</p></div>
-<details class="source">
-<summary>
-<span>Expand source code</span>
-</summary>
-<pre><code class="python">def __get__(self, instance, owner=None):
-    if instance is None:
-        return self
-    if not defaults.caching or self.disabled:  # you can manually disable cache here
-        return super().__get__(instance, owner=owner)
-    cache = instance.__dict__
-    val = cache.get(self.attrname, _NOT_FOUND)
-    if val is _NOT_FOUND:
-        with self.lock:
-            # check if another thread filled cache while we awaited lock
-            val = cache.get(self.attrname, _NOT_FOUND)
-            if val is _NOT_FOUND:
-                val = self.func(instance)
-                cache[self.attrname] = val
-    return val</code></pre>
-</details>
-</dd>
 <dt id="vectorbt.records.orders.BaseOrders.fees"><code class="name">var <span class="ident fname">fees</span></code></dt>
 <dd>
 <div class="desc"><p>Fees paid for each order.</p></div>
@@ -559,54 +463,6 @@ class Orders(BaseOrders):
     return val</code></pre>
 </details>
 </dd>
-<dt id="vectorbt.records.orders.BaseOrders.total_fees"><code class="name">var <span class="ident fname">total_fees</span></code></dt>
-<dd>
-<div class="desc"><p>Total fees paid for all orders.</p></div>
-<details class="source">
-<summary>
-<span>Expand source code</span>
-</summary>
-<pre><code class="python">def __get__(self, instance, owner=None):
-    if instance is None:
-        return self
-    if not defaults.caching or self.disabled:  # you can manually disable cache here
-        return super().__get__(instance, owner=owner)
-    cache = instance.__dict__
-    val = cache.get(self.attrname, _NOT_FOUND)
-    if val is _NOT_FOUND:
-        with self.lock:
-            # check if another thread filled cache while we awaited lock
-            val = cache.get(self.attrname, _NOT_FOUND)
-            if val is _NOT_FOUND:
-                val = self.func(instance)
-                cache[self.attrname] = val
-    return val</code></pre>
-</details>
-</dd>
-<dt id="vectorbt.records.orders.BaseOrders.total_size"><code class="name">var <span class="ident fname">total_size</span></code></dt>
-<dd>
-<div class="desc"><p>Total size of all orders.</p></div>
-<details class="source">
-<summary>
-<span>Expand source code</span>
-</summary>
-<pre><code class="python">def __get__(self, instance, owner=None):
-    if instance is None:
-        return self
-    if not defaults.caching or self.disabled:  # you can manually disable cache here
-        return super().__get__(instance, owner=owner)
-    cache = instance.__dict__
-    val = cache.get(self.attrname, _NOT_FOUND)
-    if val is _NOT_FOUND:
-        with self.lock:
-            # check if another thread filled cache while we awaited lock
-            val = cache.get(self.attrname, _NOT_FOUND)
-            if val is _NOT_FOUND:
-                val = self.func(instance)
-                cache[self.attrname] = val
-    return val</code></pre>
-</details>
-</dd>
 </dl>
 <h3 class="section-subtitle">Methods</h3>
 <dl>
@@ -636,7 +492,12 @@ class Orders(BaseOrders):
 <summary>
 <span>Expand source code</span>
 </summary>
-<pre><code class="python">def plot(self, main_price_trace_kwargs={}, buy_trace_kwargs={}, sell_trace_kwargs={}, fig=None, **layout_kwargs):
+<pre><code class="python">def plot(self,
+         main_price_trace_kwargs={},
+         buy_trace_kwargs={},
+         sell_trace_kwargs={},
+         fig=None,
+         **layout_kwargs):  # pragma: no cover
     &#34;&#34;&#34;Plot orders.
 
     Args:
@@ -652,7 +513,7 @@ class Orders(BaseOrders):
 
         ![](/vectorbt/docs/img/orders.png)&#34;&#34;&#34;
     if self.wrapper.ndim &gt; 1:
-        raise Exception(&#34;You must select a column first&#34;)
+        raise TypeError(&#34;You must select a column first&#34;)
 
     # Plot main price
     fig = self.main_price.vbt.tseries.plot(trace_kwargs=main_price_trace_kwargs, fig=fig, **layout_kwargs)
@@ -718,16 +579,15 @@ class Orders(BaseOrders):
 <ul class="hlist">
 <li><code><b><a title="vectorbt.records.base.Records" href="base.html#vectorbt.records.base.Records">Records</a></b></code>:
 <ul class="hlist">
-<li><code><a title="vectorbt.records.base.Records.convert_array_to_matrix" href="base.html#vectorbt.records.base.Records.convert_array_to_matrix">convert_array_to_matrix</a></code></li>
+<li><code><a title="vectorbt.records.base.Records.col_index" href="base.html#vectorbt.records.base.Records.col_index">col_index</a></code></li>
 <li><code><a title="vectorbt.records.base.Records.count" href="base.html#vectorbt.records.base.Records.count">count</a></code></li>
+<li><code><a title="vectorbt.records.base.Records.filter_by_mask" href="base.html#vectorbt.records.base.Records.filter_by_mask">filter_by_mask</a></code></li>
 <li><code><a title="vectorbt.records.base.Records.iloc" href="../base/indexing.html#vectorbt.base.indexing.PandasIndexer.iloc">iloc</a></code></li>
 <li><code><a title="vectorbt.records.base.Records.loc" href="../base/indexing.html#vectorbt.base.indexing.PandasIndexer.loc">loc</a></code></li>
-<li><code><a title="vectorbt.records.base.Records.map_field_to_matrix" href="base.html#vectorbt.records.base.Records.map_field_to_matrix">map_field_to_matrix</a></code></li>
-<li><code><a title="vectorbt.records.base.Records.map_records_to_matrix" href="base.html#vectorbt.records.base.Records.map_records_to_matrix">map_records_to_matrix</a></code></li>
-<li><code><a title="vectorbt.records.base.Records.map_reduce_records" href="base.html#vectorbt.records.base.Records.map_reduce_records">map_reduce_records</a></code></li>
+<li><code><a title="vectorbt.records.base.Records.map" href="base.html#vectorbt.records.base.Records.map">map</a></code></li>
+<li><code><a title="vectorbt.records.base.Records.map_array" href="base.html#vectorbt.records.base.Records.map_array">map_array</a></code></li>
+<li><code><a title="vectorbt.records.base.Records.map_field" href="base.html#vectorbt.records.base.Records.map_field">map_field</a></code></li>
 <li><code><a title="vectorbt.records.base.Records.records" href="base.html#vectorbt.records.base.Records.records">records</a></code></li>
-<li><code><a title="vectorbt.records.base.Records.records_col_index" href="base.html#vectorbt.records.base.Records.records_col_index">records_col_index</a></code></li>
-<li><code><a title="vectorbt.records.base.Records.reduce_records" href="base.html#vectorbt.records.base.Records.reduce_records">reduce_records</a></code></li>
 <li><code><a title="vectorbt.records.base.Records.xs" href="../base/indexing.html#vectorbt.base.indexing.PandasIndexer.xs">xs</a></code></li>
 </ul>
 </li>
@@ -735,7 +595,7 @@ class Orders(BaseOrders):
 </dd>
 <dt id="vectorbt.records.orders.Orders"><code class="flex name class">
 <span>class <span class="ident parent-fname">Orders</span></span>
-<span>(</span><span>records_arr, main_price, freq=None)</span>
+<span>(</span><span>records_arr, main_price, freq=None, idx_field='idx')</span>
 </code></dt>
 <dd>
 <div class="desc"><p>Extends <code><a title="vectorbt.records.orders.BaseOrders" href="#vectorbt.records.orders.BaseOrders">BaseOrders</a></code> by further dividing orders into buy and sell orders.</p></div>
@@ -751,19 +611,29 @@ class Orders(BaseOrders):
         &#34;&#34;&#34;Side of each order.
 
         See `vectorbt.records.enums.OrderSide`.&#34;&#34;&#34;
-        return self.map_field_to_matrix(&#39;side&#39;)
+        return self.map_field(&#39;side&#39;)
 
     @cached_property
     def buy(self):
         &#34;&#34;&#34;Buy operations of type `BaseOrders`.&#34;&#34;&#34;
         filter_mask = self.records_arr[&#39;side&#39;] == OrderSide.Buy
-        return BaseOrders(self.records_arr[filter_mask], self.main_price, freq=self.wrapper.freq)
+        return BaseOrders(
+            self.records_arr[filter_mask],
+            self.main_price,
+            freq=self.wrapper.freq,
+            idx_field=self.idx_field
+        )
 
     @cached_property
     def sell(self):
         &#34;&#34;&#34;Sell operations of type `BaseOrders`.&#34;&#34;&#34;
         filter_mask = self.records_arr[&#39;side&#39;] == OrderSide.Sell
-        return BaseOrders(self.records_arr[filter_mask], self.main_price, freq=self.wrapper.freq)</code></pre>
+        return BaseOrders(
+            self.records_arr[filter_mask],
+            self.main_price,
+            freq=self.wrapper.freq,
+            idx_field=self.idx_field
+        )</code></pre>
 </details>
 <h3 class="section-subtitle">Ancestors</h3>
 <ul class="hlist">
@@ -851,25 +721,19 @@ class Orders(BaseOrders):
 <ul class="hlist">
 <li><code><b><a title="vectorbt.records.orders.BaseOrders" href="#vectorbt.records.orders.BaseOrders">BaseOrders</a></b></code>:
 <ul class="hlist">
-<li><code><a title="vectorbt.records.orders.BaseOrders.avg_fees" href="#vectorbt.records.orders.BaseOrders.avg_fees">avg_fees</a></code></li>
-<li><code><a title="vectorbt.records.orders.BaseOrders.avg_price" href="#vectorbt.records.orders.BaseOrders.avg_price">avg_price</a></code></li>
-<li><code><a title="vectorbt.records.orders.BaseOrders.avg_size" href="#vectorbt.records.orders.BaseOrders.avg_size">avg_size</a></code></li>
-<li><code><a title="vectorbt.records.orders.BaseOrders.convert_array_to_matrix" href="base.html#vectorbt.records.base.Records.convert_array_to_matrix">convert_array_to_matrix</a></code></li>
+<li><code><a title="vectorbt.records.orders.BaseOrders.col_index" href="base.html#vectorbt.records.base.Records.col_index">col_index</a></code></li>
 <li><code><a title="vectorbt.records.orders.BaseOrders.count" href="base.html#vectorbt.records.base.Records.count">count</a></code></li>
 <li><code><a title="vectorbt.records.orders.BaseOrders.fees" href="#vectorbt.records.orders.BaseOrders.fees">fees</a></code></li>
+<li><code><a title="vectorbt.records.orders.BaseOrders.filter_by_mask" href="base.html#vectorbt.records.base.Records.filter_by_mask">filter_by_mask</a></code></li>
 <li><code><a title="vectorbt.records.orders.BaseOrders.iloc" href="../base/indexing.html#vectorbt.base.indexing.PandasIndexer.iloc">iloc</a></code></li>
 <li><code><a title="vectorbt.records.orders.BaseOrders.loc" href="../base/indexing.html#vectorbt.base.indexing.PandasIndexer.loc">loc</a></code></li>
-<li><code><a title="vectorbt.records.orders.BaseOrders.map_field_to_matrix" href="base.html#vectorbt.records.base.Records.map_field_to_matrix">map_field_to_matrix</a></code></li>
-<li><code><a title="vectorbt.records.orders.BaseOrders.map_records_to_matrix" href="base.html#vectorbt.records.base.Records.map_records_to_matrix">map_records_to_matrix</a></code></li>
-<li><code><a title="vectorbt.records.orders.BaseOrders.map_reduce_records" href="base.html#vectorbt.records.base.Records.map_reduce_records">map_reduce_records</a></code></li>
+<li><code><a title="vectorbt.records.orders.BaseOrders.map" href="base.html#vectorbt.records.base.Records.map">map</a></code></li>
+<li><code><a title="vectorbt.records.orders.BaseOrders.map_array" href="base.html#vectorbt.records.base.Records.map_array">map_array</a></code></li>
+<li><code><a title="vectorbt.records.orders.BaseOrders.map_field" href="base.html#vectorbt.records.base.Records.map_field">map_field</a></code></li>
 <li><code><a title="vectorbt.records.orders.BaseOrders.plot" href="#vectorbt.records.orders.BaseOrders.plot">plot</a></code></li>
 <li><code><a title="vectorbt.records.orders.BaseOrders.price" href="#vectorbt.records.orders.BaseOrders.price">price</a></code></li>
 <li><code><a title="vectorbt.records.orders.BaseOrders.records" href="base.html#vectorbt.records.base.Records.records">records</a></code></li>
-<li><code><a title="vectorbt.records.orders.BaseOrders.records_col_index" href="base.html#vectorbt.records.base.Records.records_col_index">records_col_index</a></code></li>
-<li><code><a title="vectorbt.records.orders.BaseOrders.reduce_records" href="base.html#vectorbt.records.base.Records.reduce_records">reduce_records</a></code></li>
 <li><code><a title="vectorbt.records.orders.BaseOrders.size" href="#vectorbt.records.orders.BaseOrders.size">size</a></code></li>
-<li><code><a title="vectorbt.records.orders.BaseOrders.total_fees" href="#vectorbt.records.orders.BaseOrders.total_fees">total_fees</a></code></li>
-<li><code><a title="vectorbt.records.orders.BaseOrders.total_size" href="#vectorbt.records.orders.BaseOrders.total_size">total_size</a></code></li>
 <li><code><a title="vectorbt.records.orders.BaseOrders.xs" href="../base/indexing.html#vectorbt.base.indexing.PandasIndexer.xs">xs</a></code></li>
 </ul>
 </li>
@@ -907,16 +771,11 @@ title="Search"
 <ul>
 <li>
 <h4><code><a title="vectorbt.records.orders.BaseOrders" href="#vectorbt.records.orders.BaseOrders">BaseOrders</a></code></h4>
-<ul class="two-column">
-<li><code><a title="vectorbt.records.orders.BaseOrders.avg_fees" href="#vectorbt.records.orders.BaseOrders.avg_fees">avg_fees</a></code></li>
-<li><code><a title="vectorbt.records.orders.BaseOrders.avg_price" href="#vectorbt.records.orders.BaseOrders.avg_price">avg_price</a></code></li>
-<li><code><a title="vectorbt.records.orders.BaseOrders.avg_size" href="#vectorbt.records.orders.BaseOrders.avg_size">avg_size</a></code></li>
+<ul class="">
 <li><code><a title="vectorbt.records.orders.BaseOrders.fees" href="#vectorbt.records.orders.BaseOrders.fees">fees</a></code></li>
 <li><code><a title="vectorbt.records.orders.BaseOrders.plot" href="#vectorbt.records.orders.BaseOrders.plot">plot</a></code></li>
 <li><code><a title="vectorbt.records.orders.BaseOrders.price" href="#vectorbt.records.orders.BaseOrders.price">price</a></code></li>
 <li><code><a title="vectorbt.records.orders.BaseOrders.size" href="#vectorbt.records.orders.BaseOrders.size">size</a></code></li>
-<li><code><a title="vectorbt.records.orders.BaseOrders.total_fees" href="#vectorbt.records.orders.BaseOrders.total_fees">total_fees</a></code></li>
-<li><code><a title="vectorbt.records.orders.BaseOrders.total_size" href="#vectorbt.records.orders.BaseOrders.total_size">total_size</a></code></li>
 </ul>
 </li>
 <li>

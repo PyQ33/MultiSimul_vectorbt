@@ -49,6 +49,7 @@ from scipy import stats
 from vectorbt import defaults
 from vectorbt.accessors import register_dataframe_accessor, register_series_accessor
 from vectorbt.utils import checks
+from vectorbt.utils.decorators import cached_property
 from vectorbt.base import reshape_fns
 from vectorbt.tseries.accessors import (
     TimeSeries_Accessor,
@@ -62,7 +63,7 @@ from vectorbt.returns import nb
 class Returns_Accessor(TimeSeries_Accessor):
     &#34;&#34;&#34;Accessor on top of return series. For both, Series and DataFrames.
 
-    Accessible through `pandas.Series.vbt.returns` and `pandas.DataFrame.vbt.returns`.&#34;&#34;&#34;
+    Accessible through `pd.Series.vbt.returns` and `pd.DataFrame.vbt.returns`.&#34;&#34;&#34;
 
     def __init__(self, obj, freq=None, year_freq=None):
         if not checks.is_pandas(obj):  # parent accessor
@@ -75,7 +76,7 @@ class Returns_Accessor(TimeSeries_Accessor):
 
     @classmethod
     def from_price(cls, price, **kwargs):
-        &#34;&#34;&#34;Computes the return series of `price`.&#34;&#34;&#34;
+        &#34;&#34;&#34;Returns a new `Returns_Accessor` instance with returns from `price`.&#34;&#34;&#34;
         return cls(price.vbt.tseries.pct_change(), **kwargs)
 
     @property
@@ -95,9 +96,9 @@ class Returns_Accessor(TimeSeries_Accessor):
         &#34;&#34;&#34;Daily returns.&#34;&#34;&#34;
         checks.assert_type(self.index, DatetimeTypes)
 
-        if self.freq == pd.Timedelta(&#39;1 days&#39;):
+        if self.freq == pd.Timedelta(&#39;1D&#39;):
             return self._obj
-        return self.resample_apply(&#39;1 days&#39;, nb.total_return_apply_nb)
+        return self.resample_apply(&#39;1D&#39;, nb.total_return_apply_nb)
 
     def annual(self):
         &#34;&#34;&#34;Annual returns.&#34;&#34;&#34;
@@ -118,14 +119,6 @@ class Returns_Accessor(TimeSeries_Accessor):
     def total(self):
         &#34;&#34;&#34;Total return.&#34;&#34;&#34;
         return self.wrap_reduced(nb.cum_returns_final_nb(self.to_2d_array(), np.full(len(self.columns), 0.)))
-
-    def drawdown(self):
-        &#34;&#34;&#34;Relative decline from a peak.&#34;&#34;&#34;
-        return self.wrap(nb.drawdown_nb(self.to_2d_array()))
-
-    def max_drawdown(self):
-        &#34;&#34;&#34;Total maximum drawdown (MDD).&#34;&#34;&#34;
-        return self.wrap_reduced(nb.max_drawdown_nb(self.to_2d_array()))
 
     def annualized_return(self):
         &#34;&#34;&#34;Mean annual growth rate of returns.
@@ -273,32 +266,27 @@ class Returns_Accessor(TimeSeries_Accessor):
         &#34;&#34;&#34;Kurtosis of returns.&#34;&#34;&#34;
         return self.wrap_reduced(stats.kurtosis(self.to_2d_array(), axis=0, nan_policy=&#39;omit&#39;))
 
-    def drawdown(self, start_value=1.):
-        &#34;&#34;&#34;Drawdown of cumulative returns.
+    def drawdown(self):
+        &#34;&#34;&#34;Relative decline from a peak.&#34;&#34;&#34;
+        return self.wrap(nb.drawdown_nb(self.to_2d_array()))
 
-        Args:
-            start_value (int, float or array_like): The starting returns.
+    def max_drawdown(self):
+        &#34;&#34;&#34;Total maximum drawdown (MDD).&#34;&#34;&#34;
+        return self.wrap_reduced(nb.max_drawdown_nb(self.to_2d_array()))
 
-                Default value is 1 to avoid zeros.&#34;&#34;&#34;
-        return self.cumulative(start_value=start_value).vbt.tseries(freq=self.freq).drawdown()
-
-    def drawdowns(self, start_value=1.):
+    @cached_property
+    def drawdowns(self):
         &#34;&#34;&#34;Drawdown records of cumulative returns.
 
-        See `vectorbt.records.drawdowns.Drawdowns`.
-
-        Args:
-            start_value (int, float or array_like): The starting returns.
-
-                Default value is 1 to avoid zeros.&#34;&#34;&#34;
-        return self.cumulative(start_value=start_value).vbt.tseries(freq=self.freq).drawdowns()
+        See `vectorbt.records.drawdowns.Drawdowns`.&#34;&#34;&#34;
+        return self.cumulative(start_value=1.).vbt.tseries(freq=self.freq).drawdowns
 
 
 @register_series_accessor(&#39;returns&#39;)
 class Returns_SRAccessor(Returns_Accessor, TimeSeries_SRAccessor):
     &#34;&#34;&#34;Accessor on top of return series. For Series only.
 
-    Accessible through `pandas.Series.vbt.returns`.&#34;&#34;&#34;
+    Accessible through `pd.Series.vbt.returns`.&#34;&#34;&#34;
 
     def __init__(self, obj, freq=None, year_freq=None):
         if not checks.is_pandas(obj):  # parent accessor
@@ -312,7 +300,7 @@ class Returns_SRAccessor(Returns_Accessor, TimeSeries_SRAccessor):
 class Returns_DFAccessor(Returns_Accessor, TimeSeries_DFAccessor):
     &#34;&#34;&#34;Accessor on top of return series. For DataFrames only.
 
-    Accessible through `pandas.DataFrame.vbt.returns`.&#34;&#34;&#34;
+    Accessible through `pd.DataFrame.vbt.returns`.&#34;&#34;&#34;
 
     def __init__(self, obj, freq=None, year_freq=None):
         if not checks.is_pandas(obj):  # parent accessor
@@ -337,7 +325,7 @@ class Returns_DFAccessor(Returns_Accessor, TimeSeries_DFAccessor):
 </code></dt>
 <dd>
 <div class="desc"><p>Accessor on top of return series. For both, Series and DataFrames.</p>
-<p>Accessible through <code>pandas.Series.vbt.returns</code> and <code>pandas.DataFrame.vbt.returns</code>.</p></div>
+<p>Accessible through <code>pd.Series.vbt.returns</code> and <code>pd.DataFrame.vbt.returns</code>.</p></div>
 <details class="source">
 <summary>
 <span>Expand source code</span>
@@ -345,7 +333,7 @@ class Returns_DFAccessor(Returns_Accessor, TimeSeries_DFAccessor):
 <pre><code class="python">class Returns_Accessor(TimeSeries_Accessor):
     &#34;&#34;&#34;Accessor on top of return series. For both, Series and DataFrames.
 
-    Accessible through `pandas.Series.vbt.returns` and `pandas.DataFrame.vbt.returns`.&#34;&#34;&#34;
+    Accessible through `pd.Series.vbt.returns` and `pd.DataFrame.vbt.returns`.&#34;&#34;&#34;
 
     def __init__(self, obj, freq=None, year_freq=None):
         if not checks.is_pandas(obj):  # parent accessor
@@ -358,7 +346,7 @@ class Returns_DFAccessor(Returns_Accessor, TimeSeries_DFAccessor):
 
     @classmethod
     def from_price(cls, price, **kwargs):
-        &#34;&#34;&#34;Computes the return series of `price`.&#34;&#34;&#34;
+        &#34;&#34;&#34;Returns a new `Returns_Accessor` instance with returns from `price`.&#34;&#34;&#34;
         return cls(price.vbt.tseries.pct_change(), **kwargs)
 
     @property
@@ -378,9 +366,9 @@ class Returns_DFAccessor(Returns_Accessor, TimeSeries_DFAccessor):
         &#34;&#34;&#34;Daily returns.&#34;&#34;&#34;
         checks.assert_type(self.index, DatetimeTypes)
 
-        if self.freq == pd.Timedelta(&#39;1 days&#39;):
+        if self.freq == pd.Timedelta(&#39;1D&#39;):
             return self._obj
-        return self.resample_apply(&#39;1 days&#39;, nb.total_return_apply_nb)
+        return self.resample_apply(&#39;1D&#39;, nb.total_return_apply_nb)
 
     def annual(self):
         &#34;&#34;&#34;Annual returns.&#34;&#34;&#34;
@@ -401,14 +389,6 @@ class Returns_DFAccessor(Returns_Accessor, TimeSeries_DFAccessor):
     def total(self):
         &#34;&#34;&#34;Total return.&#34;&#34;&#34;
         return self.wrap_reduced(nb.cum_returns_final_nb(self.to_2d_array(), np.full(len(self.columns), 0.)))
-
-    def drawdown(self):
-        &#34;&#34;&#34;Relative decline from a peak.&#34;&#34;&#34;
-        return self.wrap(nb.drawdown_nb(self.to_2d_array()))
-
-    def max_drawdown(self):
-        &#34;&#34;&#34;Total maximum drawdown (MDD).&#34;&#34;&#34;
-        return self.wrap_reduced(nb.max_drawdown_nb(self.to_2d_array()))
 
     def annualized_return(self):
         &#34;&#34;&#34;Mean annual growth rate of returns.
@@ -556,25 +536,20 @@ class Returns_DFAccessor(Returns_Accessor, TimeSeries_DFAccessor):
         &#34;&#34;&#34;Kurtosis of returns.&#34;&#34;&#34;
         return self.wrap_reduced(stats.kurtosis(self.to_2d_array(), axis=0, nan_policy=&#39;omit&#39;))
 
-    def drawdown(self, start_value=1.):
-        &#34;&#34;&#34;Drawdown of cumulative returns.
+    def drawdown(self):
+        &#34;&#34;&#34;Relative decline from a peak.&#34;&#34;&#34;
+        return self.wrap(nb.drawdown_nb(self.to_2d_array()))
 
-        Args:
-            start_value (int, float or array_like): The starting returns.
+    def max_drawdown(self):
+        &#34;&#34;&#34;Total maximum drawdown (MDD).&#34;&#34;&#34;
+        return self.wrap_reduced(nb.max_drawdown_nb(self.to_2d_array()))
 
-                Default value is 1 to avoid zeros.&#34;&#34;&#34;
-        return self.cumulative(start_value=start_value).vbt.tseries(freq=self.freq).drawdown()
-
-    def drawdowns(self, start_value=1.):
+    @cached_property
+    def drawdowns(self):
         &#34;&#34;&#34;Drawdown records of cumulative returns.
 
-        See `vectorbt.records.drawdowns.Drawdowns`.
-
-        Args:
-            start_value (int, float or array_like): The starting returns.
-
-                Default value is 1 to avoid zeros.&#34;&#34;&#34;
-        return self.cumulative(start_value=start_value).vbt.tseries(freq=self.freq).drawdowns()</code></pre>
+        See `vectorbt.records.drawdowns.Drawdowns`.&#34;&#34;&#34;
+        return self.cumulative(start_value=1.).vbt.tseries(freq=self.freq).drawdowns</code></pre>
 </details>
 <h3 class="section-subtitle">Ancestors</h3>
 <ul class="hlist">
@@ -594,14 +569,14 @@ class Returns_DFAccessor(Returns_Accessor, TimeSeries_DFAccessor):
 <span>def <span class="ident fname">from_price</span></span>(<span>price, **kwargs)</span>
 </code></dt>
 <dd>
-<div class="desc"><p>Computes the return series of <code>price</code>.</p></div>
+<div class="desc"><p>Returns a new <code><a title="vectorbt.returns.accessors.Returns_Accessor" href="#vectorbt.returns.accessors.Returns_Accessor">Returns_Accessor</a></code> instance with returns from <code>price</code>.</p></div>
 <details class="source">
 <summary>
 <span>Expand source code</span>
 </summary>
 <pre><code class="python">@classmethod
 def from_price(cls, price, **kwargs):
-    &#34;&#34;&#34;Computes the return series of `price`.&#34;&#34;&#34;
+    &#34;&#34;&#34;Returns a new `Returns_Accessor` instance with returns from `price`.&#34;&#34;&#34;
     return cls(price.vbt.tseries.pct_change(), **kwargs)</code></pre>
 </details>
 </dd>
@@ -619,6 +594,31 @@ def from_price(cls, price, **kwargs):
 def ann_factor(self):
     &#34;&#34;&#34;Annualization factor.&#34;&#34;&#34;
     return self.year_freq / self.freq</code></pre>
+</details>
+</dd>
+<dt id="vectorbt.returns.accessors.Returns_Accessor.drawdowns"><code class="name">var <span class="ident fname">drawdowns</span></code></dt>
+<dd>
+<div class="desc"><p>Drawdown records of cumulative returns.</p>
+<p>See <code><a title="vectorbt.records.drawdowns.Drawdowns" href="../records/drawdowns.html#vectorbt.records.drawdowns.Drawdowns">Drawdowns</a></code>.</p></div>
+<details class="source">
+<summary>
+<span>Expand source code</span>
+</summary>
+<pre><code class="python">def __get__(self, instance, owner=None):
+    if instance is None:
+        return self
+    if not defaults.caching or self.disabled:  # you can manually disable cache here
+        return super().__get__(instance, owner=owner)
+    cache = instance.__dict__
+    val = cache.get(self.attrname, _NOT_FOUND)
+    if val is _NOT_FOUND:
+        with self.lock:
+            # check if another thread filled cache while we awaited lock
+            val = cache.get(self.attrname, _NOT_FOUND)
+            if val is _NOT_FOUND:
+                val = self.func(instance)
+                cache[self.attrname] = val
+    return val</code></pre>
 </details>
 </dd>
 <dt id="vectorbt.returns.accessors.Returns_Accessor.year_freq"><code class="name">var <span class="ident fname">year_freq</span></code></dt>
@@ -852,9 +852,9 @@ bottom percentile of returns.</dd>
     &#34;&#34;&#34;Daily returns.&#34;&#34;&#34;
     checks.assert_type(self.index, DatetimeTypes)
 
-    if self.freq == pd.Timedelta(&#39;1 days&#39;):
+    if self.freq == pd.Timedelta(&#39;1D&#39;):
         return self._obj
-    return self.resample_apply(&#39;1 days&#39;, nb.total_return_apply_nb)</code></pre>
+    return self.resample_apply(&#39;1D&#39;, nb.total_return_apply_nb)</code></pre>
 </details>
 </dd>
 <dt id="vectorbt.returns.accessors.Returns_Accessor.down_capture"><code class="name flex">
@@ -906,60 +906,17 @@ bottom percentile of returns.</dd>
 </details>
 </dd>
 <dt id="vectorbt.returns.accessors.Returns_Accessor.drawdown"><code class="name flex">
-<span>def <span class="ident fname">drawdown</span></span>(<span>self, start_value=1.0)</span>
+<span>def <span class="ident fname">drawdown</span></span>(<span>self)</span>
 </code></dt>
 <dd>
-<div class="desc"><p>Drawdown of cumulative returns.</p>
-<h2 id="args">Args</h2>
-<dl>
-<dt><strong><code>start_value</code></strong> :&ensp;<code>int, float</code> or <code>array_like</code></dt>
-<dd>
-<p>The starting returns.</p>
-<p>Default value is 1 to avoid zeros.</p>
-</dd>
-</dl></div>
+<div class="desc"><p>Relative decline from a peak.</p></div>
 <details class="source">
 <summary>
 <span>Expand source code</span>
 </summary>
-<pre><code class="python">def drawdown(self, start_value=1.):
-    &#34;&#34;&#34;Drawdown of cumulative returns.
-
-    Args:
-        start_value (int, float or array_like): The starting returns.
-
-            Default value is 1 to avoid zeros.&#34;&#34;&#34;
-    return self.cumulative(start_value=start_value).vbt.tseries(freq=self.freq).drawdown()</code></pre>
-</details>
-</dd>
-<dt id="vectorbt.returns.accessors.Returns_Accessor.drawdowns"><code class="name flex">
-<span>def <span class="ident fname">drawdowns</span></span>(<span>self, start_value=1.0)</span>
-</code></dt>
-<dd>
-<div class="desc"><p>Drawdown records of cumulative returns.</p>
-<p>See <code><a title="vectorbt.records.drawdowns.Drawdowns" href="../records/drawdowns.html#vectorbt.records.drawdowns.Drawdowns">Drawdowns</a></code>.</p>
-<h2 id="args">Args</h2>
-<dl>
-<dt><strong><code>start_value</code></strong> :&ensp;<code>int, float</code> or <code>array_like</code></dt>
-<dd>
-<p>The starting returns.</p>
-<p>Default value is 1 to avoid zeros.</p>
-</dd>
-</dl></div>
-<details class="source">
-<summary>
-<span>Expand source code</span>
-</summary>
-<pre><code class="python">def drawdowns(self, start_value=1.):
-    &#34;&#34;&#34;Drawdown records of cumulative returns.
-
-    See `vectorbt.records.drawdowns.Drawdowns`.
-
-    Args:
-        start_value (int, float or array_like): The starting returns.
-
-            Default value is 1 to avoid zeros.&#34;&#34;&#34;
-    return self.cumulative(start_value=start_value).vbt.tseries(freq=self.freq).drawdowns()</code></pre>
+<pre><code class="python">def drawdown(self):
+    &#34;&#34;&#34;Relative decline from a peak.&#34;&#34;&#34;
+    return self.wrap(nb.drawdown_nb(self.to_2d_array()))</code></pre>
 </details>
 </dd>
 <dt id="vectorbt.returns.accessors.Returns_Accessor.information_ratio"><code class="name flex">
@@ -1188,12 +1145,11 @@ bottom percentile of returns.</dd>
 <li><code><b><a title="vectorbt.tseries.accessors.TimeSeries_Accessor" href="../tseries/accessors.html#vectorbt.tseries.accessors.TimeSeries_Accessor">TimeSeries_Accessor</a></b></code>:
 <ul class="hlist">
 <li><code><a title="vectorbt.tseries.accessors.TimeSeries_Accessor.align_to" href="../base/accessors.html#vectorbt.base.accessors.Base_Accessor.align_to">align_to</a></code></li>
+<li><code><a title="vectorbt.tseries.accessors.TimeSeries_Accessor.apply" href="../base/accessors.html#vectorbt.base.accessors.Base_Accessor.apply">apply</a></code></li>
 <li><code><a title="vectorbt.tseries.accessors.TimeSeries_Accessor.apply_and_concat" href="../base/accessors.html#vectorbt.base.accessors.Base_Accessor.apply_and_concat">apply_and_concat</a></code></li>
 <li><code><a title="vectorbt.tseries.accessors.TimeSeries_Accessor.apply_and_reduce" href="../tseries/accessors.html#vectorbt.tseries.accessors.TimeSeries_Accessor.apply_and_reduce">apply_and_reduce</a></code></li>
-<li><code><a title="vectorbt.tseries.accessors.TimeSeries_Accessor.apply_func_on_index" href="../base/accessors.html#vectorbt.base.accessors.Base_Accessor.apply_func_on_index">apply_func_on_index</a></code></li>
+<li><code><a title="vectorbt.tseries.accessors.TimeSeries_Accessor.apply_on_index" href="../base/accessors.html#vectorbt.base.accessors.Base_Accessor.apply_on_index">apply_on_index</a></code></li>
 <li><code><a title="vectorbt.tseries.accessors.TimeSeries_Accessor.applymap" href="../tseries/accessors.html#vectorbt.tseries.accessors.TimeSeries_Accessor.applymap">applymap</a></code></li>
-<li><code><a title="vectorbt.tseries.accessors.TimeSeries_Accessor.argmax" href="../tseries/accessors.html#vectorbt.tseries.accessors.TimeSeries_Accessor.argmax">argmax</a></code></li>
-<li><code><a title="vectorbt.tseries.accessors.TimeSeries_Accessor.argmin" href="../tseries/accessors.html#vectorbt.tseries.accessors.TimeSeries_Accessor.argmin">argmin</a></code></li>
 <li><code><a title="vectorbt.tseries.accessors.TimeSeries_Accessor.broadcast" href="../base/accessors.html#vectorbt.base.accessors.Base_Accessor.broadcast">broadcast</a></code></li>
 <li><code><a title="vectorbt.tseries.accessors.TimeSeries_Accessor.broadcast_to" href="../base/accessors.html#vectorbt.base.accessors.Base_Accessor.broadcast_to">broadcast_to</a></code></li>
 <li><code><a title="vectorbt.tseries.accessors.TimeSeries_Accessor.columns" href="../base/array_wrapper.html#vectorbt.base.array_wrapper.ArrayWrapper.columns">columns</a></code></li>
@@ -1224,12 +1180,15 @@ bottom percentile of returns.</dd>
 <li><code><a title="vectorbt.tseries.accessors.TimeSeries_Accessor.from_obj" href="../base/array_wrapper.html#vectorbt.base.array_wrapper.ArrayWrapper.from_obj">from_obj</a></code></li>
 <li><code><a title="vectorbt.tseries.accessors.TimeSeries_Accessor.fshift" href="../tseries/accessors.html#vectorbt.tseries.accessors.TimeSeries_Accessor.fshift">fshift</a></code></li>
 <li><code><a title="vectorbt.tseries.accessors.TimeSeries_Accessor.groupby_apply" href="../tseries/accessors.html#vectorbt.tseries.accessors.TimeSeries_Accessor.groupby_apply">groupby_apply</a></code></li>
+<li><code><a title="vectorbt.tseries.accessors.TimeSeries_Accessor.idxmax" href="../tseries/accessors.html#vectorbt.tseries.accessors.TimeSeries_Accessor.idxmax">idxmax</a></code></li>
+<li><code><a title="vectorbt.tseries.accessors.TimeSeries_Accessor.idxmin" href="../tseries/accessors.html#vectorbt.tseries.accessors.TimeSeries_Accessor.idxmin">idxmin</a></code></li>
 <li><code><a title="vectorbt.tseries.accessors.TimeSeries_Accessor.index" href="../base/array_wrapper.html#vectorbt.base.array_wrapper.ArrayWrapper.index">index</a></code></li>
 <li><code><a title="vectorbt.tseries.accessors.TimeSeries_Accessor.make_symmetric" href="../base/accessors.html#vectorbt.base.accessors.Base_Accessor.make_symmetric">make_symmetric</a></code></li>
 <li><code><a title="vectorbt.tseries.accessors.TimeSeries_Accessor.max" href="../tseries/accessors.html#vectorbt.tseries.accessors.TimeSeries_Accessor.max">max</a></code></li>
 <li><code><a title="vectorbt.tseries.accessors.TimeSeries_Accessor.mean" href="../tseries/accessors.html#vectorbt.tseries.accessors.TimeSeries_Accessor.mean">mean</a></code></li>
 <li><code><a title="vectorbt.tseries.accessors.TimeSeries_Accessor.median" href="../tseries/accessors.html#vectorbt.tseries.accessors.TimeSeries_Accessor.median">median</a></code></li>
 <li><code><a title="vectorbt.tseries.accessors.TimeSeries_Accessor.min" href="../tseries/accessors.html#vectorbt.tseries.accessors.TimeSeries_Accessor.min">min</a></code></li>
+<li><code><a title="vectorbt.tseries.accessors.TimeSeries_Accessor.name" href="../base/array_wrapper.html#vectorbt.base.array_wrapper.ArrayWrapper.name">name</a></code></li>
 <li><code><a title="vectorbt.tseries.accessors.TimeSeries_Accessor.ndim" href="../base/array_wrapper.html#vectorbt.base.array_wrapper.ArrayWrapper.ndim">ndim</a></code></li>
 <li><code><a title="vectorbt.tseries.accessors.TimeSeries_Accessor.pct_change" href="../tseries/accessors.html#vectorbt.tseries.accessors.TimeSeries_Accessor.pct_change">pct_change</a></code></li>
 <li><code><a title="vectorbt.tseries.accessors.TimeSeries_Accessor.product" href="../tseries/accessors.html#vectorbt.tseries.accessors.TimeSeries_Accessor.product">product</a></code></li>
@@ -1267,7 +1226,7 @@ bottom percentile of returns.</dd>
 </code></dt>
 <dd>
 <div class="desc"><p>Accessor on top of return series. For DataFrames only.</p>
-<p>Accessible through <code>pandas.DataFrame.vbt.returns</code>.</p></div>
+<p>Accessible through <code>pd.DataFrame.vbt.returns</code>.</p></div>
 <details class="source">
 <summary>
 <span>Expand source code</span>
@@ -1275,7 +1234,7 @@ bottom percentile of returns.</dd>
 <pre><code class="python">class Returns_DFAccessor(Returns_Accessor, TimeSeries_DFAccessor):
     &#34;&#34;&#34;Accessor on top of return series. For DataFrames only.
 
-    Accessible through `pandas.DataFrame.vbt.returns`.&#34;&#34;&#34;
+    Accessible through `pd.DataFrame.vbt.returns`.&#34;&#34;&#34;
 
     def __init__(self, obj, freq=None, year_freq=None):
         if not checks.is_pandas(obj):  # parent accessor
@@ -1304,12 +1263,11 @@ bottom percentile of returns.</dd>
 <li><code><a title="vectorbt.returns.accessors.Returns_Accessor.annual" href="#vectorbt.returns.accessors.Returns_Accessor.annual">annual</a></code></li>
 <li><code><a title="vectorbt.returns.accessors.Returns_Accessor.annualized_return" href="#vectorbt.returns.accessors.Returns_Accessor.annualized_return">annualized_return</a></code></li>
 <li><code><a title="vectorbt.returns.accessors.Returns_Accessor.annualized_volatility" href="#vectorbt.returns.accessors.Returns_Accessor.annualized_volatility">annualized_volatility</a></code></li>
+<li><code><a title="vectorbt.returns.accessors.Returns_Accessor.apply" href="../base/accessors.html#vectorbt.base.accessors.Base_Accessor.apply">apply</a></code></li>
 <li><code><a title="vectorbt.returns.accessors.Returns_Accessor.apply_and_concat" href="../base/accessors.html#vectorbt.base.accessors.Base_Accessor.apply_and_concat">apply_and_concat</a></code></li>
 <li><code><a title="vectorbt.returns.accessors.Returns_Accessor.apply_and_reduce" href="../tseries/accessors.html#vectorbt.tseries.accessors.TimeSeries_Accessor.apply_and_reduce">apply_and_reduce</a></code></li>
-<li><code><a title="vectorbt.returns.accessors.Returns_Accessor.apply_func_on_index" href="../base/accessors.html#vectorbt.base.accessors.Base_Accessor.apply_func_on_index">apply_func_on_index</a></code></li>
+<li><code><a title="vectorbt.returns.accessors.Returns_Accessor.apply_on_index" href="../base/accessors.html#vectorbt.base.accessors.Base_Accessor.apply_on_index">apply_on_index</a></code></li>
 <li><code><a title="vectorbt.returns.accessors.Returns_Accessor.applymap" href="../tseries/accessors.html#vectorbt.tseries.accessors.TimeSeries_Accessor.applymap">applymap</a></code></li>
-<li><code><a title="vectorbt.returns.accessors.Returns_Accessor.argmax" href="../tseries/accessors.html#vectorbt.tseries.accessors.TimeSeries_Accessor.argmax">argmax</a></code></li>
-<li><code><a title="vectorbt.returns.accessors.Returns_Accessor.argmin" href="../tseries/accessors.html#vectorbt.tseries.accessors.TimeSeries_Accessor.argmin">argmin</a></code></li>
 <li><code><a title="vectorbt.returns.accessors.Returns_Accessor.beta" href="#vectorbt.returns.accessors.Returns_Accessor.beta">beta</a></code></li>
 <li><code><a title="vectorbt.returns.accessors.Returns_Accessor.broadcast" href="../base/accessors.html#vectorbt.base.accessors.Base_Accessor.broadcast">broadcast</a></code></li>
 <li><code><a title="vectorbt.returns.accessors.Returns_Accessor.broadcast_to" href="../base/accessors.html#vectorbt.base.accessors.Base_Accessor.broadcast_to">broadcast_to</a></code></li>
@@ -1351,6 +1309,8 @@ bottom percentile of returns.</dd>
 <li><code><a title="vectorbt.returns.accessors.Returns_Accessor.from_price" href="#vectorbt.returns.accessors.Returns_Accessor.from_price">from_price</a></code></li>
 <li><code><a title="vectorbt.returns.accessors.Returns_Accessor.fshift" href="../tseries/accessors.html#vectorbt.tseries.accessors.TimeSeries_Accessor.fshift">fshift</a></code></li>
 <li><code><a title="vectorbt.returns.accessors.Returns_Accessor.groupby_apply" href="../tseries/accessors.html#vectorbt.tseries.accessors.TimeSeries_Accessor.groupby_apply">groupby_apply</a></code></li>
+<li><code><a title="vectorbt.returns.accessors.Returns_Accessor.idxmax" href="../tseries/accessors.html#vectorbt.tseries.accessors.TimeSeries_Accessor.idxmax">idxmax</a></code></li>
+<li><code><a title="vectorbt.returns.accessors.Returns_Accessor.idxmin" href="../tseries/accessors.html#vectorbt.tseries.accessors.TimeSeries_Accessor.idxmin">idxmin</a></code></li>
 <li><code><a title="vectorbt.returns.accessors.Returns_Accessor.index" href="../base/array_wrapper.html#vectorbt.base.array_wrapper.ArrayWrapper.index">index</a></code></li>
 <li><code><a title="vectorbt.returns.accessors.Returns_Accessor.information_ratio" href="#vectorbt.returns.accessors.Returns_Accessor.information_ratio">information_ratio</a></code></li>
 <li><code><a title="vectorbt.returns.accessors.Returns_Accessor.kurtosis" href="#vectorbt.returns.accessors.Returns_Accessor.kurtosis">kurtosis</a></code></li>
@@ -1360,6 +1320,7 @@ bottom percentile of returns.</dd>
 <li><code><a title="vectorbt.returns.accessors.Returns_Accessor.mean" href="../tseries/accessors.html#vectorbt.tseries.accessors.TimeSeries_Accessor.mean">mean</a></code></li>
 <li><code><a title="vectorbt.returns.accessors.Returns_Accessor.median" href="../tseries/accessors.html#vectorbt.tseries.accessors.TimeSeries_Accessor.median">median</a></code></li>
 <li><code><a title="vectorbt.returns.accessors.Returns_Accessor.min" href="../tseries/accessors.html#vectorbt.tseries.accessors.TimeSeries_Accessor.min">min</a></code></li>
+<li><code><a title="vectorbt.returns.accessors.Returns_Accessor.name" href="../base/array_wrapper.html#vectorbt.base.array_wrapper.ArrayWrapper.name">name</a></code></li>
 <li><code><a title="vectorbt.returns.accessors.Returns_Accessor.ndim" href="../base/array_wrapper.html#vectorbt.base.array_wrapper.ArrayWrapper.ndim">ndim</a></code></li>
 <li><code><a title="vectorbt.returns.accessors.Returns_Accessor.omega_ratio" href="#vectorbt.returns.accessors.Returns_Accessor.omega_ratio">omega_ratio</a></code></li>
 <li><code><a title="vectorbt.returns.accessors.Returns_Accessor.pct_change" href="../tseries/accessors.html#vectorbt.tseries.accessors.TimeSeries_Accessor.pct_change">pct_change</a></code></li>
@@ -1411,7 +1372,7 @@ bottom percentile of returns.</dd>
 </code></dt>
 <dd>
 <div class="desc"><p>Accessor on top of return series. For Series only.</p>
-<p>Accessible through <code>pandas.Series.vbt.returns</code>.</p></div>
+<p>Accessible through <code>pd.Series.vbt.returns</code>.</p></div>
 <details class="source">
 <summary>
 <span>Expand source code</span>
@@ -1419,7 +1380,7 @@ bottom percentile of returns.</dd>
 <pre><code class="python">class Returns_SRAccessor(Returns_Accessor, TimeSeries_SRAccessor):
     &#34;&#34;&#34;Accessor on top of return series. For Series only.
 
-    Accessible through `pandas.Series.vbt.returns`.&#34;&#34;&#34;
+    Accessible through `pd.Series.vbt.returns`.&#34;&#34;&#34;
 
     def __init__(self, obj, freq=None, year_freq=None):
         if not checks.is_pandas(obj):  # parent accessor
@@ -1448,12 +1409,11 @@ bottom percentile of returns.</dd>
 <li><code><a title="vectorbt.returns.accessors.Returns_Accessor.annual" href="#vectorbt.returns.accessors.Returns_Accessor.annual">annual</a></code></li>
 <li><code><a title="vectorbt.returns.accessors.Returns_Accessor.annualized_return" href="#vectorbt.returns.accessors.Returns_Accessor.annualized_return">annualized_return</a></code></li>
 <li><code><a title="vectorbt.returns.accessors.Returns_Accessor.annualized_volatility" href="#vectorbt.returns.accessors.Returns_Accessor.annualized_volatility">annualized_volatility</a></code></li>
+<li><code><a title="vectorbt.returns.accessors.Returns_Accessor.apply" href="../base/accessors.html#vectorbt.base.accessors.Base_Accessor.apply">apply</a></code></li>
 <li><code><a title="vectorbt.returns.accessors.Returns_Accessor.apply_and_concat" href="../base/accessors.html#vectorbt.base.accessors.Base_Accessor.apply_and_concat">apply_and_concat</a></code></li>
 <li><code><a title="vectorbt.returns.accessors.Returns_Accessor.apply_and_reduce" href="../tseries/accessors.html#vectorbt.tseries.accessors.TimeSeries_Accessor.apply_and_reduce">apply_and_reduce</a></code></li>
-<li><code><a title="vectorbt.returns.accessors.Returns_Accessor.apply_func_on_index" href="../base/accessors.html#vectorbt.base.accessors.Base_Accessor.apply_func_on_index">apply_func_on_index</a></code></li>
+<li><code><a title="vectorbt.returns.accessors.Returns_Accessor.apply_on_index" href="../base/accessors.html#vectorbt.base.accessors.Base_Accessor.apply_on_index">apply_on_index</a></code></li>
 <li><code><a title="vectorbt.returns.accessors.Returns_Accessor.applymap" href="../tseries/accessors.html#vectorbt.tseries.accessors.TimeSeries_Accessor.applymap">applymap</a></code></li>
-<li><code><a title="vectorbt.returns.accessors.Returns_Accessor.argmax" href="../tseries/accessors.html#vectorbt.tseries.accessors.TimeSeries_Accessor.argmax">argmax</a></code></li>
-<li><code><a title="vectorbt.returns.accessors.Returns_Accessor.argmin" href="../tseries/accessors.html#vectorbt.tseries.accessors.TimeSeries_Accessor.argmin">argmin</a></code></li>
 <li><code><a title="vectorbt.returns.accessors.Returns_Accessor.beta" href="#vectorbt.returns.accessors.Returns_Accessor.beta">beta</a></code></li>
 <li><code><a title="vectorbt.returns.accessors.Returns_Accessor.broadcast" href="../base/accessors.html#vectorbt.base.accessors.Base_Accessor.broadcast">broadcast</a></code></li>
 <li><code><a title="vectorbt.returns.accessors.Returns_Accessor.broadcast_to" href="../base/accessors.html#vectorbt.base.accessors.Base_Accessor.broadcast_to">broadcast_to</a></code></li>
@@ -1495,6 +1455,8 @@ bottom percentile of returns.</dd>
 <li><code><a title="vectorbt.returns.accessors.Returns_Accessor.from_price" href="#vectorbt.returns.accessors.Returns_Accessor.from_price">from_price</a></code></li>
 <li><code><a title="vectorbt.returns.accessors.Returns_Accessor.fshift" href="../tseries/accessors.html#vectorbt.tseries.accessors.TimeSeries_Accessor.fshift">fshift</a></code></li>
 <li><code><a title="vectorbt.returns.accessors.Returns_Accessor.groupby_apply" href="../tseries/accessors.html#vectorbt.tseries.accessors.TimeSeries_Accessor.groupby_apply">groupby_apply</a></code></li>
+<li><code><a title="vectorbt.returns.accessors.Returns_Accessor.idxmax" href="../tseries/accessors.html#vectorbt.tseries.accessors.TimeSeries_Accessor.idxmax">idxmax</a></code></li>
+<li><code><a title="vectorbt.returns.accessors.Returns_Accessor.idxmin" href="../tseries/accessors.html#vectorbt.tseries.accessors.TimeSeries_Accessor.idxmin">idxmin</a></code></li>
 <li><code><a title="vectorbt.returns.accessors.Returns_Accessor.index" href="../base/array_wrapper.html#vectorbt.base.array_wrapper.ArrayWrapper.index">index</a></code></li>
 <li><code><a title="vectorbt.returns.accessors.Returns_Accessor.information_ratio" href="#vectorbt.returns.accessors.Returns_Accessor.information_ratio">information_ratio</a></code></li>
 <li><code><a title="vectorbt.returns.accessors.Returns_Accessor.kurtosis" href="#vectorbt.returns.accessors.Returns_Accessor.kurtosis">kurtosis</a></code></li>
@@ -1504,6 +1466,7 @@ bottom percentile of returns.</dd>
 <li><code><a title="vectorbt.returns.accessors.Returns_Accessor.mean" href="../tseries/accessors.html#vectorbt.tseries.accessors.TimeSeries_Accessor.mean">mean</a></code></li>
 <li><code><a title="vectorbt.returns.accessors.Returns_Accessor.median" href="../tseries/accessors.html#vectorbt.tseries.accessors.TimeSeries_Accessor.median">median</a></code></li>
 <li><code><a title="vectorbt.returns.accessors.Returns_Accessor.min" href="../tseries/accessors.html#vectorbt.tseries.accessors.TimeSeries_Accessor.min">min</a></code></li>
+<li><code><a title="vectorbt.returns.accessors.Returns_Accessor.name" href="../base/array_wrapper.html#vectorbt.base.array_wrapper.ArrayWrapper.name">name</a></code></li>
 <li><code><a title="vectorbt.returns.accessors.Returns_Accessor.ndim" href="../base/array_wrapper.html#vectorbt.base.array_wrapper.ArrayWrapper.ndim">ndim</a></code></li>
 <li><code><a title="vectorbt.returns.accessors.Returns_Accessor.omega_ratio" href="#vectorbt.returns.accessors.Returns_Accessor.omega_ratio">omega_ratio</a></code></li>
 <li><code><a title="vectorbt.returns.accessors.Returns_Accessor.pct_change" href="../tseries/accessors.html#vectorbt.tseries.accessors.TimeSeries_Accessor.pct_change">pct_change</a></code></li>

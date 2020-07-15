@@ -45,13 +45,16 @@ from vectorbt.utils import checks
 
 def get_index(arg, axis):
     &#34;&#34;&#34;Get index of `arg` by `axis`.&#34;&#34;&#34;
+    checks.assert_type(arg, (pd.Series, pd.DataFrame))
     checks.assert_value_in(axis, (0, 1))
 
     if axis == 0:
         return arg.index
     else:
         if checks.is_series(arg):
-            return pd.Index([arg.name])
+            if arg.name is not None:
+                return pd.Index([arg.name])
+            return pd.Index([0])  # same as how pandas does it
         else:
             return arg.columns
 
@@ -76,9 +79,8 @@ def repeat_index(index, n):
     &#34;&#34;&#34;Repeat each element in `index` `n` times.&#34;&#34;&#34;
     if not isinstance(index, pd.Index):
         index = pd.Index(index)
-    if len(index) == 1 and index[0] is None:
-        return pd.Index(np.arange(n))
-
+    if pd.Index.equals(index, pd.RangeIndex(start=0, stop=len(index), step=1)):  # ignore simple ranges without name
+        return pd.RangeIndex(start=0, stop=n, step=1)
     return np.repeat(index, n)
 
 
@@ -86,9 +88,8 @@ def tile_index(index, n):
     &#34;&#34;&#34;Tile the whole `index` `n` times.&#34;&#34;&#34;
     if not isinstance(index, pd.Index):
         index = pd.Index(index)
-    if len(index) == 1 and index[0] is None:
-        return pd.Index(np.arange(n))
-
+    if pd.Index.equals(index, pd.RangeIndex(start=0, stop=len(index), step=1)):  # ignore simple ranges without name
+        return pd.RangeIndex(start=0, stop=n, step=1)
     if isinstance(index, pd.MultiIndex):
         return pd.MultiIndex.from_tuples(np.tile(index, n), names=index.names)
     return pd.Index(np.tile(index, n), name=index.name)
@@ -159,7 +160,8 @@ def combine_indexes(*indexes, ignore_single=None):
 
 def drop_levels(index, levels):
     &#34;&#34;&#34;Softly drop `levels` in `index` by their name/position.&#34;&#34;&#34;
-    checks.assert_type(index, pd.MultiIndex)
+    if not isinstance(index, pd.MultiIndex):
+        return index
 
     levels_to_drop = []
     if not isinstance(levels, (tuple, list)):
@@ -169,7 +171,7 @@ def drop_levels(index, levels):
             if level not in levels_to_drop:
                 levels_to_drop.append(level)
         elif isinstance(level, int):
-            if (level &gt;= 0 and level &lt; index.nlevels) or level == -1:
+            if 0 &lt;= level &lt; index.nlevels or level == -1:
                 if level not in levels_to_drop:
                     levels_to_drop.append(level)
     if len(levels_to_drop) &lt; index.nlevels:
@@ -203,22 +205,21 @@ def select_levels(index, level_names):
 
 def drop_redundant_levels(index):
     &#34;&#34;&#34;Drop levels in `index` that either have a single value or a range from 0 to n.&#34;&#34;&#34;
-    if not isinstance(index, pd.Index):
-        index = pd.Index(index)
+    if not isinstance(index, pd.MultiIndex):
+        return index
     if len(index) == 1:
         return index
 
-    if isinstance(index, pd.MultiIndex):
-        levels_to_drop = []
-        for i, level in enumerate(index.levels):
-            if len(level) == 1:
+    levels_to_drop = []
+    for i, level in enumerate(index.levels):
+        if len(level) == 1:
+            levels_to_drop.append(i)
+        elif level.name is None and (level == np.arange(len(level))).all():  # basic range
+            if len(index.get_level_values(i)) == len(level):
                 levels_to_drop.append(i)
-            elif level.name is None and (level == np.arange(len(level))).all():  # basic range
-                if len(index.get_level_values(i)) == len(level):
-                    levels_to_drop.append(i)
-        # Remove redundant levels only if there are some non-redundant levels left
-        if len(levels_to_drop) &lt; index.nlevels:
-            return index.droplevel(levels_to_drop)
+    # Remove redundant levels only if there are some non-redundant levels left
+    if len(levels_to_drop) &lt; index.nlevels:
+        return index.droplevel(levels_to_drop)
     return index
 
 
@@ -226,9 +227,8 @@ def drop_duplicate_levels(index, keep=&#39;last&#39;):
     &#34;&#34;&#34;Drop levels in `index` with the same name and values.
 
     Set `keep` to &#39;last&#39; to keep last levels, otherwise &#39;first&#39;.&#34;&#34;&#34;
-    if isinstance(index, pd.Index) and not isinstance(index, pd.MultiIndex):
+    if not isinstance(index, pd.MultiIndex):
         return index
-    checks.assert_type(index, pd.MultiIndex)
 
     levels = []
     levels_to_drop = []
@@ -257,7 +257,7 @@ def align_index_to(index1, index2):
     if not isinstance(index2, pd.MultiIndex):
         index2 = pd.MultiIndex.from_arrays([index2])
     if index1.duplicated().any():
-        raise Exception(&#34;Duplicates index values are not allowed for the first index&#34;)
+        raise ValueError(&#34;Duplicates index values are not allowed for the first index&#34;)
 
     if pd.Index.equals(index1, index2):
         return pd.IndexSlice[:]
@@ -277,7 +277,7 @@ def align_index_to(index1, index2):
             ypos = np.searchsorted(index1[xsorted], new_index)
             return pd.IndexSlice[xsorted[ypos]]
 
-    raise Exception(&#34;Indexes could not be aligned together&#34;)</code></pre>
+    raise ValueError(&#34;Indexes could not be aligned together&#34;)</code></pre>
 </details>
 </section>
 <section>
@@ -311,7 +311,7 @@ both must share the same elements.</p></div>
     if not isinstance(index2, pd.MultiIndex):
         index2 = pd.MultiIndex.from_arrays([index2])
     if index1.duplicated().any():
-        raise Exception(&#34;Duplicates index values are not allowed for the first index&#34;)
+        raise ValueError(&#34;Duplicates index values are not allowed for the first index&#34;)
 
     if pd.Index.equals(index1, index2):
         return pd.IndexSlice[:]
@@ -331,7 +331,7 @@ both must share the same elements.</p></div>
             ypos = np.searchsorted(index1[xsorted], new_index)
             return pd.IndexSlice[xsorted[ypos]]
 
-    raise Exception(&#34;Indexes could not be aligned together&#34;)</code></pre>
+    raise ValueError(&#34;Indexes could not be aligned together&#34;)</code></pre>
 </details>
 </dd>
 <dt id="vectorbt.base.index_fns.combine_indexes"><code class="name flex">
@@ -402,9 +402,8 @@ value, will keep both regardless of <code>ignore_single</code>.</p>
     &#34;&#34;&#34;Drop levels in `index` with the same name and values.
 
     Set `keep` to &#39;last&#39; to keep last levels, otherwise &#39;first&#39;.&#34;&#34;&#34;
-    if isinstance(index, pd.Index) and not isinstance(index, pd.MultiIndex):
+    if not isinstance(index, pd.MultiIndex):
         return index
-    checks.assert_type(index, pd.MultiIndex)
 
     levels = []
     levels_to_drop = []
@@ -432,7 +431,8 @@ value, will keep both regardless of <code>ignore_single</code>.</p>
 </summary>
 <pre><code class="python">def drop_levels(index, levels):
     &#34;&#34;&#34;Softly drop `levels` in `index` by their name/position.&#34;&#34;&#34;
-    checks.assert_type(index, pd.MultiIndex)
+    if not isinstance(index, pd.MultiIndex):
+        return index
 
     levels_to_drop = []
     if not isinstance(levels, (tuple, list)):
@@ -442,7 +442,7 @@ value, will keep both regardless of <code>ignore_single</code>.</p>
             if level not in levels_to_drop:
                 levels_to_drop.append(level)
         elif isinstance(level, int):
-            if (level &gt;= 0 and level &lt; index.nlevels) or level == -1:
+            if 0 &lt;= level &lt; index.nlevels or level == -1:
                 if level not in levels_to_drop:
                     levels_to_drop.append(level)
     if len(levels_to_drop) &lt; index.nlevels:
@@ -462,22 +462,21 @@ value, will keep both regardless of <code>ignore_single</code>.</p>
 </summary>
 <pre><code class="python">def drop_redundant_levels(index):
     &#34;&#34;&#34;Drop levels in `index` that either have a single value or a range from 0 to n.&#34;&#34;&#34;
-    if not isinstance(index, pd.Index):
-        index = pd.Index(index)
+    if not isinstance(index, pd.MultiIndex):
+        return index
     if len(index) == 1:
         return index
 
-    if isinstance(index, pd.MultiIndex):
-        levels_to_drop = []
-        for i, level in enumerate(index.levels):
-            if len(level) == 1:
+    levels_to_drop = []
+    for i, level in enumerate(index.levels):
+        if len(level) == 1:
+            levels_to_drop.append(i)
+        elif level.name is None and (level == np.arange(len(level))).all():  # basic range
+            if len(index.get_level_values(i)) == len(level):
                 levels_to_drop.append(i)
-            elif level.name is None and (level == np.arange(len(level))).all():  # basic range
-                if len(index.get_level_values(i)) == len(level):
-                    levels_to_drop.append(i)
-        # Remove redundant levels only if there are some non-redundant levels left
-        if len(levels_to_drop) &lt; index.nlevels:
-            return index.droplevel(levels_to_drop)
+    # Remove redundant levels only if there are some non-redundant levels left
+    if len(levels_to_drop) &lt; index.nlevels:
+        return index.droplevel(levels_to_drop)
     return index</code></pre>
 </details>
 </dd>
@@ -492,13 +491,16 @@ value, will keep both regardless of <code>ignore_single</code>.</p>
 </summary>
 <pre><code class="python">def get_index(arg, axis):
     &#34;&#34;&#34;Get index of `arg` by `axis`.&#34;&#34;&#34;
+    checks.assert_type(arg, (pd.Series, pd.DataFrame))
     checks.assert_value_in(axis, (0, 1))
 
     if axis == 0:
         return arg.index
     else:
         if checks.is_series(arg):
-            return pd.Index([arg.name])
+            if arg.name is not None:
+                return pd.Index([arg.name])
+            return pd.Index([0])  # same as how pandas does it
         else:
             return arg.columns</code></pre>
 </details>
@@ -563,9 +565,8 @@ value, will keep both regardless of <code>ignore_single</code>.</p>
     &#34;&#34;&#34;Repeat each element in `index` `n` times.&#34;&#34;&#34;
     if not isinstance(index, pd.Index):
         index = pd.Index(index)
-    if len(index) == 1 and index[0] is None:
-        return pd.Index(np.arange(n))
-
+    if pd.Index.equals(index, pd.RangeIndex(start=0, stop=len(index), step=1)):  # ignore simple ranges without name
+        return pd.RangeIndex(start=0, stop=n, step=1)
     return np.repeat(index, n)</code></pre>
 </details>
 </dd>
@@ -632,9 +633,8 @@ value, will keep both regardless of <code>ignore_single</code>.</p>
     &#34;&#34;&#34;Tile the whole `index` `n` times.&#34;&#34;&#34;
     if not isinstance(index, pd.Index):
         index = pd.Index(index)
-    if len(index) == 1 and index[0] is None:
-        return pd.Index(np.arange(n))
-
+    if pd.Index.equals(index, pd.RangeIndex(start=0, stop=len(index), step=1)):  # ignore simple ranges without name
+        return pd.RangeIndex(start=0, stop=n, step=1)
     if isinstance(index, pd.MultiIndex):
         return pd.MultiIndex.from_tuples(np.tile(index, n), names=index.names)
     return pd.Index(np.tile(index, n), name=index.name)</code></pre>

@@ -4,8 +4,8 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, minimum-scale=1" />
 <meta name="generator" content="pdoc 0.8.1" />
-<title>vectorbt.signals API documentation</title>
-<meta name="description" content="Modules for working with signals, such as entry and exit signals …" />
+<title>vectorbt.base.common API documentation</title>
+<meta name="description" content="Common functions and classes." />
 <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/5.12.0-2/css/all.min.css" integrity="sha256-46r060N2LrChLLb5zowXQ72/iKKNiw/lAmygmHExk/o=" crossorigin="anonymous" />
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/docsearch.js@2/dist/cdn/docsearch.min.css" />
 <link href='https://cdnjs.cloudflare.com/ajax/libs/normalize/8.0.0/normalize.min.css' rel='stylesheet'>
@@ -25,100 +25,262 @@ ga('create', 'UA-142521178-3', 'auto'); ga('send', 'pageview');
 <main>
 <article id="content">
 <header>
-<h1 class="title">Module <code>vectorbt.signals</code></h1>
+<h1 class="title">Module <code>vectorbt.base.common</code></h1>
 </header>
 <section id="section-intro">
-<p>Modules for working with signals, such as entry and exit signals.</p>
-<h2 id="accessors">Accessors</h2>
-<p>You can access methods listed in <code><a title="vectorbt.signals.accessors" href="accessors.html">vectorbt.signals.accessors</a></code> as follows:</p>
-<ul>
-<li><code><a title="vectorbt.signals.accessors.Signals_SRAccessor" href="accessors.html#vectorbt.signals.accessors.Signals_SRAccessor">Signals_SRAccessor</a></code> -&gt; <code>pd.Series.vbt.signals.*</code></li>
-<li><code><a title="vectorbt.signals.accessors.Signals_DFAccessor" href="accessors.html#vectorbt.signals.accessors.Signals_DFAccessor">Signals_DFAccessor</a></code> -&gt; <code>pd.DataFrame.vbt.signals.*</code></li>
-</ul>
-<pre><code class="python-repl">&gt;&gt;&gt; import numpy as np
-&gt;&gt;&gt; import pandas as pd
-&gt;&gt;&gt; import vectorbt as vbt
-
-&gt;&gt;&gt; # vectorbt.signals.accessors.Signals_Accessor.rank
-&gt;&gt;&gt; pd.Series([False, True, True, True, False]).vbt.signals.rank()
-0    0
-1    1
-2    2
-3    3
-4    0
-dtype: int64
-</code></pre>
-<p>Since signals are a special case of time series, their accessors extend <code><a title="vectorbt.tseries.accessors" href="../tseries/accessors.html">vectorbt.tseries.accessors</a></code>.</p>
-<h2 id="numba-compiled-functions">Numba-compiled functions</h2>
-<p><code><a title="vectorbt.signals.nb" href="nb.html">vectorbt.signals.nb</a></code> provides an arsenal of Numba-compiled functions that are used by accessors
-and in many other parts of the backtesting pipeline, such as technical indicators.
-These only accept NumPy arrays and other Numba-compatible types.</p>
-<pre><code class="python-repl">&gt;&gt;&gt; # vectorbt.signals.nb.rank_1d_nb
-&gt;&gt;&gt; vbt.signals.nb.rank_1d_nb(np.array([False, True, True, True, False]))
-array([0, 1, 2, 3, 0])
-</code></pre>
+<p>Common functions and classes.</p>
 <details class="source">
 <summary>
 <span>Expand source code</span>
 </summary>
-<pre><code class="python">&#34;&#34;&#34;Modules for working with signals, such as entry and exit signals.
+<pre><code class="python">&#34;&#34;&#34;Common functions and classes.&#34;&#34;&#34;
 
-## Accessors
+import numpy as np
+import inspect
 
-You can access methods listed in `vectorbt.signals.accessors` as follows:
+from vectorbt.utils import checks
+from vectorbt.base.array_wrapper import ArrayWrapper
 
-* `vectorbt.signals.accessors.Signals_SRAccessor` -&gt; `pd.Series.vbt.signals.*`
-* `vectorbt.signals.accessors.Signals_DFAccessor` -&gt; `pd.DataFrame.vbt.signals.*`
 
-```python-repl
-&gt;&gt;&gt; import numpy as np
-&gt;&gt;&gt; import pandas as pd
-&gt;&gt;&gt; import vectorbt as vbt
+def get_kwargs(func):
+    &#34;&#34;&#34;Get names and default values of keyword arguments from the signature of `func`.&#34;&#34;&#34;
+    return {
+        k: v.default
+        for k, v in inspect.signature(func).parameters.items()
+        if v.default is not inspect.Parameter.empty
+    }
 
-&gt;&gt;&gt; # vectorbt.signals.accessors.Signals_Accessor.rank
-&gt;&gt;&gt; pd.Series([False, True, True, True, False]).vbt.signals.rank()
-0    0
-1    1
-2    2
-3    3
-4    0
-dtype: int64
-```
 
-Since signals are a special case of time series, their accessors extend `vectorbt.tseries.accessors`.
+def add_nb_methods(nb_funcs, module_name=None):
+    &#34;&#34;&#34;Class decorator to wrap each Numba function in `nb_funcs` as a method of an accessor class.
 
-## Numba-compiled functions
+    Requires the class to be a subclass of `vectorbt.base.array_wrapper.ArrayWrapper`.&#34;&#34;&#34;
 
-`vectorbt.signals.nb` provides an arsenal of Numba-compiled functions that are used by accessors
-and in many other parts of the backtesting pipeline, such as technical indicators.
-These only accept NumPy arrays and other Numba-compatible types.
+    def wrapper(cls):
+        checks.assert_subclass(cls, ArrayWrapper)
 
-```python-repl
-&gt;&gt;&gt; # vectorbt.signals.nb.rank_1d_nb
-&gt;&gt;&gt; vbt.signals.nb.rank_1d_nb(np.array([False, True, True, True, False]))
-array([0, 1, 2, 3, 0])
-```
-&#34;&#34;&#34;
+        for nb_func in nb_funcs:
+            default_kwargs = get_kwargs(nb_func)
 
-from vectorbt.signals import accessors, nb</code></pre>
+            def nb_method(self, *args, nb_func=nb_func, default_kwargs=default_kwargs, **kwargs):
+                if &#39;_1d&#39; in nb_func.__name__:
+                    # One-dimensional array as input
+                    a = nb_func(self.to_1d_array(), *args, **{**default_kwargs, **kwargs})
+                    if np.asarray(a).ndim == 0 or len(self.index) != a.shape[0]:
+                        return self.wrap_reduced(a)
+                    return self.wrap(a)
+                else:
+                    # Two-dimensional array as input
+                    a = nb_func(self.to_2d_array(), *args, **{**default_kwargs, **kwargs})
+                    if np.asarray(a).ndim == 0 or a.ndim == 1 or len(self.index) != a.shape[0]:
+                        return self.wrap_reduced(a)
+                    return self.wrap(a)
+
+            # Replace the function&#39;s signature with the original one
+            sig = inspect.signature(nb_func)
+            self_arg = tuple(inspect.signature(nb_method).parameters.values())[0]
+            sig = sig.replace(parameters=(self_arg,) + tuple(sig.parameters.values())[1:])
+            nb_method.__signature__ = sig
+            if module_name is not None:
+                nb_method.__doc__ = f&#34;See `{module_name}.{nb_func.__name__}`&#34;
+            else:
+                nb_method.__doc__ = f&#34;See `{nb_func.__name__}`&#34;
+            setattr(cls, nb_func.__name__.replace(&#39;_1d&#39;, &#39;&#39;).replace(&#39;_nb&#39;, &#39;&#39;), nb_method)
+        return cls
+
+    return wrapper
+
+
+def add_binary_magic_methods(np_funcs, translate_func):
+    &#34;&#34;&#34;Class decorator to add binary magic methods using NumPy to the class.&#34;&#34;&#34;
+
+    def wrapper(cls):
+        for fname, np_func in np_funcs:
+            def magic_func(self, other, np_func=np_func):
+                return translate_func(self, other, np_func)
+
+            setattr(cls, fname, magic_func)
+        return cls
+
+    return wrapper
+
+
+def add_unary_magic_methods(np_funcs, translate_func):
+    &#34;&#34;&#34;Class decorator to add unary magic methods using NumPy to the class.&#34;&#34;&#34;
+
+    def wrapper(cls):
+        for fname, np_func in np_funcs:
+            def magic_func(self, np_func=np_func):
+                return translate_func(self, np_func)
+
+            setattr(cls, fname, magic_func)
+        return cls
+
+    return wrapper
+
+
+binary_magic_methods = [
+    # comparison ops
+    (&#39;__eq__&#39;, np.equal),
+    (&#39;__ne__&#39;, np.not_equal),
+    (&#39;__lt__&#39;, np.less),
+    (&#39;__gt__&#39;, np.greater),
+    (&#39;__le__&#39;, np.less_equal),
+    (&#39;__ge__&#39;, np.greater_equal),
+    # arithmetic ops
+    (&#39;__add__&#39;, np.add),
+    (&#39;__sub__&#39;, np.subtract),
+    (&#39;__mul__&#39;, np.multiply),
+    (&#39;__pow__&#39;, np.power),
+    (&#39;__mod__&#39;, np.mod),
+    (&#39;__floordiv__&#39;, np.floor_divide),
+    (&#39;__truediv__&#39;, np.true_divide),
+    (&#39;__radd__&#39;, lambda x, y: np.add(y, x)),
+    (&#39;__rsub__&#39;, lambda x, y: np.subtract(y, x)),
+    (&#39;__rmul__&#39;, lambda x, y: np.multiply(y, x)),
+    (&#39;__rpow__&#39;, lambda x, y: np.power(y, x)),
+    (&#39;__rmod__&#39;, lambda x, y: np.mod(y, x)),
+    (&#39;__rfloordiv__&#39;, lambda x, y: np.floor_divide(y, x)),
+    (&#39;__rtruediv__&#39;, lambda x, y: np.true_divide(y, x)),
+    # mask ops
+    (&#39;__and__&#39;, np.bitwise_and),
+    (&#39;__or__&#39;, np.bitwise_or),
+    (&#39;__xor__&#39;, np.bitwise_xor),
+    (&#39;__rand__&#39;, lambda x, y: np.bitwise_and(y, x)),
+    (&#39;__ror__&#39;, lambda x, y: np.bitwise_or(y, x)),
+    (&#39;__rxor__&#39;, lambda x, y: np.bitwise_xor(y, x))
+]
+
+unary_magic_methods = [
+    (&#39;__neg__&#39;, np.negative),
+    (&#39;__pos__&#39;, np.positive),
+    (&#39;__abs__&#39;, np.absolute),
+    (&#39;__invert__&#39;, np.invert)
+]</code></pre>
 </details>
 </section>
 <section>
-<h2 class="section-title" id="header-submodules">Sub-modules</h2>
+</section>
+<section>
+</section>
+<section>
+<h2 class="section-title" id="header-functions">Functions</h2>
 <dl>
-<dt><code class="name"><a title="vectorbt.signals.accessors" href="accessors.html">vectorbt.signals.accessors</a></code></dt>
+<dt id="vectorbt.base.common.add_binary_magic_methods"><code class="name flex">
+<span>def <span class="ident fname">add_binary_magic_methods</span></span>(<span>np_funcs, translate_func)</span>
+</code></dt>
 <dd>
-<div class="desc"><p>Custom pandas accessors …</p></div>
+<div class="desc"><p>Class decorator to add binary magic methods using NumPy to the class.</p></div>
+<details class="source">
+<summary>
+<span>Expand source code</span>
+</summary>
+<pre><code class="python">def add_binary_magic_methods(np_funcs, translate_func):
+    &#34;&#34;&#34;Class decorator to add binary magic methods using NumPy to the class.&#34;&#34;&#34;
+
+    def wrapper(cls):
+        for fname, np_func in np_funcs:
+            def magic_func(self, other, np_func=np_func):
+                return translate_func(self, other, np_func)
+
+            setattr(cls, fname, magic_func)
+        return cls
+
+    return wrapper</code></pre>
+</details>
 </dd>
-<dt><code class="name"><a title="vectorbt.signals.nb" href="nb.html">vectorbt.signals.nb</a></code></dt>
+<dt id="vectorbt.base.common.add_nb_methods"><code class="name flex">
+<span>def <span class="ident fname">add_nb_methods</span></span>(<span>nb_funcs, module_name=None)</span>
+</code></dt>
 <dd>
-<div class="desc"><p>Numba-compiled 1-dim and 2-dim functions …</p></div>
+<div class="desc"><p>Class decorator to wrap each Numba function in <code>nb_funcs</code> as a method of an accessor class.</p>
+<p>Requires the class to be a subclass of <code><a title="vectorbt.base.array_wrapper.ArrayWrapper" href="array_wrapper.html#vectorbt.base.array_wrapper.ArrayWrapper">ArrayWrapper</a></code>.</p></div>
+<details class="source">
+<summary>
+<span>Expand source code</span>
+</summary>
+<pre><code class="python">def add_nb_methods(nb_funcs, module_name=None):
+    &#34;&#34;&#34;Class decorator to wrap each Numba function in `nb_funcs` as a method of an accessor class.
+
+    Requires the class to be a subclass of `vectorbt.base.array_wrapper.ArrayWrapper`.&#34;&#34;&#34;
+
+    def wrapper(cls):
+        checks.assert_subclass(cls, ArrayWrapper)
+
+        for nb_func in nb_funcs:
+            default_kwargs = get_kwargs(nb_func)
+
+            def nb_method(self, *args, nb_func=nb_func, default_kwargs=default_kwargs, **kwargs):
+                if &#39;_1d&#39; in nb_func.__name__:
+                    # One-dimensional array as input
+                    a = nb_func(self.to_1d_array(), *args, **{**default_kwargs, **kwargs})
+                    if np.asarray(a).ndim == 0 or len(self.index) != a.shape[0]:
+                        return self.wrap_reduced(a)
+                    return self.wrap(a)
+                else:
+                    # Two-dimensional array as input
+                    a = nb_func(self.to_2d_array(), *args, **{**default_kwargs, **kwargs})
+                    if np.asarray(a).ndim == 0 or a.ndim == 1 or len(self.index) != a.shape[0]:
+                        return self.wrap_reduced(a)
+                    return self.wrap(a)
+
+            # Replace the function&#39;s signature with the original one
+            sig = inspect.signature(nb_func)
+            self_arg = tuple(inspect.signature(nb_method).parameters.values())[0]
+            sig = sig.replace(parameters=(self_arg,) + tuple(sig.parameters.values())[1:])
+            nb_method.__signature__ = sig
+            if module_name is not None:
+                nb_method.__doc__ = f&#34;See `{module_name}.{nb_func.__name__}`&#34;
+            else:
+                nb_method.__doc__ = f&#34;See `{nb_func.__name__}`&#34;
+            setattr(cls, nb_func.__name__.replace(&#39;_1d&#39;, &#39;&#39;).replace(&#39;_nb&#39;, &#39;&#39;), nb_method)
+        return cls
+
+    return wrapper</code></pre>
+</details>
+</dd>
+<dt id="vectorbt.base.common.add_unary_magic_methods"><code class="name flex">
+<span>def <span class="ident fname">add_unary_magic_methods</span></span>(<span>np_funcs, translate_func)</span>
+</code></dt>
+<dd>
+<div class="desc"><p>Class decorator to add unary magic methods using NumPy to the class.</p></div>
+<details class="source">
+<summary>
+<span>Expand source code</span>
+</summary>
+<pre><code class="python">def add_unary_magic_methods(np_funcs, translate_func):
+    &#34;&#34;&#34;Class decorator to add unary magic methods using NumPy to the class.&#34;&#34;&#34;
+
+    def wrapper(cls):
+        for fname, np_func in np_funcs:
+            def magic_func(self, np_func=np_func):
+                return translate_func(self, np_func)
+
+            setattr(cls, fname, magic_func)
+        return cls
+
+    return wrapper</code></pre>
+</details>
+</dd>
+<dt id="vectorbt.base.common.get_kwargs"><code class="name flex">
+<span>def <span class="ident fname">get_kwargs</span></span>(<span>func)</span>
+</code></dt>
+<dd>
+<div class="desc"><p>Get names and default values of keyword arguments from the signature of <code>func</code>.</p></div>
+<details class="source">
+<summary>
+<span>Expand source code</span>
+</summary>
+<pre><code class="python">def get_kwargs(func):
+    &#34;&#34;&#34;Get names and default values of keyword arguments from the signature of `func`.&#34;&#34;&#34;
+    return {
+        k: v.default
+        for k, v in inspect.signature(func).parameters.items()
+        if v.default is not inspect.Parameter.empty
+    }</code></pre>
+</details>
 </dd>
 </dl>
-</section>
-<section>
-</section>
-<section>
 </section>
 <section>
 </section>
@@ -140,21 +302,20 @@ title="Search"
 <div class="scrollable-index">
 <h1 class="index-caption">Index</h1>
 <div class="toc">
-<ul>
-<li><a href="#accessors">Accessors</a></li>
-<li><a href="#numba-compiled-functions">Numba-compiled functions</a></li>
-</ul>
+<ul></ul>
 </div>
 <ul id="index">
 <li><h3>Super-module</h3>
 <ul>
-<li><code><a title="vectorbt" href="../index.html">vectorbt</a></code></li>
+<li><code><a title="vectorbt.base" href="index.html">vectorbt.base</a></code></li>
 </ul>
 </li>
-<li><h3><a href="#header-submodules">Sub-modules</a></h3>
-<ul>
-<li><code><a title="vectorbt.signals.accessors" href="accessors.html">vectorbt.signals.accessors</a></code></li>
-<li><code><a title="vectorbt.signals.nb" href="nb.html">vectorbt.signals.nb</a></code></li>
+<li><h3><a href="#header-functions">Functions</a></h3>
+<ul class="">
+<li><code><a title="vectorbt.base.common.add_binary_magic_methods" href="#vectorbt.base.common.add_binary_magic_methods">add_binary_magic_methods</a></code></li>
+<li><code><a title="vectorbt.base.common.add_nb_methods" href="#vectorbt.base.common.add_nb_methods">add_nb_methods</a></code></li>
+<li><code><a title="vectorbt.base.common.add_unary_magic_methods" href="#vectorbt.base.common.add_unary_magic_methods">add_unary_magic_methods</a></code></li>
+<li><code><a title="vectorbt.base.common.get_kwargs" href="#vectorbt.base.common.get_kwargs">get_kwargs</a></code></li>
 </ul>
 </li>
 </ul>

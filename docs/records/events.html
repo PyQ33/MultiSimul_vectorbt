@@ -46,9 +46,8 @@ from vectorbt.utils.config import merge_kwargs
 from vectorbt.base.indexing import PandasIndexer
 from vectorbt.base.reshape_fns import to_1d
 from vectorbt.tseries.common import DatetimeTypes, TSArrayWrapper
-from vectorbt.records.base import Records
+from vectorbt.records.base import Records, indexing_on_records
 from vectorbt.records import nb
-from vectorbt.records.common import indexing_on_records
 from vectorbt.records.enums import (
     EventStatus,
     event_dt,
@@ -60,40 +59,44 @@ from vectorbt.records.enums import (
 def _indexing_func(obj, pd_indexing_func):
     &#34;&#34;&#34;Perform indexing on `BaseEvents`.&#34;&#34;&#34;
     records_arr, _ = indexing_on_records(obj, pd_indexing_func)
-    return obj.__class__(records_arr, pd_indexing_func(obj.main_price), freq=obj.wrapper.freq)
+    return obj.__class__(records_arr, pd_indexing_func(obj.main_price), freq=obj.wrapper.freq, idx_field=obj.idx_field)
 
 
 class BaseEvents(Records):
     &#34;&#34;&#34;Extends `Records` for working with event records.&#34;&#34;&#34;
 
-    def __init__(self, records_arr, main_price, freq=None):
-        Records.__init__(self, records_arr, TSArrayWrapper.from_obj(main_price, freq=freq))
+    def __init__(self, records_arr, main_price, freq=None, idx_field=&#39;exit_idx&#39;):
+        Records.__init__(self, records_arr, TSArrayWrapper.from_obj(main_price, freq=freq), idx_field=idx_field)
         PandasIndexer.__init__(self, _indexing_func)
 
         if not all(field in records_arr.dtype.names for field in event_dt.names):
-            raise Exception(&#34;Records array must have all fields defined in event_dt&#34;)
+            raise ValueError(&#34;Records array must have all fields defined in event_dt&#34;)
 
         self.main_price = main_price
 
+    def filter_by_mask(self, mask):
+        &#34;&#34;&#34;Return a new class instance, filtered by mask.&#34;&#34;&#34;
+        return self.__class__(self.records_arr[mask], self.main_price, freq=self.wrapper.freq, idx_field=self.idx_field)
+
     def plot(self,
              main_price_trace_kwargs={},
-             open_trace_kwargs={},
-             close_trace_kwargs={},
-             close_profit_trace_kwargs={},
-             close_loss_trace_kwargs={},
+             entry_trace_kwargs={},
+             exit_trace_kwargs={},
+             exit_profit_trace_kwargs={},
+             exit_loss_trace_kwargs={},
              active_trace_kwargs={},
              profit_shape_kwargs={},
              loss_shape_kwargs={},
              fig=None,
-             **layout_kwargs):
+             **layout_kwargs):  # pragma: no cover
         &#34;&#34;&#34;Plot orders.
 
         Args:
             main_price_trace_kwargs (dict): Keyword arguments passed to `plotly.graph_objects.Scatter` for main price.
-            open_trace_kwargs (dict): Keyword arguments passed to `plotly.graph_objects.Scatter` for &#34;Open&#34; markers.
-            close_trace_kwargs (dict): Keyword arguments passed to `plotly.graph_objects.Scatter` for &#34;Close&#34; markers.
-            close_profit_trace_kwargs (dict): Keyword arguments passed to `plotly.graph_objects.Scatter` for &#34;Close - Profit&#34; markers.
-            close_loss_trace_kwargs (dict): Keyword arguments passed to `plotly.graph_objects.Scatter` for &#34;Close - Loss&#34; markers.
+            entry_trace_kwargs (dict): Keyword arguments passed to `plotly.graph_objects.Scatter` for &#34;Entry&#34; markers.
+            exit_trace_kwargs (dict): Keyword arguments passed to `plotly.graph_objects.Scatter` for &#34;Exit&#34; markers.
+            exit_profit_trace_kwargs (dict): Keyword arguments passed to `plotly.graph_objects.Scatter` for &#34;Exit - Profit&#34; markers.
+            exit_loss_trace_kwargs (dict): Keyword arguments passed to `plotly.graph_objects.Scatter` for &#34;Exit - Loss&#34; markers.
             active_trace_kwargs (dict): Keyword arguments passed to `plotly.graph_objects.Scatter` for &#34;Active&#34; markers.
             profit_shape_kwargs (dict): Keyword arguments passed to `plotly.graph_objects.Figure.add_shape` for profit zones.
             loss_shape_kwargs (dict): Keyword arguments passed to `plotly.graph_objects.Figure.add_shape` for loss zones.
@@ -113,19 +116,19 @@ class BaseEvents(Records):
 
             ![](/vectorbt/docs/img/events.png)&#34;&#34;&#34;
         if self.wrapper.ndim &gt; 1:
-            raise Exception(&#34;You must select a column first&#34;)
+            raise TypeError(&#34;You must select a column first&#34;)
 
         # Plot main price
         fig = self.main_price.vbt.tseries.plot(trace_kwargs=main_price_trace_kwargs, fig=fig, **layout_kwargs)
 
         # Extract information
         size = self.records_arr[&#39;size&#39;]
-        open_idx = self.records_arr[&#39;open_idx&#39;]
-        open_price = self.records_arr[&#39;open_price&#39;]
-        open_fees = self.records_arr[&#39;open_fees&#39;]
-        close_idx = self.records_arr[&#39;close_idx&#39;]
-        close_price = self.records_arr[&#39;close_price&#39;]
-        close_fees = self.records_arr[&#39;close_fees&#39;]
+        entry_idx = self.records_arr[&#39;entry_idx&#39;]
+        entry_price = self.records_arr[&#39;entry_price&#39;]
+        entry_fees = self.records_arr[&#39;entry_fees&#39;]
+        exit_idx = self.records_arr[&#39;exit_idx&#39;]
+        exit_price = self.records_arr[&#39;exit_price&#39;]
+        exit_fees = self.records_arr[&#39;exit_fees&#39;]
         pnl = self.records_arr[&#39;pnl&#39;]
         ret = self.records_arr[&#39;return&#39;]
         status = self.records_arr[&#39;status&#39;]
@@ -139,13 +142,13 @@ class BaseEvents(Records):
                 duration = to_idx - from_idx
             return np.vectorize(str)(duration)
 
-        duration = get_duration_str(open_idx, close_idx)
+        duration = get_duration_str(entry_idx, exit_idx)
 
-        # Plot Open markers
-        open_customdata = np.stack((size, open_fees), axis=1)
-        open_scatter = go.Scatter(
-            x=self.wrapper.index[open_idx],
-            y=open_price,
+        # Plot Entry markers
+        entry_customdata = np.stack((size, entry_fees), axis=1)
+        entry_scatter = go.Scatter(
+            x=self.wrapper.index[entry_idx],
+            y=entry_price,
             mode=&#39;markers&#39;,
             marker=dict(
                 symbol=&#39;circle&#39;,
@@ -156,25 +159,25 @@ class BaseEvents(Records):
                     color=adjust_lightness(contrast_color_schema[&#39;blue&#39;])
                 )
             ),
-            name=&#39;Open&#39;,
-            customdata=open_customdata,
+            name=&#39;Entry&#39;,
+            customdata=entry_customdata,
             hovertemplate=&#34;%{x}&lt;br&gt;Price: %{y}&lt;br&gt;Size: %{customdata[0]:.4f}&lt;br&gt;Fees: %{customdata[1]:.2f}&#34;
         )
-        open_scatter.update(**open_trace_kwargs)
-        fig.add_trace(open_scatter)
+        entry_scatter.update(**entry_trace_kwargs)
+        fig.add_trace(entry_scatter)
 
         # Plot end markers
         def plot_end_markers(mask, name, color, kwargs):
             customdata = np.stack((
                 size[mask],
-                close_fees[mask],
+                exit_fees[mask],
                 pnl[mask],
                 ret[mask],
                 duration[mask]
             ), axis=1)
             scatter = go.Scatter(
-                x=self.wrapper.index[close_idx[mask]],
-                y=close_price[mask],
+                x=self.wrapper.index[exit_idx[mask]],
+                y=exit_price[mask],
                 mode=&#39;markers&#39;,
                 marker=dict(
                     symbol=&#39;circle&#39;,
@@ -197,28 +200,28 @@ class BaseEvents(Records):
             scatter.update(**kwargs)
             fig.add_trace(scatter)
 
-        # Plot Close markers
+        # Plot Exit markers
         plot_end_markers(
             (status == EventStatus.Closed) &amp; (pnl == 0.),
-            &#39;Close&#39;,
+            &#39;Exit&#39;,
             contrast_color_schema[&#39;gray&#39;],
-            close_trace_kwargs
+            exit_trace_kwargs
         )
 
-        # Plot Close - Profit markers
+        # Plot Exit - Profit markers
         plot_end_markers(
             (status == EventStatus.Closed) &amp; (pnl &gt; 0.),
-            &#39;Close - Profit&#39;,
+            &#39;Exit - Profit&#39;,
             contrast_color_schema[&#39;green&#39;],
-            close_profit_trace_kwargs
+            exit_profit_trace_kwargs
         )
 
-        # Plot Close - Loss markers
+        # Plot Exit - Loss markers
         plot_end_markers(
             (status == EventStatus.Closed) &amp; (pnl &lt; 0.),
-            &#39;Close - Loss&#39;,
+            &#39;Exit - Loss&#39;,
             contrast_color_schema[&#39;red&#39;],
-            close_loss_trace_kwargs
+            exit_loss_trace_kwargs
         )
 
         # Plot Active markers
@@ -236,10 +239,10 @@ class BaseEvents(Records):
                 type=&#34;rect&#34;,
                 xref=&#34;x&#34;,
                 yref=&#34;y&#34;,
-                x0=self.wrapper.index[open_idx[i]],
-                y0=open_price[i],
-                x1=self.wrapper.index[close_idx[i]],
-                y1=close_price[i],
+                x0=self.wrapper.index[entry_idx[i]],
+                y0=entry_price[i],
+                x1=self.wrapper.index[exit_idx[i]],
+                y1=exit_price[i],
                 fillcolor=&#39;green&#39;,
                 opacity=0.15,
                 layer=&#34;below&#34;,
@@ -253,10 +256,10 @@ class BaseEvents(Records):
                 type=&#34;rect&#34;,
                 xref=&#34;x&#34;,
                 yref=&#34;y&#34;,
-                x0=self.wrapper.index[open_idx[i]],
-                y0=open_price[i],
-                x1=self.wrapper.index[close_idx[i]],
-                y1=close_price[i],
+                x0=self.wrapper.index[entry_idx[i]],
+                y0=entry_price[i],
+                x1=self.wrapper.index[exit_idx[i]],
+                y1=exit_price[i],
                 fillcolor=&#39;red&#39;,
                 opacity=0.15,
                 layer=&#34;below&#34;,
@@ -270,23 +273,12 @@ class BaseEvents(Records):
     @cached_property
     def duration(self):
         &#34;&#34;&#34;Duration of each event (in raw format).&#34;&#34;&#34;
-        return self.map_records_to_matrix(nb.event_duration_map_nb)
-
-    @cached_property
-    def avg_duration(self):
-        &#34;&#34;&#34;Average duration (in time units).&#34;&#34;&#34;
-        return self.map_reduce_records(nb.event_duration_map_nb, nb.mean_reduce_nb, time_units=True)
-
-    @cached_property
-    def max_duration(self):
-        &#34;&#34;&#34;Maximum duration (in time units).&#34;&#34;&#34;
-        return self.map_reduce_records(nb.event_duration_map_nb, nb.max_reduce_nb, time_units=True)
+        return self.map(nb.event_duration_map_nb)
 
     @cached_property
     def coverage(self):
         &#34;&#34;&#34;Coverage, that is, total duration divided by the whole period.&#34;&#34;&#34;
-        total_duration = self.map_reduce_records(nb.event_duration_map_nb, nb.sum_reduce_nb, default_val=0.)
-        coverage = to_1d(total_duration, raw=True) / self.wrapper.shape[0]
+        coverage = to_1d(self.duration.sum(), raw=True) / self.wrapper.shape[0]
         return self.wrapper.wrap_reduced(coverage)
 
     # ############# PnL ############# #
@@ -294,54 +286,14 @@ class BaseEvents(Records):
     @cached_property
     def pnl(self):
         &#34;&#34;&#34;PnL of each event.&#34;&#34;&#34;
-        return self.map_field_to_matrix(&#39;pnl&#39;)
-
-    @cached_property
-    def min_pnl(self):
-        &#34;&#34;&#34;Minimum PnL.&#34;&#34;&#34;
-        return self.map_reduce_records(nb.event_pnl_map_nb, nb.min_reduce_nb)
-
-    @cached_property
-    def max_pnl(self):
-        &#34;&#34;&#34;Maximum PnL.&#34;&#34;&#34;
-        return self.map_reduce_records(nb.event_pnl_map_nb, nb.max_reduce_nb)
-
-    @cached_property
-    def avg_pnl(self):
-        &#34;&#34;&#34;Average PnL.&#34;&#34;&#34;
-        return self.map_reduce_records(nb.event_pnl_map_nb, nb.mean_reduce_nb)
-
-    @cached_property
-    def total_pnl(self):
-        &#34;&#34;&#34;Total PnL of all events.&#34;&#34;&#34;
-        return self.map_reduce_records(nb.event_pnl_map_nb, nb.sum_reduce_nb)
+        return self.map_field(&#39;pnl&#39;)
 
     # ############# Returns ############# #
 
     @cached_property
     def returns(self):
         &#34;&#34;&#34;Return of each event.&#34;&#34;&#34;
-        return self.map_field_to_matrix(&#39;return&#39;)
-
-    @cached_property
-    def min_return(self):
-        &#34;&#34;&#34;Minimum return.&#34;&#34;&#34;
-        return self.map_reduce_records(nb.event_return_map_nb, nb.min_reduce_nb)
-
-    @cached_property
-    def max_return(self):
-        &#34;&#34;&#34;Maximum return.&#34;&#34;&#34;
-        return self.map_reduce_records(nb.event_return_map_nb, nb.max_reduce_nb)
-
-    @cached_property
-    def avg_return(self):
-        &#34;&#34;&#34;Average return.&#34;&#34;&#34;
-        return self.map_reduce_records(nb.event_return_map_nb, nb.mean_reduce_nb)
-
-    @cached_property
-    def sqn(self):
-        &#34;&#34;&#34;System Quality Number (SQN).&#34;&#34;&#34;
-        return self.reduce_records(nb.event_sqn_reduce_nb, 1)  # ddof
+        return self.map_field(&#39;return&#39;)
 
 
 class BaseEventsByResult(BaseEvents):
@@ -351,13 +303,23 @@ class BaseEventsByResult(BaseEvents):
     def winning(self):
         &#34;&#34;&#34;Winning events of type `BaseEvents`.&#34;&#34;&#34;
         filter_mask = self.records_arr[&#39;pnl&#39;] &gt; 0.
-        return BaseEvents(self.records_arr[filter_mask], self.main_price, freq=self.wrapper.freq)
+        return BaseEvents(
+            self.records_arr[filter_mask],
+            self.main_price,
+            freq=self.wrapper.freq,
+            idx_field=self.idx_field
+        )
 
     @cached_property
     def losing(self):
         &#34;&#34;&#34;Losing events of type `BaseEvents`.&#34;&#34;&#34;
         filter_mask = self.records_arr[&#39;pnl&#39;] &lt; 0.
-        return BaseEvents(self.records_arr[filter_mask], self.main_price, freq=self.wrapper.freq)
+        return BaseEvents(
+            self.records_arr[filter_mask],
+            self.main_price,
+            freq=self.wrapper.freq,
+            idx_field=self.idx_field
+        )
 
     @cached_property
     def win_rate(self):
@@ -371,8 +333,8 @@ class BaseEventsByResult(BaseEvents):
     @cached_property
     def profit_factor(self):
         &#34;&#34;&#34;Profit factor.&#34;&#34;&#34;
-        total_win = to_1d(self.winning.total_pnl, raw=True)
-        total_loss = to_1d(self.losing.total_pnl, raw=True)
+        total_win = to_1d(self.winning.pnl.sum(), raw=True)
+        total_loss = to_1d(self.losing.pnl.sum(), raw=True)
 
         # Otherwise columns with only wins or losses will become NaNs
         has_values = to_1d(self.count, raw=True) &gt; 0
@@ -386,8 +348,8 @@ class BaseEventsByResult(BaseEvents):
     def expectancy(self):
         &#34;&#34;&#34;Average profitability.&#34;&#34;&#34;
         win_rate = to_1d(self.win_rate, raw=True)
-        avg_win = to_1d(self.winning.avg_pnl, raw=True)
-        avg_loss = to_1d(self.losing.avg_pnl, raw=True)
+        avg_win = to_1d(self.winning.pnl.mean(), raw=True)
+        avg_loss = to_1d(self.losing.pnl.mean(), raw=True)
 
         # Otherwise columns with only wins or losses will become NaNs
         has_values = to_1d(self.count, raw=True) &gt; 0
@@ -397,6 +359,15 @@ class BaseEventsByResult(BaseEvents):
         expectancy = win_rate * avg_win - (1 - win_rate) * np.abs(avg_loss)
         return self.wrapper.wrap_reduced(expectancy)
 
+    @cached_property
+    def sqn(self):
+        &#34;&#34;&#34;System Quality Number (SQN).&#34;&#34;&#34;
+        count = to_1d(self.count, raw=True)
+        pnl_mean = to_1d(self.pnl.mean(), raw=True)
+        pnl_std = to_1d(self.pnl.std(), raw=True)
+        sqn = np.sqrt(count) * pnl_mean / pnl_std
+        return self.wrapper.wrap_reduced(sqn)
+
 
 class Events(BaseEventsByResult):
     &#34;&#34;&#34;Extends `BaseEventsByResult` by further dividing events by status.&#34;&#34;&#34;
@@ -404,7 +375,7 @@ class Events(BaseEventsByResult):
     @cached_property
     def status(self):
         &#34;&#34;&#34;See `vectorbt.records.enums.EventStatus`.&#34;&#34;&#34;
-        return self.map_field_to_matrix(&#39;status&#39;)
+        return self.map_field(&#39;status&#39;)
 
     @cached_property
     def closed_rate(self):
@@ -416,13 +387,23 @@ class Events(BaseEventsByResult):
     def open(self):
         &#34;&#34;&#34;Open events of type `BaseEventsByResult`.&#34;&#34;&#34;
         filter_mask = self.records_arr[&#39;status&#39;] == EventStatus.Open
-        return BaseEventsByResult(self.records_arr[filter_mask], self.main_price, freq=self.wrapper.freq)
+        return BaseEventsByResult(
+            self.records_arr[filter_mask],
+            self.main_price,
+            freq=self.wrapper.freq,
+            idx_field=self.idx_field
+        )
 
     @cached_property
     def closed(self):
         &#34;&#34;&#34;Closed events of type `BaseEventsByResult`.&#34;&#34;&#34;
         filter_mask = self.records_arr[&#39;status&#39;] == EventStatus.Closed
-        return BaseEventsByResult(self.records_arr[filter_mask], self.main_price, freq=self.wrapper.freq)
+        return BaseEventsByResult(
+            self.records_arr[filter_mask],
+            self.main_price,
+            freq=self.wrapper.freq,
+            idx_field=self.idx_field
+        )
 
 
 class Trades(Events):
@@ -431,57 +412,54 @@ class Trades(Events):
     Such records can be created by using `vectorbt.records.nb.trade_records_nb`.
 
     Example:
-        Get the average PnL of trades with duration over 2 days:
+        Get count and P&amp;L of trades:
         ```python-repl
         &gt;&gt;&gt; import vectorbt as vbt
         &gt;&gt;&gt; import pandas as pd
-        &gt;&gt;&gt; from vectorbt.records import Trades
 
-        &gt;&gt;&gt; price = pd.Series([1, 2, 3, 2, 1])
-        &gt;&gt;&gt; orders = pd.Series([1, -1, 1, 0, -1])
+        &gt;&gt;&gt; price = pd.Series([1, 2, 3, 4, 3, 2, 1])
+        &gt;&gt;&gt; orders = pd.Series([1, -0.5, -0.5, 2, -0.5, -0.5, -0.5])
         &gt;&gt;&gt; portfolio = vbt.Portfolio.from_orders(price, orders,
         ...      init_capital=100, freq=&#39;1D&#39;)
-        &gt;&gt;&gt; print(portfolio.trades.avg_pnl)
-        -0.5
 
-        &gt;&gt;&gt; records_arr = portfolio.trades.records_arr
-        &gt;&gt;&gt; duration_mask = (records_arr[&#39;close_idx&#39;] - records_arr[&#39;open_idx&#39;]) &gt;= 2.
-        &gt;&gt;&gt; trades = Trades(portfolio.wrapper, records_arr[duration_mask])
-        &gt;&gt;&gt; print(trades.avg_pnl)
-        -2.0
+        &gt;&gt;&gt; trades = vbt.Trades.from_orders(portfolio.orders)
+        &gt;&gt;&gt; print(trades.count)
+        6
+        &gt;&gt;&gt; print(trades.pnl.sum())
+        -3.0
+        &gt;&gt;&gt; print(trades.winning.count)
+        2
+        &gt;&gt;&gt; print(trades.winning.pnl.sum())
+        1.5
         ```
 
-        The same can be done by using `BaseEvents.reduce_records`,
-        which skips the step of transforming records into a matrix and thus saves memory.
+        Get count and P&amp;L of trades with duration of more than 2 days:
         ```python-repl
-        &gt;&gt;&gt; import numpy as np
-        &gt;&gt;&gt; from numba import njit
-
-        &gt;&gt;&gt; @njit
-        ... def reduce_func_nb(col_rs):
-        ...     duration_mask = col_rs[:, TS.CloseIdx] - col_rs[:, TS.OpenIdx] &gt;= 2.
-        ...     return np.nanmean(col_rs[duration_mask, TS.PnL])
-
-        &gt;&gt;&gt; portfolio.trades.reduce_records(reduce_func_nb)
-        -2.0
+        &gt;&gt;&gt; mask = (trades.records[&#39;exit_idx&#39;] - trades.records[&#39;entry_idx&#39;]) &gt; 2
+        &gt;&gt;&gt; trades_filtered = trades.filter_by_mask(mask)
+        &gt;&gt;&gt; print(trades_filtered.count)
+        2
+        &gt;&gt;&gt; print(trades_filtered.pnl.sum())
+        -3.0
         ```&#34;&#34;&#34;
 
-    def __init__(self, records_arr, main_price, freq=None):
-        Events.__init__(self, records_arr, main_price, freq=freq)
+    def __init__(self, records_arr, main_price, **kwargs):
+        Events.__init__(self, records_arr, main_price, **kwargs)
 
         if not all(field in records_arr.dtype.names for field in trade_dt.names):
-            raise Exception(&#34;Records array must have all fields defined in trade_dt&#34;)
+            raise ValueError(&#34;Records array must have all fields defined in trade_dt&#34;)
 
     @classmethod
-    def from_orders(cls, orders):
+    def from_orders(cls, orders, **kwargs):
         &#34;&#34;&#34;Build `Trades` from `Orders`.&#34;&#34;&#34;
         trade_records = nb.trade_records_nb(orders.main_price.vbt.to_2d_array(), orders.records_arr)
-        return cls(trade_records, orders.main_price, freq=orders.wrapper.freq)
+        return cls(trade_records, orders.main_price, freq=orders.wrapper.freq, **kwargs)
 
     @cached_property
     def position_idx(self):
         &#34;&#34;&#34;Position index of each trade.&#34;&#34;&#34;
-        return self.map_field_to_matrix(&#39;position_idx&#39;)
+        return self.map_field(&#39;position_idx&#39;)
+
 
 
 class Positions(Events):
@@ -490,37 +468,48 @@ class Positions(Events):
     Such records can be created by using `vectorbt.records.nb.position_records_nb`.
 
     Example:
-        Get the average PnL of closed positions with duration over 2 days:
+        Get count and P&amp;L of positions:
         ```python-repl
         &gt;&gt;&gt; import vectorbt as vbt
         &gt;&gt;&gt; import pandas as pd
-        &gt;&gt;&gt; from vectorbt.records import Positions
 
-        &gt;&gt;&gt; price = pd.Series([1, 2, 3, 2, 1])
-        &gt;&gt;&gt; orders = pd.Series([1, -1, 1, 0, -1])
+        &gt;&gt;&gt; price = pd.Series([1, 2, 3, 4, 3, 2, 1])
+        &gt;&gt;&gt; orders = pd.Series([1, -0.5, -0.5, 1, -1, 2, -1])
         &gt;&gt;&gt; portfolio = vbt.Portfolio.from_orders(price, orders,
         ...      init_capital=100, freq=&#39;1D&#39;)
-        &gt;&gt;&gt; print(portfolio.positions.avg_pnl)
-        -0.5
 
-        &gt;&gt;&gt; records_arr = portfolio.positions.closed.records_arr
-        &gt;&gt;&gt; duration_mask = (records_arr[&#39;close_idx&#39;] - records_arr[&#39;open_idx&#39;]) &gt;= 2.
-        &gt;&gt;&gt; positions = Positions(portfolio.wrapper, records_arr[duration_mask])
-        &gt;&gt;&gt; print(positions.avg_pnl)
+        &gt;&gt;&gt; positions = vbt.Positions.from_orders(portfolio.orders)
+        &gt;&gt;&gt; print(positions.count)
+        3
+        &gt;&gt;&gt; print(positions.pnl.sum())
+        -1.5
+        &gt;&gt;&gt; print(positions.open.pnl.sum())
+        -2.0
+        &gt;&gt;&gt; print(positions.closed.pnl.sum())
+        0.5
+        ```
+
+        Get count and P&amp;L of positions with size of more than 1 share:
+        ```python-repl
+        &gt;&gt;&gt; mask = positions.records[&#39;size&#39;] &gt; 1
+        &gt;&gt;&gt; positions_filtered = positions.filter_by_mask(mask)
+        &gt;&gt;&gt; print(positions_filtered.count)
+        1
+        &gt;&gt;&gt; print(positions_filtered.pnl.sum())
         -2.0
         ```&#34;&#34;&#34;
 
-    def __init__(self, records_arr, main_price, freq=None):
-        Events.__init__(self, records_arr, main_price, freq=freq)
+    def __init__(self, records_arr, main_price, **kwargs):
+        Events.__init__(self, records_arr, main_price, **kwargs)
 
         if not all(field in records_arr.dtype.names for field in position_dt.names):
-            raise Exception(&#34;Records array must have all fields defined in position_dt&#34;)
+            raise ValueError(&#34;Records array must have all fields defined in position_dt&#34;)
 
     @classmethod
-    def from_orders(cls, orders):
+    def from_orders(cls, orders, **kwargs):
         &#34;&#34;&#34;Build `Positions` from `Orders`.&#34;&#34;&#34;
         position_records = nb.position_records_nb(orders.main_price.vbt.to_2d_array(), orders.records_arr)
-        return cls(position_records, orders.main_price, freq=orders.wrapper.freq)</code></pre>
+        return cls(position_records, orders.main_price, freq=orders.wrapper.freq, **kwargs)</code></pre>
 </details>
 </section>
 <section>
@@ -534,7 +523,7 @@ class Positions(Events):
 <dl>
 <dt id="vectorbt.records.events.BaseEvents"><code class="flex name class">
 <span>class <span class="ident parent-fname">BaseEvents</span></span>
-<span>(</span><span>records_arr, main_price, freq=None)</span>
+<span>(</span><span>records_arr, main_price, freq=None, idx_field='exit_idx')</span>
 </code></dt>
 <dd>
 <div class="desc"><p>Extends <code>Records</code> for working with event records.</p></div>
@@ -545,34 +534,38 @@ class Positions(Events):
 <pre><code class="python">class BaseEvents(Records):
     &#34;&#34;&#34;Extends `Records` for working with event records.&#34;&#34;&#34;
 
-    def __init__(self, records_arr, main_price, freq=None):
-        Records.__init__(self, records_arr, TSArrayWrapper.from_obj(main_price, freq=freq))
+    def __init__(self, records_arr, main_price, freq=None, idx_field=&#39;exit_idx&#39;):
+        Records.__init__(self, records_arr, TSArrayWrapper.from_obj(main_price, freq=freq), idx_field=idx_field)
         PandasIndexer.__init__(self, _indexing_func)
 
         if not all(field in records_arr.dtype.names for field in event_dt.names):
-            raise Exception(&#34;Records array must have all fields defined in event_dt&#34;)
+            raise ValueError(&#34;Records array must have all fields defined in event_dt&#34;)
 
         self.main_price = main_price
 
+    def filter_by_mask(self, mask):
+        &#34;&#34;&#34;Return a new class instance, filtered by mask.&#34;&#34;&#34;
+        return self.__class__(self.records_arr[mask], self.main_price, freq=self.wrapper.freq, idx_field=self.idx_field)
+
     def plot(self,
              main_price_trace_kwargs={},
-             open_trace_kwargs={},
-             close_trace_kwargs={},
-             close_profit_trace_kwargs={},
-             close_loss_trace_kwargs={},
+             entry_trace_kwargs={},
+             exit_trace_kwargs={},
+             exit_profit_trace_kwargs={},
+             exit_loss_trace_kwargs={},
              active_trace_kwargs={},
              profit_shape_kwargs={},
              loss_shape_kwargs={},
              fig=None,
-             **layout_kwargs):
+             **layout_kwargs):  # pragma: no cover
         &#34;&#34;&#34;Plot orders.
 
         Args:
             main_price_trace_kwargs (dict): Keyword arguments passed to `plotly.graph_objects.Scatter` for main price.
-            open_trace_kwargs (dict): Keyword arguments passed to `plotly.graph_objects.Scatter` for &#34;Open&#34; markers.
-            close_trace_kwargs (dict): Keyword arguments passed to `plotly.graph_objects.Scatter` for &#34;Close&#34; markers.
-            close_profit_trace_kwargs (dict): Keyword arguments passed to `plotly.graph_objects.Scatter` for &#34;Close - Profit&#34; markers.
-            close_loss_trace_kwargs (dict): Keyword arguments passed to `plotly.graph_objects.Scatter` for &#34;Close - Loss&#34; markers.
+            entry_trace_kwargs (dict): Keyword arguments passed to `plotly.graph_objects.Scatter` for &#34;Entry&#34; markers.
+            exit_trace_kwargs (dict): Keyword arguments passed to `plotly.graph_objects.Scatter` for &#34;Exit&#34; markers.
+            exit_profit_trace_kwargs (dict): Keyword arguments passed to `plotly.graph_objects.Scatter` for &#34;Exit - Profit&#34; markers.
+            exit_loss_trace_kwargs (dict): Keyword arguments passed to `plotly.graph_objects.Scatter` for &#34;Exit - Loss&#34; markers.
             active_trace_kwargs (dict): Keyword arguments passed to `plotly.graph_objects.Scatter` for &#34;Active&#34; markers.
             profit_shape_kwargs (dict): Keyword arguments passed to `plotly.graph_objects.Figure.add_shape` for profit zones.
             loss_shape_kwargs (dict): Keyword arguments passed to `plotly.graph_objects.Figure.add_shape` for loss zones.
@@ -592,19 +585,19 @@ class Positions(Events):
 
             ![](/vectorbt/docs/img/events.png)&#34;&#34;&#34;
         if self.wrapper.ndim &gt; 1:
-            raise Exception(&#34;You must select a column first&#34;)
+            raise TypeError(&#34;You must select a column first&#34;)
 
         # Plot main price
         fig = self.main_price.vbt.tseries.plot(trace_kwargs=main_price_trace_kwargs, fig=fig, **layout_kwargs)
 
         # Extract information
         size = self.records_arr[&#39;size&#39;]
-        open_idx = self.records_arr[&#39;open_idx&#39;]
-        open_price = self.records_arr[&#39;open_price&#39;]
-        open_fees = self.records_arr[&#39;open_fees&#39;]
-        close_idx = self.records_arr[&#39;close_idx&#39;]
-        close_price = self.records_arr[&#39;close_price&#39;]
-        close_fees = self.records_arr[&#39;close_fees&#39;]
+        entry_idx = self.records_arr[&#39;entry_idx&#39;]
+        entry_price = self.records_arr[&#39;entry_price&#39;]
+        entry_fees = self.records_arr[&#39;entry_fees&#39;]
+        exit_idx = self.records_arr[&#39;exit_idx&#39;]
+        exit_price = self.records_arr[&#39;exit_price&#39;]
+        exit_fees = self.records_arr[&#39;exit_fees&#39;]
         pnl = self.records_arr[&#39;pnl&#39;]
         ret = self.records_arr[&#39;return&#39;]
         status = self.records_arr[&#39;status&#39;]
@@ -618,13 +611,13 @@ class Positions(Events):
                 duration = to_idx - from_idx
             return np.vectorize(str)(duration)
 
-        duration = get_duration_str(open_idx, close_idx)
+        duration = get_duration_str(entry_idx, exit_idx)
 
-        # Plot Open markers
-        open_customdata = np.stack((size, open_fees), axis=1)
-        open_scatter = go.Scatter(
-            x=self.wrapper.index[open_idx],
-            y=open_price,
+        # Plot Entry markers
+        entry_customdata = np.stack((size, entry_fees), axis=1)
+        entry_scatter = go.Scatter(
+            x=self.wrapper.index[entry_idx],
+            y=entry_price,
             mode=&#39;markers&#39;,
             marker=dict(
                 symbol=&#39;circle&#39;,
@@ -635,25 +628,25 @@ class Positions(Events):
                     color=adjust_lightness(contrast_color_schema[&#39;blue&#39;])
                 )
             ),
-            name=&#39;Open&#39;,
-            customdata=open_customdata,
+            name=&#39;Entry&#39;,
+            customdata=entry_customdata,
             hovertemplate=&#34;%{x}&lt;br&gt;Price: %{y}&lt;br&gt;Size: %{customdata[0]:.4f}&lt;br&gt;Fees: %{customdata[1]:.2f}&#34;
         )
-        open_scatter.update(**open_trace_kwargs)
-        fig.add_trace(open_scatter)
+        entry_scatter.update(**entry_trace_kwargs)
+        fig.add_trace(entry_scatter)
 
         # Plot end markers
         def plot_end_markers(mask, name, color, kwargs):
             customdata = np.stack((
                 size[mask],
-                close_fees[mask],
+                exit_fees[mask],
                 pnl[mask],
                 ret[mask],
                 duration[mask]
             ), axis=1)
             scatter = go.Scatter(
-                x=self.wrapper.index[close_idx[mask]],
-                y=close_price[mask],
+                x=self.wrapper.index[exit_idx[mask]],
+                y=exit_price[mask],
                 mode=&#39;markers&#39;,
                 marker=dict(
                     symbol=&#39;circle&#39;,
@@ -676,28 +669,28 @@ class Positions(Events):
             scatter.update(**kwargs)
             fig.add_trace(scatter)
 
-        # Plot Close markers
+        # Plot Exit markers
         plot_end_markers(
             (status == EventStatus.Closed) &amp; (pnl == 0.),
-            &#39;Close&#39;,
+            &#39;Exit&#39;,
             contrast_color_schema[&#39;gray&#39;],
-            close_trace_kwargs
+            exit_trace_kwargs
         )
 
-        # Plot Close - Profit markers
+        # Plot Exit - Profit markers
         plot_end_markers(
             (status == EventStatus.Closed) &amp; (pnl &gt; 0.),
-            &#39;Close - Profit&#39;,
+            &#39;Exit - Profit&#39;,
             contrast_color_schema[&#39;green&#39;],
-            close_profit_trace_kwargs
+            exit_profit_trace_kwargs
         )
 
-        # Plot Close - Loss markers
+        # Plot Exit - Loss markers
         plot_end_markers(
             (status == EventStatus.Closed) &amp; (pnl &lt; 0.),
-            &#39;Close - Loss&#39;,
+            &#39;Exit - Loss&#39;,
             contrast_color_schema[&#39;red&#39;],
-            close_loss_trace_kwargs
+            exit_loss_trace_kwargs
         )
 
         # Plot Active markers
@@ -715,10 +708,10 @@ class Positions(Events):
                 type=&#34;rect&#34;,
                 xref=&#34;x&#34;,
                 yref=&#34;y&#34;,
-                x0=self.wrapper.index[open_idx[i]],
-                y0=open_price[i],
-                x1=self.wrapper.index[close_idx[i]],
-                y1=close_price[i],
+                x0=self.wrapper.index[entry_idx[i]],
+                y0=entry_price[i],
+                x1=self.wrapper.index[exit_idx[i]],
+                y1=exit_price[i],
                 fillcolor=&#39;green&#39;,
                 opacity=0.15,
                 layer=&#34;below&#34;,
@@ -732,10 +725,10 @@ class Positions(Events):
                 type=&#34;rect&#34;,
                 xref=&#34;x&#34;,
                 yref=&#34;y&#34;,
-                x0=self.wrapper.index[open_idx[i]],
-                y0=open_price[i],
-                x1=self.wrapper.index[close_idx[i]],
-                y1=close_price[i],
+                x0=self.wrapper.index[entry_idx[i]],
+                y0=entry_price[i],
+                x1=self.wrapper.index[exit_idx[i]],
+                y1=exit_price[i],
                 fillcolor=&#39;red&#39;,
                 opacity=0.15,
                 layer=&#34;below&#34;,
@@ -749,23 +742,12 @@ class Positions(Events):
     @cached_property
     def duration(self):
         &#34;&#34;&#34;Duration of each event (in raw format).&#34;&#34;&#34;
-        return self.map_records_to_matrix(nb.event_duration_map_nb)
-
-    @cached_property
-    def avg_duration(self):
-        &#34;&#34;&#34;Average duration (in time units).&#34;&#34;&#34;
-        return self.map_reduce_records(nb.event_duration_map_nb, nb.mean_reduce_nb, time_units=True)
-
-    @cached_property
-    def max_duration(self):
-        &#34;&#34;&#34;Maximum duration (in time units).&#34;&#34;&#34;
-        return self.map_reduce_records(nb.event_duration_map_nb, nb.max_reduce_nb, time_units=True)
+        return self.map(nb.event_duration_map_nb)
 
     @cached_property
     def coverage(self):
         &#34;&#34;&#34;Coverage, that is, total duration divided by the whole period.&#34;&#34;&#34;
-        total_duration = self.map_reduce_records(nb.event_duration_map_nb, nb.sum_reduce_nb, default_val=0.)
-        coverage = to_1d(total_duration, raw=True) / self.wrapper.shape[0]
+        coverage = to_1d(self.duration.sum(), raw=True) / self.wrapper.shape[0]
         return self.wrapper.wrap_reduced(coverage)
 
     # ############# PnL ############# #
@@ -773,54 +755,14 @@ class Positions(Events):
     @cached_property
     def pnl(self):
         &#34;&#34;&#34;PnL of each event.&#34;&#34;&#34;
-        return self.map_field_to_matrix(&#39;pnl&#39;)
-
-    @cached_property
-    def min_pnl(self):
-        &#34;&#34;&#34;Minimum PnL.&#34;&#34;&#34;
-        return self.map_reduce_records(nb.event_pnl_map_nb, nb.min_reduce_nb)
-
-    @cached_property
-    def max_pnl(self):
-        &#34;&#34;&#34;Maximum PnL.&#34;&#34;&#34;
-        return self.map_reduce_records(nb.event_pnl_map_nb, nb.max_reduce_nb)
-
-    @cached_property
-    def avg_pnl(self):
-        &#34;&#34;&#34;Average PnL.&#34;&#34;&#34;
-        return self.map_reduce_records(nb.event_pnl_map_nb, nb.mean_reduce_nb)
-
-    @cached_property
-    def total_pnl(self):
-        &#34;&#34;&#34;Total PnL of all events.&#34;&#34;&#34;
-        return self.map_reduce_records(nb.event_pnl_map_nb, nb.sum_reduce_nb)
+        return self.map_field(&#39;pnl&#39;)
 
     # ############# Returns ############# #
 
     @cached_property
     def returns(self):
         &#34;&#34;&#34;Return of each event.&#34;&#34;&#34;
-        return self.map_field_to_matrix(&#39;return&#39;)
-
-    @cached_property
-    def min_return(self):
-        &#34;&#34;&#34;Minimum return.&#34;&#34;&#34;
-        return self.map_reduce_records(nb.event_return_map_nb, nb.min_reduce_nb)
-
-    @cached_property
-    def max_return(self):
-        &#34;&#34;&#34;Maximum return.&#34;&#34;&#34;
-        return self.map_reduce_records(nb.event_return_map_nb, nb.max_reduce_nb)
-
-    @cached_property
-    def avg_return(self):
-        &#34;&#34;&#34;Average return.&#34;&#34;&#34;
-        return self.map_reduce_records(nb.event_return_map_nb, nb.mean_reduce_nb)
-
-    @cached_property
-    def sqn(self):
-        &#34;&#34;&#34;System Quality Number (SQN).&#34;&#34;&#34;
-        return self.reduce_records(nb.event_sqn_reduce_nb, 1)  # ddof</code></pre>
+        return self.map_field(&#39;return&#39;)</code></pre>
 </details>
 <h3 class="section-subtitle">Ancestors</h3>
 <ul class="hlist">
@@ -833,78 +775,6 @@ class Positions(Events):
 </ul>
 <h3 class="section-subtitle">Instance variables</h3>
 <dl>
-<dt id="vectorbt.records.events.BaseEvents.avg_duration"><code class="name">var <span class="ident fname">avg_duration</span></code></dt>
-<dd>
-<div class="desc"><p>Average duration (in time units).</p></div>
-<details class="source">
-<summary>
-<span>Expand source code</span>
-</summary>
-<pre><code class="python">def __get__(self, instance, owner=None):
-    if instance is None:
-        return self
-    if not defaults.caching or self.disabled:  # you can manually disable cache here
-        return super().__get__(instance, owner=owner)
-    cache = instance.__dict__
-    val = cache.get(self.attrname, _NOT_FOUND)
-    if val is _NOT_FOUND:
-        with self.lock:
-            # check if another thread filled cache while we awaited lock
-            val = cache.get(self.attrname, _NOT_FOUND)
-            if val is _NOT_FOUND:
-                val = self.func(instance)
-                cache[self.attrname] = val
-    return val</code></pre>
-</details>
-</dd>
-<dt id="vectorbt.records.events.BaseEvents.avg_pnl"><code class="name">var <span class="ident fname">avg_pnl</span></code></dt>
-<dd>
-<div class="desc"><p>Average PnL.</p></div>
-<details class="source">
-<summary>
-<span>Expand source code</span>
-</summary>
-<pre><code class="python">def __get__(self, instance, owner=None):
-    if instance is None:
-        return self
-    if not defaults.caching or self.disabled:  # you can manually disable cache here
-        return super().__get__(instance, owner=owner)
-    cache = instance.__dict__
-    val = cache.get(self.attrname, _NOT_FOUND)
-    if val is _NOT_FOUND:
-        with self.lock:
-            # check if another thread filled cache while we awaited lock
-            val = cache.get(self.attrname, _NOT_FOUND)
-            if val is _NOT_FOUND:
-                val = self.func(instance)
-                cache[self.attrname] = val
-    return val</code></pre>
-</details>
-</dd>
-<dt id="vectorbt.records.events.BaseEvents.avg_return"><code class="name">var <span class="ident fname">avg_return</span></code></dt>
-<dd>
-<div class="desc"><p>Average return.</p></div>
-<details class="source">
-<summary>
-<span>Expand source code</span>
-</summary>
-<pre><code class="python">def __get__(self, instance, owner=None):
-    if instance is None:
-        return self
-    if not defaults.caching or self.disabled:  # you can manually disable cache here
-        return super().__get__(instance, owner=owner)
-    cache = instance.__dict__
-    val = cache.get(self.attrname, _NOT_FOUND)
-    if val is _NOT_FOUND:
-        with self.lock:
-            # check if another thread filled cache while we awaited lock
-            val = cache.get(self.attrname, _NOT_FOUND)
-            if val is _NOT_FOUND:
-                val = self.func(instance)
-                cache[self.attrname] = val
-    return val</code></pre>
-</details>
-</dd>
 <dt id="vectorbt.records.events.BaseEvents.coverage"><code class="name">var <span class="ident fname">coverage</span></code></dt>
 <dd>
 <div class="desc"><p>Coverage, that is, total duration divided by the whole period.</p></div>
@@ -932,126 +802,6 @@ class Positions(Events):
 <dt id="vectorbt.records.events.BaseEvents.duration"><code class="name">var <span class="ident fname">duration</span></code></dt>
 <dd>
 <div class="desc"><p>Duration of each event (in raw format).</p></div>
-<details class="source">
-<summary>
-<span>Expand source code</span>
-</summary>
-<pre><code class="python">def __get__(self, instance, owner=None):
-    if instance is None:
-        return self
-    if not defaults.caching or self.disabled:  # you can manually disable cache here
-        return super().__get__(instance, owner=owner)
-    cache = instance.__dict__
-    val = cache.get(self.attrname, _NOT_FOUND)
-    if val is _NOT_FOUND:
-        with self.lock:
-            # check if another thread filled cache while we awaited lock
-            val = cache.get(self.attrname, _NOT_FOUND)
-            if val is _NOT_FOUND:
-                val = self.func(instance)
-                cache[self.attrname] = val
-    return val</code></pre>
-</details>
-</dd>
-<dt id="vectorbt.records.events.BaseEvents.max_duration"><code class="name">var <span class="ident fname">max_duration</span></code></dt>
-<dd>
-<div class="desc"><p>Maximum duration (in time units).</p></div>
-<details class="source">
-<summary>
-<span>Expand source code</span>
-</summary>
-<pre><code class="python">def __get__(self, instance, owner=None):
-    if instance is None:
-        return self
-    if not defaults.caching or self.disabled:  # you can manually disable cache here
-        return super().__get__(instance, owner=owner)
-    cache = instance.__dict__
-    val = cache.get(self.attrname, _NOT_FOUND)
-    if val is _NOT_FOUND:
-        with self.lock:
-            # check if another thread filled cache while we awaited lock
-            val = cache.get(self.attrname, _NOT_FOUND)
-            if val is _NOT_FOUND:
-                val = self.func(instance)
-                cache[self.attrname] = val
-    return val</code></pre>
-</details>
-</dd>
-<dt id="vectorbt.records.events.BaseEvents.max_pnl"><code class="name">var <span class="ident fname">max_pnl</span></code></dt>
-<dd>
-<div class="desc"><p>Maximum PnL.</p></div>
-<details class="source">
-<summary>
-<span>Expand source code</span>
-</summary>
-<pre><code class="python">def __get__(self, instance, owner=None):
-    if instance is None:
-        return self
-    if not defaults.caching or self.disabled:  # you can manually disable cache here
-        return super().__get__(instance, owner=owner)
-    cache = instance.__dict__
-    val = cache.get(self.attrname, _NOT_FOUND)
-    if val is _NOT_FOUND:
-        with self.lock:
-            # check if another thread filled cache while we awaited lock
-            val = cache.get(self.attrname, _NOT_FOUND)
-            if val is _NOT_FOUND:
-                val = self.func(instance)
-                cache[self.attrname] = val
-    return val</code></pre>
-</details>
-</dd>
-<dt id="vectorbt.records.events.BaseEvents.max_return"><code class="name">var <span class="ident fname">max_return</span></code></dt>
-<dd>
-<div class="desc"><p>Maximum return.</p></div>
-<details class="source">
-<summary>
-<span>Expand source code</span>
-</summary>
-<pre><code class="python">def __get__(self, instance, owner=None):
-    if instance is None:
-        return self
-    if not defaults.caching or self.disabled:  # you can manually disable cache here
-        return super().__get__(instance, owner=owner)
-    cache = instance.__dict__
-    val = cache.get(self.attrname, _NOT_FOUND)
-    if val is _NOT_FOUND:
-        with self.lock:
-            # check if another thread filled cache while we awaited lock
-            val = cache.get(self.attrname, _NOT_FOUND)
-            if val is _NOT_FOUND:
-                val = self.func(instance)
-                cache[self.attrname] = val
-    return val</code></pre>
-</details>
-</dd>
-<dt id="vectorbt.records.events.BaseEvents.min_pnl"><code class="name">var <span class="ident fname">min_pnl</span></code></dt>
-<dd>
-<div class="desc"><p>Minimum PnL.</p></div>
-<details class="source">
-<summary>
-<span>Expand source code</span>
-</summary>
-<pre><code class="python">def __get__(self, instance, owner=None):
-    if instance is None:
-        return self
-    if not defaults.caching or self.disabled:  # you can manually disable cache here
-        return super().__get__(instance, owner=owner)
-    cache = instance.__dict__
-    val = cache.get(self.attrname, _NOT_FOUND)
-    if val is _NOT_FOUND:
-        with self.lock:
-            # check if another thread filled cache while we awaited lock
-            val = cache.get(self.attrname, _NOT_FOUND)
-            if val is _NOT_FOUND:
-                val = self.func(instance)
-                cache[self.attrname] = val
-    return val</code></pre>
-</details>
-</dd>
-<dt id="vectorbt.records.events.BaseEvents.min_return"><code class="name">var <span class="ident fname">min_return</span></code></dt>
-<dd>
-<div class="desc"><p>Minimum return.</p></div>
 <details class="source">
 <summary>
 <span>Expand source code</span>
@@ -1121,59 +871,11 @@ class Positions(Events):
     return val</code></pre>
 </details>
 </dd>
-<dt id="vectorbt.records.events.BaseEvents.sqn"><code class="name">var <span class="ident fname">sqn</span></code></dt>
-<dd>
-<div class="desc"><p>System Quality Number (SQN).</p></div>
-<details class="source">
-<summary>
-<span>Expand source code</span>
-</summary>
-<pre><code class="python">def __get__(self, instance, owner=None):
-    if instance is None:
-        return self
-    if not defaults.caching or self.disabled:  # you can manually disable cache here
-        return super().__get__(instance, owner=owner)
-    cache = instance.__dict__
-    val = cache.get(self.attrname, _NOT_FOUND)
-    if val is _NOT_FOUND:
-        with self.lock:
-            # check if another thread filled cache while we awaited lock
-            val = cache.get(self.attrname, _NOT_FOUND)
-            if val is _NOT_FOUND:
-                val = self.func(instance)
-                cache[self.attrname] = val
-    return val</code></pre>
-</details>
-</dd>
-<dt id="vectorbt.records.events.BaseEvents.total_pnl"><code class="name">var <span class="ident fname">total_pnl</span></code></dt>
-<dd>
-<div class="desc"><p>Total PnL of all events.</p></div>
-<details class="source">
-<summary>
-<span>Expand source code</span>
-</summary>
-<pre><code class="python">def __get__(self, instance, owner=None):
-    if instance is None:
-        return self
-    if not defaults.caching or self.disabled:  # you can manually disable cache here
-        return super().__get__(instance, owner=owner)
-    cache = instance.__dict__
-    val = cache.get(self.attrname, _NOT_FOUND)
-    if val is _NOT_FOUND:
-        with self.lock:
-            # check if another thread filled cache while we awaited lock
-            val = cache.get(self.attrname, _NOT_FOUND)
-            if val is _NOT_FOUND:
-                val = self.func(instance)
-                cache[self.attrname] = val
-    return val</code></pre>
-</details>
-</dd>
 </dl>
 <h3 class="section-subtitle">Methods</h3>
 <dl>
 <dt id="vectorbt.records.events.BaseEvents.plot"><code class="name flex">
-<span>def <span class="ident fname">plot</span></span>(<span>self, main_price_trace_kwargs={}, open_trace_kwargs={}, close_trace_kwargs={}, close_profit_trace_kwargs={}, close_loss_trace_kwargs={}, active_trace_kwargs={}, profit_shape_kwargs={}, loss_shape_kwargs={}, fig=None, **layout_kwargs)</span>
+<span>def <span class="ident fname">plot</span></span>(<span>self, main_price_trace_kwargs={}, entry_trace_kwargs={}, exit_trace_kwargs={}, exit_profit_trace_kwargs={}, exit_loss_trace_kwargs={}, active_trace_kwargs={}, profit_shape_kwargs={}, loss_shape_kwargs={}, fig=None, **layout_kwargs)</span>
 </code></dt>
 <dd>
 <div class="desc"><p>Plot orders.</p>
@@ -1181,14 +883,14 @@ class Positions(Events):
 <dl>
 <dt><strong><code>main_price_trace_kwargs</code></strong> :&ensp;<code>dict</code></dt>
 <dd>Keyword arguments passed to <code>plotly.graph_objects.Scatter</code> for main price.</dd>
-<dt><strong><code>open_trace_kwargs</code></strong> :&ensp;<code>dict</code></dt>
-<dd>Keyword arguments passed to <code>plotly.graph_objects.Scatter</code> for "Open" markers.</dd>
-<dt><strong><code>close_trace_kwargs</code></strong> :&ensp;<code>dict</code></dt>
-<dd>Keyword arguments passed to <code>plotly.graph_objects.Scatter</code> for "Close" markers.</dd>
-<dt><strong><code>close_profit_trace_kwargs</code></strong> :&ensp;<code>dict</code></dt>
-<dd>Keyword arguments passed to <code>plotly.graph_objects.Scatter</code> for "Close - Profit" markers.</dd>
-<dt><strong><code>close_loss_trace_kwargs</code></strong> :&ensp;<code>dict</code></dt>
-<dd>Keyword arguments passed to <code>plotly.graph_objects.Scatter</code> for "Close - Loss" markers.</dd>
+<dt><strong><code>entry_trace_kwargs</code></strong> :&ensp;<code>dict</code></dt>
+<dd>Keyword arguments passed to <code>plotly.graph_objects.Scatter</code> for "Entry" markers.</dd>
+<dt><strong><code>exit_trace_kwargs</code></strong> :&ensp;<code>dict</code></dt>
+<dd>Keyword arguments passed to <code>plotly.graph_objects.Scatter</code> for "Exit" markers.</dd>
+<dt><strong><code>exit_profit_trace_kwargs</code></strong> :&ensp;<code>dict</code></dt>
+<dd>Keyword arguments passed to <code>plotly.graph_objects.Scatter</code> for "Exit - Profit" markers.</dd>
+<dt><strong><code>exit_loss_trace_kwargs</code></strong> :&ensp;<code>dict</code></dt>
+<dd>Keyword arguments passed to <code>plotly.graph_objects.Scatter</code> for "Exit - Loss" markers.</dd>
 <dt><strong><code>active_trace_kwargs</code></strong> :&ensp;<code>dict</code></dt>
 <dd>Keyword arguments passed to <code>plotly.graph_objects.Scatter</code> for "Active" markers.</dd>
 <dt><strong><code>profit_shape_kwargs</code></strong> :&ensp;<code>dict</code></dt>
@@ -1217,23 +919,23 @@ portfolio.trades.plot()
 </summary>
 <pre><code class="python">def plot(self,
          main_price_trace_kwargs={},
-         open_trace_kwargs={},
-         close_trace_kwargs={},
-         close_profit_trace_kwargs={},
-         close_loss_trace_kwargs={},
+         entry_trace_kwargs={},
+         exit_trace_kwargs={},
+         exit_profit_trace_kwargs={},
+         exit_loss_trace_kwargs={},
          active_trace_kwargs={},
          profit_shape_kwargs={},
          loss_shape_kwargs={},
          fig=None,
-         **layout_kwargs):
+         **layout_kwargs):  # pragma: no cover
     &#34;&#34;&#34;Plot orders.
 
     Args:
         main_price_trace_kwargs (dict): Keyword arguments passed to `plotly.graph_objects.Scatter` for main price.
-        open_trace_kwargs (dict): Keyword arguments passed to `plotly.graph_objects.Scatter` for &#34;Open&#34; markers.
-        close_trace_kwargs (dict): Keyword arguments passed to `plotly.graph_objects.Scatter` for &#34;Close&#34; markers.
-        close_profit_trace_kwargs (dict): Keyword arguments passed to `plotly.graph_objects.Scatter` for &#34;Close - Profit&#34; markers.
-        close_loss_trace_kwargs (dict): Keyword arguments passed to `plotly.graph_objects.Scatter` for &#34;Close - Loss&#34; markers.
+        entry_trace_kwargs (dict): Keyword arguments passed to `plotly.graph_objects.Scatter` for &#34;Entry&#34; markers.
+        exit_trace_kwargs (dict): Keyword arguments passed to `plotly.graph_objects.Scatter` for &#34;Exit&#34; markers.
+        exit_profit_trace_kwargs (dict): Keyword arguments passed to `plotly.graph_objects.Scatter` for &#34;Exit - Profit&#34; markers.
+        exit_loss_trace_kwargs (dict): Keyword arguments passed to `plotly.graph_objects.Scatter` for &#34;Exit - Loss&#34; markers.
         active_trace_kwargs (dict): Keyword arguments passed to `plotly.graph_objects.Scatter` for &#34;Active&#34; markers.
         profit_shape_kwargs (dict): Keyword arguments passed to `plotly.graph_objects.Figure.add_shape` for profit zones.
         loss_shape_kwargs (dict): Keyword arguments passed to `plotly.graph_objects.Figure.add_shape` for loss zones.
@@ -1253,19 +955,19 @@ portfolio.trades.plot()
 
         ![](/vectorbt/docs/img/events.png)&#34;&#34;&#34;
     if self.wrapper.ndim &gt; 1:
-        raise Exception(&#34;You must select a column first&#34;)
+        raise TypeError(&#34;You must select a column first&#34;)
 
     # Plot main price
     fig = self.main_price.vbt.tseries.plot(trace_kwargs=main_price_trace_kwargs, fig=fig, **layout_kwargs)
 
     # Extract information
     size = self.records_arr[&#39;size&#39;]
-    open_idx = self.records_arr[&#39;open_idx&#39;]
-    open_price = self.records_arr[&#39;open_price&#39;]
-    open_fees = self.records_arr[&#39;open_fees&#39;]
-    close_idx = self.records_arr[&#39;close_idx&#39;]
-    close_price = self.records_arr[&#39;close_price&#39;]
-    close_fees = self.records_arr[&#39;close_fees&#39;]
+    entry_idx = self.records_arr[&#39;entry_idx&#39;]
+    entry_price = self.records_arr[&#39;entry_price&#39;]
+    entry_fees = self.records_arr[&#39;entry_fees&#39;]
+    exit_idx = self.records_arr[&#39;exit_idx&#39;]
+    exit_price = self.records_arr[&#39;exit_price&#39;]
+    exit_fees = self.records_arr[&#39;exit_fees&#39;]
     pnl = self.records_arr[&#39;pnl&#39;]
     ret = self.records_arr[&#39;return&#39;]
     status = self.records_arr[&#39;status&#39;]
@@ -1279,13 +981,13 @@ portfolio.trades.plot()
             duration = to_idx - from_idx
         return np.vectorize(str)(duration)
 
-    duration = get_duration_str(open_idx, close_idx)
+    duration = get_duration_str(entry_idx, exit_idx)
 
-    # Plot Open markers
-    open_customdata = np.stack((size, open_fees), axis=1)
-    open_scatter = go.Scatter(
-        x=self.wrapper.index[open_idx],
-        y=open_price,
+    # Plot Entry markers
+    entry_customdata = np.stack((size, entry_fees), axis=1)
+    entry_scatter = go.Scatter(
+        x=self.wrapper.index[entry_idx],
+        y=entry_price,
         mode=&#39;markers&#39;,
         marker=dict(
             symbol=&#39;circle&#39;,
@@ -1296,25 +998,25 @@ portfolio.trades.plot()
                 color=adjust_lightness(contrast_color_schema[&#39;blue&#39;])
             )
         ),
-        name=&#39;Open&#39;,
-        customdata=open_customdata,
+        name=&#39;Entry&#39;,
+        customdata=entry_customdata,
         hovertemplate=&#34;%{x}&lt;br&gt;Price: %{y}&lt;br&gt;Size: %{customdata[0]:.4f}&lt;br&gt;Fees: %{customdata[1]:.2f}&#34;
     )
-    open_scatter.update(**open_trace_kwargs)
-    fig.add_trace(open_scatter)
+    entry_scatter.update(**entry_trace_kwargs)
+    fig.add_trace(entry_scatter)
 
     # Plot end markers
     def plot_end_markers(mask, name, color, kwargs):
         customdata = np.stack((
             size[mask],
-            close_fees[mask],
+            exit_fees[mask],
             pnl[mask],
             ret[mask],
             duration[mask]
         ), axis=1)
         scatter = go.Scatter(
-            x=self.wrapper.index[close_idx[mask]],
-            y=close_price[mask],
+            x=self.wrapper.index[exit_idx[mask]],
+            y=exit_price[mask],
             mode=&#39;markers&#39;,
             marker=dict(
                 symbol=&#39;circle&#39;,
@@ -1337,28 +1039,28 @@ portfolio.trades.plot()
         scatter.update(**kwargs)
         fig.add_trace(scatter)
 
-    # Plot Close markers
+    # Plot Exit markers
     plot_end_markers(
         (status == EventStatus.Closed) &amp; (pnl == 0.),
-        &#39;Close&#39;,
+        &#39;Exit&#39;,
         contrast_color_schema[&#39;gray&#39;],
-        close_trace_kwargs
+        exit_trace_kwargs
     )
 
-    # Plot Close - Profit markers
+    # Plot Exit - Profit markers
     plot_end_markers(
         (status == EventStatus.Closed) &amp; (pnl &gt; 0.),
-        &#39;Close - Profit&#39;,
+        &#39;Exit - Profit&#39;,
         contrast_color_schema[&#39;green&#39;],
-        close_profit_trace_kwargs
+        exit_profit_trace_kwargs
     )
 
-    # Plot Close - Loss markers
+    # Plot Exit - Loss markers
     plot_end_markers(
         (status == EventStatus.Closed) &amp; (pnl &lt; 0.),
-        &#39;Close - Loss&#39;,
+        &#39;Exit - Loss&#39;,
         contrast_color_schema[&#39;red&#39;],
-        close_loss_trace_kwargs
+        exit_loss_trace_kwargs
     )
 
     # Plot Active markers
@@ -1376,10 +1078,10 @@ portfolio.trades.plot()
             type=&#34;rect&#34;,
             xref=&#34;x&#34;,
             yref=&#34;y&#34;,
-            x0=self.wrapper.index[open_idx[i]],
-            y0=open_price[i],
-            x1=self.wrapper.index[close_idx[i]],
-            y1=close_price[i],
+            x0=self.wrapper.index[entry_idx[i]],
+            y0=entry_price[i],
+            x1=self.wrapper.index[exit_idx[i]],
+            y1=exit_price[i],
             fillcolor=&#39;green&#39;,
             opacity=0.15,
             layer=&#34;below&#34;,
@@ -1393,10 +1095,10 @@ portfolio.trades.plot()
             type=&#34;rect&#34;,
             xref=&#34;x&#34;,
             yref=&#34;y&#34;,
-            x0=self.wrapper.index[open_idx[i]],
-            y0=open_price[i],
-            x1=self.wrapper.index[close_idx[i]],
-            y1=close_price[i],
+            x0=self.wrapper.index[entry_idx[i]],
+            y0=entry_price[i],
+            x1=self.wrapper.index[exit_idx[i]],
+            y1=exit_price[i],
             fillcolor=&#39;red&#39;,
             opacity=0.15,
             layer=&#34;below&#34;,
@@ -1411,16 +1113,15 @@ portfolio.trades.plot()
 <ul class="hlist">
 <li><code><b><a title="vectorbt.records.base.Records" href="base.html#vectorbt.records.base.Records">Records</a></b></code>:
 <ul class="hlist">
-<li><code><a title="vectorbt.records.base.Records.convert_array_to_matrix" href="base.html#vectorbt.records.base.Records.convert_array_to_matrix">convert_array_to_matrix</a></code></li>
+<li><code><a title="vectorbt.records.base.Records.col_index" href="base.html#vectorbt.records.base.Records.col_index">col_index</a></code></li>
 <li><code><a title="vectorbt.records.base.Records.count" href="base.html#vectorbt.records.base.Records.count">count</a></code></li>
+<li><code><a title="vectorbt.records.base.Records.filter_by_mask" href="base.html#vectorbt.records.base.Records.filter_by_mask">filter_by_mask</a></code></li>
 <li><code><a title="vectorbt.records.base.Records.iloc" href="../base/indexing.html#vectorbt.base.indexing.PandasIndexer.iloc">iloc</a></code></li>
 <li><code><a title="vectorbt.records.base.Records.loc" href="../base/indexing.html#vectorbt.base.indexing.PandasIndexer.loc">loc</a></code></li>
-<li><code><a title="vectorbt.records.base.Records.map_field_to_matrix" href="base.html#vectorbt.records.base.Records.map_field_to_matrix">map_field_to_matrix</a></code></li>
-<li><code><a title="vectorbt.records.base.Records.map_records_to_matrix" href="base.html#vectorbt.records.base.Records.map_records_to_matrix">map_records_to_matrix</a></code></li>
-<li><code><a title="vectorbt.records.base.Records.map_reduce_records" href="base.html#vectorbt.records.base.Records.map_reduce_records">map_reduce_records</a></code></li>
+<li><code><a title="vectorbt.records.base.Records.map" href="base.html#vectorbt.records.base.Records.map">map</a></code></li>
+<li><code><a title="vectorbt.records.base.Records.map_array" href="base.html#vectorbt.records.base.Records.map_array">map_array</a></code></li>
+<li><code><a title="vectorbt.records.base.Records.map_field" href="base.html#vectorbt.records.base.Records.map_field">map_field</a></code></li>
 <li><code><a title="vectorbt.records.base.Records.records" href="base.html#vectorbt.records.base.Records.records">records</a></code></li>
-<li><code><a title="vectorbt.records.base.Records.records_col_index" href="base.html#vectorbt.records.base.Records.records_col_index">records_col_index</a></code></li>
-<li><code><a title="vectorbt.records.base.Records.reduce_records" href="base.html#vectorbt.records.base.Records.reduce_records">reduce_records</a></code></li>
 <li><code><a title="vectorbt.records.base.Records.xs" href="../base/indexing.html#vectorbt.base.indexing.PandasIndexer.xs">xs</a></code></li>
 </ul>
 </li>
@@ -1428,7 +1129,7 @@ portfolio.trades.plot()
 </dd>
 <dt id="vectorbt.records.events.BaseEventsByResult"><code class="flex name class">
 <span>class <span class="ident parent-fname">BaseEventsByResult</span></span>
-<span>(</span><span>records_arr, main_price, freq=None)</span>
+<span>(</span><span>records_arr, main_price, freq=None, idx_field='exit_idx')</span>
 </code></dt>
 <dd>
 <div class="desc"><p>Extends <code><a title="vectorbt.records.events.BaseEvents" href="#vectorbt.records.events.BaseEvents">BaseEvents</a></code> by further dividing events into winning and losing events.</p></div>
@@ -1443,13 +1144,23 @@ portfolio.trades.plot()
     def winning(self):
         &#34;&#34;&#34;Winning events of type `BaseEvents`.&#34;&#34;&#34;
         filter_mask = self.records_arr[&#39;pnl&#39;] &gt; 0.
-        return BaseEvents(self.records_arr[filter_mask], self.main_price, freq=self.wrapper.freq)
+        return BaseEvents(
+            self.records_arr[filter_mask],
+            self.main_price,
+            freq=self.wrapper.freq,
+            idx_field=self.idx_field
+        )
 
     @cached_property
     def losing(self):
         &#34;&#34;&#34;Losing events of type `BaseEvents`.&#34;&#34;&#34;
         filter_mask = self.records_arr[&#39;pnl&#39;] &lt; 0.
-        return BaseEvents(self.records_arr[filter_mask], self.main_price, freq=self.wrapper.freq)
+        return BaseEvents(
+            self.records_arr[filter_mask],
+            self.main_price,
+            freq=self.wrapper.freq,
+            idx_field=self.idx_field
+        )
 
     @cached_property
     def win_rate(self):
@@ -1463,8 +1174,8 @@ portfolio.trades.plot()
     @cached_property
     def profit_factor(self):
         &#34;&#34;&#34;Profit factor.&#34;&#34;&#34;
-        total_win = to_1d(self.winning.total_pnl, raw=True)
-        total_loss = to_1d(self.losing.total_pnl, raw=True)
+        total_win = to_1d(self.winning.pnl.sum(), raw=True)
+        total_loss = to_1d(self.losing.pnl.sum(), raw=True)
 
         # Otherwise columns with only wins or losses will become NaNs
         has_values = to_1d(self.count, raw=True) &gt; 0
@@ -1478,8 +1189,8 @@ portfolio.trades.plot()
     def expectancy(self):
         &#34;&#34;&#34;Average profitability.&#34;&#34;&#34;
         win_rate = to_1d(self.win_rate, raw=True)
-        avg_win = to_1d(self.winning.avg_pnl, raw=True)
-        avg_loss = to_1d(self.losing.avg_pnl, raw=True)
+        avg_win = to_1d(self.winning.pnl.mean(), raw=True)
+        avg_loss = to_1d(self.losing.pnl.mean(), raw=True)
 
         # Otherwise columns with only wins or losses will become NaNs
         has_values = to_1d(self.count, raw=True) &gt; 0
@@ -1487,7 +1198,16 @@ portfolio.trades.plot()
         avg_loss[np.isnan(avg_loss) &amp; has_values] = 0.
 
         expectancy = win_rate * avg_win - (1 - win_rate) * np.abs(avg_loss)
-        return self.wrapper.wrap_reduced(expectancy)</code></pre>
+        return self.wrapper.wrap_reduced(expectancy)
+
+    @cached_property
+    def sqn(self):
+        &#34;&#34;&#34;System Quality Number (SQN).&#34;&#34;&#34;
+        count = to_1d(self.count, raw=True)
+        pnl_mean = to_1d(self.pnl.mean(), raw=True)
+        pnl_std = to_1d(self.pnl.std(), raw=True)
+        sqn = np.sqrt(count) * pnl_mean / pnl_std
+        return self.wrapper.wrap_reduced(sqn)</code></pre>
 </details>
 <h3 class="section-subtitle">Ancestors</h3>
 <ul class="hlist">
@@ -1573,6 +1293,30 @@ portfolio.trades.plot()
     return val</code></pre>
 </details>
 </dd>
+<dt id="vectorbt.records.events.BaseEventsByResult.sqn"><code class="name">var <span class="ident fname">sqn</span></code></dt>
+<dd>
+<div class="desc"><p>System Quality Number (SQN).</p></div>
+<details class="source">
+<summary>
+<span>Expand source code</span>
+</summary>
+<pre><code class="python">def __get__(self, instance, owner=None):
+    if instance is None:
+        return self
+    if not defaults.caching or self.disabled:  # you can manually disable cache here
+        return super().__get__(instance, owner=owner)
+    cache = instance.__dict__
+    val = cache.get(self.attrname, _NOT_FOUND)
+    if val is _NOT_FOUND:
+        with self.lock:
+            # check if another thread filled cache while we awaited lock
+            val = cache.get(self.attrname, _NOT_FOUND)
+            if val is _NOT_FOUND:
+                val = self.func(instance)
+                cache[self.attrname] = val
+    return val</code></pre>
+</details>
+</dd>
 <dt id="vectorbt.records.events.BaseEventsByResult.win_rate"><code class="name">var <span class="ident fname">win_rate</span></code></dt>
 <dd>
 <div class="desc"><p>Rate of profitable events.</p></div>
@@ -1626,31 +1370,20 @@ portfolio.trades.plot()
 <ul class="hlist">
 <li><code><b><a title="vectorbt.records.events.BaseEvents" href="#vectorbt.records.events.BaseEvents">BaseEvents</a></b></code>:
 <ul class="hlist">
-<li><code><a title="vectorbt.records.events.BaseEvents.avg_duration" href="#vectorbt.records.events.BaseEvents.avg_duration">avg_duration</a></code></li>
-<li><code><a title="vectorbt.records.events.BaseEvents.avg_pnl" href="#vectorbt.records.events.BaseEvents.avg_pnl">avg_pnl</a></code></li>
-<li><code><a title="vectorbt.records.events.BaseEvents.avg_return" href="#vectorbt.records.events.BaseEvents.avg_return">avg_return</a></code></li>
-<li><code><a title="vectorbt.records.events.BaseEvents.convert_array_to_matrix" href="base.html#vectorbt.records.base.Records.convert_array_to_matrix">convert_array_to_matrix</a></code></li>
+<li><code><a title="vectorbt.records.events.BaseEvents.col_index" href="base.html#vectorbt.records.base.Records.col_index">col_index</a></code></li>
 <li><code><a title="vectorbt.records.events.BaseEvents.count" href="base.html#vectorbt.records.base.Records.count">count</a></code></li>
 <li><code><a title="vectorbt.records.events.BaseEvents.coverage" href="#vectorbt.records.events.BaseEvents.coverage">coverage</a></code></li>
 <li><code><a title="vectorbt.records.events.BaseEvents.duration" href="#vectorbt.records.events.BaseEvents.duration">duration</a></code></li>
+<li><code><a title="vectorbt.records.events.BaseEvents.filter_by_mask" href="base.html#vectorbt.records.base.Records.filter_by_mask">filter_by_mask</a></code></li>
 <li><code><a title="vectorbt.records.events.BaseEvents.iloc" href="../base/indexing.html#vectorbt.base.indexing.PandasIndexer.iloc">iloc</a></code></li>
 <li><code><a title="vectorbt.records.events.BaseEvents.loc" href="../base/indexing.html#vectorbt.base.indexing.PandasIndexer.loc">loc</a></code></li>
-<li><code><a title="vectorbt.records.events.BaseEvents.map_field_to_matrix" href="base.html#vectorbt.records.base.Records.map_field_to_matrix">map_field_to_matrix</a></code></li>
-<li><code><a title="vectorbt.records.events.BaseEvents.map_records_to_matrix" href="base.html#vectorbt.records.base.Records.map_records_to_matrix">map_records_to_matrix</a></code></li>
-<li><code><a title="vectorbt.records.events.BaseEvents.map_reduce_records" href="base.html#vectorbt.records.base.Records.map_reduce_records">map_reduce_records</a></code></li>
-<li><code><a title="vectorbt.records.events.BaseEvents.max_duration" href="#vectorbt.records.events.BaseEvents.max_duration">max_duration</a></code></li>
-<li><code><a title="vectorbt.records.events.BaseEvents.max_pnl" href="#vectorbt.records.events.BaseEvents.max_pnl">max_pnl</a></code></li>
-<li><code><a title="vectorbt.records.events.BaseEvents.max_return" href="#vectorbt.records.events.BaseEvents.max_return">max_return</a></code></li>
-<li><code><a title="vectorbt.records.events.BaseEvents.min_pnl" href="#vectorbt.records.events.BaseEvents.min_pnl">min_pnl</a></code></li>
-<li><code><a title="vectorbt.records.events.BaseEvents.min_return" href="#vectorbt.records.events.BaseEvents.min_return">min_return</a></code></li>
+<li><code><a title="vectorbt.records.events.BaseEvents.map" href="base.html#vectorbt.records.base.Records.map">map</a></code></li>
+<li><code><a title="vectorbt.records.events.BaseEvents.map_array" href="base.html#vectorbt.records.base.Records.map_array">map_array</a></code></li>
+<li><code><a title="vectorbt.records.events.BaseEvents.map_field" href="base.html#vectorbt.records.base.Records.map_field">map_field</a></code></li>
 <li><code><a title="vectorbt.records.events.BaseEvents.plot" href="#vectorbt.records.events.BaseEvents.plot">plot</a></code></li>
 <li><code><a title="vectorbt.records.events.BaseEvents.pnl" href="#vectorbt.records.events.BaseEvents.pnl">pnl</a></code></li>
 <li><code><a title="vectorbt.records.events.BaseEvents.records" href="base.html#vectorbt.records.base.Records.records">records</a></code></li>
-<li><code><a title="vectorbt.records.events.BaseEvents.records_col_index" href="base.html#vectorbt.records.base.Records.records_col_index">records_col_index</a></code></li>
-<li><code><a title="vectorbt.records.events.BaseEvents.reduce_records" href="base.html#vectorbt.records.base.Records.reduce_records">reduce_records</a></code></li>
 <li><code><a title="vectorbt.records.events.BaseEvents.returns" href="#vectorbt.records.events.BaseEvents.returns">returns</a></code></li>
-<li><code><a title="vectorbt.records.events.BaseEvents.sqn" href="#vectorbt.records.events.BaseEvents.sqn">sqn</a></code></li>
-<li><code><a title="vectorbt.records.events.BaseEvents.total_pnl" href="#vectorbt.records.events.BaseEvents.total_pnl">total_pnl</a></code></li>
 <li><code><a title="vectorbt.records.events.BaseEvents.xs" href="../base/indexing.html#vectorbt.base.indexing.PandasIndexer.xs">xs</a></code></li>
 </ul>
 </li>
@@ -1658,7 +1391,7 @@ portfolio.trades.plot()
 </dd>
 <dt id="vectorbt.records.events.Events"><code class="flex name class">
 <span>class <span class="ident parent-fname">Events</span></span>
-<span>(</span><span>records_arr, main_price, freq=None)</span>
+<span>(</span><span>records_arr, main_price, freq=None, idx_field='exit_idx')</span>
 </code></dt>
 <dd>
 <div class="desc"><p>Extends <code><a title="vectorbt.records.events.BaseEventsByResult" href="#vectorbt.records.events.BaseEventsByResult">BaseEventsByResult</a></code> by further dividing events by status.</p></div>
@@ -1672,7 +1405,7 @@ portfolio.trades.plot()
     @cached_property
     def status(self):
         &#34;&#34;&#34;See `vectorbt.records.enums.EventStatus`.&#34;&#34;&#34;
-        return self.map_field_to_matrix(&#39;status&#39;)
+        return self.map_field(&#39;status&#39;)
 
     @cached_property
     def closed_rate(self):
@@ -1684,13 +1417,23 @@ portfolio.trades.plot()
     def open(self):
         &#34;&#34;&#34;Open events of type `BaseEventsByResult`.&#34;&#34;&#34;
         filter_mask = self.records_arr[&#39;status&#39;] == EventStatus.Open
-        return BaseEventsByResult(self.records_arr[filter_mask], self.main_price, freq=self.wrapper.freq)
+        return BaseEventsByResult(
+            self.records_arr[filter_mask],
+            self.main_price,
+            freq=self.wrapper.freq,
+            idx_field=self.idx_field
+        )
 
     @cached_property
     def closed(self):
         &#34;&#34;&#34;Closed events of type `BaseEventsByResult`.&#34;&#34;&#34;
         filter_mask = self.records_arr[&#39;status&#39;] == EventStatus.Closed
-        return BaseEventsByResult(self.records_arr[filter_mask], self.main_price, freq=self.wrapper.freq)</code></pre>
+        return BaseEventsByResult(
+            self.records_arr[filter_mask],
+            self.main_price,
+            freq=self.wrapper.freq,
+            idx_field=self.idx_field
+        )</code></pre>
 </details>
 <h3 class="section-subtitle">Ancestors</h3>
 <ul class="hlist">
@@ -1807,34 +1550,24 @@ portfolio.trades.plot()
 <ul class="hlist">
 <li><code><b><a title="vectorbt.records.events.BaseEventsByResult" href="#vectorbt.records.events.BaseEventsByResult">BaseEventsByResult</a></b></code>:
 <ul class="hlist">
-<li><code><a title="vectorbt.records.events.BaseEventsByResult.avg_duration" href="#vectorbt.records.events.BaseEvents.avg_duration">avg_duration</a></code></li>
-<li><code><a title="vectorbt.records.events.BaseEventsByResult.avg_pnl" href="#vectorbt.records.events.BaseEvents.avg_pnl">avg_pnl</a></code></li>
-<li><code><a title="vectorbt.records.events.BaseEventsByResult.avg_return" href="#vectorbt.records.events.BaseEvents.avg_return">avg_return</a></code></li>
-<li><code><a title="vectorbt.records.events.BaseEventsByResult.convert_array_to_matrix" href="base.html#vectorbt.records.base.Records.convert_array_to_matrix">convert_array_to_matrix</a></code></li>
+<li><code><a title="vectorbt.records.events.BaseEventsByResult.col_index" href="base.html#vectorbt.records.base.Records.col_index">col_index</a></code></li>
 <li><code><a title="vectorbt.records.events.BaseEventsByResult.count" href="base.html#vectorbt.records.base.Records.count">count</a></code></li>
 <li><code><a title="vectorbt.records.events.BaseEventsByResult.coverage" href="#vectorbt.records.events.BaseEvents.coverage">coverage</a></code></li>
 <li><code><a title="vectorbt.records.events.BaseEventsByResult.duration" href="#vectorbt.records.events.BaseEvents.duration">duration</a></code></li>
 <li><code><a title="vectorbt.records.events.BaseEventsByResult.expectancy" href="#vectorbt.records.events.BaseEventsByResult.expectancy">expectancy</a></code></li>
+<li><code><a title="vectorbt.records.events.BaseEventsByResult.filter_by_mask" href="base.html#vectorbt.records.base.Records.filter_by_mask">filter_by_mask</a></code></li>
 <li><code><a title="vectorbt.records.events.BaseEventsByResult.iloc" href="../base/indexing.html#vectorbt.base.indexing.PandasIndexer.iloc">iloc</a></code></li>
 <li><code><a title="vectorbt.records.events.BaseEventsByResult.loc" href="../base/indexing.html#vectorbt.base.indexing.PandasIndexer.loc">loc</a></code></li>
 <li><code><a title="vectorbt.records.events.BaseEventsByResult.losing" href="#vectorbt.records.events.BaseEventsByResult.losing">losing</a></code></li>
-<li><code><a title="vectorbt.records.events.BaseEventsByResult.map_field_to_matrix" href="base.html#vectorbt.records.base.Records.map_field_to_matrix">map_field_to_matrix</a></code></li>
-<li><code><a title="vectorbt.records.events.BaseEventsByResult.map_records_to_matrix" href="base.html#vectorbt.records.base.Records.map_records_to_matrix">map_records_to_matrix</a></code></li>
-<li><code><a title="vectorbt.records.events.BaseEventsByResult.map_reduce_records" href="base.html#vectorbt.records.base.Records.map_reduce_records">map_reduce_records</a></code></li>
-<li><code><a title="vectorbt.records.events.BaseEventsByResult.max_duration" href="#vectorbt.records.events.BaseEvents.max_duration">max_duration</a></code></li>
-<li><code><a title="vectorbt.records.events.BaseEventsByResult.max_pnl" href="#vectorbt.records.events.BaseEvents.max_pnl">max_pnl</a></code></li>
-<li><code><a title="vectorbt.records.events.BaseEventsByResult.max_return" href="#vectorbt.records.events.BaseEvents.max_return">max_return</a></code></li>
-<li><code><a title="vectorbt.records.events.BaseEventsByResult.min_pnl" href="#vectorbt.records.events.BaseEvents.min_pnl">min_pnl</a></code></li>
-<li><code><a title="vectorbt.records.events.BaseEventsByResult.min_return" href="#vectorbt.records.events.BaseEvents.min_return">min_return</a></code></li>
+<li><code><a title="vectorbt.records.events.BaseEventsByResult.map" href="base.html#vectorbt.records.base.Records.map">map</a></code></li>
+<li><code><a title="vectorbt.records.events.BaseEventsByResult.map_array" href="base.html#vectorbt.records.base.Records.map_array">map_array</a></code></li>
+<li><code><a title="vectorbt.records.events.BaseEventsByResult.map_field" href="base.html#vectorbt.records.base.Records.map_field">map_field</a></code></li>
 <li><code><a title="vectorbt.records.events.BaseEventsByResult.plot" href="#vectorbt.records.events.BaseEvents.plot">plot</a></code></li>
 <li><code><a title="vectorbt.records.events.BaseEventsByResult.pnl" href="#vectorbt.records.events.BaseEvents.pnl">pnl</a></code></li>
 <li><code><a title="vectorbt.records.events.BaseEventsByResult.profit_factor" href="#vectorbt.records.events.BaseEventsByResult.profit_factor">profit_factor</a></code></li>
 <li><code><a title="vectorbt.records.events.BaseEventsByResult.records" href="base.html#vectorbt.records.base.Records.records">records</a></code></li>
-<li><code><a title="vectorbt.records.events.BaseEventsByResult.records_col_index" href="base.html#vectorbt.records.base.Records.records_col_index">records_col_index</a></code></li>
-<li><code><a title="vectorbt.records.events.BaseEventsByResult.reduce_records" href="base.html#vectorbt.records.base.Records.reduce_records">reduce_records</a></code></li>
 <li><code><a title="vectorbt.records.events.BaseEventsByResult.returns" href="#vectorbt.records.events.BaseEvents.returns">returns</a></code></li>
-<li><code><a title="vectorbt.records.events.BaseEventsByResult.sqn" href="#vectorbt.records.events.BaseEvents.sqn">sqn</a></code></li>
-<li><code><a title="vectorbt.records.events.BaseEventsByResult.total_pnl" href="#vectorbt.records.events.BaseEvents.total_pnl">total_pnl</a></code></li>
+<li><code><a title="vectorbt.records.events.BaseEventsByResult.sqn" href="#vectorbt.records.events.BaseEventsByResult.sqn">sqn</a></code></li>
 <li><code><a title="vectorbt.records.events.BaseEventsByResult.win_rate" href="#vectorbt.records.events.BaseEventsByResult.win_rate">win_rate</a></code></li>
 <li><code><a title="vectorbt.records.events.BaseEventsByResult.winning" href="#vectorbt.records.events.BaseEventsByResult.winning">winning</a></code></li>
 <li><code><a title="vectorbt.records.events.BaseEventsByResult.xs" href="../base/indexing.html#vectorbt.base.indexing.PandasIndexer.xs">xs</a></code></li>
@@ -1844,28 +1577,37 @@ portfolio.trades.plot()
 </dd>
 <dt id="vectorbt.records.events.Positions"><code class="flex name class">
 <span>class <span class="ident parent-fname">Positions</span></span>
-<span>(</span><span>records_arr, main_price, freq=None)</span>
+<span>(</span><span>records_arr, main_price, **kwargs)</span>
 </code></dt>
 <dd>
 <div class="desc"><p>Extends <code><a title="vectorbt.records.events.Events" href="#vectorbt.records.events.Events">Events</a></code> for working with position records.</p>
 <p>Such records can be created by using <code><a title="vectorbt.records.nb.position_records_nb" href="nb.html#vectorbt.records.nb.position_records_nb">position_records_nb()</a></code>.</p>
 <h2 id="example">Example</h2>
-<p>Get the average PnL of closed positions with duration over 2 days:</p>
+<p>Get count and P&amp;L of positions:</p>
 <pre><code class="python-repl">&gt;&gt;&gt; import vectorbt as vbt
 &gt;&gt;&gt; import pandas as pd
-&gt;&gt;&gt; from vectorbt.records import Positions
 
-&gt;&gt;&gt; price = pd.Series([1, 2, 3, 2, 1])
-&gt;&gt;&gt; orders = pd.Series([1, -1, 1, 0, -1])
+&gt;&gt;&gt; price = pd.Series([1, 2, 3, 4, 3, 2, 1])
+&gt;&gt;&gt; orders = pd.Series([1, -0.5, -0.5, 1, -1, 2, -1])
 &gt;&gt;&gt; portfolio = vbt.Portfolio.from_orders(price, orders,
 ...      init_capital=100, freq='1D')
-&gt;&gt;&gt; print(portfolio.positions.avg_pnl)
--0.5
 
-&gt;&gt;&gt; records_arr = portfolio.positions.closed.records_arr
-&gt;&gt;&gt; duration_mask = (records_arr['close_idx'] - records_arr['open_idx']) &gt;= 2.
-&gt;&gt;&gt; positions = Positions(portfolio.wrapper, records_arr[duration_mask])
-&gt;&gt;&gt; print(positions.avg_pnl)
+&gt;&gt;&gt; positions = vbt.Positions.from_orders(portfolio.orders)
+&gt;&gt;&gt; print(positions.count)
+3
+&gt;&gt;&gt; print(positions.pnl.sum())
+-1.5
+&gt;&gt;&gt; print(positions.open.pnl.sum())
+-2.0
+&gt;&gt;&gt; print(positions.closed.pnl.sum())
+0.5
+</code></pre>
+<p>Get count and P&amp;L of positions with size of more than 1 share:</p>
+<pre><code class="python-repl">&gt;&gt;&gt; mask = positions.records['size'] &gt; 1
+&gt;&gt;&gt; positions_filtered = positions.filter_by_mask(mask)
+&gt;&gt;&gt; print(positions_filtered.count)
+1
+&gt;&gt;&gt; print(positions_filtered.pnl.sum())
 -2.0
 </code></pre></div>
 <details class="source">
@@ -1878,37 +1620,48 @@ portfolio.trades.plot()
     Such records can be created by using `vectorbt.records.nb.position_records_nb`.
 
     Example:
-        Get the average PnL of closed positions with duration over 2 days:
+        Get count and P&amp;L of positions:
         ```python-repl
         &gt;&gt;&gt; import vectorbt as vbt
         &gt;&gt;&gt; import pandas as pd
-        &gt;&gt;&gt; from vectorbt.records import Positions
 
-        &gt;&gt;&gt; price = pd.Series([1, 2, 3, 2, 1])
-        &gt;&gt;&gt; orders = pd.Series([1, -1, 1, 0, -1])
+        &gt;&gt;&gt; price = pd.Series([1, 2, 3, 4, 3, 2, 1])
+        &gt;&gt;&gt; orders = pd.Series([1, -0.5, -0.5, 1, -1, 2, -1])
         &gt;&gt;&gt; portfolio = vbt.Portfolio.from_orders(price, orders,
         ...      init_capital=100, freq=&#39;1D&#39;)
-        &gt;&gt;&gt; print(portfolio.positions.avg_pnl)
-        -0.5
 
-        &gt;&gt;&gt; records_arr = portfolio.positions.closed.records_arr
-        &gt;&gt;&gt; duration_mask = (records_arr[&#39;close_idx&#39;] - records_arr[&#39;open_idx&#39;]) &gt;= 2.
-        &gt;&gt;&gt; positions = Positions(portfolio.wrapper, records_arr[duration_mask])
-        &gt;&gt;&gt; print(positions.avg_pnl)
+        &gt;&gt;&gt; positions = vbt.Positions.from_orders(portfolio.orders)
+        &gt;&gt;&gt; print(positions.count)
+        3
+        &gt;&gt;&gt; print(positions.pnl.sum())
+        -1.5
+        &gt;&gt;&gt; print(positions.open.pnl.sum())
+        -2.0
+        &gt;&gt;&gt; print(positions.closed.pnl.sum())
+        0.5
+        ```
+
+        Get count and P&amp;L of positions with size of more than 1 share:
+        ```python-repl
+        &gt;&gt;&gt; mask = positions.records[&#39;size&#39;] &gt; 1
+        &gt;&gt;&gt; positions_filtered = positions.filter_by_mask(mask)
+        &gt;&gt;&gt; print(positions_filtered.count)
+        1
+        &gt;&gt;&gt; print(positions_filtered.pnl.sum())
         -2.0
         ```&#34;&#34;&#34;
 
-    def __init__(self, records_arr, main_price, freq=None):
-        Events.__init__(self, records_arr, main_price, freq=freq)
+    def __init__(self, records_arr, main_price, **kwargs):
+        Events.__init__(self, records_arr, main_price, **kwargs)
 
         if not all(field in records_arr.dtype.names for field in position_dt.names):
-            raise Exception(&#34;Records array must have all fields defined in position_dt&#34;)
+            raise ValueError(&#34;Records array must have all fields defined in position_dt&#34;)
 
     @classmethod
-    def from_orders(cls, orders):
+    def from_orders(cls, orders, **kwargs):
         &#34;&#34;&#34;Build `Positions` from `Orders`.&#34;&#34;&#34;
         position_records = nb.position_records_nb(orders.main_price.vbt.to_2d_array(), orders.records_arr)
-        return cls(position_records, orders.main_price, freq=orders.wrapper.freq)</code></pre>
+        return cls(position_records, orders.main_price, freq=orders.wrapper.freq, **kwargs)</code></pre>
 </details>
 <h3 class="section-subtitle">Ancestors</h3>
 <ul class="hlist">
@@ -1921,7 +1674,7 @@ portfolio.trades.plot()
 <h3 class="section-subtitle">Static methods</h3>
 <dl>
 <dt id="vectorbt.records.events.Positions.from_orders"><code class="name flex">
-<span>def <span class="ident fname">from_orders</span></span>(<span>orders)</span>
+<span>def <span class="ident fname">from_orders</span></span>(<span>orders, **kwargs)</span>
 </code></dt>
 <dd>
 <div class="desc"><p>Build <code><a title="vectorbt.records.events.Positions" href="#vectorbt.records.events.Positions">Positions</a></code> from <code>Orders</code>.</p></div>
@@ -1930,10 +1683,10 @@ portfolio.trades.plot()
 <span>Expand source code</span>
 </summary>
 <pre><code class="python">@classmethod
-def from_orders(cls, orders):
+def from_orders(cls, orders, **kwargs):
     &#34;&#34;&#34;Build `Positions` from `Orders`.&#34;&#34;&#34;
     position_records = nb.position_records_nb(orders.main_price.vbt.to_2d_array(), orders.records_arr)
-    return cls(position_records, orders.main_price, freq=orders.wrapper.freq)</code></pre>
+    return cls(position_records, orders.main_price, freq=orders.wrapper.freq, **kwargs)</code></pre>
 </details>
 </dd>
 </dl>
@@ -1941,38 +1694,28 @@ def from_orders(cls, orders):
 <ul class="hlist">
 <li><code><b><a title="vectorbt.records.events.Events" href="#vectorbt.records.events.Events">Events</a></b></code>:
 <ul class="hlist">
-<li><code><a title="vectorbt.records.events.Events.avg_duration" href="#vectorbt.records.events.BaseEvents.avg_duration">avg_duration</a></code></li>
-<li><code><a title="vectorbt.records.events.Events.avg_pnl" href="#vectorbt.records.events.BaseEvents.avg_pnl">avg_pnl</a></code></li>
-<li><code><a title="vectorbt.records.events.Events.avg_return" href="#vectorbt.records.events.BaseEvents.avg_return">avg_return</a></code></li>
 <li><code><a title="vectorbt.records.events.Events.closed" href="#vectorbt.records.events.Events.closed">closed</a></code></li>
 <li><code><a title="vectorbt.records.events.Events.closed_rate" href="#vectorbt.records.events.Events.closed_rate">closed_rate</a></code></li>
-<li><code><a title="vectorbt.records.events.Events.convert_array_to_matrix" href="base.html#vectorbt.records.base.Records.convert_array_to_matrix">convert_array_to_matrix</a></code></li>
+<li><code><a title="vectorbt.records.events.Events.col_index" href="base.html#vectorbt.records.base.Records.col_index">col_index</a></code></li>
 <li><code><a title="vectorbt.records.events.Events.count" href="base.html#vectorbt.records.base.Records.count">count</a></code></li>
 <li><code><a title="vectorbt.records.events.Events.coverage" href="#vectorbt.records.events.BaseEvents.coverage">coverage</a></code></li>
 <li><code><a title="vectorbt.records.events.Events.duration" href="#vectorbt.records.events.BaseEvents.duration">duration</a></code></li>
 <li><code><a title="vectorbt.records.events.Events.expectancy" href="#vectorbt.records.events.BaseEventsByResult.expectancy">expectancy</a></code></li>
+<li><code><a title="vectorbt.records.events.Events.filter_by_mask" href="base.html#vectorbt.records.base.Records.filter_by_mask">filter_by_mask</a></code></li>
 <li><code><a title="vectorbt.records.events.Events.iloc" href="../base/indexing.html#vectorbt.base.indexing.PandasIndexer.iloc">iloc</a></code></li>
 <li><code><a title="vectorbt.records.events.Events.loc" href="../base/indexing.html#vectorbt.base.indexing.PandasIndexer.loc">loc</a></code></li>
 <li><code><a title="vectorbt.records.events.Events.losing" href="#vectorbt.records.events.BaseEventsByResult.losing">losing</a></code></li>
-<li><code><a title="vectorbt.records.events.Events.map_field_to_matrix" href="base.html#vectorbt.records.base.Records.map_field_to_matrix">map_field_to_matrix</a></code></li>
-<li><code><a title="vectorbt.records.events.Events.map_records_to_matrix" href="base.html#vectorbt.records.base.Records.map_records_to_matrix">map_records_to_matrix</a></code></li>
-<li><code><a title="vectorbt.records.events.Events.map_reduce_records" href="base.html#vectorbt.records.base.Records.map_reduce_records">map_reduce_records</a></code></li>
-<li><code><a title="vectorbt.records.events.Events.max_duration" href="#vectorbt.records.events.BaseEvents.max_duration">max_duration</a></code></li>
-<li><code><a title="vectorbt.records.events.Events.max_pnl" href="#vectorbt.records.events.BaseEvents.max_pnl">max_pnl</a></code></li>
-<li><code><a title="vectorbt.records.events.Events.max_return" href="#vectorbt.records.events.BaseEvents.max_return">max_return</a></code></li>
-<li><code><a title="vectorbt.records.events.Events.min_pnl" href="#vectorbt.records.events.BaseEvents.min_pnl">min_pnl</a></code></li>
-<li><code><a title="vectorbt.records.events.Events.min_return" href="#vectorbt.records.events.BaseEvents.min_return">min_return</a></code></li>
+<li><code><a title="vectorbt.records.events.Events.map" href="base.html#vectorbt.records.base.Records.map">map</a></code></li>
+<li><code><a title="vectorbt.records.events.Events.map_array" href="base.html#vectorbt.records.base.Records.map_array">map_array</a></code></li>
+<li><code><a title="vectorbt.records.events.Events.map_field" href="base.html#vectorbt.records.base.Records.map_field">map_field</a></code></li>
 <li><code><a title="vectorbt.records.events.Events.open" href="#vectorbt.records.events.Events.open">open</a></code></li>
 <li><code><a title="vectorbt.records.events.Events.plot" href="#vectorbt.records.events.BaseEvents.plot">plot</a></code></li>
 <li><code><a title="vectorbt.records.events.Events.pnl" href="#vectorbt.records.events.BaseEvents.pnl">pnl</a></code></li>
 <li><code><a title="vectorbt.records.events.Events.profit_factor" href="#vectorbt.records.events.BaseEventsByResult.profit_factor">profit_factor</a></code></li>
 <li><code><a title="vectorbt.records.events.Events.records" href="base.html#vectorbt.records.base.Records.records">records</a></code></li>
-<li><code><a title="vectorbt.records.events.Events.records_col_index" href="base.html#vectorbt.records.base.Records.records_col_index">records_col_index</a></code></li>
-<li><code><a title="vectorbt.records.events.Events.reduce_records" href="base.html#vectorbt.records.base.Records.reduce_records">reduce_records</a></code></li>
 <li><code><a title="vectorbt.records.events.Events.returns" href="#vectorbt.records.events.BaseEvents.returns">returns</a></code></li>
-<li><code><a title="vectorbt.records.events.Events.sqn" href="#vectorbt.records.events.BaseEvents.sqn">sqn</a></code></li>
+<li><code><a title="vectorbt.records.events.Events.sqn" href="#vectorbt.records.events.BaseEventsByResult.sqn">sqn</a></code></li>
 <li><code><a title="vectorbt.records.events.Events.status" href="#vectorbt.records.events.Events.status">status</a></code></li>
-<li><code><a title="vectorbt.records.events.Events.total_pnl" href="#vectorbt.records.events.BaseEvents.total_pnl">total_pnl</a></code></li>
 <li><code><a title="vectorbt.records.events.Events.win_rate" href="#vectorbt.records.events.BaseEventsByResult.win_rate">win_rate</a></code></li>
 <li><code><a title="vectorbt.records.events.Events.winning" href="#vectorbt.records.events.BaseEventsByResult.winning">winning</a></code></li>
 <li><code><a title="vectorbt.records.events.Events.xs" href="../base/indexing.html#vectorbt.base.indexing.PandasIndexer.xs">xs</a></code></li>
@@ -1982,42 +1725,38 @@ def from_orders(cls, orders):
 </dd>
 <dt id="vectorbt.records.events.Trades"><code class="flex name class">
 <span>class <span class="ident parent-fname">Trades</span></span>
-<span>(</span><span>records_arr, main_price, freq=None)</span>
+<span>(</span><span>records_arr, main_price, **kwargs)</span>
 </code></dt>
 <dd>
 <div class="desc"><p>Extends <code><a title="vectorbt.records.events.Events" href="#vectorbt.records.events.Events">Events</a></code> for working with trade records.</p>
 <p>Such records can be created by using <code><a title="vectorbt.records.nb.trade_records_nb" href="nb.html#vectorbt.records.nb.trade_records_nb">trade_records_nb()</a></code>.</p>
 <h2 id="example">Example</h2>
-<p>Get the average PnL of trades with duration over 2 days:</p>
+<p>Get count and P&amp;L of trades:</p>
 <pre><code class="python-repl">&gt;&gt;&gt; import vectorbt as vbt
 &gt;&gt;&gt; import pandas as pd
-&gt;&gt;&gt; from vectorbt.records import Trades
 
-&gt;&gt;&gt; price = pd.Series([1, 2, 3, 2, 1])
-&gt;&gt;&gt; orders = pd.Series([1, -1, 1, 0, -1])
+&gt;&gt;&gt; price = pd.Series([1, 2, 3, 4, 3, 2, 1])
+&gt;&gt;&gt; orders = pd.Series([1, -0.5, -0.5, 2, -0.5, -0.5, -0.5])
 &gt;&gt;&gt; portfolio = vbt.Portfolio.from_orders(price, orders,
 ...      init_capital=100, freq='1D')
-&gt;&gt;&gt; print(portfolio.trades.avg_pnl)
--0.5
 
-&gt;&gt;&gt; records_arr = portfolio.trades.records_arr
-&gt;&gt;&gt; duration_mask = (records_arr['close_idx'] - records_arr['open_idx']) &gt;= 2.
-&gt;&gt;&gt; trades = Trades(portfolio.wrapper, records_arr[duration_mask])
-&gt;&gt;&gt; print(trades.avg_pnl)
--2.0
+&gt;&gt;&gt; trades = vbt.Trades.from_orders(portfolio.orders)
+&gt;&gt;&gt; print(trades.count)
+6
+&gt;&gt;&gt; print(trades.pnl.sum())
+-3.0
+&gt;&gt;&gt; print(trades.winning.count)
+2
+&gt;&gt;&gt; print(trades.winning.pnl.sum())
+1.5
 </code></pre>
-<p>The same can be done by using <code><a title="vectorbt.records.events.BaseEvents.reduce_records" href="base.html#vectorbt.records.base.Records.reduce_records">Records.reduce_records()</a></code>,
-which skips the step of transforming records into a matrix and thus saves memory.</p>
-<pre><code class="python-repl">&gt;&gt;&gt; import numpy as np
-&gt;&gt;&gt; from numba import njit
-
-&gt;&gt;&gt; @njit
-... def reduce_func_nb(col_rs):
-...     duration_mask = col_rs[:, TS.CloseIdx] - col_rs[:, TS.OpenIdx] &gt;= 2.
-...     return np.nanmean(col_rs[duration_mask, TS.PnL])
-
-&gt;&gt;&gt; portfolio.trades.reduce_records(reduce_func_nb)
--2.0
+<p>Get count and P&amp;L of trades with duration of more than 2 days:</p>
+<pre><code class="python-repl">&gt;&gt;&gt; mask = (trades.records['exit_idx'] - trades.records['entry_idx']) &gt; 2
+&gt;&gt;&gt; trades_filtered = trades.filter_by_mask(mask)
+&gt;&gt;&gt; print(trades_filtered.count)
+2
+&gt;&gt;&gt; print(trades_filtered.pnl.sum())
+-3.0
 </code></pre></div>
 <details class="source">
 <summary>
@@ -2029,57 +1768,53 @@ which skips the step of transforming records into a matrix and thus saves memory
     Such records can be created by using `vectorbt.records.nb.trade_records_nb`.
 
     Example:
-        Get the average PnL of trades with duration over 2 days:
+        Get count and P&amp;L of trades:
         ```python-repl
         &gt;&gt;&gt; import vectorbt as vbt
         &gt;&gt;&gt; import pandas as pd
-        &gt;&gt;&gt; from vectorbt.records import Trades
 
-        &gt;&gt;&gt; price = pd.Series([1, 2, 3, 2, 1])
-        &gt;&gt;&gt; orders = pd.Series([1, -1, 1, 0, -1])
+        &gt;&gt;&gt; price = pd.Series([1, 2, 3, 4, 3, 2, 1])
+        &gt;&gt;&gt; orders = pd.Series([1, -0.5, -0.5, 2, -0.5, -0.5, -0.5])
         &gt;&gt;&gt; portfolio = vbt.Portfolio.from_orders(price, orders,
         ...      init_capital=100, freq=&#39;1D&#39;)
-        &gt;&gt;&gt; print(portfolio.trades.avg_pnl)
-        -0.5
 
-        &gt;&gt;&gt; records_arr = portfolio.trades.records_arr
-        &gt;&gt;&gt; duration_mask = (records_arr[&#39;close_idx&#39;] - records_arr[&#39;open_idx&#39;]) &gt;= 2.
-        &gt;&gt;&gt; trades = Trades(portfolio.wrapper, records_arr[duration_mask])
-        &gt;&gt;&gt; print(trades.avg_pnl)
-        -2.0
+        &gt;&gt;&gt; trades = vbt.Trades.from_orders(portfolio.orders)
+        &gt;&gt;&gt; print(trades.count)
+        6
+        &gt;&gt;&gt; print(trades.pnl.sum())
+        -3.0
+        &gt;&gt;&gt; print(trades.winning.count)
+        2
+        &gt;&gt;&gt; print(trades.winning.pnl.sum())
+        1.5
         ```
 
-        The same can be done by using `BaseEvents.reduce_records`,
-        which skips the step of transforming records into a matrix and thus saves memory.
+        Get count and P&amp;L of trades with duration of more than 2 days:
         ```python-repl
-        &gt;&gt;&gt; import numpy as np
-        &gt;&gt;&gt; from numba import njit
-
-        &gt;&gt;&gt; @njit
-        ... def reduce_func_nb(col_rs):
-        ...     duration_mask = col_rs[:, TS.CloseIdx] - col_rs[:, TS.OpenIdx] &gt;= 2.
-        ...     return np.nanmean(col_rs[duration_mask, TS.PnL])
-
-        &gt;&gt;&gt; portfolio.trades.reduce_records(reduce_func_nb)
-        -2.0
+        &gt;&gt;&gt; mask = (trades.records[&#39;exit_idx&#39;] - trades.records[&#39;entry_idx&#39;]) &gt; 2
+        &gt;&gt;&gt; trades_filtered = trades.filter_by_mask(mask)
+        &gt;&gt;&gt; print(trades_filtered.count)
+        2
+        &gt;&gt;&gt; print(trades_filtered.pnl.sum())
+        -3.0
         ```&#34;&#34;&#34;
 
-    def __init__(self, records_arr, main_price, freq=None):
-        Events.__init__(self, records_arr, main_price, freq=freq)
+    def __init__(self, records_arr, main_price, **kwargs):
+        Events.__init__(self, records_arr, main_price, **kwargs)
 
         if not all(field in records_arr.dtype.names for field in trade_dt.names):
-            raise Exception(&#34;Records array must have all fields defined in trade_dt&#34;)
+            raise ValueError(&#34;Records array must have all fields defined in trade_dt&#34;)
 
     @classmethod
-    def from_orders(cls, orders):
+    def from_orders(cls, orders, **kwargs):
         &#34;&#34;&#34;Build `Trades` from `Orders`.&#34;&#34;&#34;
         trade_records = nb.trade_records_nb(orders.main_price.vbt.to_2d_array(), orders.records_arr)
-        return cls(trade_records, orders.main_price, freq=orders.wrapper.freq)
+        return cls(trade_records, orders.main_price, freq=orders.wrapper.freq, **kwargs)
 
     @cached_property
     def position_idx(self):
         &#34;&#34;&#34;Position index of each trade.&#34;&#34;&#34;
-        return self.map_field_to_matrix(&#39;position_idx&#39;)</code></pre>
+        return self.map_field(&#39;position_idx&#39;)</code></pre>
 </details>
 <h3 class="section-subtitle">Ancestors</h3>
 <ul class="hlist">
@@ -2092,7 +1827,7 @@ which skips the step of transforming records into a matrix and thus saves memory
 <h3 class="section-subtitle">Static methods</h3>
 <dl>
 <dt id="vectorbt.records.events.Trades.from_orders"><code class="name flex">
-<span>def <span class="ident fname">from_orders</span></span>(<span>orders)</span>
+<span>def <span class="ident fname">from_orders</span></span>(<span>orders, **kwargs)</span>
 </code></dt>
 <dd>
 <div class="desc"><p>Build <code><a title="vectorbt.records.events.Trades" href="#vectorbt.records.events.Trades">Trades</a></code> from <code>Orders</code>.</p></div>
@@ -2101,10 +1836,10 @@ which skips the step of transforming records into a matrix and thus saves memory
 <span>Expand source code</span>
 </summary>
 <pre><code class="python">@classmethod
-def from_orders(cls, orders):
+def from_orders(cls, orders, **kwargs):
     &#34;&#34;&#34;Build `Trades` from `Orders`.&#34;&#34;&#34;
     trade_records = nb.trade_records_nb(orders.main_price.vbt.to_2d_array(), orders.records_arr)
-    return cls(trade_records, orders.main_price, freq=orders.wrapper.freq)</code></pre>
+    return cls(trade_records, orders.main_price, freq=orders.wrapper.freq, **kwargs)</code></pre>
 </details>
 </dd>
 </dl>
@@ -2139,38 +1874,28 @@ def from_orders(cls, orders):
 <ul class="hlist">
 <li><code><b><a title="vectorbt.records.events.Events" href="#vectorbt.records.events.Events">Events</a></b></code>:
 <ul class="hlist">
-<li><code><a title="vectorbt.records.events.Events.avg_duration" href="#vectorbt.records.events.BaseEvents.avg_duration">avg_duration</a></code></li>
-<li><code><a title="vectorbt.records.events.Events.avg_pnl" href="#vectorbt.records.events.BaseEvents.avg_pnl">avg_pnl</a></code></li>
-<li><code><a title="vectorbt.records.events.Events.avg_return" href="#vectorbt.records.events.BaseEvents.avg_return">avg_return</a></code></li>
 <li><code><a title="vectorbt.records.events.Events.closed" href="#vectorbt.records.events.Events.closed">closed</a></code></li>
 <li><code><a title="vectorbt.records.events.Events.closed_rate" href="#vectorbt.records.events.Events.closed_rate">closed_rate</a></code></li>
-<li><code><a title="vectorbt.records.events.Events.convert_array_to_matrix" href="base.html#vectorbt.records.base.Records.convert_array_to_matrix">convert_array_to_matrix</a></code></li>
+<li><code><a title="vectorbt.records.events.Events.col_index" href="base.html#vectorbt.records.base.Records.col_index">col_index</a></code></li>
 <li><code><a title="vectorbt.records.events.Events.count" href="base.html#vectorbt.records.base.Records.count">count</a></code></li>
 <li><code><a title="vectorbt.records.events.Events.coverage" href="#vectorbt.records.events.BaseEvents.coverage">coverage</a></code></li>
 <li><code><a title="vectorbt.records.events.Events.duration" href="#vectorbt.records.events.BaseEvents.duration">duration</a></code></li>
 <li><code><a title="vectorbt.records.events.Events.expectancy" href="#vectorbt.records.events.BaseEventsByResult.expectancy">expectancy</a></code></li>
+<li><code><a title="vectorbt.records.events.Events.filter_by_mask" href="base.html#vectorbt.records.base.Records.filter_by_mask">filter_by_mask</a></code></li>
 <li><code><a title="vectorbt.records.events.Events.iloc" href="../base/indexing.html#vectorbt.base.indexing.PandasIndexer.iloc">iloc</a></code></li>
 <li><code><a title="vectorbt.records.events.Events.loc" href="../base/indexing.html#vectorbt.base.indexing.PandasIndexer.loc">loc</a></code></li>
 <li><code><a title="vectorbt.records.events.Events.losing" href="#vectorbt.records.events.BaseEventsByResult.losing">losing</a></code></li>
-<li><code><a title="vectorbt.records.events.Events.map_field_to_matrix" href="base.html#vectorbt.records.base.Records.map_field_to_matrix">map_field_to_matrix</a></code></li>
-<li><code><a title="vectorbt.records.events.Events.map_records_to_matrix" href="base.html#vectorbt.records.base.Records.map_records_to_matrix">map_records_to_matrix</a></code></li>
-<li><code><a title="vectorbt.records.events.Events.map_reduce_records" href="base.html#vectorbt.records.base.Records.map_reduce_records">map_reduce_records</a></code></li>
-<li><code><a title="vectorbt.records.events.Events.max_duration" href="#vectorbt.records.events.BaseEvents.max_duration">max_duration</a></code></li>
-<li><code><a title="vectorbt.records.events.Events.max_pnl" href="#vectorbt.records.events.BaseEvents.max_pnl">max_pnl</a></code></li>
-<li><code><a title="vectorbt.records.events.Events.max_return" href="#vectorbt.records.events.BaseEvents.max_return">max_return</a></code></li>
-<li><code><a title="vectorbt.records.events.Events.min_pnl" href="#vectorbt.records.events.BaseEvents.min_pnl">min_pnl</a></code></li>
-<li><code><a title="vectorbt.records.events.Events.min_return" href="#vectorbt.records.events.BaseEvents.min_return">min_return</a></code></li>
+<li><code><a title="vectorbt.records.events.Events.map" href="base.html#vectorbt.records.base.Records.map">map</a></code></li>
+<li><code><a title="vectorbt.records.events.Events.map_array" href="base.html#vectorbt.records.base.Records.map_array">map_array</a></code></li>
+<li><code><a title="vectorbt.records.events.Events.map_field" href="base.html#vectorbt.records.base.Records.map_field">map_field</a></code></li>
 <li><code><a title="vectorbt.records.events.Events.open" href="#vectorbt.records.events.Events.open">open</a></code></li>
 <li><code><a title="vectorbt.records.events.Events.plot" href="#vectorbt.records.events.BaseEvents.plot">plot</a></code></li>
 <li><code><a title="vectorbt.records.events.Events.pnl" href="#vectorbt.records.events.BaseEvents.pnl">pnl</a></code></li>
 <li><code><a title="vectorbt.records.events.Events.profit_factor" href="#vectorbt.records.events.BaseEventsByResult.profit_factor">profit_factor</a></code></li>
 <li><code><a title="vectorbt.records.events.Events.records" href="base.html#vectorbt.records.base.Records.records">records</a></code></li>
-<li><code><a title="vectorbt.records.events.Events.records_col_index" href="base.html#vectorbt.records.base.Records.records_col_index">records_col_index</a></code></li>
-<li><code><a title="vectorbt.records.events.Events.reduce_records" href="base.html#vectorbt.records.base.Records.reduce_records">reduce_records</a></code></li>
 <li><code><a title="vectorbt.records.events.Events.returns" href="#vectorbt.records.events.BaseEvents.returns">returns</a></code></li>
-<li><code><a title="vectorbt.records.events.Events.sqn" href="#vectorbt.records.events.BaseEvents.sqn">sqn</a></code></li>
+<li><code><a title="vectorbt.records.events.Events.sqn" href="#vectorbt.records.events.BaseEventsByResult.sqn">sqn</a></code></li>
 <li><code><a title="vectorbt.records.events.Events.status" href="#vectorbt.records.events.Events.status">status</a></code></li>
-<li><code><a title="vectorbt.records.events.Events.total_pnl" href="#vectorbt.records.events.BaseEvents.total_pnl">total_pnl</a></code></li>
 <li><code><a title="vectorbt.records.events.Events.win_rate" href="#vectorbt.records.events.BaseEventsByResult.win_rate">win_rate</a></code></li>
 <li><code><a title="vectorbt.records.events.Events.winning" href="#vectorbt.records.events.BaseEventsByResult.winning">winning</a></code></li>
 <li><code><a title="vectorbt.records.events.Events.xs" href="../base/indexing.html#vectorbt.base.indexing.PandasIndexer.xs">xs</a></code></li>
@@ -2210,30 +1935,21 @@ title="Search"
 <ul>
 <li>
 <h4><code><a title="vectorbt.records.events.BaseEvents" href="#vectorbt.records.events.BaseEvents">BaseEvents</a></code></h4>
-<ul class="two-column">
-<li><code><a title="vectorbt.records.events.BaseEvents.avg_duration" href="#vectorbt.records.events.BaseEvents.avg_duration">avg_duration</a></code></li>
-<li><code><a title="vectorbt.records.events.BaseEvents.avg_pnl" href="#vectorbt.records.events.BaseEvents.avg_pnl">avg_pnl</a></code></li>
-<li><code><a title="vectorbt.records.events.BaseEvents.avg_return" href="#vectorbt.records.events.BaseEvents.avg_return">avg_return</a></code></li>
+<ul class="">
 <li><code><a title="vectorbt.records.events.BaseEvents.coverage" href="#vectorbt.records.events.BaseEvents.coverage">coverage</a></code></li>
 <li><code><a title="vectorbt.records.events.BaseEvents.duration" href="#vectorbt.records.events.BaseEvents.duration">duration</a></code></li>
-<li><code><a title="vectorbt.records.events.BaseEvents.max_duration" href="#vectorbt.records.events.BaseEvents.max_duration">max_duration</a></code></li>
-<li><code><a title="vectorbt.records.events.BaseEvents.max_pnl" href="#vectorbt.records.events.BaseEvents.max_pnl">max_pnl</a></code></li>
-<li><code><a title="vectorbt.records.events.BaseEvents.max_return" href="#vectorbt.records.events.BaseEvents.max_return">max_return</a></code></li>
-<li><code><a title="vectorbt.records.events.BaseEvents.min_pnl" href="#vectorbt.records.events.BaseEvents.min_pnl">min_pnl</a></code></li>
-<li><code><a title="vectorbt.records.events.BaseEvents.min_return" href="#vectorbt.records.events.BaseEvents.min_return">min_return</a></code></li>
 <li><code><a title="vectorbt.records.events.BaseEvents.plot" href="#vectorbt.records.events.BaseEvents.plot">plot</a></code></li>
 <li><code><a title="vectorbt.records.events.BaseEvents.pnl" href="#vectorbt.records.events.BaseEvents.pnl">pnl</a></code></li>
 <li><code><a title="vectorbt.records.events.BaseEvents.returns" href="#vectorbt.records.events.BaseEvents.returns">returns</a></code></li>
-<li><code><a title="vectorbt.records.events.BaseEvents.sqn" href="#vectorbt.records.events.BaseEvents.sqn">sqn</a></code></li>
-<li><code><a title="vectorbt.records.events.BaseEvents.total_pnl" href="#vectorbt.records.events.BaseEvents.total_pnl">total_pnl</a></code></li>
 </ul>
 </li>
 <li>
 <h4><code><a title="vectorbt.records.events.BaseEventsByResult" href="#vectorbt.records.events.BaseEventsByResult">BaseEventsByResult</a></code></h4>
-<ul class="">
+<ul class="two-column">
 <li><code><a title="vectorbt.records.events.BaseEventsByResult.expectancy" href="#vectorbt.records.events.BaseEventsByResult.expectancy">expectancy</a></code></li>
 <li><code><a title="vectorbt.records.events.BaseEventsByResult.losing" href="#vectorbt.records.events.BaseEventsByResult.losing">losing</a></code></li>
 <li><code><a title="vectorbt.records.events.BaseEventsByResult.profit_factor" href="#vectorbt.records.events.BaseEventsByResult.profit_factor">profit_factor</a></code></li>
+<li><code><a title="vectorbt.records.events.BaseEventsByResult.sqn" href="#vectorbt.records.events.BaseEventsByResult.sqn">sqn</a></code></li>
 <li><code><a title="vectorbt.records.events.BaseEventsByResult.win_rate" href="#vectorbt.records.events.BaseEventsByResult.win_rate">win_rate</a></code></li>
 <li><code><a title="vectorbt.records.events.BaseEventsByResult.winning" href="#vectorbt.records.events.BaseEventsByResult.winning">winning</a></code></li>
 </ul>
