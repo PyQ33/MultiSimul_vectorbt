@@ -39,13 +39,14 @@ import numpy as np
 import pandas as pd
 
 from vectorbt.utils import checks
+from vectorbt.utils.datetime import freq_delta, DatetimeTypes, to_time_units
 from vectorbt.base import index_fns, reshape_fns
 
 
 class ArrayWrapper:
     &#34;&#34;&#34;Class that stores index, columns and shape metadata for wrapping NumPy arrays.&#34;&#34;&#34;
 
-    def __init__(self, index=None, columns=None, ndim=None):
+    def __init__(self, index=None, columns=None, ndim=None, freq=None):
         if index is not None and not isinstance(index, pd.Index):
             index = pd.Index(index)
         if columns is not None and not isinstance(columns, pd.Index):
@@ -53,6 +54,14 @@ class ArrayWrapper:
         self._index = index
         self._columns = columns
         self._ndim = ndim
+        self._freq = None
+        if freq is not None:
+            self._freq = freq_delta(freq)
+        elif isinstance(self.index, DatetimeTypes):
+            if self.index.freq is not None:
+                self._freq = freq_delta(self.index.freq)
+            elif self.index.inferred_freq is not None:
+                self._freq = freq_delta(self.index.inferred_freq)
 
     @property
     def index(self):
@@ -84,6 +93,17 @@ class ArrayWrapper:
         if self.ndim == 1:
             return len(self.index),
         return len(self.index), len(self.columns)
+
+    @property
+    def freq(self):
+        &#34;&#34;&#34;Index frequency.&#34;&#34;&#34;
+        return self._freq
+
+    def to_time_units(self, a):
+        &#34;&#34;&#34;Convert array to time units.&#34;&#34;&#34;
+        if self.freq is None:
+            raise ValueError(&#34;Couldn&#39;t parse the frequency of index. You must set `freq`.&#34;)
+        return to_time_units(a, self.freq)
 
     @classmethod
     def from_obj(cls, obj, *args, **kwargs):
@@ -123,20 +143,28 @@ class ArrayWrapper:
             return pd.Series(a, index=index, name=name, dtype=dtype)
         return pd.DataFrame(a, index=index, columns=columns, dtype=dtype)
 
-    def wrap_reduced(self, a, index=None):
+    def wrap_reduced(self, a, index=None, time_units=False):
         &#34;&#34;&#34;Wrap result of reduction.
 
-        Argument `index` can be passed when reducing to an array of values (vs. one value) per column.&#34;&#34;&#34;
+        Argument `index` can be passed when reducing to an array of values (vs. one value) per column.
+
+        If `time_units` is set, calls `to_time_units`.&#34;&#34;&#34;
         checks.assert_not_none(self.ndim)
 
         a = np.asarray(a)
+        if time_units:
+            a = self.to_time_units(a)
         if a.ndim == 0:
             # Scalar value
+            if time_units:
+                return pd.to_timedelta(a.item())
             return a.item()
         elif a.ndim == 1:
             if self.ndim == 1:
                 if a.shape[0] == 1:
                     # Scalar value
+                    if time_units:
+                        return pd.to_timedelta(a[0])
                     return a[0]
                 # Array per series
                 name = self.columns[0]
@@ -177,7 +205,7 @@ class ArrayWrapper:
 <dl>
 <dt id="vectorbt.base.array_wrapper.ArrayWrapper"><code class="flex name class">
 <span>class <span class="ident parent-fname">ArrayWrapper</span></span>
-<span>(</span><span>index=None, columns=None, ndim=None)</span>
+<span>(</span><span>index=None, columns=None, ndim=None, freq=None)</span>
 </code></dt>
 <dd>
 <div class="desc"><p>Class that stores index, columns and shape metadata for wrapping NumPy arrays.</p></div>
@@ -188,7 +216,7 @@ class ArrayWrapper:
 <pre><code class="python">class ArrayWrapper:
     &#34;&#34;&#34;Class that stores index, columns and shape metadata for wrapping NumPy arrays.&#34;&#34;&#34;
 
-    def __init__(self, index=None, columns=None, ndim=None):
+    def __init__(self, index=None, columns=None, ndim=None, freq=None):
         if index is not None and not isinstance(index, pd.Index):
             index = pd.Index(index)
         if columns is not None and not isinstance(columns, pd.Index):
@@ -196,6 +224,14 @@ class ArrayWrapper:
         self._index = index
         self._columns = columns
         self._ndim = ndim
+        self._freq = None
+        if freq is not None:
+            self._freq = freq_delta(freq)
+        elif isinstance(self.index, DatetimeTypes):
+            if self.index.freq is not None:
+                self._freq = freq_delta(self.index.freq)
+            elif self.index.inferred_freq is not None:
+                self._freq = freq_delta(self.index.inferred_freq)
 
     @property
     def index(self):
@@ -227,6 +263,17 @@ class ArrayWrapper:
         if self.ndim == 1:
             return len(self.index),
         return len(self.index), len(self.columns)
+
+    @property
+    def freq(self):
+        &#34;&#34;&#34;Index frequency.&#34;&#34;&#34;
+        return self._freq
+
+    def to_time_units(self, a):
+        &#34;&#34;&#34;Convert array to time units.&#34;&#34;&#34;
+        if self.freq is None:
+            raise ValueError(&#34;Couldn&#39;t parse the frequency of index. You must set `freq`.&#34;)
+        return to_time_units(a, self.freq)
 
     @classmethod
     def from_obj(cls, obj, *args, **kwargs):
@@ -266,20 +313,28 @@ class ArrayWrapper:
             return pd.Series(a, index=index, name=name, dtype=dtype)
         return pd.DataFrame(a, index=index, columns=columns, dtype=dtype)
 
-    def wrap_reduced(self, a, index=None):
+    def wrap_reduced(self, a, index=None, time_units=False):
         &#34;&#34;&#34;Wrap result of reduction.
 
-        Argument `index` can be passed when reducing to an array of values (vs. one value) per column.&#34;&#34;&#34;
+        Argument `index` can be passed when reducing to an array of values (vs. one value) per column.
+
+        If `time_units` is set, calls `to_time_units`.&#34;&#34;&#34;
         checks.assert_not_none(self.ndim)
 
         a = np.asarray(a)
+        if time_units:
+            a = self.to_time_units(a)
         if a.ndim == 0:
             # Scalar value
+            if time_units:
+                return pd.to_timedelta(a.item())
             return a.item()
         elif a.ndim == 1:
             if self.ndim == 1:
                 if a.shape[0] == 1:
                     # Scalar value
+                    if time_units:
+                        return pd.to_timedelta(a[0])
                     return a[0]
                 # Array per series
                 name = self.columns[0]
@@ -311,7 +366,6 @@ class ArrayWrapper:
 <h3 class="section-subtitle">Subclasses</h3>
 <ul class="hlist">
 <li><a title="vectorbt.base.accessors.Base_Accessor" href="accessors.html#vectorbt.base.accessors.Base_Accessor">Base_Accessor</a></li>
-<li><a title="vectorbt.tseries.common.TSArrayWrapper" href="../tseries/common.html#vectorbt.tseries.common.TSArrayWrapper">TSArrayWrapper</a></li>
 </ul>
 <h3 class="section-subtitle">Static methods</h3>
 <dl>
@@ -347,6 +401,19 @@ def from_obj(cls, obj, *args, **kwargs):
 def columns(self):
     &#34;&#34;&#34;Columns.&#34;&#34;&#34;
     return self._columns</code></pre>
+</details>
+</dd>
+<dt id="vectorbt.base.array_wrapper.ArrayWrapper.freq"><code class="name">var <span class="ident fname">freq</span></code></dt>
+<dd>
+<div class="desc"><p>Index frequency.</p></div>
+<details class="source">
+<summary>
+<span>Expand source code</span>
+</summary>
+<pre><code class="python">@property
+def freq(self):
+    &#34;&#34;&#34;Index frequency.&#34;&#34;&#34;
+    return self._freq</code></pre>
 </details>
 </dd>
 <dt id="vectorbt.base.array_wrapper.ArrayWrapper.index"><code class="name">var <span class="ident fname">index</span></code></dt>
@@ -410,6 +477,22 @@ def shape(self):
 </dl>
 <h3 class="section-subtitle">Methods</h3>
 <dl>
+<dt id="vectorbt.base.array_wrapper.ArrayWrapper.to_time_units"><code class="name flex">
+<span>def <span class="ident fname">to_time_units</span></span>(<span>self, a)</span>
+</code></dt>
+<dd>
+<div class="desc"><p>Convert array to time units.</p></div>
+<details class="source">
+<summary>
+<span>Expand source code</span>
+</summary>
+<pre><code class="python">def to_time_units(self, a):
+    &#34;&#34;&#34;Convert array to time units.&#34;&#34;&#34;
+    if self.freq is None:
+        raise ValueError(&#34;Couldn&#39;t parse the frequency of index. You must set `freq`.&#34;)
+    return to_time_units(a, self.freq)</code></pre>
+</details>
+</dd>
 <dt id="vectorbt.base.array_wrapper.ArrayWrapper.wrap"><code class="name flex">
 <span>def <span class="ident fname">wrap</span></span>(<span>self, a, index=None, columns=None, ndim=None, dtype=None)</span>
 </code></dt>
@@ -451,29 +534,38 @@ def shape(self):
 </details>
 </dd>
 <dt id="vectorbt.base.array_wrapper.ArrayWrapper.wrap_reduced"><code class="name flex">
-<span>def <span class="ident fname">wrap_reduced</span></span>(<span>self, a, index=None)</span>
+<span>def <span class="ident fname">wrap_reduced</span></span>(<span>self, a, index=None, time_units=False)</span>
 </code></dt>
 <dd>
 <div class="desc"><p>Wrap result of reduction.</p>
-<p>Argument <code>index</code> can be passed when reducing to an array of values (vs. one value) per column.</p></div>
+<p>Argument <code>index</code> can be passed when reducing to an array of values (vs. one value) per column.</p>
+<p>If <code>time_units</code> is set, calls <code>to_time_units</code>.</p></div>
 <details class="source">
 <summary>
 <span>Expand source code</span>
 </summary>
-<pre><code class="python">def wrap_reduced(self, a, index=None):
+<pre><code class="python">def wrap_reduced(self, a, index=None, time_units=False):
     &#34;&#34;&#34;Wrap result of reduction.
 
-    Argument `index` can be passed when reducing to an array of values (vs. one value) per column.&#34;&#34;&#34;
+    Argument `index` can be passed when reducing to an array of values (vs. one value) per column.
+
+    If `time_units` is set, calls `to_time_units`.&#34;&#34;&#34;
     checks.assert_not_none(self.ndim)
 
     a = np.asarray(a)
+    if time_units:
+        a = self.to_time_units(a)
     if a.ndim == 0:
         # Scalar value
+        if time_units:
+            return pd.to_timedelta(a.item())
         return a.item()
     elif a.ndim == 1:
         if self.ndim == 1:
             if a.shape[0] == 1:
                 # Scalar value
+                if time_units:
+                    return pd.to_timedelta(a[0])
                 return a[0]
             # Array per series
             name = self.columns[0]
@@ -528,11 +620,13 @@ title="Search"
 <h4><code><a title="vectorbt.base.array_wrapper.ArrayWrapper" href="#vectorbt.base.array_wrapper.ArrayWrapper">ArrayWrapper</a></code></h4>
 <ul class="two-column">
 <li><code><a title="vectorbt.base.array_wrapper.ArrayWrapper.columns" href="#vectorbt.base.array_wrapper.ArrayWrapper.columns">columns</a></code></li>
+<li><code><a title="vectorbt.base.array_wrapper.ArrayWrapper.freq" href="#vectorbt.base.array_wrapper.ArrayWrapper.freq">freq</a></code></li>
 <li><code><a title="vectorbt.base.array_wrapper.ArrayWrapper.from_obj" href="#vectorbt.base.array_wrapper.ArrayWrapper.from_obj">from_obj</a></code></li>
 <li><code><a title="vectorbt.base.array_wrapper.ArrayWrapper.index" href="#vectorbt.base.array_wrapper.ArrayWrapper.index">index</a></code></li>
 <li><code><a title="vectorbt.base.array_wrapper.ArrayWrapper.name" href="#vectorbt.base.array_wrapper.ArrayWrapper.name">name</a></code></li>
 <li><code><a title="vectorbt.base.array_wrapper.ArrayWrapper.ndim" href="#vectorbt.base.array_wrapper.ArrayWrapper.ndim">ndim</a></code></li>
 <li><code><a title="vectorbt.base.array_wrapper.ArrayWrapper.shape" href="#vectorbt.base.array_wrapper.ArrayWrapper.shape">shape</a></code></li>
+<li><code><a title="vectorbt.base.array_wrapper.ArrayWrapper.to_time_units" href="#vectorbt.base.array_wrapper.ArrayWrapper.to_time_units">to_time_units</a></code></li>
 <li><code><a title="vectorbt.base.array_wrapper.ArrayWrapper.wrap" href="#vectorbt.base.array_wrapper.ArrayWrapper.wrap">wrap</a></code></li>
 <li><code><a title="vectorbt.base.array_wrapper.ArrayWrapper.wrap_reduced" href="#vectorbt.base.array_wrapper.ArrayWrapper.wrap_reduced">wrap_reduced</a></code></li>
 </ul>

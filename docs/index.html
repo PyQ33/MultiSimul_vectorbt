@@ -49,7 +49,8 @@ Python loops to be run at native machine code speed.</p>
 <h2 id="performance">Performance</h2>
 <p>While it might seem tempting to perform all sorts of computations with pandas alone, the NumPy+Numba combo
 outperforms pandas significantly, especially for basic operations:</p>
-<pre><code class="python-repl">&gt;&gt;&gt; import pandas as pd
+<pre><code class="python-repl">&gt;&gt;&gt; import numpy as np
+&gt;&gt;&gt; import pandas as pd
 &gt;&gt;&gt; import vectorbt as vbt
 
 &gt;&gt;&gt; big_ts = pd.DataFrame(np.random.uniform(size=(1000, 1000)))
@@ -57,14 +58,14 @@ outperforms pandas significantly, especially for basic operations:</p>
 &gt;&gt;&gt; %timeit big_ts.pct_change()
 280 ms ± 12.6 ms per loop (mean ± std. dev. of 7 runs, 1 loop each)
 
-&gt;&gt;&gt; %timeit big_ts.vbt.tseries.pct_change()
+&gt;&gt;&gt; %timeit big_ts.vbt.pct_change()
 5.95 ms ± 380 µs per loop (mean ± std. dev. of 7 runs, 100 loops each)
 </code></pre>
 <p>But also pandas functions already compiled with Cython/Numba are slower:</p>
 <pre><code class="python-repl">&gt;&gt;&gt; %timeit big_ts.expanding().max()
 48.4 ms ± 557 µs per loop (mean ± std. dev. of 7 runs, 10 loops each)
 
-&gt;&gt;&gt; %timeit big_ts.vbt.tseries.expanding_max()
+&gt;&gt;&gt; %timeit big_ts.vbt.expanding_max()
 8.82 ms ± 121 µs per loop (mean ± std. dev. of 7 runs, 100 loops each)
 </code></pre>
 <p>Moreover, pandas functions cannot be accessed within user-defined Numba code, since Numba cannot do any
@@ -90,10 +91,7 @@ to store valuable information on each backtest. Take for example a simple crosso
 it depends on the size of the fast and slow windows, and other hyper-parameters such as whether
 it is SMA or EMA. Each of these hyper-parameters becomes an additional dimension for manipulating data
 and gets stored as a separate column level. Below is an example of a column hierarchy for MACD:</p>
-<pre><code class="python-repl">&gt;&gt;&gt; import pandas as pd
-&gt;&gt;&gt; import vectorbt as vbt
-
-&gt;&gt;&gt; macd = vbt.MACD.from_params(
+<pre><code class="python-repl">&gt;&gt;&gt; macd = vbt.MACD.from_params(
 ...     pd.Series([1, 2, 3, 4, 3, 2, 1]),
 ...     fast_window=(2, 3),
 ...     slow_window=(3, 4),
@@ -295,7 +293,7 @@ combine price series for Bitcoin and Ethereum into one DataFrame and run the sam
 <pre><code class="python-repl">&gt;&gt;&gt; # Multiple strategy instances and instruments
 &gt;&gt;&gt; eth_price = yf.Ticker(&quot;ETH-USD&quot;).history(start=start, end=end)['Open']
 &gt;&gt;&gt; comb_price = btc_price.vbt.concat(eth_price,
-...     as_columns=pd.Index(['BTC', 'ETH'], name='asset'))
+...     keys=pd.Index(['BTC', 'ETH'], name='asset'))
 &gt;&gt;&gt; print(comb_price)
 asset           BTC     ETH
 Date
@@ -369,7 +367,7 @@ you to split one time period into many (given they have the same length and freq
 them as distinct columns. For example, let's split <code>[2019-1-1, 2020-1-1]</code> into two equal time periods -
 <code>[2018-12-31, 2019-07-01]</code> and <code>[2019-07-02, 2019-12-31]</code>, and backtest them all at once.</p>
 <pre><code class="python-repl">&gt;&gt;&gt; # Multiple strategy instances, instruments and time periods
-&gt;&gt;&gt; mult_comb_price = comb_price.vbt.tseries.split_into_ranges(n=2)
+&gt;&gt;&gt; mult_comb_price = comb_price.vbt.split_into_ranges(n=2)
 &gt;&gt;&gt; print(mult_comb_price)
 asset             BTC                   ETH
 range_start 2018-12-31 2019-07-02 2018-12-31 2019-07-02
@@ -399,15 +397,15 @@ range_end   2019-07-01 2019-12-31 2019-07-01 2019-12-31
 &gt;&gt;&gt; portfolio = vbt.Portfolio.from_signals(
 ...     mult_comb_price.vbt.tile(2), entries, exits, freq='1D')
 &gt;&gt;&gt; print(portfolio.total_return)
-fast_window  slow_window  asset  start_date  end_date
-10           30           BTC    2018-12-31  2019-07-01    1.631617
-                                 2019-07-02  2019-12-31   -0.281432
-                          ETH    2018-12-31  2019-07-01    0.941945
-                                 2019-07-02  2019-12-31   -0.306689
-20           30           BTC    2018-12-31  2019-07-01    1.725547
-                                 2019-07-02  2019-12-31   -0.417770
-                          ETH    2018-12-31  2019-07-01    0.336136
-                                 2019-07-02  2019-12-31   -0.257854
+fast_window  slow_window  asset  range_start  range_end
+10           30           BTC    2018-12-31   2019-07-01    1.631617
+                                 2019-07-02   2019-12-31   -0.281432
+                          ETH    2018-12-31   2019-07-01    0.941945
+                                 2019-07-02   2019-12-31   -0.306689
+20           30           BTC    2018-12-31   2019-07-01    1.725547
+                                 2019-07-02   2019-12-31   -0.417770
+                          ETH    2018-12-31   2019-07-01    0.336136
+                                 2019-07-02   2019-12-31   -0.257854
 dtype: float64
 </code></pre>
 <p>Notice how index is no more datetime-like, since it captures multiple time periods.
@@ -415,7 +413,7 @@ That's why it's required here to pass the frequency <code>freq</code> to the <co
 class methods in order to be able to compute performance metrics such as Sharpe ratio.</p>
 <p>The index hierarchy of the final performance series can be then used to group performance
 by any feature, such as window pair, asset, and time period.</p>
-<pre><code class="python-repl">&gt;&gt;&gt; mean_return = portfolio.total_return.groupby(['end_date', 'asset']).mean()
+<pre><code class="python-repl">&gt;&gt;&gt; mean_return = portfolio.total_return.groupby(['range_end', 'asset']).mean()
 &gt;&gt;&gt; mean_return = mean_return.unstack(level=-1).vbt.bar(
 ...     xaxis_title='End date',
 ...     yaxis_title='Mean total return',
@@ -464,6 +462,7 @@ While it might seem tempting to perform all sorts of computations with pandas al
 outperforms pandas significantly, especially for basic operations:
 
 ```python-repl
+&gt;&gt;&gt; import numpy as np
 &gt;&gt;&gt; import pandas as pd
 &gt;&gt;&gt; import vectorbt as vbt
 
@@ -472,7 +471,7 @@ outperforms pandas significantly, especially for basic operations:
 &gt;&gt;&gt; %timeit big_ts.pct_change()
 280 ms ± 12.6 ms per loop (mean ± std. dev. of 7 runs, 1 loop each)
 
-&gt;&gt;&gt; %timeit big_ts.vbt.tseries.pct_change()
+&gt;&gt;&gt; %timeit big_ts.vbt.pct_change()
 5.95 ms ± 380 µs per loop (mean ± std. dev. of 7 runs, 100 loops each)
 ```
 
@@ -482,7 +481,7 @@ But also pandas functions already compiled with Cython/Numba are slower:
 &gt;&gt;&gt; %timeit big_ts.expanding().max()
 48.4 ms ± 557 µs per loop (mean ± std. dev. of 7 runs, 10 loops each)
 
-&gt;&gt;&gt; %timeit big_ts.vbt.tseries.expanding_max()
+&gt;&gt;&gt; %timeit big_ts.vbt.expanding_max()
 8.82 ms ± 121 µs per loop (mean ± std. dev. of 7 runs, 100 loops each)
 ```
 
@@ -517,9 +516,6 @@ it is SMA or EMA. Each of these hyper-parameters becomes an additional dimension
 and gets stored as a separate column level. Below is an example of a column hierarchy for MACD:
 
 ```python-repl
-&gt;&gt;&gt; import pandas as pd
-&gt;&gt;&gt; import vectorbt as vbt
-
 &gt;&gt;&gt; macd = vbt.MACD.from_params(
 ...     pd.Series([1, 2, 3, 4, 3, 2, 1]),
 ...     fast_window=(2, 3),
@@ -757,7 +753,7 @@ combine price series for Bitcoin and Ethereum into one DataFrame and run the sam
 &gt;&gt;&gt; # Multiple strategy instances and instruments
 &gt;&gt;&gt; eth_price = yf.Ticker(&#34;ETH-USD&#34;).history(start=start, end=end)[&#39;Open&#39;]
 &gt;&gt;&gt; comb_price = btc_price.vbt.concat(eth_price,
-...     as_columns=pd.Index([&#39;BTC&#39;, &#39;ETH&#39;], name=&#39;asset&#39;))
+...     keys=pd.Index([&#39;BTC&#39;, &#39;ETH&#39;], name=&#39;asset&#39;))
 &gt;&gt;&gt; print(comb_price)
 asset           BTC     ETH
 Date
@@ -835,7 +831,7 @@ them as distinct columns. For example, let&#39;s split `[2019-1-1, 2020-1-1]` in
 
 ```python-repl
 &gt;&gt;&gt; # Multiple strategy instances, instruments and time periods
-&gt;&gt;&gt; mult_comb_price = comb_price.vbt.tseries.split_into_ranges(n=2)
+&gt;&gt;&gt; mult_comb_price = comb_price.vbt.split_into_ranges(n=2)
 &gt;&gt;&gt; print(mult_comb_price)
 asset             BTC                   ETH
 range_start 2018-12-31 2019-07-02 2018-12-31 2019-07-02
@@ -865,15 +861,15 @@ range_end   2019-07-01 2019-12-31 2019-07-01 2019-12-31
 &gt;&gt;&gt; portfolio = vbt.Portfolio.from_signals(
 ...     mult_comb_price.vbt.tile(2), entries, exits, freq=&#39;1D&#39;)
 &gt;&gt;&gt; print(portfolio.total_return)
-fast_window  slow_window  asset  start_date  end_date
-10           30           BTC    2018-12-31  2019-07-01    1.631617
-                                 2019-07-02  2019-12-31   -0.281432
-                          ETH    2018-12-31  2019-07-01    0.941945
-                                 2019-07-02  2019-12-31   -0.306689
-20           30           BTC    2018-12-31  2019-07-01    1.725547
-                                 2019-07-02  2019-12-31   -0.417770
-                          ETH    2018-12-31  2019-07-01    0.336136
-                                 2019-07-02  2019-12-31   -0.257854
+fast_window  slow_window  asset  range_start  range_end
+10           30           BTC    2018-12-31   2019-07-01    1.631617
+                                 2019-07-02   2019-12-31   -0.281432
+                          ETH    2018-12-31   2019-07-01    0.941945
+                                 2019-07-02   2019-12-31   -0.306689
+20           30           BTC    2018-12-31   2019-07-01    1.725547
+                                 2019-07-02   2019-12-31   -0.417770
+                          ETH    2018-12-31   2019-07-01    0.336136
+                                 2019-07-02   2019-12-31   -0.257854
 dtype: float64
 ```
 
@@ -885,7 +881,7 @@ The index hierarchy of the final performance series can be then used to group pe
 by any feature, such as window pair, asset, and time period.
 
 ```python-repl
-&gt;&gt;&gt; mean_return = portfolio.total_return.groupby([&#39;end_date&#39;, &#39;asset&#39;]).mean()
+&gt;&gt;&gt; mean_return = portfolio.total_return.groupby([&#39;range_end&#39;, &#39;asset&#39;]).mean()
 &gt;&gt;&gt; mean_return = mean_return.unstack(level=-1).vbt.bar(
 ...     xaxis_title=&#39;End date&#39;,
 ...     yaxis_title=&#39;Mean total return&#39;,
@@ -906,21 +902,16 @@ modeling portfolio performance and visualizing results.
 There is also [a range of notebooks](https://github.com/polakowo/vectorbt/tree/master/tests/notebooks) for testing purposes.
 &#34;&#34;&#34;
 
-from vectorbt import (
-    base,
-    indicators,
-    portfolio,
-    records,
-    returns,
-    signals,
-    tseries,
-    utils,
-    widgets,
-    accessors,
-    defaults
-)
+# Load all accessors
+import vectorbt.root_accessors
+import vectorbt.base.accessors
+import vectorbt.generic.accessors
+import vectorbt.signals.accessors
+import vectorbt.returns.accessors
+import vectorbt.ohlcv.accessors
 
 # Most important classes
+from vectorbt.generic import nb, plotting
 from vectorbt.records import (
     MappedArray,
     Records,
@@ -929,15 +920,6 @@ from vectorbt.records import (
     Trades,
     Positions,
     Drawdowns
-)
-from vectorbt.widgets import (
-    DefaultFigureWidget,
-    Indicator,
-    Bar,
-    Scatter,
-    Histogram,
-    Box,
-    Heatmap
 )
 from vectorbt.portfolio import Portfolio
 from vectorbt.indicators import (
@@ -962,10 +944,6 @@ warnings.filterwarnings(&#34;ignore&#34;, category=NumbaExperimentalFeatureWarni
 <section>
 <h2 class="section-title" id="header-submodules">Sub-modules</h2>
 <dl>
-<dt><code class="name"><a title="vectorbt.accessors" href="accessors.html">vectorbt.accessors</a></code></dt>
-<dd>
-<div class="desc"><p>Root pandas accessors …</p></div>
-</dd>
 <dt><code class="name"><a title="vectorbt.base" href="base/index.html">vectorbt.base</a></code></dt>
 <dd>
 <div class="desc"><p>Modules with base classes and utilities for pandas objects, such as broadcasting …</p></div>
@@ -974,9 +952,17 @@ warnings.filterwarnings(&#34;ignore&#34;, category=NumbaExperimentalFeatureWarni
 <dd>
 <div class="desc"><p>Global defaults …</p></div>
 </dd>
+<dt><code class="name"><a title="vectorbt.generic" href="generic/index.html">vectorbt.generic</a></code></dt>
+<dd>
+<div class="desc"><p>Modules for working with data of any type …</p></div>
+</dd>
 <dt><code class="name"><a title="vectorbt.indicators" href="indicators/index.html">vectorbt.indicators</a></code></dt>
 <dd>
 <div class="desc"><p>Modules for building and running indicators …</p></div>
+</dd>
+<dt><code class="name"><a title="vectorbt.ohlcv" href="ohlcv/index.html">vectorbt.ohlcv</a></code></dt>
+<dd>
+<div class="desc"><p>Modules for working with OHLCV data …</p></div>
 </dd>
 <dt><code class="name"><a title="vectorbt.portfolio" href="portfolio/index.html">vectorbt.portfolio</a></code></dt>
 <dd>
@@ -990,21 +976,17 @@ warnings.filterwarnings(&#34;ignore&#34;, category=NumbaExperimentalFeatureWarni
 <dd>
 <div class="desc"><p>Modules for working with returns …</p></div>
 </dd>
+<dt><code class="name"><a title="vectorbt.root_accessors" href="root_accessors.html">vectorbt.root_accessors</a></code></dt>
+<dd>
+<div class="desc"><p>Root pandas accessors …</p></div>
+</dd>
 <dt><code class="name"><a title="vectorbt.signals" href="signals/index.html">vectorbt.signals</a></code></dt>
 <dd>
 <div class="desc"><p>Modules for working with signals, such as entry and exit signals …</p></div>
 </dd>
-<dt><code class="name"><a title="vectorbt.tseries" href="tseries/index.html">vectorbt.tseries</a></code></dt>
-<dd>
-<div class="desc"><p>Modules for working with time series, such as price series …</p></div>
-</dd>
 <dt><code class="name"><a title="vectorbt.utils" href="utils/index.html">vectorbt.utils</a></code></dt>
 <dd>
 <div class="desc"><p>Modules with utilities that are used throughout vectorbt.</p></div>
-</dd>
-<dt><code class="name"><a title="vectorbt.widgets" href="widgets/index.html">vectorbt.widgets</a></code></dt>
-<dd>
-<div class="desc"><p>Modules for creating and displaying widgets …</p></div>
 </dd>
 </dl>
 </section>
@@ -1047,17 +1029,17 @@ title="Search"
 <ul id="index">
 <li><h3><a href="#header-submodules">Sub-modules</a></h3>
 <ul>
-<li><code><a title="vectorbt.accessors" href="accessors.html">vectorbt.accessors</a></code></li>
 <li><code><a title="vectorbt.base" href="base/index.html">vectorbt.base</a></code></li>
 <li><code><a title="vectorbt.defaults" href="defaults.html">vectorbt.defaults</a></code></li>
+<li><code><a title="vectorbt.generic" href="generic/index.html">vectorbt.generic</a></code></li>
 <li><code><a title="vectorbt.indicators" href="indicators/index.html">vectorbt.indicators</a></code></li>
+<li><code><a title="vectorbt.ohlcv" href="ohlcv/index.html">vectorbt.ohlcv</a></code></li>
 <li><code><a title="vectorbt.portfolio" href="portfolio/index.html">vectorbt.portfolio</a></code></li>
 <li><code><a title="vectorbt.records" href="records/index.html">vectorbt.records</a></code></li>
 <li><code><a title="vectorbt.returns" href="returns/index.html">vectorbt.returns</a></code></li>
+<li><code><a title="vectorbt.root_accessors" href="root_accessors.html">vectorbt.root_accessors</a></code></li>
 <li><code><a title="vectorbt.signals" href="signals/index.html">vectorbt.signals</a></code></li>
-<li><code><a title="vectorbt.tseries" href="tseries/index.html">vectorbt.tseries</a></code></li>
 <li><code><a title="vectorbt.utils" href="utils/index.html">vectorbt.utils</a></code></li>
-<li><code><a title="vectorbt.widgets" href="widgets/index.html">vectorbt.widgets</a></code></li>
 </ul>
 </li>
 </ul>
