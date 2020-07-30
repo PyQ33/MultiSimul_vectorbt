@@ -338,7 +338,7 @@ def nanmedian_nb(a):
 
 
 @njit(cache=True)
-def nanstd_1d_nb(a, ddof=1):
+def nanstd_1d_nb(a, ddof=0):
     &#34;&#34;&#34;Compute the standard deviation while ignoring NaNs.&#34;&#34;&#34;
     cnt = a.shape[0] - np.count_nonzero(np.isnan(a))
     rcount = max(cnt - ddof, 0)
@@ -349,7 +349,7 @@ def nanstd_1d_nb(a, ddof=1):
 
 
 @njit(cache=True)
-def nanstd_nb(a, ddof=1):
+def nanstd_nb(a, ddof=0):
     &#34;&#34;&#34;2-dim version of `nanstd_1d_nb`.&#34;&#34;&#34;
     result = np.empty(a.shape[1], dtype=np.float_)
     for col in range(a.shape[1]):
@@ -357,30 +357,31 @@ def nanstd_nb(a, ddof=1):
     return result
 
 
-# ############# Rolling functions ############# #
+# ############# Range functions ############# #
 
 
 @njit(cache=True)
-def rolling_window_1d_nb(a, window):
+def concat_ranges_1d_nb(a, start_idxs, end_idxs):
     &#34;&#34;&#34;Roll a window.
 
-    Creates a matrix of rolled windows with first axis being window size.&#34;&#34;&#34;
-    width = a.shape[0] - window + 1
-    result = np.empty((window, width), dtype=np.float_)
-    for col in range(width):
-        result[:, col] = a[col:col + window]
+    For each index pair from `start_idxs` and `end_idxs`, slices `a` along index and concatenates.&#34;&#34;&#34;
+    result = np.empty((end_idxs[0] - start_idxs[0], start_idxs.shape[0]), dtype=a.dtype)
+    for idx in range(start_idxs.shape[0]):
+        result[:, idx] = a[start_idxs[idx]:end_idxs[idx]]
     return result
 
 
 @njit(cache=True)
-def rolling_window_nb(a, window):
-    &#34;&#34;&#34;2-dim version of `rolling_window_1d_nb`.
-
-    Creates a cube of rolled windows with first axis being columns and second axis being window size.&#34;&#34;&#34;
-    result = np.empty((a.shape[1], window, a.shape[0] - window + 1), dtype=np.float_)
+def concat_ranges_nb(a, start_idxs, end_idxs):
+    &#34;&#34;&#34;2-dim version of `range_1d_nb`.&#34;&#34;&#34;
+    result = np.empty((end_idxs[0] - start_idxs[0], start_idxs.shape[0] * a.shape[1]), dtype=a.dtype)
     for col in range(a.shape[1]):
-        result[col, :, :] = rolling_window_1d_nb(a[:, col], window)
+        result[:, col * start_idxs.shape[0]:(col + 1) * start_idxs.shape[0]] = \
+            concat_ranges_1d_nb(a[:, col], start_idxs, end_idxs)
     return result
+
+
+# ############# Rolling functions ############# #
 
 
 @njit(cache=True)
@@ -497,16 +498,14 @@ def rolling_mean_nb(a, window, minp=None):
 
 
 @njit(cache=True)
-def rolling_std_1d_nb(a, window, minp=None):
+def rolling_std_1d_nb(a, window, minp=None, ddof=0):
     &#34;&#34;&#34;Return rolling standard deviation.
 
-    Numba equivalent to `pd.Series(a).rolling(window, min_periods=minp).std()`.&#34;&#34;&#34;
+    Numba equivalent to `pd.Series(a).rolling(window, min_periods=minp).std(ddof=ddof)`.&#34;&#34;&#34;
     if minp is None:
         minp = window
     if minp &gt; window:
         raise ValueError(&#34;minp must be &lt;= window&#34;)
-    if minp == 1:
-        minp = 2
     result = np.empty_like(a, dtype=np.float_)
     cumsum_arr = np.zeros_like(a)
     cumsum = 0
@@ -532,29 +531,29 @@ def rolling_std_1d_nb(a, window, minp=None):
             window_len = window - (nancnt - nancnt_arr[i - window])
             window_cumsum = cumsum - cumsum_arr[i - window]
             window_cumsum_sq = cumsum_sq - cumsum_sq_arr[i - window]
-        if window_len &lt; minp:
+        if window_len &lt; minp or window_len == ddof:
             result[i] = np.nan
         else:
             mean = window_cumsum / window_len
             result[i] = np.sqrt(np.abs(window_cumsum_sq - 2 * window_cumsum *
-                                       mean + window_len * mean ** 2) / (window_len - 1))
+                                       mean + window_len * mean ** 2) / (window_len - ddof))
     return result
 
 
 @njit(cache=True)
-def rolling_std_nb(a, window, minp=None):
+def rolling_std_nb(a, window, minp=None, ddof=0):
     &#34;&#34;&#34;2-dim version of `rolling_std_1d_nb`.&#34;&#34;&#34;
     result = np.empty_like(a, dtype=np.float_)
     for col in range(a.shape[1]):
-        result[:, col] = rolling_std_1d_nb(a[:, col], window, minp=minp)
+        result[:, col] = rolling_std_1d_nb(a[:, col], window, minp=minp, ddof=ddof)
     return result
 
 
 @njit(cache=True)
-def ewm_mean_1d_nb(a, span, minp=None):
+def ewm_mean_1d_nb(a, span, minp=None, adjust=False):
     &#34;&#34;&#34;Return exponential weighted average.
 
-    Numba equivalent to `pd.Series(a).ewm(span=span, min_periods=minp).mean()`.
+    Numba equivalent to `pd.Series(a).ewm(span=span, min_periods=minp, adjust=adjust).mean()`.
 
     Adaptation of `pd._libs.window.aggregations.window_aggregations.ewma` with default arguments.&#34;&#34;&#34;
     if minp is None:
@@ -568,7 +567,7 @@ def ewm_mean_1d_nb(a, span, minp=None):
     com = (span - 1) / 2.0
     alpha = 1. / (1. + com)
     old_wt_factor = 1. - alpha
-    new_wt = 1.
+    new_wt = 1. if adjust else alpha
     weighted_avg = a[0]
     is_observation = (weighted_avg == weighted_avg)
     nobs = int(is_observation)
@@ -585,7 +584,10 @@ def ewm_mean_1d_nb(a, span, minp=None):
                 # avoid numerical errors on constant series
                 if weighted_avg != cur:
                     weighted_avg = ((old_wt * weighted_avg) + (new_wt * cur)) / (old_wt + new_wt)
-                old_wt += new_wt
+                if adjust:
+                    old_wt += new_wt
+                else:
+                    old_wt = 1.
         elif is_observation:
             weighted_avg = cur
         result[i] = weighted_avg if (nobs &gt;= minp) else np.nan
@@ -593,19 +595,19 @@ def ewm_mean_1d_nb(a, span, minp=None):
 
 
 @njit(cache=True)
-def ewm_mean_nb(a, span, minp=None):
+def ewm_mean_nb(a, span, minp=None, adjust=False):
     &#34;&#34;&#34;2-dim version of `ewm_mean_1d_nb`.&#34;&#34;&#34;
     result = np.empty_like(a, dtype=np.float_)
     for col in range(a.shape[1]):
-        result[:, col] = ewm_mean_1d_nb(a[:, col], span, minp=minp)
+        result[:, col] = ewm_mean_1d_nb(a[:, col], span, minp=minp, adjust=adjust)
     return result
 
 
 @njit(cache=True)
-def ewm_std_1d_nb(a, span, minp=None):
+def ewm_std_1d_nb(a, span, minp=None, adjust=False, ddof=0):
     &#34;&#34;&#34;Return exponential weighted standard deviation.
 
-    Numba equivalent to `pd.Series(a).ewm(span=span, min_periods=minp).std()`.
+    Numba equivalent to `pd.Series(a).ewm(span=span, min_periods=minp).std(ddof=ddof)`.
 
     Adaptation of `pd._libs.window.aggregations.window_aggregations.ewmcov` with default arguments.&#34;&#34;&#34;
     if minp is None:
@@ -619,7 +621,7 @@ def ewm_std_1d_nb(a, span, minp=None):
     com = (span - 1) / 2.0
     alpha = 1. / (1. + com)
     old_wt_factor = 1. - alpha
-    new_wt = 1.
+    new_wt = 1. if adjust else alpha
     mean_x = a[0]
     mean_y = a[0]
     is_observation = ((mean_x == mean_x) and (mean_y == mean_y))
@@ -662,6 +664,10 @@ def ewm_std_1d_nb(a, span, minp=None):
                 sum_wt += new_wt
                 sum_wt2 += (new_wt * new_wt)
                 old_wt += new_wt
+                if not adjust:
+                    sum_wt /= old_wt
+                    sum_wt2 /= (old_wt * old_wt)
+                    old_wt = 1.
         elif is_observation:
             mean_x = cur_x
             mean_y = cur_y
@@ -679,11 +685,11 @@ def ewm_std_1d_nb(a, span, minp=None):
 
 
 @njit(cache=True)
-def ewm_std_nb(a, span, minp=None):
+def ewm_std_nb(a, span, minp=None, adjust=False, ddof=0):
     &#34;&#34;&#34;2-dim version of `ewm_std_1d_nb`.&#34;&#34;&#34;
     result = np.empty_like(a, dtype=np.float_)
     for col in range(a.shape[1]):
-        result[:, col] = ewm_std_1d_nb(a[:, col], span, minp=minp)
+        result[:, col] = ewm_std_1d_nb(a[:, col], span, minp=minp, adjust=adjust, ddof=ddof)
     return result
 
 
@@ -763,17 +769,17 @@ def expanding_mean_nb(a, minp=1):
 
 
 @njit(cache=True)
-def expanding_std_1d_nb(a, minp=1):
+def expanding_std_1d_nb(a, minp=1, ddof=0):
     &#34;&#34;&#34;Return expanding standard deviation.
 
-    Numba equivalent to `pd.Series(a).expanding(min_periods=minp).std()`.&#34;&#34;&#34;
-    return rolling_std_1d_nb(a, a.shape[0], minp=minp)
+    Numba equivalent to `pd.Series(a).expanding(min_periods=minp).std(ddof=ddof)`.&#34;&#34;&#34;
+    return rolling_std_1d_nb(a, a.shape[0], minp=minp, ddof=ddof)
 
 
 @njit(cache=True)
-def expanding_std_nb(a, minp=1):
+def expanding_std_nb(a, minp=1, ddof=0):
     &#34;&#34;&#34;2-dim version of `expanding_std_1d_nb`.&#34;&#34;&#34;
-    return rolling_std_nb(a, a.shape[0], minp=minp)
+    return rolling_std_nb(a, a.shape[0], minp=minp, ddof=ddof)
 
 
 # ############# Apply functions ############# #
@@ -1113,6 +1119,46 @@ def argmin_reduce_nb(col, a, *args):
     return np.argmin(a)</code></pre>
 </details>
 </dd>
+<dt id="vectorbt.generic.nb.concat_ranges_1d_nb"><code class="name flex">
+<span>def <span class="ident fname">concat_ranges_1d_nb</span></span>(<span>a, start_idxs, end_idxs)</span>
+</code></dt>
+<dd>
+<div class="desc"><p>Roll a window.</p>
+<p>For each index pair from <code>start_idxs</code> and <code>end_idxs</code>, slices <code>a</code> along index and concatenates.</p></div>
+<details class="source">
+<summary>
+<span>Expand source code</span>
+</summary>
+<pre><code class="python">@njit(cache=True)
+def concat_ranges_1d_nb(a, start_idxs, end_idxs):
+    &#34;&#34;&#34;Roll a window.
+
+    For each index pair from `start_idxs` and `end_idxs`, slices `a` along index and concatenates.&#34;&#34;&#34;
+    result = np.empty((end_idxs[0] - start_idxs[0], start_idxs.shape[0]), dtype=a.dtype)
+    for idx in range(start_idxs.shape[0]):
+        result[:, idx] = a[start_idxs[idx]:end_idxs[idx]]
+    return result</code></pre>
+</details>
+</dd>
+<dt id="vectorbt.generic.nb.concat_ranges_nb"><code class="name flex">
+<span>def <span class="ident fname">concat_ranges_nb</span></span>(<span>a, start_idxs, end_idxs)</span>
+</code></dt>
+<dd>
+<div class="desc"><p>2-dim version of <code>range_1d_nb</code>.</p></div>
+<details class="source">
+<summary>
+<span>Expand source code</span>
+</summary>
+<pre><code class="python">@njit(cache=True)
+def concat_ranges_nb(a, start_idxs, end_idxs):
+    &#34;&#34;&#34;2-dim version of `range_1d_nb`.&#34;&#34;&#34;
+    result = np.empty((end_idxs[0] - start_idxs[0], start_idxs.shape[0] * a.shape[1]), dtype=a.dtype)
+    for col in range(a.shape[1]):
+        result[:, col * start_idxs.shape[0]:(col + 1) * start_idxs.shape[0]] = \
+            concat_ranges_1d_nb(a[:, col], start_idxs, end_idxs)
+    return result</code></pre>
+</details>
+</dd>
 <dt id="vectorbt.generic.nb.count_reduce_nb"><code class="name flex">
 <span>def <span class="ident fname">count_reduce_nb</span></span>(<span>col, a, *args)</span>
 </code></dt>
@@ -1284,21 +1330,21 @@ def diff_nb(a):
 </details>
 </dd>
 <dt id="vectorbt.generic.nb.ewm_mean_1d_nb"><code class="name flex">
-<span>def <span class="ident fname">ewm_mean_1d_nb</span></span>(<span>a, span, minp=None)</span>
+<span>def <span class="ident fname">ewm_mean_1d_nb</span></span>(<span>a, span, minp=None, adjust=False)</span>
 </code></dt>
 <dd>
 <div class="desc"><p>Return exponential weighted average.</p>
-<p>Numba equivalent to <code>pd.Series(a).ewm(span=span, min_periods=minp).mean()</code>.</p>
+<p>Numba equivalent to <code>pd.Series(a).ewm(span=span, min_periods=minp, adjust=adjust).mean()</code>.</p>
 <p>Adaptation of <code>pd._libs.window.aggregations.window_aggregations.ewma</code> with default arguments.</p></div>
 <details class="source">
 <summary>
 <span>Expand source code</span>
 </summary>
 <pre><code class="python">@njit(cache=True)
-def ewm_mean_1d_nb(a, span, minp=None):
+def ewm_mean_1d_nb(a, span, minp=None, adjust=False):
     &#34;&#34;&#34;Return exponential weighted average.
 
-    Numba equivalent to `pd.Series(a).ewm(span=span, min_periods=minp).mean()`.
+    Numba equivalent to `pd.Series(a).ewm(span=span, min_periods=minp, adjust=adjust).mean()`.
 
     Adaptation of `pd._libs.window.aggregations.window_aggregations.ewma` with default arguments.&#34;&#34;&#34;
     if minp is None:
@@ -1312,7 +1358,7 @@ def ewm_mean_1d_nb(a, span, minp=None):
     com = (span - 1) / 2.0
     alpha = 1. / (1. + com)
     old_wt_factor = 1. - alpha
-    new_wt = 1.
+    new_wt = 1. if adjust else alpha
     weighted_avg = a[0]
     is_observation = (weighted_avg == weighted_avg)
     nobs = int(is_observation)
@@ -1329,7 +1375,10 @@ def ewm_mean_1d_nb(a, span, minp=None):
                 # avoid numerical errors on constant series
                 if weighted_avg != cur:
                     weighted_avg = ((old_wt * weighted_avg) + (new_wt * cur)) / (old_wt + new_wt)
-                old_wt += new_wt
+                if adjust:
+                    old_wt += new_wt
+                else:
+                    old_wt = 1.
         elif is_observation:
             weighted_avg = cur
         result[i] = weighted_avg if (nobs &gt;= minp) else np.nan
@@ -1337,7 +1386,7 @@ def ewm_mean_1d_nb(a, span, minp=None):
 </details>
 </dd>
 <dt id="vectorbt.generic.nb.ewm_mean_nb"><code class="name flex">
-<span>def <span class="ident fname">ewm_mean_nb</span></span>(<span>a, span, minp=None)</span>
+<span>def <span class="ident fname">ewm_mean_nb</span></span>(<span>a, span, minp=None, adjust=False)</span>
 </code></dt>
 <dd>
 <div class="desc"><p>2-dim version of <code><a title="vectorbt.generic.nb.ewm_mean_1d_nb" href="#vectorbt.generic.nb.ewm_mean_1d_nb">ewm_mean_1d_nb()</a></code>.</p></div>
@@ -1346,30 +1395,30 @@ def ewm_mean_1d_nb(a, span, minp=None):
 <span>Expand source code</span>
 </summary>
 <pre><code class="python">@njit(cache=True)
-def ewm_mean_nb(a, span, minp=None):
+def ewm_mean_nb(a, span, minp=None, adjust=False):
     &#34;&#34;&#34;2-dim version of `ewm_mean_1d_nb`.&#34;&#34;&#34;
     result = np.empty_like(a, dtype=np.float_)
     for col in range(a.shape[1]):
-        result[:, col] = ewm_mean_1d_nb(a[:, col], span, minp=minp)
+        result[:, col] = ewm_mean_1d_nb(a[:, col], span, minp=minp, adjust=adjust)
     return result</code></pre>
 </details>
 </dd>
 <dt id="vectorbt.generic.nb.ewm_std_1d_nb"><code class="name flex">
-<span>def <span class="ident fname">ewm_std_1d_nb</span></span>(<span>a, span, minp=None)</span>
+<span>def <span class="ident fname">ewm_std_1d_nb</span></span>(<span>a, span, minp=None, adjust=False, ddof=0)</span>
 </code></dt>
 <dd>
 <div class="desc"><p>Return exponential weighted standard deviation.</p>
-<p>Numba equivalent to <code>pd.Series(a).ewm(span=span, min_periods=minp).std()</code>.</p>
+<p>Numba equivalent to <code>pd.Series(a).ewm(span=span, min_periods=minp).std(ddof=ddof)</code>.</p>
 <p>Adaptation of <code>pd._libs.window.aggregations.window_aggregations.ewmcov</code> with default arguments.</p></div>
 <details class="source">
 <summary>
 <span>Expand source code</span>
 </summary>
 <pre><code class="python">@njit(cache=True)
-def ewm_std_1d_nb(a, span, minp=None):
+def ewm_std_1d_nb(a, span, minp=None, adjust=False, ddof=0):
     &#34;&#34;&#34;Return exponential weighted standard deviation.
 
-    Numba equivalent to `pd.Series(a).ewm(span=span, min_periods=minp).std()`.
+    Numba equivalent to `pd.Series(a).ewm(span=span, min_periods=minp).std(ddof=ddof)`.
 
     Adaptation of `pd._libs.window.aggregations.window_aggregations.ewmcov` with default arguments.&#34;&#34;&#34;
     if minp is None:
@@ -1383,7 +1432,7 @@ def ewm_std_1d_nb(a, span, minp=None):
     com = (span - 1) / 2.0
     alpha = 1. / (1. + com)
     old_wt_factor = 1. - alpha
-    new_wt = 1.
+    new_wt = 1. if adjust else alpha
     mean_x = a[0]
     mean_y = a[0]
     is_observation = ((mean_x == mean_x) and (mean_y == mean_y))
@@ -1426,6 +1475,10 @@ def ewm_std_1d_nb(a, span, minp=None):
                 sum_wt += new_wt
                 sum_wt2 += (new_wt * new_wt)
                 old_wt += new_wt
+                if not adjust:
+                    sum_wt /= old_wt
+                    sum_wt2 /= (old_wt * old_wt)
+                    old_wt = 1.
         elif is_observation:
             mean_x = cur_x
             mean_y = cur_y
@@ -1443,7 +1496,7 @@ def ewm_std_1d_nb(a, span, minp=None):
 </details>
 </dd>
 <dt id="vectorbt.generic.nb.ewm_std_nb"><code class="name flex">
-<span>def <span class="ident fname">ewm_std_nb</span></span>(<span>a, span, minp=None)</span>
+<span>def <span class="ident fname">ewm_std_nb</span></span>(<span>a, span, minp=None, adjust=False, ddof=0)</span>
 </code></dt>
 <dd>
 <div class="desc"><p>2-dim version of <code><a title="vectorbt.generic.nb.ewm_std_1d_nb" href="#vectorbt.generic.nb.ewm_std_1d_nb">ewm_std_1d_nb()</a></code>.</p></div>
@@ -1452,11 +1505,11 @@ def ewm_std_1d_nb(a, span, minp=None):
 <span>Expand source code</span>
 </summary>
 <pre><code class="python">@njit(cache=True)
-def ewm_std_nb(a, span, minp=None):
+def ewm_std_nb(a, span, minp=None, adjust=False, ddof=0):
     &#34;&#34;&#34;2-dim version of `ewm_std_1d_nb`.&#34;&#34;&#34;
     result = np.empty_like(a, dtype=np.float_)
     for col in range(a.shape[1]):
-        result[:, col] = ewm_std_1d_nb(a[:, col], span, minp=minp)
+        result[:, col] = ewm_std_1d_nb(a[:, col], span, minp=minp, adjust=adjust, ddof=ddof)
     return result</code></pre>
 </details>
 </dd>
@@ -1620,25 +1673,25 @@ def expanding_min_nb(a, minp=1):
 </details>
 </dd>
 <dt id="vectorbt.generic.nb.expanding_std_1d_nb"><code class="name flex">
-<span>def <span class="ident fname">expanding_std_1d_nb</span></span>(<span>a, minp=1)</span>
+<span>def <span class="ident fname">expanding_std_1d_nb</span></span>(<span>a, minp=1, ddof=0)</span>
 </code></dt>
 <dd>
 <div class="desc"><p>Return expanding standard deviation.</p>
-<p>Numba equivalent to <code>pd.Series(a).expanding(min_periods=minp).std()</code>.</p></div>
+<p>Numba equivalent to <code>pd.Series(a).expanding(min_periods=minp).std(ddof=ddof)</code>.</p></div>
 <details class="source">
 <summary>
 <span>Expand source code</span>
 </summary>
 <pre><code class="python">@njit(cache=True)
-def expanding_std_1d_nb(a, minp=1):
+def expanding_std_1d_nb(a, minp=1, ddof=0):
     &#34;&#34;&#34;Return expanding standard deviation.
 
-    Numba equivalent to `pd.Series(a).expanding(min_periods=minp).std()`.&#34;&#34;&#34;
-    return rolling_std_1d_nb(a, a.shape[0], minp=minp)</code></pre>
+    Numba equivalent to `pd.Series(a).expanding(min_periods=minp).std(ddof=ddof)`.&#34;&#34;&#34;
+    return rolling_std_1d_nb(a, a.shape[0], minp=minp, ddof=ddof)</code></pre>
 </details>
 </dd>
 <dt id="vectorbt.generic.nb.expanding_std_nb"><code class="name flex">
-<span>def <span class="ident fname">expanding_std_nb</span></span>(<span>a, minp=1)</span>
+<span>def <span class="ident fname">expanding_std_nb</span></span>(<span>a, minp=1, ddof=0)</span>
 </code></dt>
 <dd>
 <div class="desc"><p>2-dim version of <code><a title="vectorbt.generic.nb.expanding_std_1d_nb" href="#vectorbt.generic.nb.expanding_std_1d_nb">expanding_std_1d_nb()</a></code>.</p></div>
@@ -1647,9 +1700,9 @@ def expanding_std_1d_nb(a, minp=1):
 <span>Expand source code</span>
 </summary>
 <pre><code class="python">@njit(cache=True)
-def expanding_std_nb(a, minp=1):
+def expanding_std_nb(a, minp=1, ddof=0):
     &#34;&#34;&#34;2-dim version of `expanding_std_1d_nb`.&#34;&#34;&#34;
-    return rolling_std_nb(a, a.shape[0], minp=minp)</code></pre>
+    return rolling_std_nb(a, a.shape[0], minp=minp, ddof=ddof)</code></pre>
 </details>
 </dd>
 <dt id="vectorbt.generic.nb.ffill_1d_nb"><code class="name flex">
@@ -1995,7 +2048,7 @@ def nanmin_nb(a):
 </details>
 </dd>
 <dt id="vectorbt.generic.nb.nanstd_1d_nb"><code class="name flex">
-<span>def <span class="ident fname">nanstd_1d_nb</span></span>(<span>a, ddof=1)</span>
+<span>def <span class="ident fname">nanstd_1d_nb</span></span>(<span>a, ddof=0)</span>
 </code></dt>
 <dd>
 <div class="desc"><p>Compute the standard deviation while ignoring NaNs.</p></div>
@@ -2004,7 +2057,7 @@ def nanmin_nb(a):
 <span>Expand source code</span>
 </summary>
 <pre><code class="python">@njit(cache=True)
-def nanstd_1d_nb(a, ddof=1):
+def nanstd_1d_nb(a, ddof=0):
     &#34;&#34;&#34;Compute the standard deviation while ignoring NaNs.&#34;&#34;&#34;
     cnt = a.shape[0] - np.count_nonzero(np.isnan(a))
     rcount = max(cnt - ddof, 0)
@@ -2015,7 +2068,7 @@ def nanstd_1d_nb(a, ddof=1):
 </details>
 </dd>
 <dt id="vectorbt.generic.nb.nanstd_nb"><code class="name flex">
-<span>def <span class="ident fname">nanstd_nb</span></span>(<span>a, ddof=1)</span>
+<span>def <span class="ident fname">nanstd_nb</span></span>(<span>a, ddof=0)</span>
 </code></dt>
 <dd>
 <div class="desc"><p>2-dim version of <code><a title="vectorbt.generic.nb.nanstd_1d_nb" href="#vectorbt.generic.nb.nanstd_1d_nb">nanstd_1d_nb()</a></code>.</p></div>
@@ -2024,7 +2077,7 @@ def nanstd_1d_nb(a, ddof=1):
 <span>Expand source code</span>
 </summary>
 <pre><code class="python">@njit(cache=True)
-def nanstd_nb(a, ddof=1):
+def nanstd_nb(a, ddof=0):
     &#34;&#34;&#34;2-dim version of `nanstd_1d_nb`.&#34;&#34;&#34;
     result = np.empty(a.shape[1], dtype=np.float_)
     for col in range(a.shape[1]):
@@ -2461,26 +2514,24 @@ def rolling_min_nb(a, window, minp=None):
 </details>
 </dd>
 <dt id="vectorbt.generic.nb.rolling_std_1d_nb"><code class="name flex">
-<span>def <span class="ident fname">rolling_std_1d_nb</span></span>(<span>a, window, minp=None)</span>
+<span>def <span class="ident fname">rolling_std_1d_nb</span></span>(<span>a, window, minp=None, ddof=0)</span>
 </code></dt>
 <dd>
 <div class="desc"><p>Return rolling standard deviation.</p>
-<p>Numba equivalent to <code>pd.Series(a).rolling(window, min_periods=minp).std()</code>.</p></div>
+<p>Numba equivalent to <code>pd.Series(a).rolling(window, min_periods=minp).std(ddof=ddof)</code>.</p></div>
 <details class="source">
 <summary>
 <span>Expand source code</span>
 </summary>
 <pre><code class="python">@njit(cache=True)
-def rolling_std_1d_nb(a, window, minp=None):
+def rolling_std_1d_nb(a, window, minp=None, ddof=0):
     &#34;&#34;&#34;Return rolling standard deviation.
 
-    Numba equivalent to `pd.Series(a).rolling(window, min_periods=minp).std()`.&#34;&#34;&#34;
+    Numba equivalent to `pd.Series(a).rolling(window, min_periods=minp).std(ddof=ddof)`.&#34;&#34;&#34;
     if minp is None:
         minp = window
     if minp &gt; window:
         raise ValueError(&#34;minp must be &lt;= window&#34;)
-    if minp == 1:
-        minp = 2
     result = np.empty_like(a, dtype=np.float_)
     cumsum_arr = np.zeros_like(a)
     cumsum = 0
@@ -2506,17 +2557,17 @@ def rolling_std_1d_nb(a, window, minp=None):
             window_len = window - (nancnt - nancnt_arr[i - window])
             window_cumsum = cumsum - cumsum_arr[i - window]
             window_cumsum_sq = cumsum_sq - cumsum_sq_arr[i - window]
-        if window_len &lt; minp:
+        if window_len &lt; minp or window_len == ddof:
             result[i] = np.nan
         else:
             mean = window_cumsum / window_len
             result[i] = np.sqrt(np.abs(window_cumsum_sq - 2 * window_cumsum *
-                                       mean + window_len * mean ** 2) / (window_len - 1))
+                                       mean + window_len * mean ** 2) / (window_len - ddof))
     return result</code></pre>
 </details>
 </dd>
 <dt id="vectorbt.generic.nb.rolling_std_nb"><code class="name flex">
-<span>def <span class="ident fname">rolling_std_nb</span></span>(<span>a, window, minp=None)</span>
+<span>def <span class="ident fname">rolling_std_nb</span></span>(<span>a, window, minp=None, ddof=0)</span>
 </code></dt>
 <dd>
 <div class="desc"><p>2-dim version of <code><a title="vectorbt.generic.nb.rolling_std_1d_nb" href="#vectorbt.generic.nb.rolling_std_1d_nb">rolling_std_1d_nb()</a></code>.</p></div>
@@ -2525,54 +2576,11 @@ def rolling_std_1d_nb(a, window, minp=None):
 <span>Expand source code</span>
 </summary>
 <pre><code class="python">@njit(cache=True)
-def rolling_std_nb(a, window, minp=None):
+def rolling_std_nb(a, window, minp=None, ddof=0):
     &#34;&#34;&#34;2-dim version of `rolling_std_1d_nb`.&#34;&#34;&#34;
     result = np.empty_like(a, dtype=np.float_)
     for col in range(a.shape[1]):
-        result[:, col] = rolling_std_1d_nb(a[:, col], window, minp=minp)
-    return result</code></pre>
-</details>
-</dd>
-<dt id="vectorbt.generic.nb.rolling_window_1d_nb"><code class="name flex">
-<span>def <span class="ident fname">rolling_window_1d_nb</span></span>(<span>a, window)</span>
-</code></dt>
-<dd>
-<div class="desc"><p>Roll a window.</p>
-<p>Creates a matrix of rolled windows with first axis being window size.</p></div>
-<details class="source">
-<summary>
-<span>Expand source code</span>
-</summary>
-<pre><code class="python">@njit(cache=True)
-def rolling_window_1d_nb(a, window):
-    &#34;&#34;&#34;Roll a window.
-
-    Creates a matrix of rolled windows with first axis being window size.&#34;&#34;&#34;
-    width = a.shape[0] - window + 1
-    result = np.empty((window, width), dtype=np.float_)
-    for col in range(width):
-        result[:, col] = a[col:col + window]
-    return result</code></pre>
-</details>
-</dd>
-<dt id="vectorbt.generic.nb.rolling_window_nb"><code class="name flex">
-<span>def <span class="ident fname">rolling_window_nb</span></span>(<span>a, window)</span>
-</code></dt>
-<dd>
-<div class="desc"><p>2-dim version of <code><a title="vectorbt.generic.nb.rolling_window_1d_nb" href="#vectorbt.generic.nb.rolling_window_1d_nb">rolling_window_1d_nb()</a></code>.</p>
-<p>Creates a cube of rolled windows with first axis being columns and second axis being window size.</p></div>
-<details class="source">
-<summary>
-<span>Expand source code</span>
-</summary>
-<pre><code class="python">@njit(cache=True)
-def rolling_window_nb(a, window):
-    &#34;&#34;&#34;2-dim version of `rolling_window_1d_nb`.
-
-    Creates a cube of rolled windows with first axis being columns and second axis being window size.&#34;&#34;&#34;
-    result = np.empty((a.shape[1], window, a.shape[0] - window + 1), dtype=np.float_)
-    for col in range(a.shape[1]):
-        result[col, :, :] = rolling_window_1d_nb(a[:, col], window)
+        result[:, col] = rolling_std_1d_nb(a[:, col], window, minp=minp, ddof=ddof)
     return result</code></pre>
 </details>
 </dd>
@@ -2713,6 +2721,8 @@ title="Search"
 <li><code><a title="vectorbt.generic.nb.applymap_nb" href="#vectorbt.generic.nb.applymap_nb">applymap_nb</a></code></li>
 <li><code><a title="vectorbt.generic.nb.argmax_reduce_nb" href="#vectorbt.generic.nb.argmax_reduce_nb">argmax_reduce_nb</a></code></li>
 <li><code><a title="vectorbt.generic.nb.argmin_reduce_nb" href="#vectorbt.generic.nb.argmin_reduce_nb">argmin_reduce_nb</a></code></li>
+<li><code><a title="vectorbt.generic.nb.concat_ranges_1d_nb" href="#vectorbt.generic.nb.concat_ranges_1d_nb">concat_ranges_1d_nb</a></code></li>
+<li><code><a title="vectorbt.generic.nb.concat_ranges_nb" href="#vectorbt.generic.nb.concat_ranges_nb">concat_ranges_nb</a></code></li>
 <li><code><a title="vectorbt.generic.nb.count_reduce_nb" href="#vectorbt.generic.nb.count_reduce_nb">count_reduce_nb</a></code></li>
 <li><code><a title="vectorbt.generic.nb.cumprod_1d_nb" href="#vectorbt.generic.nb.cumprod_1d_nb">cumprod_1d_nb</a></code></li>
 <li><code><a title="vectorbt.generic.nb.cumprod_nb" href="#vectorbt.generic.nb.cumprod_nb">cumprod_nb</a></code></li>
@@ -2775,8 +2785,6 @@ title="Search"
 <li><code><a title="vectorbt.generic.nb.rolling_min_nb" href="#vectorbt.generic.nb.rolling_min_nb">rolling_min_nb</a></code></li>
 <li><code><a title="vectorbt.generic.nb.rolling_std_1d_nb" href="#vectorbt.generic.nb.rolling_std_1d_nb">rolling_std_1d_nb</a></code></li>
 <li><code><a title="vectorbt.generic.nb.rolling_std_nb" href="#vectorbt.generic.nb.rolling_std_nb">rolling_std_nb</a></code></li>
-<li><code><a title="vectorbt.generic.nb.rolling_window_1d_nb" href="#vectorbt.generic.nb.rolling_window_1d_nb">rolling_window_1d_nb</a></code></li>
-<li><code><a title="vectorbt.generic.nb.rolling_window_nb" href="#vectorbt.generic.nb.rolling_window_nb">rolling_window_nb</a></code></li>
 <li><code><a title="vectorbt.generic.nb.set_by_mask_1d_nb" href="#vectorbt.generic.nb.set_by_mask_1d_nb">set_by_mask_1d_nb</a></code></li>
 <li><code><a title="vectorbt.generic.nb.set_by_mask_mult_1d_nb" href="#vectorbt.generic.nb.set_by_mask_mult_1d_nb">set_by_mask_mult_1d_nb</a></code></li>
 <li><code><a title="vectorbt.generic.nb.set_by_mask_mult_nb" href="#vectorbt.generic.nb.set_by_mask_mult_nb">set_by_mask_mult_nb</a></code></li>
