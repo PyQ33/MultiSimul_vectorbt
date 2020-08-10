@@ -35,6 +35,7 @@ ga('create', 'UA-142521178-3', 'auto'); ga('send', 'pageview');
 2-dim, unless function has suffix <code>_1d</code> or is meant to be input to another function.
 Data is processed along index (axis 0).</p>
 <p>All functions passed as argument must be Numba-compiled.</p>
+<p>Returned indices must be absolute.</p>
 </div>
 <details class="source">
 <summary>
@@ -47,7 +48,9 @@ Data is processed along index (axis 0).</p>
     2-dim, unless function has suffix `_1d` or is meant to be input to another function. 
     Data is processed along index (axis 0).
     
-    All functions passed as argument must be Numba-compiled.&#34;&#34;&#34;
+    All functions passed as argument must be Numba-compiled.
+
+    Returned indices must be absolute.&#34;&#34;&#34;
 
 from numba import njit
 import numpy as np
@@ -67,9 +70,6 @@ def generate_nb(shape, choice_func_nb, *args):
     of the range `from_i`, index of the end of the range `to_i`, and `*args`.
     It must return an array of indices from `[from_i, to_i)` (can be empty).
 
-    !!! note
-        Returned indices must be absolute.
-
     Example:
         ```python-repl
         &gt;&gt;&gt; from numba import njit
@@ -80,7 +80,7 @@ def generate_nb(shape, choice_func_nb, *args):
         ... def choice_func_nb(col, from_i, to_i):
         ...     return np.array([from_i + col])
 
-        &gt;&gt;&gt; print(generate_nb((5, 3), choice_func_nb))
+        &gt;&gt;&gt; generate_nb((5, 3), choice_func_nb)
         [[ True False False]
          [False  True False]
          [False False  True]
@@ -96,43 +96,45 @@ def generate_nb(shape, choice_func_nb, *args):
 
 
 @njit
-def generate_after_nb(a, choice_func_nb, *args):
-    &#34;&#34;&#34;Pick signals using `choice_func_nb` after each signal in `a`.
+def generate_ex_nb(entries, exit_choice_func_nb, *args):
+    &#34;&#34;&#34;Pick exit signals using `exit_choice_func_nb` after each signal in `entries`.
 
-    `choice_func_nb` is same as for `generate_nb`.&#34;&#34;&#34;
-    result = np.full_like(a, False)
+    `exit_choice_func_nb` is same as for `generate_nb`.&#34;&#34;&#34;
+    exits = np.full_like(entries, False)
 
-    for col in range(a.shape[1]):
-        a_idxs = np.flatnonzero(a[:, col])
-        for i in range(a_idxs.shape[0]):
+    for col in range(entries.shape[1]):
+        entry_idxs = np.flatnonzero(entries[:, col])
+        for i in range(entry_idxs.shape[0]):
             # Calculate the range to choose from
-            prev_idx = a_idxs[i]
-            if i &lt; a_idxs.shape[0] - 1:
-                next_idx = a_idxs[i + 1]
+            prev_idx = entry_idxs[i]
+            if i &lt; entry_idxs.shape[0] - 1:
+                next_idx = entry_idxs[i + 1]
             else:
-                next_idx = a.shape[0]
-            if prev_idx &lt; a.shape[0] - 1:
+                next_idx = entries.shape[0]
+            if prev_idx &lt; entries.shape[0] - 1:
                 if next_idx - prev_idx &gt; 1:
                     # Run the UDF
                     from_i = prev_idx + 1
                     to_i = next_idx
-                    idxs = choice_func_nb(col, from_i, to_i, *args)
+                    idxs = exit_choice_func_nb(col, from_i, to_i, *args)
                     if np.any(idxs &lt; from_i) or np.any(idxs &gt;= to_i):
                         raise ValueError(&#34;Returned indices are out of bounds&#34;)
-                    result[idxs, col] = True
-    return result
+                    exits[idxs, col] = True
+    return exits
 
 
 @njit
-def generate_iteratively_nb(shape, choice_func1_nb, choice_func2_nb, args_1, args_2):
-    &#34;&#34;&#34;Pick signals using `choice_func1_nb` and `choice_func2_nb` one after another.
+def generate_enex_nb(shape, entry_choice_func_nb, exit_choice_func_nb, entry_args, exit_args):
+    &#34;&#34;&#34;Pick entry signals using `entry_choice_func_nb` and exit signals using 
+    `exit_choice_func_nb` iteratively.
 
-    `choice_func1_nb` and `choice_func2_nb` are same as for `generate_nb`.
-    `args_1` and `args_2` must be tuples that will be unpacked and passed to each function respectively.
+    `entry_choice_func_nb` and `exit_choice_func_nb` are same as for `generate_nb`.
+    `entry_args` and `exit_args` must be tuples that will be unpacked and passed to
+    each function respectively.
 
     If any function returns multiple values, only the first value will be picked.&#34;&#34;&#34;
-    result1 = np.full(shape, False)
-    result2 = np.full(shape, False)
+    entries = np.full(shape, False)
+    exits = np.full(shape, False)
 
     for col in range(shape[1]):
         prev_idx = -1
@@ -142,11 +144,11 @@ def generate_iteratively_nb(shape, choice_func1_nb, choice_func2_nb, args_1, arg
             to_i = shape[0]
             if i % 2 == 0:
                 # Cannot assign two functions to a var in numba
-                idxs = choice_func1_nb(col, from_i, to_i, *args_1)
-                a = result1
+                idxs = entry_choice_func_nb(col, from_i, to_i, *entry_args)
+                a = entries
             else:
-                idxs = choice_func2_nb(col, from_i, to_i, *args_2)
-                a = result2
+                idxs = exit_choice_func_nb(col, from_i, to_i, *exit_args)
+                a = exits
             if len(idxs) == 0:
                 break
             next_idx = idxs[0]
@@ -155,7 +157,7 @@ def generate_iteratively_nb(shape, choice_func1_nb, choice_func2_nb, args_1, arg
             a[next_idx, col] = True
             prev_idx = next_idx
             i += 1
-    return result1, result2
+    return entries, exits
 
 
 # ############# Random ############# #
@@ -238,7 +240,7 @@ def generate_rand_ex_nb(entries, seed=None):
     Specify seed to make output deterministic.&#34;&#34;&#34;
     if seed is not None:
         np.random.seed(seed)
-    return generate_after_nb(entries, rand_choice_nb, 1)
+    return generate_ex_nb(entries, rand_choice_nb, 1)
 
 
 @njit
@@ -249,7 +251,7 @@ def generate_rand_ex_by_prob_nb(entries, probs, seed=None):
     Specify seed to make output deterministic.&#34;&#34;&#34;
     if seed is not None:
         np.random.seed(seed)
-    return generate_after_nb(entries, rand_by_prob_choice_nb, probs, True)
+    return generate_ex_nb(entries, rand_by_prob_choice_nb, probs, True)
 
 
 @njit
@@ -277,7 +279,7 @@ def generate_rand_enex_by_prob_nb(shape, entry_probs, exit_probs, seed=None):
     Specify seed to make output deterministic.&#34;&#34;&#34;
     if seed is not None:
         np.random.seed(seed)
-    return generate_iteratively_nb(
+    return generate_enex_nb(
         shape,
         rand_by_prob_choice_nb,
         rand_by_prob_choice_nb,
@@ -323,13 +325,13 @@ def tp_choice_nb(col, from_i, to_i, ts, stop, first):
 @njit
 def sl_apply_nb(i, entries, ts, stops, trailing, first):
     &#34;&#34;&#34;`apply_func_nb` for stop loss used in `vectorbt.base.combine_fns.apply_and_concat_one_nb`.&#34;&#34;&#34;
-    return generate_after_nb(entries, sl_choice_nb, ts, stops[i, :, :], trailing, first)
+    return generate_ex_nb(entries, sl_choice_nb, ts, stops[i, :, :], trailing, first)
 
 
 @njit
 def sl_iter_apply_nb(i, entries, ts, stops, trailing, first):
     &#34;&#34;&#34;`apply_func_nb` for iterative stop loss used in `vectorbt.base.combine_fns.apply_and_concat_one_nb`.&#34;&#34;&#34;
-    return generate_iteratively_nb(
+    return generate_enex_nb(
         entries.shape,
         true_choice_nb,
         sl_choice_nb,
@@ -339,13 +341,13 @@ def sl_iter_apply_nb(i, entries, ts, stops, trailing, first):
 @njit
 def tp_apply_nb(i, entries, ts, stops, first):
     &#34;&#34;&#34;`apply_func_nb` for take profit used in `vectorbt.base.combine_fns.apply_and_concat_one_nb`.&#34;&#34;&#34;
-    return generate_after_nb(entries, tp_choice_nb, ts, stops[i, :, :], first)
+    return generate_ex_nb(entries, tp_choice_nb, ts, stops[i, :, :], first)
 
 
 @njit
 def tp_iter_apply_nb(i, entries, ts, stops, first):
     &#34;&#34;&#34;`apply_func_nb` for iterative take profit used in `vectorbt.base.combine_fns.apply_and_concat_one_nb`.&#34;&#34;&#34;
-    return generate_iteratively_nb(
+    return generate_enex_nb(
         entries.shape,
         true_choice_nb,
         tp_choice_nb,
@@ -354,7 +356,7 @@ def tp_iter_apply_nb(i, entries, ts, stops, first):
 
 @njit
 def generate_sl_ex_nb(entries, ts, stops, trailing=False, first=True):
-    &#34;&#34;&#34;Generate (trailing) stop loss exits using `generate_after_nb`.
+    &#34;&#34;&#34;Generate (trailing) stop loss exits using `generate_ex_nb`.
 
     For each signal in `entries`, find the first value in `ts` that is below the (trailing) stop.
 
@@ -379,8 +381,7 @@ def generate_sl_ex_nb(entries, ts, stops, trailing=False, first=True):
         &gt;&gt;&gt; ts = np.asarray([1, 2, 3, 2, 1])[:, None]
         &gt;&gt;&gt; stops = broadcast_to_array_of([0.1, 0.5], ts)
 
-        &gt;&gt;&gt; print(generate_sl_ex_nb(entries, ts, stops,
-        ...     trailing=True, first=True))
+        &gt;&gt;&gt; generate_sl_ex_nb(entries, ts, stops, trailing=True, first=True)
         [[False False]
          [False False]
          [False False]
@@ -393,7 +394,7 @@ def generate_sl_ex_nb(entries, ts, stops, trailing=False, first=True):
 
 @njit
 def generate_sl_ex_iter_nb(entries, ts, stops, trailing=False):
-    &#34;&#34;&#34;Generate (trailing) stop loss exits iteratively using `generate_iteratively_nb`.
+    &#34;&#34;&#34;Generate (trailing) stop loss exits iteratively using `generate_enex_nb`.
 
     Returns two arrays: new entries and exits.
 
@@ -404,7 +405,7 @@ def generate_sl_ex_iter_nb(entries, ts, stops, trailing=False):
 
 @njit
 def generate_tp_ex_nb(entries, ts, stops, first=True):
-    &#34;&#34;&#34;Generate take profit exits using `generate_after_nb`.
+    &#34;&#34;&#34;Generate take profit exits using `generate_ex_nb`.
 
     For arguments, see `generate_sl_ex_nb`.&#34;&#34;&#34;
     return combine_fns.apply_and_concat_one_nb(
@@ -413,7 +414,7 @@ def generate_tp_ex_nb(entries, ts, stops, first=True):
 
 @njit
 def generate_tp_ex_iter_nb(entries, ts, stops):
-    &#34;&#34;&#34;Generate take profit exits iteratively using `generate_iteratively_nb`.
+    &#34;&#34;&#34;Generate take profit exits iteratively using `generate_enex_nb`.
 
     For arguments, see `generate_sl_ex_nb`.&#34;&#34;&#34;
     return combine_fns.apply_and_concat_multiple_nb(
@@ -434,9 +435,6 @@ def map_reduce_between_nb(a, map_func_nb, reduce_func_nb, *args):
     Applies `reduce_func_nb` on all mapper results in a column. Must accept index of the
     current column, the array of results from `map_func_nb` for that column, and `*args`.
 
-    !!! note
-        Returned indices must be absolute.
-
     Example:
         ```python-repl
         &gt;&gt;&gt; import numpy as np
@@ -451,7 +449,7 @@ def map_reduce_between_nb(a, map_func_nb, reduce_func_nb, *args):
         ...     return np.nanmean(map_res)
         &gt;&gt;&gt; a = np.asarray([False, True, True, False, True])[:, None]
 
-        &gt;&gt;&gt; print(map_reduce_between_nb(a, map_func_nb, reduce_func_nb))
+        &gt;&gt;&gt; map_reduce_between_nb(a, map_func_nb, reduce_func_nb)
         [1.5]
         ```&#34;&#34;&#34;
     result = np.full(a.shape[1], np.nan, dtype=np.float_)
@@ -562,13 +560,13 @@ def rank_1d_nb(a, reset_by=None, after_false=False, allow_gaps=False):
         &gt;&gt;&gt; signals = np.asarray([True, True, False, True, True])
         &gt;&gt;&gt; reset_by = np.asarray([False, True, False, False, True])
 
-        &gt;&gt;&gt; print(rank_1d_nb(signals))
+        &gt;&gt;&gt; rank_1d_nb(signals)
         [1 2 0 1 2]
-        &gt;&gt;&gt; print(rank_1d_nb(signals, after_false=True))
+        &gt;&gt;&gt; rank_1d_nb(signals, after_false=True)
         [0 0 0 1 2]
-        &gt;&gt;&gt; print(rank_1d_nb(signals, allow_gaps=True))
+        &gt;&gt;&gt; rank_1d_nb(signals, allow_gaps=True)
         [1 2 0 3 4]
-        &gt;&gt;&gt; print(rank_1d_nb(signals, allow_gaps=True, reset_by=reset_by))
+        &gt;&gt;&gt; rank_1d_nb(signals, allow_gaps=True, reset_by=reset_by)
         [1 1 0 2 1]
         ```&#34;&#34;&#34;
     result = np.zeros(a.shape, dtype=np.int_)
@@ -621,11 +619,11 @@ def rank_partitions_1d_nb(a, reset_by=None, after_false=False):
         &gt;&gt;&gt; signals = np.asarray([True, True, False, True, True])
         &gt;&gt;&gt; reset_by = np.asarray([False, True, False, False, True])
 
-        &gt;&gt;&gt; print(rank_partitions_1d_nb(signals))
+        &gt;&gt;&gt; rank_partitions_1d_nb(signals)
         [1 1 0 2 2]
-        &gt;&gt;&gt; print(rank_partitions_1d_nb(signals, after_false=True))
+        &gt;&gt;&gt; rank_partitions_1d_nb(signals, after_false=True)
         [0 0 0 1 1]
-        &gt;&gt;&gt; print(rank_partitions_1d_nb(signals, reset_by=reset_by))
+        &gt;&gt;&gt; rank_partitions_1d_nb(signals, reset_by=reset_by)
         [1 1 0 2 1]
         ```&#34;&#34;&#34;
     result = np.zeros(a.shape, dtype=np.int_)
@@ -742,66 +740,32 @@ def fshift_nb(a, n):
     return fshift_1d_nb(a, n)</code></pre>
 </details>
 </dd>
-<dt id="vectorbt.signals.nb.generate_after_nb"><code class="name flex">
-<span>def <span class="ident fname">generate_after_nb</span></span>(<span>a, choice_func_nb, *args)</span>
+<dt id="vectorbt.signals.nb.generate_enex_nb"><code class="name flex">
+<span>def <span class="ident fname">generate_enex_nb</span></span>(<span>shape, entry_choice_func_nb, exit_choice_func_nb, entry_args, exit_args)</span>
 </code></dt>
 <dd>
-<div class="desc"><p>Pick signals using <code>choice_func_nb</code> after each signal in <code>a</code>.</p>
-<p><code>choice_func_nb</code> is same as for <code><a title="vectorbt.signals.nb.generate_nb" href="#vectorbt.signals.nb.generate_nb">generate_nb()</a></code>.</p></div>
-<details class="source">
-<summary>
-<span>Expand source code</span>
-</summary>
-<pre><code class="python">@njit
-def generate_after_nb(a, choice_func_nb, *args):
-    &#34;&#34;&#34;Pick signals using `choice_func_nb` after each signal in `a`.
-
-    `choice_func_nb` is same as for `generate_nb`.&#34;&#34;&#34;
-    result = np.full_like(a, False)
-
-    for col in range(a.shape[1]):
-        a_idxs = np.flatnonzero(a[:, col])
-        for i in range(a_idxs.shape[0]):
-            # Calculate the range to choose from
-            prev_idx = a_idxs[i]
-            if i &lt; a_idxs.shape[0] - 1:
-                next_idx = a_idxs[i + 1]
-            else:
-                next_idx = a.shape[0]
-            if prev_idx &lt; a.shape[0] - 1:
-                if next_idx - prev_idx &gt; 1:
-                    # Run the UDF
-                    from_i = prev_idx + 1
-                    to_i = next_idx
-                    idxs = choice_func_nb(col, from_i, to_i, *args)
-                    if np.any(idxs &lt; from_i) or np.any(idxs &gt;= to_i):
-                        raise ValueError(&#34;Returned indices are out of bounds&#34;)
-                    result[idxs, col] = True
-    return result</code></pre>
-</details>
-</dd>
-<dt id="vectorbt.signals.nb.generate_iteratively_nb"><code class="name flex">
-<span>def <span class="ident fname">generate_iteratively_nb</span></span>(<span>shape, choice_func1_nb, choice_func2_nb, args_1, args_2)</span>
-</code></dt>
-<dd>
-<div class="desc"><p>Pick signals using <code>choice_func1_nb</code> and <code>choice_func2_nb</code> one after another.</p>
-<p><code>choice_func1_nb</code> and <code>choice_func2_nb</code> are same as for <code><a title="vectorbt.signals.nb.generate_nb" href="#vectorbt.signals.nb.generate_nb">generate_nb()</a></code>.
-<code>args_1</code> and <code>args_2</code> must be tuples that will be unpacked and passed to each function respectively.</p>
+<div class="desc"><p>Pick entry signals using <code>entry_choice_func_nb</code> and exit signals using
+<code>exit_choice_func_nb</code> iteratively.</p>
+<p><code>entry_choice_func_nb</code> and <code>exit_choice_func_nb</code> are same as for <code><a title="vectorbt.signals.nb.generate_nb" href="#vectorbt.signals.nb.generate_nb">generate_nb()</a></code>.
+<code>entry_args</code> and <code>exit_args</code> must be tuples that will be unpacked and passed to
+each function respectively.</p>
 <p>If any function returns multiple values, only the first value will be picked.</p></div>
 <details class="source">
 <summary>
 <span>Expand source code</span>
 </summary>
 <pre><code class="python">@njit
-def generate_iteratively_nb(shape, choice_func1_nb, choice_func2_nb, args_1, args_2):
-    &#34;&#34;&#34;Pick signals using `choice_func1_nb` and `choice_func2_nb` one after another.
+def generate_enex_nb(shape, entry_choice_func_nb, exit_choice_func_nb, entry_args, exit_args):
+    &#34;&#34;&#34;Pick entry signals using `entry_choice_func_nb` and exit signals using 
+    `exit_choice_func_nb` iteratively.
 
-    `choice_func1_nb` and `choice_func2_nb` are same as for `generate_nb`.
-    `args_1` and `args_2` must be tuples that will be unpacked and passed to each function respectively.
+    `entry_choice_func_nb` and `exit_choice_func_nb` are same as for `generate_nb`.
+    `entry_args` and `exit_args` must be tuples that will be unpacked and passed to
+    each function respectively.
 
     If any function returns multiple values, only the first value will be picked.&#34;&#34;&#34;
-    result1 = np.full(shape, False)
-    result2 = np.full(shape, False)
+    entries = np.full(shape, False)
+    exits = np.full(shape, False)
 
     for col in range(shape[1]):
         prev_idx = -1
@@ -811,11 +775,11 @@ def generate_iteratively_nb(shape, choice_func1_nb, choice_func2_nb, args_1, arg
             to_i = shape[0]
             if i % 2 == 0:
                 # Cannot assign two functions to a var in numba
-                idxs = choice_func1_nb(col, from_i, to_i, *args_1)
-                a = result1
+                idxs = entry_choice_func_nb(col, from_i, to_i, *entry_args)
+                a = entries
             else:
-                idxs = choice_func2_nb(col, from_i, to_i, *args_2)
-                a = result2
+                idxs = exit_choice_func_nb(col, from_i, to_i, *exit_args)
+                a = exits
             if len(idxs) == 0:
                 break
             next_idx = idxs[0]
@@ -824,7 +788,45 @@ def generate_iteratively_nb(shape, choice_func1_nb, choice_func2_nb, args_1, arg
             a[next_idx, col] = True
             prev_idx = next_idx
             i += 1
-    return result1, result2</code></pre>
+    return entries, exits</code></pre>
+</details>
+</dd>
+<dt id="vectorbt.signals.nb.generate_ex_nb"><code class="name flex">
+<span>def <span class="ident fname">generate_ex_nb</span></span>(<span>entries, exit_choice_func_nb, *args)</span>
+</code></dt>
+<dd>
+<div class="desc"><p>Pick exit signals using <code>exit_choice_func_nb</code> after each signal in <code>entries</code>.</p>
+<p><code>exit_choice_func_nb</code> is same as for <code><a title="vectorbt.signals.nb.generate_nb" href="#vectorbt.signals.nb.generate_nb">generate_nb()</a></code>.</p></div>
+<details class="source">
+<summary>
+<span>Expand source code</span>
+</summary>
+<pre><code class="python">@njit
+def generate_ex_nb(entries, exit_choice_func_nb, *args):
+    &#34;&#34;&#34;Pick exit signals using `exit_choice_func_nb` after each signal in `entries`.
+
+    `exit_choice_func_nb` is same as for `generate_nb`.&#34;&#34;&#34;
+    exits = np.full_like(entries, False)
+
+    for col in range(entries.shape[1]):
+        entry_idxs = np.flatnonzero(entries[:, col])
+        for i in range(entry_idxs.shape[0]):
+            # Calculate the range to choose from
+            prev_idx = entry_idxs[i]
+            if i &lt; entry_idxs.shape[0] - 1:
+                next_idx = entry_idxs[i + 1]
+            else:
+                next_idx = entries.shape[0]
+            if prev_idx &lt; entries.shape[0] - 1:
+                if next_idx - prev_idx &gt; 1:
+                    # Run the UDF
+                    from_i = prev_idx + 1
+                    to_i = next_idx
+                    idxs = exit_choice_func_nb(col, from_i, to_i, *args)
+                    if np.any(idxs &lt; from_i) or np.any(idxs &gt;= to_i):
+                        raise ValueError(&#34;Returned indices are out of bounds&#34;)
+                    exits[idxs, col] = True
+    return exits</code></pre>
 </details>
 </dd>
 <dt id="vectorbt.signals.nb.generate_nb"><code class="name flex">
@@ -835,10 +837,6 @@ def generate_iteratively_nb(shape, choice_func1_nb, choice_func2_nb, args_1, arg
 <p><code>choice_func_nb</code> must accept index of the current column <code>col</code>, index of the start
 of the range <code>from_i</code>, index of the end of the range <code>to_i</code>, and <code>*args</code>.
 It must return an array of indices from <code>[from_i, to_i)</code> (can be empty).</p>
-<div class="admonition note">
-<p class="admonition-title">Note</p>
-<p>Returned indices must be absolute.</p>
-</div>
 <h2 id="example">Example</h2>
 <pre><code class="python-repl">&gt;&gt;&gt; from numba import njit
 &gt;&gt;&gt; import numpy as np
@@ -848,7 +846,7 @@ It must return an array of indices from <code>[from_i, to_i)</code> (can be empt
 ... def choice_func_nb(col, from_i, to_i):
 ...     return np.array([from_i + col])
 
-&gt;&gt;&gt; print(generate_nb((5, 3), choice_func_nb))
+&gt;&gt;&gt; generate_nb((5, 3), choice_func_nb)
 [[ True False False]
  [False  True False]
  [False False  True]
@@ -867,9 +865,6 @@ def generate_nb(shape, choice_func_nb, *args):
     of the range `from_i`, index of the end of the range `to_i`, and `*args`.
     It must return an array of indices from `[from_i, to_i)` (can be empty).
 
-    !!! note
-        Returned indices must be absolute.
-
     Example:
         ```python-repl
         &gt;&gt;&gt; from numba import njit
@@ -880,7 +875,7 @@ def generate_nb(shape, choice_func_nb, *args):
         ... def choice_func_nb(col, from_i, to_i):
         ...     return np.array([from_i + col])
 
-        &gt;&gt;&gt; print(generate_nb((5, 3), choice_func_nb))
+        &gt;&gt;&gt; generate_nb((5, 3), choice_func_nb)
         [[ True False False]
          [False  True False]
          [False False  True]
@@ -939,7 +934,7 @@ def generate_rand_enex_by_prob_nb(shape, entry_probs, exit_probs, seed=None):
     Specify seed to make output deterministic.&#34;&#34;&#34;
     if seed is not None:
         np.random.seed(seed)
-    return generate_iteratively_nb(
+    return generate_enex_nb(
         shape,
         rand_by_prob_choice_nb,
         rand_by_prob_choice_nb,
@@ -994,7 +989,7 @@ def generate_rand_ex_by_prob_nb(entries, probs, seed=None):
     Specify seed to make output deterministic.&#34;&#34;&#34;
     if seed is not None:
         np.random.seed(seed)
-    return generate_after_nb(entries, rand_by_prob_choice_nb, probs, True)</code></pre>
+    return generate_ex_nb(entries, rand_by_prob_choice_nb, probs, True)</code></pre>
 </details>
 </dd>
 <dt id="vectorbt.signals.nb.generate_rand_ex_nb"><code class="name flex">
@@ -1014,7 +1009,7 @@ def generate_rand_ex_nb(entries, seed=None):
     Specify seed to make output deterministic.&#34;&#34;&#34;
     if seed is not None:
         np.random.seed(seed)
-    return generate_after_nb(entries, rand_choice_nb, 1)</code></pre>
+    return generate_ex_nb(entries, rand_choice_nb, 1)</code></pre>
 </details>
 </dd>
 <dt id="vectorbt.signals.nb.generate_rand_nb"><code class="name flex">
@@ -1043,7 +1038,7 @@ def generate_rand_nb(shape, n, seed=None):
 <span>def <span class="ident fname">generate_sl_ex_iter_nb</span></span>(<span>entries, ts, stops, trailing=False)</span>
 </code></dt>
 <dd>
-<div class="desc"><p>Generate (trailing) stop loss exits iteratively using <code><a title="vectorbt.signals.nb.generate_iteratively_nb" href="#vectorbt.signals.nb.generate_iteratively_nb">generate_iteratively_nb()</a></code>.</p>
+<div class="desc"><p>Generate (trailing) stop loss exits iteratively using <code><a title="vectorbt.signals.nb.generate_enex_nb" href="#vectorbt.signals.nb.generate_enex_nb">generate_enex_nb()</a></code>.</p>
 <p>Returns two arrays: new entries and exits.</p>
 <p>For arguments, see <code><a title="vectorbt.signals.nb.generate_sl_ex_nb" href="#vectorbt.signals.nb.generate_sl_ex_nb">generate_sl_ex_nb()</a></code>.</p></div>
 <details class="source">
@@ -1052,7 +1047,7 @@ def generate_rand_nb(shape, n, seed=None):
 </summary>
 <pre><code class="python">@njit
 def generate_sl_ex_iter_nb(entries, ts, stops, trailing=False):
-    &#34;&#34;&#34;Generate (trailing) stop loss exits iteratively using `generate_iteratively_nb`.
+    &#34;&#34;&#34;Generate (trailing) stop loss exits iteratively using `generate_enex_nb`.
 
     Returns two arrays: new entries and exits.
 
@@ -1065,7 +1060,7 @@ def generate_sl_ex_iter_nb(entries, ts, stops, trailing=False):
 <span>def <span class="ident fname">generate_sl_ex_nb</span></span>(<span>entries, ts, stops, trailing=False, first=True)</span>
 </code></dt>
 <dd>
-<div class="desc"><p>Generate (trailing) stop loss exits using <code><a title="vectorbt.signals.nb.generate_after_nb" href="#vectorbt.signals.nb.generate_after_nb">generate_after_nb()</a></code>.</p>
+<div class="desc"><p>Generate (trailing) stop loss exits using <code><a title="vectorbt.signals.nb.generate_ex_nb" href="#vectorbt.signals.nb.generate_ex_nb">generate_ex_nb()</a></code>.</p>
 <p>For each signal in <code>entries</code>, find the first value in <code>ts</code> that is below the (trailing) stop.</p>
 <h2 id="args">Args</h2>
 <dl>
@@ -1096,8 +1091,7 @@ Each of these arrays will correspond to a different stop configuration.</p>
 &gt;&gt;&gt; ts = np.asarray([1, 2, 3, 2, 1])[:, None]
 &gt;&gt;&gt; stops = broadcast_to_array_of([0.1, 0.5], ts)
 
-&gt;&gt;&gt; print(generate_sl_ex_nb(entries, ts, stops,
-...     trailing=True, first=True))
+&gt;&gt;&gt; generate_sl_ex_nb(entries, ts, stops, trailing=True, first=True)
 [[False False]
  [False False]
  [False False]
@@ -1110,7 +1104,7 @@ Each of these arrays will correspond to a different stop configuration.</p>
 </summary>
 <pre><code class="python">@njit
 def generate_sl_ex_nb(entries, ts, stops, trailing=False, first=True):
-    &#34;&#34;&#34;Generate (trailing) stop loss exits using `generate_after_nb`.
+    &#34;&#34;&#34;Generate (trailing) stop loss exits using `generate_ex_nb`.
 
     For each signal in `entries`, find the first value in `ts` that is below the (trailing) stop.
 
@@ -1135,8 +1129,7 @@ def generate_sl_ex_nb(entries, ts, stops, trailing=False, first=True):
         &gt;&gt;&gt; ts = np.asarray([1, 2, 3, 2, 1])[:, None]
         &gt;&gt;&gt; stops = broadcast_to_array_of([0.1, 0.5], ts)
 
-        &gt;&gt;&gt; print(generate_sl_ex_nb(entries, ts, stops,
-        ...     trailing=True, first=True))
+        &gt;&gt;&gt; generate_sl_ex_nb(entries, ts, stops, trailing=True, first=True)
         [[False False]
          [False False]
          [False False]
@@ -1151,7 +1144,7 @@ def generate_sl_ex_nb(entries, ts, stops, trailing=False, first=True):
 <span>def <span class="ident fname">generate_tp_ex_iter_nb</span></span>(<span>entries, ts, stops)</span>
 </code></dt>
 <dd>
-<div class="desc"><p>Generate take profit exits iteratively using <code><a title="vectorbt.signals.nb.generate_iteratively_nb" href="#vectorbt.signals.nb.generate_iteratively_nb">generate_iteratively_nb()</a></code>.</p>
+<div class="desc"><p>Generate take profit exits iteratively using <code><a title="vectorbt.signals.nb.generate_enex_nb" href="#vectorbt.signals.nb.generate_enex_nb">generate_enex_nb()</a></code>.</p>
 <p>For arguments, see <code><a title="vectorbt.signals.nb.generate_sl_ex_nb" href="#vectorbt.signals.nb.generate_sl_ex_nb">generate_sl_ex_nb()</a></code>.</p></div>
 <details class="source">
 <summary>
@@ -1159,7 +1152,7 @@ def generate_sl_ex_nb(entries, ts, stops, trailing=False, first=True):
 </summary>
 <pre><code class="python">@njit
 def generate_tp_ex_iter_nb(entries, ts, stops):
-    &#34;&#34;&#34;Generate take profit exits iteratively using `generate_iteratively_nb`.
+    &#34;&#34;&#34;Generate take profit exits iteratively using `generate_enex_nb`.
 
     For arguments, see `generate_sl_ex_nb`.&#34;&#34;&#34;
     return combine_fns.apply_and_concat_multiple_nb(
@@ -1170,7 +1163,7 @@ def generate_tp_ex_iter_nb(entries, ts, stops):
 <span>def <span class="ident fname">generate_tp_ex_nb</span></span>(<span>entries, ts, stops, first=True)</span>
 </code></dt>
 <dd>
-<div class="desc"><p>Generate take profit exits using <code><a title="vectorbt.signals.nb.generate_after_nb" href="#vectorbt.signals.nb.generate_after_nb">generate_after_nb()</a></code>.</p>
+<div class="desc"><p>Generate take profit exits using <code><a title="vectorbt.signals.nb.generate_ex_nb" href="#vectorbt.signals.nb.generate_ex_nb">generate_ex_nb()</a></code>.</p>
 <p>For arguments, see <code><a title="vectorbt.signals.nb.generate_sl_ex_nb" href="#vectorbt.signals.nb.generate_sl_ex_nb">generate_sl_ex_nb()</a></code>.</p></div>
 <details class="source">
 <summary>
@@ -1178,7 +1171,7 @@ def generate_tp_ex_iter_nb(entries, ts, stops):
 </summary>
 <pre><code class="python">@njit
 def generate_tp_ex_nb(entries, ts, stops, first=True):
-    &#34;&#34;&#34;Generate take profit exits using `generate_after_nb`.
+    &#34;&#34;&#34;Generate take profit exits using `generate_ex_nb`.
 
     For arguments, see `generate_sl_ex_nb`.&#34;&#34;&#34;
     return combine_fns.apply_and_concat_one_nb(
@@ -1195,10 +1188,6 @@ pair of signals in <code>a</code>.</p>
 index of the start of the range <code>from_i</code>, index of the end of the range <code>to_i</code>, and <code>*args</code>.</p>
 <p>Applies <code>reduce_func_nb</code> on all mapper results in a column. Must accept index of the
 current column, the array of results from <code>map_func_nb</code> for that column, and <code>*args</code>.</p>
-<div class="admonition note">
-<p class="admonition-title">Note</p>
-<p>Returned indices must be absolute.</p>
-</div>
 <h2 id="example">Example</h2>
 <pre><code class="python-repl">&gt;&gt;&gt; import numpy as np
 &gt;&gt;&gt; from numba import njit
@@ -1212,7 +1201,7 @@ current column, the array of results from <code>map_func_nb</code> for that colu
 ...     return np.nanmean(map_res)
 &gt;&gt;&gt; a = np.asarray([False, True, True, False, True])[:, None]
 
-&gt;&gt;&gt; print(map_reduce_between_nb(a, map_func_nb, reduce_func_nb))
+&gt;&gt;&gt; map_reduce_between_nb(a, map_func_nb, reduce_func_nb)
 [1.5]
 </code></pre></div>
 <details class="source">
@@ -1230,9 +1219,6 @@ def map_reduce_between_nb(a, map_func_nb, reduce_func_nb, *args):
     Applies `reduce_func_nb` on all mapper results in a column. Must accept index of the
     current column, the array of results from `map_func_nb` for that column, and `*args`.
 
-    !!! note
-        Returned indices must be absolute.
-
     Example:
         ```python-repl
         &gt;&gt;&gt; import numpy as np
@@ -1247,7 +1233,7 @@ def map_reduce_between_nb(a, map_func_nb, reduce_func_nb, *args):
         ...     return np.nanmean(map_res)
         &gt;&gt;&gt; a = np.asarray([False, True, True, False, True])[:, None]
 
-        &gt;&gt;&gt; print(map_reduce_between_nb(a, map_func_nb, reduce_func_nb))
+        &gt;&gt;&gt; map_reduce_between_nb(a, map_func_nb, reduce_func_nb)
         [1.5]
         ```&#34;&#34;&#34;
     result = np.full(a.shape[1], np.nan, dtype=np.float_)
@@ -1420,13 +1406,13 @@ come after at least one <code>False</code> value. If <code>allow_gaps</code> is 
 &gt;&gt;&gt; signals = np.asarray([True, True, False, True, True])
 &gt;&gt;&gt; reset_by = np.asarray([False, True, False, False, True])
 
-&gt;&gt;&gt; print(rank_1d_nb(signals))
+&gt;&gt;&gt; rank_1d_nb(signals)
 [1 2 0 1 2]
-&gt;&gt;&gt; print(rank_1d_nb(signals, after_false=True))
+&gt;&gt;&gt; rank_1d_nb(signals, after_false=True)
 [0 0 0 1 2]
-&gt;&gt;&gt; print(rank_1d_nb(signals, allow_gaps=True))
+&gt;&gt;&gt; rank_1d_nb(signals, allow_gaps=True)
 [1 2 0 3 4]
-&gt;&gt;&gt; print(rank_1d_nb(signals, allow_gaps=True, reset_by=reset_by))
+&gt;&gt;&gt; rank_1d_nb(signals, allow_gaps=True, reset_by=reset_by)
 [1 1 0 2 1]
 </code></pre></div>
 <details class="source">
@@ -1449,13 +1435,13 @@ def rank_1d_nb(a, reset_by=None, after_false=False, allow_gaps=False):
         &gt;&gt;&gt; signals = np.asarray([True, True, False, True, True])
         &gt;&gt;&gt; reset_by = np.asarray([False, True, False, False, True])
 
-        &gt;&gt;&gt; print(rank_1d_nb(signals))
+        &gt;&gt;&gt; rank_1d_nb(signals)
         [1 2 0 1 2]
-        &gt;&gt;&gt; print(rank_1d_nb(signals, after_false=True))
+        &gt;&gt;&gt; rank_1d_nb(signals, after_false=True)
         [0 0 0 1 2]
-        &gt;&gt;&gt; print(rank_1d_nb(signals, allow_gaps=True))
+        &gt;&gt;&gt; rank_1d_nb(signals, allow_gaps=True)
         [1 2 0 3 4]
-        &gt;&gt;&gt; print(rank_1d_nb(signals, allow_gaps=True, reset_by=reset_by))
+        &gt;&gt;&gt; rank_1d_nb(signals, allow_gaps=True, reset_by=reset_by)
         [1 1 0 2 1]
         ```&#34;&#34;&#34;
     result = np.zeros(a.shape, dtype=np.int_)
@@ -1516,11 +1502,11 @@ def rank_nb(a, reset_by=None, after_false=False, allow_gaps=False):
 &gt;&gt;&gt; signals = np.asarray([True, True, False, True, True])
 &gt;&gt;&gt; reset_by = np.asarray([False, True, False, False, True])
 
-&gt;&gt;&gt; print(rank_partitions_1d_nb(signals))
+&gt;&gt;&gt; rank_partitions_1d_nb(signals)
 [1 1 0 2 2]
-&gt;&gt;&gt; print(rank_partitions_1d_nb(signals, after_false=True))
+&gt;&gt;&gt; rank_partitions_1d_nb(signals, after_false=True)
 [0 0 0 1 1]
-&gt;&gt;&gt; print(rank_partitions_1d_nb(signals, reset_by=reset_by))
+&gt;&gt;&gt; rank_partitions_1d_nb(signals, reset_by=reset_by)
 [1 1 0 2 1]
 </code></pre></div>
 <details class="source">
@@ -1541,11 +1527,11 @@ def rank_partitions_1d_nb(a, reset_by=None, after_false=False):
         &gt;&gt;&gt; signals = np.asarray([True, True, False, True, True])
         &gt;&gt;&gt; reset_by = np.asarray([False, True, False, False, True])
 
-        &gt;&gt;&gt; print(rank_partitions_1d_nb(signals))
+        &gt;&gt;&gt; rank_partitions_1d_nb(signals)
         [1 1 0 2 2]
-        &gt;&gt;&gt; print(rank_partitions_1d_nb(signals, after_false=True))
+        &gt;&gt;&gt; rank_partitions_1d_nb(signals, after_false=True)
         [0 0 0 1 1]
-        &gt;&gt;&gt; print(rank_partitions_1d_nb(signals, reset_by=reset_by))
+        &gt;&gt;&gt; rank_partitions_1d_nb(signals, reset_by=reset_by)
         [1 1 0 2 1]
         ```&#34;&#34;&#34;
     result = np.zeros(a.shape, dtype=np.int_)
@@ -1648,7 +1634,7 @@ def shuffle_nb(a, seed=None):
 <pre><code class="python">@njit
 def sl_apply_nb(i, entries, ts, stops, trailing, first):
     &#34;&#34;&#34;`apply_func_nb` for stop loss used in `vectorbt.base.combine_fns.apply_and_concat_one_nb`.&#34;&#34;&#34;
-    return generate_after_nb(entries, sl_choice_nb, ts, stops[i, :, :], trailing, first)</code></pre>
+    return generate_ex_nb(entries, sl_choice_nb, ts, stops[i, :, :], trailing, first)</code></pre>
 </details>
 </dd>
 <dt id="vectorbt.signals.nb.sl_choice_nb"><code class="name flex">
@@ -1689,7 +1675,7 @@ def sl_choice_nb(col, from_i, to_i, ts, stop, trailing, first):
 <pre><code class="python">@njit
 def sl_iter_apply_nb(i, entries, ts, stops, trailing, first):
     &#34;&#34;&#34;`apply_func_nb` for iterative stop loss used in `vectorbt.base.combine_fns.apply_and_concat_one_nb`.&#34;&#34;&#34;
-    return generate_iteratively_nb(
+    return generate_enex_nb(
         entries.shape,
         true_choice_nb,
         sl_choice_nb,
@@ -1708,7 +1694,7 @@ def sl_iter_apply_nb(i, entries, ts, stops, trailing, first):
 <pre><code class="python">@njit
 def tp_apply_nb(i, entries, ts, stops, first):
     &#34;&#34;&#34;`apply_func_nb` for take profit used in `vectorbt.base.combine_fns.apply_and_concat_one_nb`.&#34;&#34;&#34;
-    return generate_after_nb(entries, tp_choice_nb, ts, stops[i, :, :], first)</code></pre>
+    return generate_ex_nb(entries, tp_choice_nb, ts, stops[i, :, :], first)</code></pre>
 </details>
 </dd>
 <dt id="vectorbt.signals.nb.tp_choice_nb"><code class="name flex">
@@ -1743,7 +1729,7 @@ def tp_choice_nb(col, from_i, to_i, ts, stop, first):
 <pre><code class="python">@njit
 def tp_iter_apply_nb(i, entries, ts, stops, first):
     &#34;&#34;&#34;`apply_func_nb` for iterative take profit used in `vectorbt.base.combine_fns.apply_and_concat_one_nb`.&#34;&#34;&#34;
-    return generate_iteratively_nb(
+    return generate_enex_nb(
         entries.shape,
         true_choice_nb,
         tp_choice_nb,
@@ -1800,8 +1786,8 @@ title="Search"
 <li><code><a title="vectorbt.signals.nb.distance_map_nb" href="#vectorbt.signals.nb.distance_map_nb">distance_map_nb</a></code></li>
 <li><code><a title="vectorbt.signals.nb.fshift_1d_nb" href="#vectorbt.signals.nb.fshift_1d_nb">fshift_1d_nb</a></code></li>
 <li><code><a title="vectorbt.signals.nb.fshift_nb" href="#vectorbt.signals.nb.fshift_nb">fshift_nb</a></code></li>
-<li><code><a title="vectorbt.signals.nb.generate_after_nb" href="#vectorbt.signals.nb.generate_after_nb">generate_after_nb</a></code></li>
-<li><code><a title="vectorbt.signals.nb.generate_iteratively_nb" href="#vectorbt.signals.nb.generate_iteratively_nb">generate_iteratively_nb</a></code></li>
+<li><code><a title="vectorbt.signals.nb.generate_enex_nb" href="#vectorbt.signals.nb.generate_enex_nb">generate_enex_nb</a></code></li>
+<li><code><a title="vectorbt.signals.nb.generate_ex_nb" href="#vectorbt.signals.nb.generate_ex_nb">generate_ex_nb</a></code></li>
 <li><code><a title="vectorbt.signals.nb.generate_nb" href="#vectorbt.signals.nb.generate_nb">generate_nb</a></code></li>
 <li><code><a title="vectorbt.signals.nb.generate_rand_by_prob_nb" href="#vectorbt.signals.nb.generate_rand_by_prob_nb">generate_rand_by_prob_nb</a></code></li>
 <li><code><a title="vectorbt.signals.nb.generate_rand_enex_by_prob_nb" href="#vectorbt.signals.nb.generate_rand_enex_by_prob_nb">generate_rand_enex_by_prob_nb</a></code></li>
