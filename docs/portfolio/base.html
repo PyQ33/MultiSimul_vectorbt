@@ -247,7 +247,8 @@ def _indexing_func(obj, pd_indexing_func):
         risk_free=index_arraylike_param(obj.risk_free),
         required_return=index_arraylike_param(obj.required_return),
         cutoff=index_arraylike_param(obj.cutoff),
-        factor_returns=factor_returns
+        factor_returns=factor_returns,
+        incl_unrealized_stats=obj.incl_unrealized_stats
     )
 
 
@@ -284,6 +285,7 @@ class Portfolio(PandasIndexer):
         factor_returns (array_like): Benchmark return to compare returns against. Will broadcast.
 
             By default it&#39;s `None`, but it&#39;s required by some return-based metrics.
+        incl_unrealized_stats (bool): Whether to include unrealized metrics in `Portfolio.stats`.
 
     !!! note
         Use class methods with `from_` prefix to build a portfolio.
@@ -291,9 +293,9 @@ class Portfolio(PandasIndexer):
 
         All array objects must have the same metadata as `main_price`.&#34;&#34;&#34;
 
-    def __init__(self, main_price, init_capital, orders, cash, shares, freq=None, year_freq=None,
-                 levy_alpha=None, risk_free=None, required_return=None, cutoff=None,
-                 factor_returns=None):
+    def __init__(self, main_price, init_capital, orders, cash, shares, freq=None,
+                 year_freq=None, levy_alpha=None, risk_free=None, required_return=None,
+                 cutoff=None, factor_returns=None, incl_unrealized_stats=False):
         # Perform checks
         checks.assert_type(main_price, (pd.Series, pd.DataFrame))
         if checks.is_frame(main_price):
@@ -310,6 +312,7 @@ class Portfolio(PandasIndexer):
         self._orders = orders
         self._cash = cash
         self._shares = shares
+        self._incl_unrealized_stats = incl_unrealized_stats
 
         freq = main_price.vbt(freq=freq).freq
         if freq is None:
@@ -680,20 +683,25 @@ class Portfolio(PandasIndexer):
         &#34;&#34;&#34;Initial capital.&#34;&#34;&#34;
         return self._init_capital
 
-    @cached_property
+    @property
     def main_price(self):
         &#34;&#34;&#34;Price per share series.&#34;&#34;&#34;
         return self._main_price
 
-    @cached_property
+    @property
     def cash(self):
         &#34;&#34;&#34;Cash series.&#34;&#34;&#34;
         return self._cash
 
-    @cached_property
+    @property
     def shares(self):
         &#34;&#34;&#34;Shares series.&#34;&#34;&#34;
         return self._shares
+
+    @property
+    def incl_unrealized_stats(self):
+        &#34;&#34;&#34;Whether to include unrealized metrics in `Portfolio.stats`.&#34;&#34;&#34;
+        return self._incl_unrealized_stats
 
     @property
     def freq(self):
@@ -765,19 +773,26 @@ class Portfolio(PandasIndexer):
     @cached_property
     def equity(self):
         &#34;&#34;&#34;Portfolio equity series.&#34;&#34;&#34;
-        return self.cash.vbt + self.shares.vbt * self.main_price.vbt
+        cash = self.cash.vbt.to_2d_array()
+        shares = self.shares.vbt.to_2d_array()
+        main_price = self.main_price.vbt.to_2d_array()
+        equity = cash + shares * main_price
+        zero_shares_mask = shares == 0.  # helps with initial NaNs
+        equity[zero_shares_mask] = cash[zero_shares_mask]
+        return self.wrapper.wrap(equity)
 
     @cached_property
     def final_equity(self):
         &#34;&#34;&#34;Final equity.&#34;&#34;&#34;
-        return self.wrapper.wrap_reduced(self.equity.values[-1])
+        final_equity = generic_nb.ffill_nb(self.equity.vbt.to_2d_array())[-1, :]
+        return self.wrapper.wrap_reduced(final_equity)
 
     @cached_property
     def total_profit(self):
         &#34;&#34;&#34;Total profit.&#34;&#34;&#34;
-        equity = self.equity.vbt.to_2d_array()[-1, :]
+        final_equity = reshape_fns.to_1d(self.final_equity, raw=True)
         init_capital = reshape_fns.to_1d(self.init_capital, raw=True)
-        return self.wrapper.wrap_reduced(equity - init_capital)
+        return self.wrapper.wrap_reduced(final_equity - init_capital)
 
     # ############# Drawdown ############# #
 
@@ -809,7 +824,8 @@ class Portfolio(PandasIndexer):
         equity = self.equity.vbt.to_2d_array()
         returns = generic_nb.pct_change_nb(equity)
         init_capital = reshape_fns.to_1d(self.init_capital, raw=True)
-        returns[0, :] = (equity[0, :] - init_capital) / init_capital
+        returns[0, :] = (equity[0, :] - init_capital) / init_capital  # initial capital is one tick before
+        returns[np.isnan(returns)] = 0.  # can happen if later price is unknown
         return self.wrapper.wrap(returns)
 
     @cached_property
@@ -952,6 +968,9 @@ class Portfolio(PandasIndexer):
         if self.wrapper.ndim &gt; 1:
             raise TypeError(&#34;You must select a column first&#34;)
 
+        trades = self.trades
+        if not self.incl_unrealized_stats:
+            trades = trades.closed
         return pd.Series({
             &#39;Start&#39;: self.wrapper.index[0],
             &#39;End&#39;: self.wrapper.index[-1],
@@ -964,15 +983,15 @@ class Portfolio(PandasIndexer):
             &#39;Avg. Drawdown [%]&#39;: -self.drawdowns.avg_drawdown * 100,
             &#39;Max. Drawdown Duration&#39;: self.drawdowns.max_duration,
             &#39;Avg. Drawdown Duration&#39;: self.drawdowns.avg_duration,
-            &#39;Num. Trades&#39;: self.trades.count,
-            &#39;Win Rate [%]&#39;: self.trades.win_rate * 100,
-            &#39;Best Trade [%]&#39;: self.trades.returns.max() * 100,
-            &#39;Worst Trade [%]&#39;: self.trades.returns.min() * 100,
-            &#39;Avg. Trade [%]&#39;: self.trades.returns.mean() * 100,
-            &#39;Max. Trade Duration&#39;: self.trades.duration.max(time_units=True),
-            &#39;Avg. Trade Duration&#39;: self.trades.duration.mean(time_units=True),
-            &#39;Expectancy&#39;: self.trades.expectancy,
-            &#39;SQN&#39;: self.trades.sqn,
+            &#39;Num. Trades&#39;: trades.count,
+            &#39;Win Rate [%]&#39;: trades.win_rate * 100,
+            &#39;Best Trade [%]&#39;: trades.returns.max() * 100,
+            &#39;Worst Trade [%]&#39;: trades.returns.min() * 100,
+            &#39;Avg. Trade [%]&#39;: trades.returns.mean() * 100,
+            &#39;Max. Trade Duration&#39;: trades.duration.max(time_units=True),
+            &#39;Avg. Trade Duration&#39;: trades.duration.mean(time_units=True),
+            &#39;Expectancy&#39;: trades.expectancy,
+            &#39;SQN&#39;: trades.sqn,
             &#39;Sharpe Ratio&#39;: self.sharpe_ratio,
             &#39;Sortino Ratio&#39;: self.sortino_ratio,
             &#39;Calmar Ratio&#39;: self.calmar_ratio
@@ -990,7 +1009,7 @@ class Portfolio(PandasIndexer):
 <dl>
 <dt id="vectorbt.portfolio.base.Portfolio"><code class="flex name class">
 <span>class <span class="ident parent-fname">Portfolio</span></span>
-<span>(</span><span>main_price, init_capital, orders, cash, shares, freq=None, year_freq=None, levy_alpha=None, risk_free=None, required_return=None, cutoff=None, factor_returns=None)</span>
+<span>(</span><span>main_price, init_capital, orders, cash, shares, freq=None, year_freq=None, levy_alpha=None, risk_free=None, required_return=None, cutoff=None, factor_returns=None, incl_unrealized_stats=False)</span>
 </code></dt>
 <dd>
 <div class="desc"><p>Class for modeling portfolio and measuring its performance.</p>
@@ -1045,6 +1064,8 @@ bottom percentile of returns.</p>
 <p>Benchmark return to compare returns against. Will broadcast.</p>
 <p>By default it's <code>None</code>, but it's required by some return-based metrics.</p>
 </dd>
+<dt><strong><code>incl_unrealized_stats</code></strong> :&ensp;<code>bool</code></dt>
+<dd>Whether to include unrealized metrics in <code><a title="vectorbt.portfolio.base.Portfolio.stats" href="#vectorbt.portfolio.base.Portfolio.stats">Portfolio.stats</a></code>.</dd>
 </dl>
 <div class="admonition note">
 <p class="admonition-title">Note</p>
@@ -1089,6 +1110,7 @@ The <code>__init__</code> method is reserved for indexing purposes.</p>
         factor_returns (array_like): Benchmark return to compare returns against. Will broadcast.
 
             By default it&#39;s `None`, but it&#39;s required by some return-based metrics.
+        incl_unrealized_stats (bool): Whether to include unrealized metrics in `Portfolio.stats`.
 
     !!! note
         Use class methods with `from_` prefix to build a portfolio.
@@ -1096,9 +1118,9 @@ The <code>__init__</code> method is reserved for indexing purposes.</p>
 
         All array objects must have the same metadata as `main_price`.&#34;&#34;&#34;
 
-    def __init__(self, main_price, init_capital, orders, cash, shares, freq=None, year_freq=None,
-                 levy_alpha=None, risk_free=None, required_return=None, cutoff=None,
-                 factor_returns=None):
+    def __init__(self, main_price, init_capital, orders, cash, shares, freq=None,
+                 year_freq=None, levy_alpha=None, risk_free=None, required_return=None,
+                 cutoff=None, factor_returns=None, incl_unrealized_stats=False):
         # Perform checks
         checks.assert_type(main_price, (pd.Series, pd.DataFrame))
         if checks.is_frame(main_price):
@@ -1115,6 +1137,7 @@ The <code>__init__</code> method is reserved for indexing purposes.</p>
         self._orders = orders
         self._cash = cash
         self._shares = shares
+        self._incl_unrealized_stats = incl_unrealized_stats
 
         freq = main_price.vbt(freq=freq).freq
         if freq is None:
@@ -1485,20 +1508,25 @@ The <code>__init__</code> method is reserved for indexing purposes.</p>
         &#34;&#34;&#34;Initial capital.&#34;&#34;&#34;
         return self._init_capital
 
-    @cached_property
+    @property
     def main_price(self):
         &#34;&#34;&#34;Price per share series.&#34;&#34;&#34;
         return self._main_price
 
-    @cached_property
+    @property
     def cash(self):
         &#34;&#34;&#34;Cash series.&#34;&#34;&#34;
         return self._cash
 
-    @cached_property
+    @property
     def shares(self):
         &#34;&#34;&#34;Shares series.&#34;&#34;&#34;
         return self._shares
+
+    @property
+    def incl_unrealized_stats(self):
+        &#34;&#34;&#34;Whether to include unrealized metrics in `Portfolio.stats`.&#34;&#34;&#34;
+        return self._incl_unrealized_stats
 
     @property
     def freq(self):
@@ -1570,19 +1598,26 @@ The <code>__init__</code> method is reserved for indexing purposes.</p>
     @cached_property
     def equity(self):
         &#34;&#34;&#34;Portfolio equity series.&#34;&#34;&#34;
-        return self.cash.vbt + self.shares.vbt * self.main_price.vbt
+        cash = self.cash.vbt.to_2d_array()
+        shares = self.shares.vbt.to_2d_array()
+        main_price = self.main_price.vbt.to_2d_array()
+        equity = cash + shares * main_price
+        zero_shares_mask = shares == 0.  # helps with initial NaNs
+        equity[zero_shares_mask] = cash[zero_shares_mask]
+        return self.wrapper.wrap(equity)
 
     @cached_property
     def final_equity(self):
         &#34;&#34;&#34;Final equity.&#34;&#34;&#34;
-        return self.wrapper.wrap_reduced(self.equity.values[-1])
+        final_equity = generic_nb.ffill_nb(self.equity.vbt.to_2d_array())[-1, :]
+        return self.wrapper.wrap_reduced(final_equity)
 
     @cached_property
     def total_profit(self):
         &#34;&#34;&#34;Total profit.&#34;&#34;&#34;
-        equity = self.equity.vbt.to_2d_array()[-1, :]
+        final_equity = reshape_fns.to_1d(self.final_equity, raw=True)
         init_capital = reshape_fns.to_1d(self.init_capital, raw=True)
-        return self.wrapper.wrap_reduced(equity - init_capital)
+        return self.wrapper.wrap_reduced(final_equity - init_capital)
 
     # ############# Drawdown ############# #
 
@@ -1614,7 +1649,8 @@ The <code>__init__</code> method is reserved for indexing purposes.</p>
         equity = self.equity.vbt.to_2d_array()
         returns = generic_nb.pct_change_nb(equity)
         init_capital = reshape_fns.to_1d(self.init_capital, raw=True)
-        returns[0, :] = (equity[0, :] - init_capital) / init_capital
+        returns[0, :] = (equity[0, :] - init_capital) / init_capital  # initial capital is one tick before
+        returns[np.isnan(returns)] = 0.  # can happen if later price is unknown
         return self.wrapper.wrap(returns)
 
     @cached_property
@@ -1757,6 +1793,9 @@ The <code>__init__</code> method is reserved for indexing purposes.</p>
         if self.wrapper.ndim &gt; 1:
             raise TypeError(&#34;You must select a column first&#34;)
 
+        trades = self.trades
+        if not self.incl_unrealized_stats:
+            trades = trades.closed
         return pd.Series({
             &#39;Start&#39;: self.wrapper.index[0],
             &#39;End&#39;: self.wrapper.index[-1],
@@ -1769,15 +1808,15 @@ The <code>__init__</code> method is reserved for indexing purposes.</p>
             &#39;Avg. Drawdown [%]&#39;: -self.drawdowns.avg_drawdown * 100,
             &#39;Max. Drawdown Duration&#39;: self.drawdowns.max_duration,
             &#39;Avg. Drawdown Duration&#39;: self.drawdowns.avg_duration,
-            &#39;Num. Trades&#39;: self.trades.count,
-            &#39;Win Rate [%]&#39;: self.trades.win_rate * 100,
-            &#39;Best Trade [%]&#39;: self.trades.returns.max() * 100,
-            &#39;Worst Trade [%]&#39;: self.trades.returns.min() * 100,
-            &#39;Avg. Trade [%]&#39;: self.trades.returns.mean() * 100,
-            &#39;Max. Trade Duration&#39;: self.trades.duration.max(time_units=True),
-            &#39;Avg. Trade Duration&#39;: self.trades.duration.mean(time_units=True),
-            &#39;Expectancy&#39;: self.trades.expectancy,
-            &#39;SQN&#39;: self.trades.sqn,
+            &#39;Num. Trades&#39;: trades.count,
+            &#39;Win Rate [%]&#39;: trades.win_rate * 100,
+            &#39;Best Trade [%]&#39;: trades.returns.max() * 100,
+            &#39;Worst Trade [%]&#39;: trades.returns.min() * 100,
+            &#39;Avg. Trade [%]&#39;: trades.returns.mean() * 100,
+            &#39;Max. Trade Duration&#39;: trades.duration.max(time_units=True),
+            &#39;Avg. Trade Duration&#39;: trades.duration.mean(time_units=True),
+            &#39;Expectancy&#39;: trades.expectancy,
+            &#39;SQN&#39;: trades.sqn,
             &#39;Sharpe Ratio&#39;: self.sharpe_ratio,
             &#39;Sortino Ratio&#39;: self.sortino_ratio,
             &#39;Calmar Ratio&#39;: self.calmar_ratio
@@ -2582,21 +2621,10 @@ Does not take into account fees and slippage. For this, create a separate portfo
 <summary>
 <span>Expand source code</span>
 </summary>
-<pre><code class="python">def __get__(self, instance, owner=None):
-    if instance is None:
-        return self
-    if not defaults.caching or self.disabled:  # you can manually disable cache here
-        return super().__get__(instance, owner=owner)
-    cache = instance.__dict__
-    val = cache.get(self.attrname, _NOT_FOUND)
-    if val is _NOT_FOUND:
-        with self.lock:
-            # check if another thread filled cache while we awaited lock
-            val = cache.get(self.attrname, _NOT_FOUND)
-            if val is _NOT_FOUND:
-                val = self.func(instance)
-                cache[self.attrname] = val
-    return val</code></pre>
+<pre><code class="python">@property
+def cash(self):
+    &#34;&#34;&#34;Cash series.&#34;&#34;&#34;
+    return self._cash</code></pre>
 </details>
 </dd>
 <dt id="vectorbt.portfolio.base.Portfolio.conditional_value_at_risk"><code class="name">var <span class="ident fname">conditional_value_at_risk</span></code></dt>
@@ -2855,6 +2883,19 @@ def freq(self):
     return self._freq</code></pre>
 </details>
 </dd>
+<dt id="vectorbt.portfolio.base.Portfolio.incl_unrealized_stats"><code class="name">var <span class="ident fname">incl_unrealized_stats</span></code></dt>
+<dd>
+<div class="desc"><p>Whether to include unrealized metrics in <code><a title="vectorbt.portfolio.base.Portfolio.stats" href="#vectorbt.portfolio.base.Portfolio.stats">Portfolio.stats</a></code>.</p></div>
+<details class="source">
+<summary>
+<span>Expand source code</span>
+</summary>
+<pre><code class="python">@property
+def incl_unrealized_stats(self):
+    &#34;&#34;&#34;Whether to include unrealized metrics in `Portfolio.stats`.&#34;&#34;&#34;
+    return self._incl_unrealized_stats</code></pre>
+</details>
+</dd>
 <dt id="vectorbt.portfolio.base.Portfolio.information_ratio"><code class="name">var <span class="ident fname">information_ratio</span></code></dt>
 <dd>
 <div class="desc"><p>See <code><a title="vectorbt.returns.accessors.Returns_Accessor.information_ratio" href="../returns/accessors.html#vectorbt.returns.accessors.Returns_Accessor.information_ratio">Returns_Accessor.information_ratio()</a></code>.</p></div>
@@ -2912,21 +2953,10 @@ def levy_alpha(self):
 <summary>
 <span>Expand source code</span>
 </summary>
-<pre><code class="python">def __get__(self, instance, owner=None):
-    if instance is None:
-        return self
-    if not defaults.caching or self.disabled:  # you can manually disable cache here
-        return super().__get__(instance, owner=owner)
-    cache = instance.__dict__
-    val = cache.get(self.attrname, _NOT_FOUND)
-    if val is _NOT_FOUND:
-        with self.lock:
-            # check if another thread filled cache while we awaited lock
-            val = cache.get(self.attrname, _NOT_FOUND)
-            if val is _NOT_FOUND:
-                val = self.func(instance)
-                cache[self.attrname] = val
-    return val</code></pre>
+<pre><code class="python">@property
+def main_price(self):
+    &#34;&#34;&#34;Price per share series.&#34;&#34;&#34;
+    return self._main_price</code></pre>
 </details>
 </dd>
 <dt id="vectorbt.portfolio.base.Portfolio.max_drawdown"><code class="name">var <span class="ident fname">max_drawdown</span></code></dt>
@@ -3084,21 +3114,10 @@ def risk_free(self):
 <summary>
 <span>Expand source code</span>
 </summary>
-<pre><code class="python">def __get__(self, instance, owner=None):
-    if instance is None:
-        return self
-    if not defaults.caching or self.disabled:  # you can manually disable cache here
-        return super().__get__(instance, owner=owner)
-    cache = instance.__dict__
-    val = cache.get(self.attrname, _NOT_FOUND)
-    if val is _NOT_FOUND:
-        with self.lock:
-            # check if another thread filled cache while we awaited lock
-            val = cache.get(self.attrname, _NOT_FOUND)
-            if val is _NOT_FOUND:
-                val = self.func(instance)
-                cache[self.attrname] = val
-    return val</code></pre>
+<pre><code class="python">@property
+def shares(self):
+    &#34;&#34;&#34;Shares series.&#34;&#34;&#34;
+    return self._shares</code></pre>
 </details>
 </dd>
 <dt id="vectorbt.portfolio.base.Portfolio.sharpe_ratio"><code class="name">var <span class="ident fname">sharpe_ratio</span></code></dt>
@@ -3407,6 +3426,7 @@ title="Search"
 <li><code><a title="vectorbt.portfolio.base.Portfolio.from_order_func" href="#vectorbt.portfolio.base.Portfolio.from_order_func">from_order_func</a></code></li>
 <li><code><a title="vectorbt.portfolio.base.Portfolio.from_orders" href="#vectorbt.portfolio.base.Portfolio.from_orders">from_orders</a></code></li>
 <li><code><a title="vectorbt.portfolio.base.Portfolio.from_signals" href="#vectorbt.portfolio.base.Portfolio.from_signals">from_signals</a></code></li>
+<li><code><a title="vectorbt.portfolio.base.Portfolio.incl_unrealized_stats" href="#vectorbt.portfolio.base.Portfolio.incl_unrealized_stats">incl_unrealized_stats</a></code></li>
 <li><code><a title="vectorbt.portfolio.base.Portfolio.information_ratio" href="#vectorbt.portfolio.base.Portfolio.information_ratio">information_ratio</a></code></li>
 <li><code><a title="vectorbt.portfolio.base.Portfolio.init_capital" href="#vectorbt.portfolio.base.Portfolio.init_capital">init_capital</a></code></li>
 <li><code><a title="vectorbt.portfolio.base.Portfolio.levy_alpha" href="#vectorbt.portfolio.base.Portfolio.levy_alpha">levy_alpha</a></code></li>
