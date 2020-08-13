@@ -40,7 +40,7 @@ import pandas as pd
 import plotly.graph_objects as go
 
 from vectorbt.defaults import contrast_color_schema
-from vectorbt.utils.decorators import cached_property
+from vectorbt.utils.decorators import cached_property, cached_method
 from vectorbt.base.reshape_fns import to_1d
 from vectorbt.base.indexing import PandasIndexer
 from vectorbt.base.array_wrapper import ArrayWrapper
@@ -54,8 +54,18 @@ from vectorbt.records import nb
 
 def _indexing_func(obj, pd_indexing_func):
     &#34;&#34;&#34;Perform indexing on `BaseDrawdowns`.&#34;&#34;&#34;
-    records_arr, _ = indexing_on_records(obj, pd_indexing_func)
-    return obj.__class__(records_arr, pd_indexing_func(obj.ts), freq=obj.wrapper.freq, idx_field=obj.idx_field)
+    new_cols, new_records, _ = indexing_on_records(obj, pd_indexing_func)
+    if obj.grouper.group_by is not None:
+        new_group_by = obj.grouper.group_by[new_cols]
+    else:
+        new_group_by = None
+    return obj.__class__(
+        new_records,
+        pd_indexing_func(obj.ts),
+        freq=obj.wrapper.freq,
+        idx_field=obj.idx_field,
+        group_by=new_group_by
+    )
 
 
 class BaseDrawdowns(Records):
@@ -63,8 +73,14 @@ class BaseDrawdowns(Records):
 
     Requires `records_arr` to have all fields defined in `vectorbt.records.enums.drawdown_dt`.&#34;&#34;&#34;
 
-    def __init__(self, records_arr, ts, freq=None, idx_field=&#39;end_idx&#39;):
-        Records.__init__(self, records_arr, ArrayWrapper.from_obj(ts, freq=freq), idx_field=idx_field)
+    def __init__(self, records_arr, ts, freq=None, idx_field=&#39;end_idx&#39;, group_by=None):
+        Records.__init__(
+            self,
+            records_arr,
+            ArrayWrapper.from_obj(ts, freq=freq),
+            idx_field=idx_field,
+            group_by=group_by
+        )
         PandasIndexer.__init__(self, _indexing_func)
 
         if not all(field in records_arr.dtype.names for field in drawdown_dt.names):
@@ -80,9 +96,19 @@ class BaseDrawdowns(Records):
         records_arr = nb.drawdown_records_nb(ts.vbt.to_2d_array())
         return cls(records_arr, ts, **kwargs)
 
-    def filter_by_mask(self, mask):
+    def filter_by_mask(self, mask, idx_field=None, group_by=None):
         &#34;&#34;&#34;Return a new class instance, filtered by mask.&#34;&#34;&#34;
-        return self.__class__(self.records_arr[mask], self.ts, freq=self.wrapper.freq, idx_field=self.idx_field)
+        if idx_field is None:
+            idx_field = self.idx_field
+        if group_by is None:
+            group_by = self.grouper.group_by
+        return self.__class__(
+            self.records_arr[mask],
+            self.ts,
+            freq=self.wrapper.freq,
+            idx_field=idx_field,
+            group_by=group_by
+        )
 
     def plot(self,
              ts_trace_kwargs={},
@@ -308,36 +334,38 @@ class BaseDrawdowns(Records):
         &#34;&#34;&#34;Drawdown value (in percentage).&#34;&#34;&#34;
         return self.map(nb.dd_drawdown_map_nb, self.ts.vbt.to_2d_array())
 
-    @cached_property
-    def avg_drawdown(self):
+    @cached_method
+    def avg_drawdown(self, default_val=0., **kwargs):
         &#34;&#34;&#34;Average drawdown (ADD).&#34;&#34;&#34;
-        return self.drawdown.mean(default_val=0.)
+        return self.drawdown.mean(default_val=default_val, **kwargs)
 
-    @cached_property
-    def max_drawdown(self):
+    @cached_method
+    def max_drawdown(self, default_val=0., **kwargs):
         &#34;&#34;&#34;Maximum drawdown (MDD).&#34;&#34;&#34;
-        return self.drawdown.min(default_val=0.)
+        return self.drawdown.min(default_val=default_val, **kwargs)
 
     @cached_property
     def duration(self):
         &#34;&#34;&#34;Duration of each drawdown (in raw format).&#34;&#34;&#34;
         return self.map(nb.dd_duration_map_nb)
 
-    @cached_property
-    def avg_duration(self):
+    @cached_method
+    def avg_duration(self, time_units=True, **kwargs):
         &#34;&#34;&#34;Average drawdown duration (in time units).&#34;&#34;&#34;
-        return self.duration.mean(time_units=True)
+        return self.duration.mean(time_units=time_units, **kwargs)
 
-    @cached_property
-    def max_duration(self):
+    @cached_method
+    def max_duration(self, time_units=True, **kwargs):
         &#34;&#34;&#34;Maximum drawdown duration (in time units).&#34;&#34;&#34;
-        return self.duration.max(time_units=True)
+        return self.duration.max(time_units=time_units, **kwargs)
 
-    @cached_property
-    def coverage(self):
+    @cached_method
+    def coverage(self, group_by=None, columns=None, **kwargs):
         &#34;&#34;&#34;Coverage, that is, total duration divided by the whole period.&#34;&#34;&#34;
-        coverage = to_1d(self.duration.sum(), raw=True) / self.wrapper.shape[0]
-        return self.wrapper.wrap_reduced(coverage)
+        total_duration = to_1d(self.duration.sum(group_by=group_by), raw=True)
+        total_steps = self.grouper.get_group_counts(group_by=group_by) * self.wrapper.shape[0]
+        columns = self.grouper.get_new_index(group_by=group_by, new_index=columns)
+        return self.wrapper.wrap_reduced(total_duration / total_steps, columns=columns, **kwargs)
 
     @cached_property
     def ptv_duration(self):
@@ -348,17 +376,30 @@ class BaseDrawdowns(Records):
 class ActiveDrawdowns(BaseDrawdowns):
     &#34;&#34;&#34;Extends `BaseDrawdowns` by properties for active drawdowns.&#34;&#34;&#34;
 
-    @cached_property
-    def current_drawdown(self):
-        return self.drawdown.nst(-1)
+    @cached_method
+    def current_drawdown(self, group_by=None, **kwargs):
+        &#34;&#34;&#34;Current drawdown from peak.
 
-    @cached_property
-    def current_duration(self):
-        return self.duration.nst(-1, time_units=True)
+        Does not support `group_by`.&#34;&#34;&#34;
+        curr_end_val = self.end_value.nst(-1, group_by=group_by)
+        curr_start_val = self.start_value.nst(-1, group_by=group_by)
+        curr_drawdown = (curr_end_val - curr_start_val) / curr_start_val
+        return self.wrapper.wrap_reduced(curr_drawdown, **kwargs)
 
-    @cached_property
-    def current_return(self):
-        return self.map(nb.dd_recovery_return_map_nb, self.ts.vbt.to_2d_array()).nst(-1)
+    @cached_method
+    def current_duration(self, time_units=True, **kwargs):
+        &#34;&#34;&#34;Current duration from peak.
+
+        Does not support `group_by`.&#34;&#34;&#34;
+        return self.duration.nst(-1, time_units=time_units, **kwargs)
+
+    @cached_method
+    def current_return(self, **kwargs):
+        &#34;&#34;&#34;Current return from valley.
+
+        Does not support `group_by`.&#34;&#34;&#34;
+        recovery_return = self.map(nb.dd_recovery_return_map_nb, self.ts.vbt.to_2d_array())
+        return recovery_return.nst(-1, **kwargs)
 
 
 class RecoveredDrawdowns(BaseDrawdowns):
@@ -406,12 +447,12 @@ class Drawdowns(BaseDrawdowns):
         1    1          2           3        4       1
         2    2          1           2        3       1
         3    2          3           4        4       0
-        &gt;&gt;&gt; drawdowns.active.avg_duration
+        &gt;&gt;&gt; drawdowns.active.avg_duration()
         a   2 days
         b      NaT
         c   1 days
         dtype: timedelta64[ns]
-        &gt;&gt;&gt; drawdowns.recovered.avg_duration
+        &gt;&gt;&gt; drawdowns.recovered.avg_duration()
         a      NaT
         b   2 days
         c   2 days
@@ -423,10 +464,13 @@ class Drawdowns(BaseDrawdowns):
         &#34;&#34;&#34;See `vectorbt.records.enums.DrawdownStatus`.&#34;&#34;&#34;
         return self.map_field(&#39;status&#39;)
 
-    @cached_property
-    def recovered_rate(self):
+    @cached_method
+    def recovered_rate(self, group_by=None, columns=None, **kwargs):
         &#34;&#34;&#34;Rate of recovered drawdowns.&#34;&#34;&#34;
-        return self.wrapper.wrap_reduced(to_1d(self.recovered.count, raw=True) / to_1d(self.count, raw=True))
+        recovered_count = to_1d(self.recovered.count(group_by=group_by), raw=True)
+        total_count = to_1d(self.count(group_by=group_by), raw=True)
+        columns = self.grouper.get_new_index(group_by=group_by, new_index=columns)
+        return self.wrapper.wrap_reduced(recovered_count / total_count, columns=columns, **kwargs)
 
     @cached_property
     def active(self):
@@ -436,7 +480,8 @@ class Drawdowns(BaseDrawdowns):
             self.records_arr[filter_mask],
             self.ts,
             freq=self.wrapper.freq,
-            idx_field=self.idx_field
+            idx_field=self.idx_field,
+            group_by=self.grouper.group_by
         )
 
     @cached_property
@@ -447,7 +492,8 @@ class Drawdowns(BaseDrawdowns):
             self.records_arr[filter_mask],
             self.ts,
             freq=self.wrapper.freq,
-            idx_field=self.idx_field
+            idx_field=self.idx_field,
+            group_by=self.grouper.group_by
         )</code></pre>
 </details>
 </section>
@@ -462,7 +508,7 @@ class Drawdowns(BaseDrawdowns):
 <dl>
 <dt id="vectorbt.records.drawdowns.ActiveDrawdowns"><code class="flex name class">
 <span>class <span class="ident parent-fname">ActiveDrawdowns</span></span>
-<span>(</span><span>records_arr, ts, freq=None, idx_field='end_idx')</span>
+<span>(</span><span>records_arr, ts, freq=None, idx_field='end_idx', group_by=None)</span>
 </code></dt>
 <dd>
 <div class="desc"><p>Extends <code><a title="vectorbt.records.drawdowns.BaseDrawdowns" href="#vectorbt.records.drawdowns.BaseDrawdowns">BaseDrawdowns</a></code> by properties for active drawdowns.</p></div>
@@ -473,17 +519,30 @@ class Drawdowns(BaseDrawdowns):
 <pre><code class="python">class ActiveDrawdowns(BaseDrawdowns):
     &#34;&#34;&#34;Extends `BaseDrawdowns` by properties for active drawdowns.&#34;&#34;&#34;
 
-    @cached_property
-    def current_drawdown(self):
-        return self.drawdown.nst(-1)
+    @cached_method
+    def current_drawdown(self, group_by=None, **kwargs):
+        &#34;&#34;&#34;Current drawdown from peak.
 
-    @cached_property
-    def current_duration(self):
-        return self.duration.nst(-1, time_units=True)
+        Does not support `group_by`.&#34;&#34;&#34;
+        curr_end_val = self.end_value.nst(-1, group_by=group_by)
+        curr_start_val = self.start_value.nst(-1, group_by=group_by)
+        curr_drawdown = (curr_end_val - curr_start_val) / curr_start_val
+        return self.wrapper.wrap_reduced(curr_drawdown, **kwargs)
 
-    @cached_property
-    def current_return(self):
-        return self.map(nb.dd_recovery_return_map_nb, self.ts.vbt.to_2d_array()).nst(-1)</code></pre>
+    @cached_method
+    def current_duration(self, time_units=True, **kwargs):
+        &#34;&#34;&#34;Current duration from peak.
+
+        Does not support `group_by`.&#34;&#34;&#34;
+        return self.duration.nst(-1, time_units=time_units, **kwargs)
+
+    @cached_method
+    def current_return(self, **kwargs):
+        &#34;&#34;&#34;Current return from valley.
+
+        Does not support `group_by`.&#34;&#34;&#34;
+        recovery_return = self.map(nb.dd_recovery_return_map_nb, self.ts.vbt.to_2d_array())
+        return recovery_return.nst(-1, **kwargs)</code></pre>
 </details>
 <h3 class="section-subtitle">Ancestors</h3>
 <ul class="hlist">
@@ -491,78 +550,64 @@ class Drawdowns(BaseDrawdowns):
 <li><a title="vectorbt.records.base.Records" href="base.html#vectorbt.records.base.Records">Records</a></li>
 <li><a title="vectorbt.base.indexing.PandasIndexer" href="../base/indexing.html#vectorbt.base.indexing.PandasIndexer">PandasIndexer</a></li>
 </ul>
-<h3 class="section-subtitle">Instance variables</h3>
+<h3 class="section-subtitle">Methods</h3>
 <dl>
-<dt id="vectorbt.records.drawdowns.ActiveDrawdowns.current_drawdown"><code class="name">var <span class="ident fname">current_drawdown</span></code></dt>
+<dt id="vectorbt.records.drawdowns.ActiveDrawdowns.current_drawdown"><code class="name flex">
+<span>def <span class="ident fname">current_drawdown</span></span>(<span>self, group_by=None, **kwargs)</span>
+</code></dt>
 <dd>
-<div class="desc"></div>
+<div class="desc"><p>Current drawdown from peak.</p>
+<p>Does not support <code>group_by</code>.</p></div>
 <details class="source">
 <summary>
 <span>Expand source code</span>
 </summary>
-<pre><code class="python">def __get__(self, instance, owner=None):
-    if instance is None:
-        return self
-    if not defaults.caching or self.disabled:  # you can manually disable cache here
-        return super().__get__(instance, owner=owner)
-    cache = instance.__dict__
-    val = cache.get(self.attrname, _NOT_FOUND)
-    if val is _NOT_FOUND:
-        with self.lock:
-            # check if another thread filled cache while we awaited lock
-            val = cache.get(self.attrname, _NOT_FOUND)
-            if val is _NOT_FOUND:
-                val = self.func(instance)
-                cache[self.attrname] = val
-    return val</code></pre>
+<pre><code class="python">@cached_method
+def current_drawdown(self, group_by=None, **kwargs):
+    &#34;&#34;&#34;Current drawdown from peak.
+
+    Does not support `group_by`.&#34;&#34;&#34;
+    curr_end_val = self.end_value.nst(-1, group_by=group_by)
+    curr_start_val = self.start_value.nst(-1, group_by=group_by)
+    curr_drawdown = (curr_end_val - curr_start_val) / curr_start_val
+    return self.wrapper.wrap_reduced(curr_drawdown, **kwargs)</code></pre>
 </details>
 </dd>
-<dt id="vectorbt.records.drawdowns.ActiveDrawdowns.current_duration"><code class="name">var <span class="ident fname">current_duration</span></code></dt>
+<dt id="vectorbt.records.drawdowns.ActiveDrawdowns.current_duration"><code class="name flex">
+<span>def <span class="ident fname">current_duration</span></span>(<span>self, time_units=True, **kwargs)</span>
+</code></dt>
 <dd>
-<div class="desc"></div>
+<div class="desc"><p>Current duration from peak.</p>
+<p>Does not support <code>group_by</code>.</p></div>
 <details class="source">
 <summary>
 <span>Expand source code</span>
 </summary>
-<pre><code class="python">def __get__(self, instance, owner=None):
-    if instance is None:
-        return self
-    if not defaults.caching or self.disabled:  # you can manually disable cache here
-        return super().__get__(instance, owner=owner)
-    cache = instance.__dict__
-    val = cache.get(self.attrname, _NOT_FOUND)
-    if val is _NOT_FOUND:
-        with self.lock:
-            # check if another thread filled cache while we awaited lock
-            val = cache.get(self.attrname, _NOT_FOUND)
-            if val is _NOT_FOUND:
-                val = self.func(instance)
-                cache[self.attrname] = val
-    return val</code></pre>
+<pre><code class="python">@cached_method
+def current_duration(self, time_units=True, **kwargs):
+    &#34;&#34;&#34;Current duration from peak.
+
+    Does not support `group_by`.&#34;&#34;&#34;
+    return self.duration.nst(-1, time_units=time_units, **kwargs)</code></pre>
 </details>
 </dd>
-<dt id="vectorbt.records.drawdowns.ActiveDrawdowns.current_return"><code class="name">var <span class="ident fname">current_return</span></code></dt>
+<dt id="vectorbt.records.drawdowns.ActiveDrawdowns.current_return"><code class="name flex">
+<span>def <span class="ident fname">current_return</span></span>(<span>self, **kwargs)</span>
+</code></dt>
 <dd>
-<div class="desc"></div>
+<div class="desc"><p>Current return from valley.</p>
+<p>Does not support <code>group_by</code>.</p></div>
 <details class="source">
 <summary>
 <span>Expand source code</span>
 </summary>
-<pre><code class="python">def __get__(self, instance, owner=None):
-    if instance is None:
-        return self
-    if not defaults.caching or self.disabled:  # you can manually disable cache here
-        return super().__get__(instance, owner=owner)
-    cache = instance.__dict__
-    val = cache.get(self.attrname, _NOT_FOUND)
-    if val is _NOT_FOUND:
-        with self.lock:
-            # check if another thread filled cache while we awaited lock
-            val = cache.get(self.attrname, _NOT_FOUND)
-            if val is _NOT_FOUND:
-                val = self.func(instance)
-                cache[self.attrname] = val
-    return val</code></pre>
+<pre><code class="python">@cached_method
+def current_return(self, **kwargs):
+    &#34;&#34;&#34;Current return from valley.
+
+    Does not support `group_by`.&#34;&#34;&#34;
+    recovery_return = self.map(nb.dd_recovery_return_map_nb, self.ts.vbt.to_2d_array())
+    return recovery_return.nst(-1, **kwargs)</code></pre>
 </details>
 </dd>
 </dl>
@@ -599,7 +644,7 @@ class Drawdowns(BaseDrawdowns):
 </dd>
 <dt id="vectorbt.records.drawdowns.BaseDrawdowns"><code class="flex name class">
 <span>class <span class="ident parent-fname">BaseDrawdowns</span></span>
-<span>(</span><span>records_arr, ts, freq=None, idx_field='end_idx')</span>
+<span>(</span><span>records_arr, ts, freq=None, idx_field='end_idx', group_by=None)</span>
 </code></dt>
 <dd>
 <div class="desc"><p>Extends <code>Records</code> for working with drawdown records.</p>
@@ -613,8 +658,14 @@ class Drawdowns(BaseDrawdowns):
 
     Requires `records_arr` to have all fields defined in `vectorbt.records.enums.drawdown_dt`.&#34;&#34;&#34;
 
-    def __init__(self, records_arr, ts, freq=None, idx_field=&#39;end_idx&#39;):
-        Records.__init__(self, records_arr, ArrayWrapper.from_obj(ts, freq=freq), idx_field=idx_field)
+    def __init__(self, records_arr, ts, freq=None, idx_field=&#39;end_idx&#39;, group_by=None):
+        Records.__init__(
+            self,
+            records_arr,
+            ArrayWrapper.from_obj(ts, freq=freq),
+            idx_field=idx_field,
+            group_by=group_by
+        )
         PandasIndexer.__init__(self, _indexing_func)
 
         if not all(field in records_arr.dtype.names for field in drawdown_dt.names):
@@ -630,9 +681,19 @@ class Drawdowns(BaseDrawdowns):
         records_arr = nb.drawdown_records_nb(ts.vbt.to_2d_array())
         return cls(records_arr, ts, **kwargs)
 
-    def filter_by_mask(self, mask):
+    def filter_by_mask(self, mask, idx_field=None, group_by=None):
         &#34;&#34;&#34;Return a new class instance, filtered by mask.&#34;&#34;&#34;
-        return self.__class__(self.records_arr[mask], self.ts, freq=self.wrapper.freq, idx_field=self.idx_field)
+        if idx_field is None:
+            idx_field = self.idx_field
+        if group_by is None:
+            group_by = self.grouper.group_by
+        return self.__class__(
+            self.records_arr[mask],
+            self.ts,
+            freq=self.wrapper.freq,
+            idx_field=idx_field,
+            group_by=group_by
+        )
 
     def plot(self,
              ts_trace_kwargs={},
@@ -858,36 +919,38 @@ class Drawdowns(BaseDrawdowns):
         &#34;&#34;&#34;Drawdown value (in percentage).&#34;&#34;&#34;
         return self.map(nb.dd_drawdown_map_nb, self.ts.vbt.to_2d_array())
 
-    @cached_property
-    def avg_drawdown(self):
+    @cached_method
+    def avg_drawdown(self, default_val=0., **kwargs):
         &#34;&#34;&#34;Average drawdown (ADD).&#34;&#34;&#34;
-        return self.drawdown.mean(default_val=0.)
+        return self.drawdown.mean(default_val=default_val, **kwargs)
 
-    @cached_property
-    def max_drawdown(self):
+    @cached_method
+    def max_drawdown(self, default_val=0., **kwargs):
         &#34;&#34;&#34;Maximum drawdown (MDD).&#34;&#34;&#34;
-        return self.drawdown.min(default_val=0.)
+        return self.drawdown.min(default_val=default_val, **kwargs)
 
     @cached_property
     def duration(self):
         &#34;&#34;&#34;Duration of each drawdown (in raw format).&#34;&#34;&#34;
         return self.map(nb.dd_duration_map_nb)
 
-    @cached_property
-    def avg_duration(self):
+    @cached_method
+    def avg_duration(self, time_units=True, **kwargs):
         &#34;&#34;&#34;Average drawdown duration (in time units).&#34;&#34;&#34;
-        return self.duration.mean(time_units=True)
+        return self.duration.mean(time_units=time_units, **kwargs)
 
-    @cached_property
-    def max_duration(self):
+    @cached_method
+    def max_duration(self, time_units=True, **kwargs):
         &#34;&#34;&#34;Maximum drawdown duration (in time units).&#34;&#34;&#34;
-        return self.duration.max(time_units=True)
+        return self.duration.max(time_units=time_units, **kwargs)
 
-    @cached_property
-    def coverage(self):
+    @cached_method
+    def coverage(self, group_by=None, columns=None, **kwargs):
         &#34;&#34;&#34;Coverage, that is, total duration divided by the whole period.&#34;&#34;&#34;
-        coverage = to_1d(self.duration.sum(), raw=True) / self.wrapper.shape[0]
-        return self.wrapper.wrap_reduced(coverage)
+        total_duration = to_1d(self.duration.sum(group_by=group_by), raw=True)
+        total_steps = self.grouper.get_group_counts(group_by=group_by) * self.wrapper.shape[0]
+        columns = self.grouper.get_new_index(group_by=group_by, new_index=columns)
+        return self.wrapper.wrap_reduced(total_duration / total_steps, columns=columns, **kwargs)
 
     @cached_property
     def ptv_duration(self):
@@ -929,78 +992,6 @@ def from_ts(cls, ts, **kwargs):
 </dl>
 <h3 class="section-subtitle">Instance variables</h3>
 <dl>
-<dt id="vectorbt.records.drawdowns.BaseDrawdowns.avg_drawdown"><code class="name">var <span class="ident fname">avg_drawdown</span></code></dt>
-<dd>
-<div class="desc"><p>Average drawdown (ADD).</p></div>
-<details class="source">
-<summary>
-<span>Expand source code</span>
-</summary>
-<pre><code class="python">def __get__(self, instance, owner=None):
-    if instance is None:
-        return self
-    if not defaults.caching or self.disabled:  # you can manually disable cache here
-        return super().__get__(instance, owner=owner)
-    cache = instance.__dict__
-    val = cache.get(self.attrname, _NOT_FOUND)
-    if val is _NOT_FOUND:
-        with self.lock:
-            # check if another thread filled cache while we awaited lock
-            val = cache.get(self.attrname, _NOT_FOUND)
-            if val is _NOT_FOUND:
-                val = self.func(instance)
-                cache[self.attrname] = val
-    return val</code></pre>
-</details>
-</dd>
-<dt id="vectorbt.records.drawdowns.BaseDrawdowns.avg_duration"><code class="name">var <span class="ident fname">avg_duration</span></code></dt>
-<dd>
-<div class="desc"><p>Average drawdown duration (in time units).</p></div>
-<details class="source">
-<summary>
-<span>Expand source code</span>
-</summary>
-<pre><code class="python">def __get__(self, instance, owner=None):
-    if instance is None:
-        return self
-    if not defaults.caching or self.disabled:  # you can manually disable cache here
-        return super().__get__(instance, owner=owner)
-    cache = instance.__dict__
-    val = cache.get(self.attrname, _NOT_FOUND)
-    if val is _NOT_FOUND:
-        with self.lock:
-            # check if another thread filled cache while we awaited lock
-            val = cache.get(self.attrname, _NOT_FOUND)
-            if val is _NOT_FOUND:
-                val = self.func(instance)
-                cache[self.attrname] = val
-    return val</code></pre>
-</details>
-</dd>
-<dt id="vectorbt.records.drawdowns.BaseDrawdowns.coverage"><code class="name">var <span class="ident fname">coverage</span></code></dt>
-<dd>
-<div class="desc"><p>Coverage, that is, total duration divided by the whole period.</p></div>
-<details class="source">
-<summary>
-<span>Expand source code</span>
-</summary>
-<pre><code class="python">def __get__(self, instance, owner=None):
-    if instance is None:
-        return self
-    if not defaults.caching or self.disabled:  # you can manually disable cache here
-        return super().__get__(instance, owner=owner)
-    cache = instance.__dict__
-    val = cache.get(self.attrname, _NOT_FOUND)
-    if val is _NOT_FOUND:
-        with self.lock:
-            # check if another thread filled cache while we awaited lock
-            val = cache.get(self.attrname, _NOT_FOUND)
-            if val is _NOT_FOUND:
-                val = self.func(instance)
-                cache[self.attrname] = val
-    return val</code></pre>
-</details>
-</dd>
 <dt id="vectorbt.records.drawdowns.BaseDrawdowns.drawdown"><code class="name">var <span class="ident fname">drawdown</span></code></dt>
 <dd>
 <div class="desc"><p>Drawdown value (in percentage).</p></div>
@@ -1052,54 +1043,6 @@ def from_ts(cls, ts, **kwargs):
 <dt id="vectorbt.records.drawdowns.BaseDrawdowns.end_value"><code class="name">var <span class="ident fname">end_value</span></code></dt>
 <dd>
 <div class="desc"><p>End value of each drawdown.</p></div>
-<details class="source">
-<summary>
-<span>Expand source code</span>
-</summary>
-<pre><code class="python">def __get__(self, instance, owner=None):
-    if instance is None:
-        return self
-    if not defaults.caching or self.disabled:  # you can manually disable cache here
-        return super().__get__(instance, owner=owner)
-    cache = instance.__dict__
-    val = cache.get(self.attrname, _NOT_FOUND)
-    if val is _NOT_FOUND:
-        with self.lock:
-            # check if another thread filled cache while we awaited lock
-            val = cache.get(self.attrname, _NOT_FOUND)
-            if val is _NOT_FOUND:
-                val = self.func(instance)
-                cache[self.attrname] = val
-    return val</code></pre>
-</details>
-</dd>
-<dt id="vectorbt.records.drawdowns.BaseDrawdowns.max_drawdown"><code class="name">var <span class="ident fname">max_drawdown</span></code></dt>
-<dd>
-<div class="desc"><p>Maximum drawdown (MDD).</p></div>
-<details class="source">
-<summary>
-<span>Expand source code</span>
-</summary>
-<pre><code class="python">def __get__(self, instance, owner=None):
-    if instance is None:
-        return self
-    if not defaults.caching or self.disabled:  # you can manually disable cache here
-        return super().__get__(instance, owner=owner)
-    cache = instance.__dict__
-    val = cache.get(self.attrname, _NOT_FOUND)
-    if val is _NOT_FOUND:
-        with self.lock:
-            # check if another thread filled cache while we awaited lock
-            val = cache.get(self.attrname, _NOT_FOUND)
-            if val is _NOT_FOUND:
-                val = self.func(instance)
-                cache[self.attrname] = val
-    return val</code></pre>
-</details>
-</dd>
-<dt id="vectorbt.records.drawdowns.BaseDrawdowns.max_duration"><code class="name">var <span class="ident fname">max_duration</span></code></dt>
-<dd>
-<div class="desc"><p>Maximum drawdown duration (in time units).</p></div>
 <details class="source">
 <summary>
 <span>Expand source code</span>
@@ -1196,6 +1139,84 @@ def from_ts(cls, ts, **kwargs):
 </dl>
 <h3 class="section-subtitle">Methods</h3>
 <dl>
+<dt id="vectorbt.records.drawdowns.BaseDrawdowns.avg_drawdown"><code class="name flex">
+<span>def <span class="ident fname">avg_drawdown</span></span>(<span>self, default_val=0.0, **kwargs)</span>
+</code></dt>
+<dd>
+<div class="desc"><p>Average drawdown (ADD).</p></div>
+<details class="source">
+<summary>
+<span>Expand source code</span>
+</summary>
+<pre><code class="python">@cached_method
+def avg_drawdown(self, default_val=0., **kwargs):
+    &#34;&#34;&#34;Average drawdown (ADD).&#34;&#34;&#34;
+    return self.drawdown.mean(default_val=default_val, **kwargs)</code></pre>
+</details>
+</dd>
+<dt id="vectorbt.records.drawdowns.BaseDrawdowns.avg_duration"><code class="name flex">
+<span>def <span class="ident fname">avg_duration</span></span>(<span>self, time_units=True, **kwargs)</span>
+</code></dt>
+<dd>
+<div class="desc"><p>Average drawdown duration (in time units).</p></div>
+<details class="source">
+<summary>
+<span>Expand source code</span>
+</summary>
+<pre><code class="python">@cached_method
+def avg_duration(self, time_units=True, **kwargs):
+    &#34;&#34;&#34;Average drawdown duration (in time units).&#34;&#34;&#34;
+    return self.duration.mean(time_units=time_units, **kwargs)</code></pre>
+</details>
+</dd>
+<dt id="vectorbt.records.drawdowns.BaseDrawdowns.coverage"><code class="name flex">
+<span>def <span class="ident fname">coverage</span></span>(<span>self, group_by=None, columns=None, **kwargs)</span>
+</code></dt>
+<dd>
+<div class="desc"><p>Coverage, that is, total duration divided by the whole period.</p></div>
+<details class="source">
+<summary>
+<span>Expand source code</span>
+</summary>
+<pre><code class="python">@cached_method
+def coverage(self, group_by=None, columns=None, **kwargs):
+    &#34;&#34;&#34;Coverage, that is, total duration divided by the whole period.&#34;&#34;&#34;
+    total_duration = to_1d(self.duration.sum(group_by=group_by), raw=True)
+    total_steps = self.grouper.get_group_counts(group_by=group_by) * self.wrapper.shape[0]
+    columns = self.grouper.get_new_index(group_by=group_by, new_index=columns)
+    return self.wrapper.wrap_reduced(total_duration / total_steps, columns=columns, **kwargs)</code></pre>
+</details>
+</dd>
+<dt id="vectorbt.records.drawdowns.BaseDrawdowns.max_drawdown"><code class="name flex">
+<span>def <span class="ident fname">max_drawdown</span></span>(<span>self, default_val=0.0, **kwargs)</span>
+</code></dt>
+<dd>
+<div class="desc"><p>Maximum drawdown (MDD).</p></div>
+<details class="source">
+<summary>
+<span>Expand source code</span>
+</summary>
+<pre><code class="python">@cached_method
+def max_drawdown(self, default_val=0., **kwargs):
+    &#34;&#34;&#34;Maximum drawdown (MDD).&#34;&#34;&#34;
+    return self.drawdown.min(default_val=default_val, **kwargs)</code></pre>
+</details>
+</dd>
+<dt id="vectorbt.records.drawdowns.BaseDrawdowns.max_duration"><code class="name flex">
+<span>def <span class="ident fname">max_duration</span></span>(<span>self, time_units=True, **kwargs)</span>
+</code></dt>
+<dd>
+<div class="desc"><p>Maximum drawdown duration (in time units).</p></div>
+<details class="source">
+<summary>
+<span>Expand source code</span>
+</summary>
+<pre><code class="python">@cached_method
+def max_duration(self, time_units=True, **kwargs):
+    &#34;&#34;&#34;Maximum drawdown duration (in time units).&#34;&#34;&#34;
+    return self.duration.max(time_units=time_units, **kwargs)</code></pre>
+</details>
+</dd>
 <dt id="vectorbt.records.drawdowns.BaseDrawdowns.plot"><code class="name flex">
 <span>def <span class="ident fname">plot</span></span>(<span>self, ts_trace_kwargs={}, peak_trace_kwargs={}, valley_trace_kwargs={}, recovery_trace_kwargs={}, active_trace_kwargs={}, ptv_shape_kwargs={}, vtr_shape_kwargs={}, active_shape_kwargs={}, fig=None, **layout_kwargs)</span>
 </code></dt>
@@ -1462,7 +1483,7 @@ vbt.records.Drawdowns.from_ts(ts, freq='1 days').plot()
 </dd>
 <dt id="vectorbt.records.drawdowns.Drawdowns"><code class="flex name class">
 <span>class <span class="ident parent-fname">Drawdowns</span></span>
-<span>(</span><span>records_arr, ts, freq=None, idx_field='end_idx')</span>
+<span>(</span><span>records_arr, ts, freq=None, idx_field='end_idx', group_by=None)</span>
 </code></dt>
 <dd>
 <div class="desc"><p>Extends <code><a title="vectorbt.records.drawdowns.BaseDrawdowns" href="#vectorbt.records.drawdowns.BaseDrawdowns">BaseDrawdowns</a></code> by further dividing drawdowns into active and recovered.</p>
@@ -1486,12 +1507,12 @@ vbt.records.Drawdowns.from_ts(ts, freq='1 days').plot()
 1    1          2           3        4       1
 2    2          1           2        3       1
 3    2          3           4        4       0
-&gt;&gt;&gt; drawdowns.active.avg_duration
+&gt;&gt;&gt; drawdowns.active.avg_duration()
 a   2 days
 b      NaT
 c   1 days
 dtype: timedelta64[ns]
-&gt;&gt;&gt; drawdowns.recovered.avg_duration
+&gt;&gt;&gt; drawdowns.recovered.avg_duration()
 a      NaT
 b   2 days
 c   2 days
@@ -1525,12 +1546,12 @@ dtype: timedelta64[ns]
         1    1          2           3        4       1
         2    2          1           2        3       1
         3    2          3           4        4       0
-        &gt;&gt;&gt; drawdowns.active.avg_duration
+        &gt;&gt;&gt; drawdowns.active.avg_duration()
         a   2 days
         b      NaT
         c   1 days
         dtype: timedelta64[ns]
-        &gt;&gt;&gt; drawdowns.recovered.avg_duration
+        &gt;&gt;&gt; drawdowns.recovered.avg_duration()
         a      NaT
         b   2 days
         c   2 days
@@ -1542,10 +1563,13 @@ dtype: timedelta64[ns]
         &#34;&#34;&#34;See `vectorbt.records.enums.DrawdownStatus`.&#34;&#34;&#34;
         return self.map_field(&#39;status&#39;)
 
-    @cached_property
-    def recovered_rate(self):
+    @cached_method
+    def recovered_rate(self, group_by=None, columns=None, **kwargs):
         &#34;&#34;&#34;Rate of recovered drawdowns.&#34;&#34;&#34;
-        return self.wrapper.wrap_reduced(to_1d(self.recovered.count, raw=True) / to_1d(self.count, raw=True))
+        recovered_count = to_1d(self.recovered.count(group_by=group_by), raw=True)
+        total_count = to_1d(self.count(group_by=group_by), raw=True)
+        columns = self.grouper.get_new_index(group_by=group_by, new_index=columns)
+        return self.wrapper.wrap_reduced(recovered_count / total_count, columns=columns, **kwargs)
 
     @cached_property
     def active(self):
@@ -1555,7 +1579,8 @@ dtype: timedelta64[ns]
             self.records_arr[filter_mask],
             self.ts,
             freq=self.wrapper.freq,
-            idx_field=self.idx_field
+            idx_field=self.idx_field,
+            group_by=self.grouper.group_by
         )
 
     @cached_property
@@ -1566,7 +1591,8 @@ dtype: timedelta64[ns]
             self.records_arr[filter_mask],
             self.ts,
             freq=self.wrapper.freq,
-            idx_field=self.idx_field
+            idx_field=self.idx_field,
+            group_by=self.grouper.group_by
         )</code></pre>
 </details>
 <h3 class="section-subtitle">Ancestors</h3>
@@ -1625,30 +1651,6 @@ dtype: timedelta64[ns]
     return val</code></pre>
 </details>
 </dd>
-<dt id="vectorbt.records.drawdowns.Drawdowns.recovered_rate"><code class="name">var <span class="ident fname">recovered_rate</span></code></dt>
-<dd>
-<div class="desc"><p>Rate of recovered drawdowns.</p></div>
-<details class="source">
-<summary>
-<span>Expand source code</span>
-</summary>
-<pre><code class="python">def __get__(self, instance, owner=None):
-    if instance is None:
-        return self
-    if not defaults.caching or self.disabled:  # you can manually disable cache here
-        return super().__get__(instance, owner=owner)
-    cache = instance.__dict__
-    val = cache.get(self.attrname, _NOT_FOUND)
-    if val is _NOT_FOUND:
-        with self.lock:
-            # check if another thread filled cache while we awaited lock
-            val = cache.get(self.attrname, _NOT_FOUND)
-            if val is _NOT_FOUND:
-                val = self.func(instance)
-                cache[self.attrname] = val
-    return val</code></pre>
-</details>
-</dd>
 <dt id="vectorbt.records.drawdowns.Drawdowns.status"><code class="name">var <span class="ident fname">status</span></code></dt>
 <dd>
 <div class="desc"><p>See <code><a title="vectorbt.records.enums.DrawdownStatus" href="enums.html#vectorbt.records.enums.DrawdownStatus">DrawdownStatus</a></code>.</p></div>
@@ -1671,6 +1673,27 @@ dtype: timedelta64[ns]
                 val = self.func(instance)
                 cache[self.attrname] = val
     return val</code></pre>
+</details>
+</dd>
+</dl>
+<h3 class="section-subtitle">Methods</h3>
+<dl>
+<dt id="vectorbt.records.drawdowns.Drawdowns.recovered_rate"><code class="name flex">
+<span>def <span class="ident fname">recovered_rate</span></span>(<span>self, group_by=None, columns=None, **kwargs)</span>
+</code></dt>
+<dd>
+<div class="desc"><p>Rate of recovered drawdowns.</p></div>
+<details class="source">
+<summary>
+<span>Expand source code</span>
+</summary>
+<pre><code class="python">@cached_method
+def recovered_rate(self, group_by=None, columns=None, **kwargs):
+    &#34;&#34;&#34;Rate of recovered drawdowns.&#34;&#34;&#34;
+    recovered_count = to_1d(self.recovered.count(group_by=group_by), raw=True)
+    total_count = to_1d(self.count(group_by=group_by), raw=True)
+    columns = self.grouper.get_new_index(group_by=group_by, new_index=columns)
+    return self.wrapper.wrap_reduced(recovered_count / total_count, columns=columns, **kwargs)</code></pre>
 </details>
 </dd>
 </dl>
@@ -1707,7 +1730,7 @@ dtype: timedelta64[ns]
 </dd>
 <dt id="vectorbt.records.drawdowns.RecoveredDrawdowns"><code class="flex name class">
 <span>class <span class="ident parent-fname">RecoveredDrawdowns</span></span>
-<span>(</span><span>records_arr, ts, freq=None, idx_field='end_idx')</span>
+<span>(</span><span>records_arr, ts, freq=None, idx_field='end_idx', group_by=None)</span>
 </code></dt>
 <dd>
 <div class="desc"><p>Extends <code><a title="vectorbt.records.drawdowns.BaseDrawdowns" href="#vectorbt.records.drawdowns.BaseDrawdowns">BaseDrawdowns</a></code> by properties for recovered drawdowns.</p></div>

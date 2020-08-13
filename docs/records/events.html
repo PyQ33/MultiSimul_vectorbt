@@ -57,7 +57,7 @@ import plotly.graph_objects as go
 
 from vectorbt.defaults import contrast_color_schema
 from vectorbt.utils.colors import adjust_lightness
-from vectorbt.utils.decorators import cached_property
+from vectorbt.utils.decorators import cached_property, cached_method
 from vectorbt.utils.config import merge_kwargs
 from vectorbt.utils.datetime import DatetimeTypes
 from vectorbt.base.indexing import PandasIndexer
@@ -75,15 +75,31 @@ from vectorbt.records.enums import (
 
 def _indexing_func(obj, pd_indexing_func):
     &#34;&#34;&#34;Perform indexing on `BaseEvents`.&#34;&#34;&#34;
-    records_arr, _ = indexing_on_records(obj, pd_indexing_func)
-    return obj.__class__(records_arr, pd_indexing_func(obj.main_price), freq=obj.wrapper.freq, idx_field=obj.idx_field)
+    new_cols, new_records, _ = indexing_on_records(obj, pd_indexing_func)
+    if obj.grouper.group_by is not None:
+        new_group_by = obj.grouper.group_by[new_cols]
+    else:
+        new_group_by = None
+    return obj.__class__(
+        new_records,
+        pd_indexing_func(obj.main_price),
+        freq=obj.wrapper.freq,
+        idx_field=obj.idx_field,
+        group_by=new_group_by
+    )
 
 
 class BaseEvents(Records):
     &#34;&#34;&#34;Extends `Records` for working with event records.&#34;&#34;&#34;
 
-    def __init__(self, records_arr, main_price, freq=None, idx_field=&#39;exit_idx&#39;):
-        Records.__init__(self, records_arr, ArrayWrapper.from_obj(main_price, freq=freq), idx_field=idx_field)
+    def __init__(self, records_arr, main_price, freq=None, idx_field=&#39;exit_idx&#39;, group_by=None):
+        Records.__init__(
+            self,
+            records_arr,
+            ArrayWrapper.from_obj(main_price, freq=freq),
+            idx_field=idx_field,
+            group_by=group_by
+        )
         PandasIndexer.__init__(self, _indexing_func)
 
         if not all(field in records_arr.dtype.names for field in event_dt.names):
@@ -91,9 +107,19 @@ class BaseEvents(Records):
 
         self.main_price = main_price
 
-    def filter_by_mask(self, mask):
+    def filter_by_mask(self, mask, idx_field=None, group_by=None):
         &#34;&#34;&#34;Return a new class instance, filtered by mask.&#34;&#34;&#34;
-        return self.__class__(self.records_arr[mask], self.main_price, freq=self.wrapper.freq, idx_field=self.idx_field)
+        if idx_field is None:
+            idx_field = self.idx_field
+        if group_by is None:
+            group_by = self.grouper.group_by
+        return self.__class__(
+            self.records_arr[mask],
+            self.main_price,
+            freq=self.wrapper.freq,
+            idx_field=idx_field,
+            group_by=group_by
+        )
 
     def plot(self,
              main_price_trace_kwargs={},
@@ -292,11 +318,13 @@ class BaseEvents(Records):
         &#34;&#34;&#34;Duration of each event (in raw format).&#34;&#34;&#34;
         return self.map(nb.event_duration_map_nb)
 
-    @cached_property
-    def coverage(self):
+    @cached_method
+    def coverage(self, group_by=None, columns=None, **kwargs):
         &#34;&#34;&#34;Coverage, that is, total duration divided by the whole period.&#34;&#34;&#34;
-        coverage = to_1d(self.duration.sum(), raw=True) / self.wrapper.shape[0]
-        return self.wrapper.wrap_reduced(coverage)
+        total_duration = to_1d(self.duration.sum(group_by=group_by), raw=True)
+        total_steps = self.grouper.get_group_counts(group_by=group_by) * self.wrapper.shape[0]
+        columns = self.grouper.get_new_index(group_by=group_by, new_index=columns)
+        return self.wrapper.wrap_reduced(total_duration / total_steps, columns=columns, **kwargs)
 
     # ############# PnL ############# #
 
@@ -324,7 +352,8 @@ class BaseEventsByResult(BaseEvents):
             self.records_arr[filter_mask],
             self.main_price,
             freq=self.wrapper.freq,
-            idx_field=self.idx_field
+            idx_field=self.idx_field,
+            group_by=self.grouper.group_by
         )
 
     @cached_property
@@ -335,55 +364,58 @@ class BaseEventsByResult(BaseEvents):
             self.records_arr[filter_mask],
             self.main_price,
             freq=self.wrapper.freq,
-            idx_field=self.idx_field
+            idx_field=self.idx_field,
+            group_by=self.grouper.group_by
         )
 
-    @cached_property
-    def win_rate(self):
+    @cached_method
+    def win_rate(self, group_by=None, columns=None, **kwargs):
         &#34;&#34;&#34;Rate of profitable events.&#34;&#34;&#34;
-        winning_count = to_1d(self.winning.count, raw=True)
-        count = to_1d(self.count, raw=True)
+        win_count = to_1d(self.winning.count(group_by=group_by), raw=True)
+        total_count = to_1d(self.count(group_by=group_by), raw=True)
+        columns = self.grouper.get_new_index(group_by=group_by, new_index=columns)
+        return self.wrapper.wrap_reduced(win_count / total_count, columns=columns, **kwargs)
 
-        win_rate = winning_count / count
-        return self.wrapper.wrap_reduced(win_rate)
-
-    @cached_property
-    def profit_factor(self):
+    @cached_method
+    def profit_factor(self, group_by=None, columns=None, **kwargs):
         &#34;&#34;&#34;Profit factor.&#34;&#34;&#34;
-        total_win = to_1d(self.winning.pnl.sum(), raw=True)
-        total_loss = to_1d(self.losing.pnl.sum(), raw=True)
+        total_win = to_1d(self.winning.pnl.sum(group_by=group_by), raw=True)
+        total_loss = to_1d(self.losing.pnl.sum(group_by=group_by), raw=True)
 
         # Otherwise columns with only wins or losses will become NaNs
-        has_values = to_1d(self.count, raw=True) &gt; 0
+        has_values = to_1d(self.count(group_by=group_by), raw=True) &gt; 0
         total_win[np.isnan(total_win) &amp; has_values] = 0.
         total_loss[np.isnan(total_loss) &amp; has_values] = 0.
 
         profit_factor = total_win / np.abs(total_loss)
-        return self.wrapper.wrap_reduced(profit_factor)
+        columns = self.grouper.get_new_index(group_by=group_by, new_index=columns)
+        return self.wrapper.wrap_reduced(profit_factor, columns=columns, **kwargs)
 
-    @cached_property
-    def expectancy(self):
+    @cached_method
+    def expectancy(self, group_by=None, columns=None, **kwargs):
         &#34;&#34;&#34;Average profitability.&#34;&#34;&#34;
-        win_rate = to_1d(self.win_rate, raw=True)
-        avg_win = to_1d(self.winning.pnl.mean(), raw=True)
-        avg_loss = to_1d(self.losing.pnl.mean(), raw=True)
+        win_rate = to_1d(self.win_rate(group_by=group_by), raw=True)
+        avg_win = to_1d(self.winning.pnl.mean(group_by=group_by), raw=True)
+        avg_loss = to_1d(self.losing.pnl.mean(group_by=group_by), raw=True)
 
         # Otherwise columns with only wins or losses will become NaNs
-        has_values = to_1d(self.count, raw=True) &gt; 0
+        has_values = to_1d(self.count(group_by=group_by), raw=True) &gt; 0
         avg_win[np.isnan(avg_win) &amp; has_values] = 0.
         avg_loss[np.isnan(avg_loss) &amp; has_values] = 0.
 
         expectancy = win_rate * avg_win - (1 - win_rate) * np.abs(avg_loss)
-        return self.wrapper.wrap_reduced(expectancy)
+        columns = self.grouper.get_new_index(group_by=group_by, new_index=columns)
+        return self.wrapper.wrap_reduced(expectancy, columns=columns, **kwargs)
 
-    @cached_property
-    def sqn(self):
+    @cached_method
+    def sqn(self, group_by=None, columns=None, **kwargs):
         &#34;&#34;&#34;System Quality Number (SQN).&#34;&#34;&#34;
-        count = to_1d(self.count, raw=True)
-        pnl_mean = to_1d(self.pnl.mean(), raw=True)
-        pnl_std = to_1d(self.pnl.std(), raw=True)
+        count = to_1d(self.count(group_by=group_by), raw=True)
+        pnl_mean = to_1d(self.pnl.mean(group_by=group_by), raw=True)
+        pnl_std = to_1d(self.pnl.std(group_by=group_by), raw=True)
         sqn = np.sqrt(count) * pnl_mean / pnl_std
-        return self.wrapper.wrap_reduced(sqn)
+        columns = self.grouper.get_new_index(group_by=group_by, new_index=columns)
+        return self.wrapper.wrap_reduced(sqn, columns=columns, **kwargs)
 
 
 class Events(BaseEventsByResult):
@@ -394,11 +426,13 @@ class Events(BaseEventsByResult):
         &#34;&#34;&#34;See `vectorbt.records.enums.EventStatus`.&#34;&#34;&#34;
         return self.map_field(&#39;status&#39;)
 
-    @cached_property
-    def closed_rate(self):
+    @cached_method
+    def closed_rate(self, group_by=None, columns=None, **kwargs):
         &#34;&#34;&#34;Rate of closed events.&#34;&#34;&#34;
-        closed_rate = to_1d(self.closed.count, raw=True) / to_1d(self.count, raw=True)
-        return self.wrapper.wrap_reduced(closed_rate)
+        closed_count = to_1d(self.closed.count(group_by=group_by), raw=True)
+        total_count = to_1d(self.count(group_by=group_by), raw=True)
+        columns = self.grouper.get_new_index(group_by=group_by, new_index=columns)
+        return self.wrapper.wrap_reduced(closed_count / total_count, columns=columns, **kwargs)
 
     @cached_property
     def open(self):
@@ -408,7 +442,8 @@ class Events(BaseEventsByResult):
             self.records_arr[filter_mask],
             self.main_price,
             freq=self.wrapper.freq,
-            idx_field=self.idx_field
+            idx_field=self.idx_field,
+            group_by=self.grouper.group_by
         )
 
     @cached_property
@@ -419,7 +454,8 @@ class Events(BaseEventsByResult):
             self.records_arr[filter_mask],
             self.main_price,
             freq=self.wrapper.freq,
-            idx_field=self.idx_field
+            idx_field=self.idx_field,
+            group_by=self.grouper.group_by
         )
 
 
@@ -437,6 +473,9 @@ class Trades(Events):
     Example:
         Increasing position:
         ```python-repl
+        &gt;&gt;&gt; import vectorbt as vbt
+        &gt;&gt;&gt; import pandas as pd
+
         &gt;&gt;&gt; vbt.Portfolio.from_orders(
         ...     pd.Series([1, 2, 3, 4, 5]),
         ...     pd.Series([1, 1, 1, 1, -4]),
@@ -487,20 +526,17 @@ class Trades(Events):
 
         Get count and P&amp;L of trades:
         ```python-repl
-        &gt;&gt;&gt; import vectorbt as vbt
-        &gt;&gt;&gt; import pandas as pd
-
         &gt;&gt;&gt; price = pd.Series([1, 2, 3, 4, 3, 2, 1])
         &gt;&gt;&gt; orders = pd.Series([1, -0.5, -0.5, 2, -0.5, -0.5, -0.5])
         &gt;&gt;&gt; portfolio = vbt.Portfolio.from_orders(price, orders,
         ...      init_capital=100, freq=&#39;1D&#39;)
 
         &gt;&gt;&gt; trades = vbt.Trades.from_orders(portfolio.orders)
-        &gt;&gt;&gt; trades.count
+        &gt;&gt;&gt; trades.count()
         6
         &gt;&gt;&gt; trades.pnl.sum()
         -3.0
-        &gt;&gt;&gt; trades.winning.count
+        &gt;&gt;&gt; trades.winning.count()
         2
         &gt;&gt;&gt; trades.winning.pnl.sum()
         1.5
@@ -510,7 +546,7 @@ class Trades(Events):
         ```python-repl
         &gt;&gt;&gt; mask = (trades.records[&#39;exit_idx&#39;] - trades.records[&#39;entry_idx&#39;]) &gt; 2
         &gt;&gt;&gt; trades_filtered = trades.filter_by_mask(mask)
-        &gt;&gt;&gt; trades_filtered.count
+        &gt;&gt;&gt; trades_filtered.count()
         2
         &gt;&gt;&gt; trades_filtered.pnl.sum()
         -3.0
@@ -523,16 +559,17 @@ class Trades(Events):
             raise ValueError(&#34;Records array must have all fields defined in trade_dt&#34;)
 
     @classmethod
-    def from_orders(cls, orders, **kwargs):
+    def from_orders(cls, orders, group_by=None, **kwargs):
         &#34;&#34;&#34;Build `Trades` from `Orders`.&#34;&#34;&#34;
         trade_records = nb.trade_records_nb(orders.main_price.vbt.to_2d_array(), orders.records_arr)
-        return cls(trade_records, orders.main_price, freq=orders.wrapper.freq, **kwargs)
+        if group_by is None:
+            group_by = orders.grouper.group_by
+        return cls(trade_records, orders.main_price, freq=orders.wrapper.freq, group_by=group_by, **kwargs)
 
     @cached_property
     def position_idx(self):
         &#34;&#34;&#34;Position index of each trade.&#34;&#34;&#34;
         return self.map_field(&#39;position_idx&#39;)
-
 
 
 class Positions(Events):
@@ -548,6 +585,9 @@ class Positions(Events):
     Example:
         Increasing position:
         ```python-repl
+        &gt;&gt;&gt; import vectorbt as vbt
+        &gt;&gt;&gt; import pandas as pd
+
         &gt;&gt;&gt; vbt.Portfolio.from_orders(
         ...     pd.Series([1, 2, 3, 4, 5]),
         ...     pd.Series([1, 1, 1, 1, -4]),
@@ -592,16 +632,13 @@ class Positions(Events):
 
         Get count and P&amp;L of positions:
         ```python-repl
-        &gt;&gt;&gt; import vectorbt as vbt
-        &gt;&gt;&gt; import pandas as pd
-
         &gt;&gt;&gt; price = pd.Series([1, 2, 3, 4, 3, 2, 1])
         &gt;&gt;&gt; orders = pd.Series([1, -0.5, -0.5, 1, -1, 2, -1])
         &gt;&gt;&gt; portfolio = vbt.Portfolio.from_orders(price, orders,
         ...      init_capital=100, freq=&#39;1D&#39;)
 
         &gt;&gt;&gt; positions = vbt.Positions.from_orders(portfolio.orders)
-        &gt;&gt;&gt; positions.count
+        &gt;&gt;&gt; positions.count()
         3
         &gt;&gt;&gt; positions.pnl.sum()
         -1.5
@@ -615,7 +652,7 @@ class Positions(Events):
         ```python-repl
         &gt;&gt;&gt; mask = positions.records[&#39;size&#39;] &gt; 1
         &gt;&gt;&gt; positions_filtered = positions.filter_by_mask(mask)
-        &gt;&gt;&gt; positions_filtered.count
+        &gt;&gt;&gt; positions_filtered.count()
         1
         &gt;&gt;&gt; positions_filtered.pnl.sum()
         -2.0
@@ -628,10 +665,12 @@ class Positions(Events):
             raise ValueError(&#34;Records array must have all fields defined in position_dt&#34;)
 
     @classmethod
-    def from_orders(cls, orders, **kwargs):
+    def from_orders(cls, orders, group_by=None, **kwargs):
         &#34;&#34;&#34;Build `Positions` from `Orders`.&#34;&#34;&#34;
         position_records = nb.position_records_nb(orders.main_price.vbt.to_2d_array(), orders.records_arr)
-        return cls(position_records, orders.main_price, freq=orders.wrapper.freq, **kwargs)</code></pre>
+        if group_by is None:
+            group_by = orders.grouper.group_by
+        return cls(position_records, orders.main_price, freq=orders.wrapper.freq, group_by=group_by, **kwargs)</code></pre>
 </details>
 </section>
 <section>
@@ -645,7 +684,7 @@ class Positions(Events):
 <dl>
 <dt id="vectorbt.records.events.BaseEvents"><code class="flex name class">
 <span>class <span class="ident parent-fname">BaseEvents</span></span>
-<span>(</span><span>records_arr, main_price, freq=None, idx_field='exit_idx')</span>
+<span>(</span><span>records_arr, main_price, freq=None, idx_field='exit_idx', group_by=None)</span>
 </code></dt>
 <dd>
 <div class="desc"><p>Extends <code>Records</code> for working with event records.</p></div>
@@ -656,8 +695,14 @@ class Positions(Events):
 <pre><code class="python">class BaseEvents(Records):
     &#34;&#34;&#34;Extends `Records` for working with event records.&#34;&#34;&#34;
 
-    def __init__(self, records_arr, main_price, freq=None, idx_field=&#39;exit_idx&#39;):
-        Records.__init__(self, records_arr, ArrayWrapper.from_obj(main_price, freq=freq), idx_field=idx_field)
+    def __init__(self, records_arr, main_price, freq=None, idx_field=&#39;exit_idx&#39;, group_by=None):
+        Records.__init__(
+            self,
+            records_arr,
+            ArrayWrapper.from_obj(main_price, freq=freq),
+            idx_field=idx_field,
+            group_by=group_by
+        )
         PandasIndexer.__init__(self, _indexing_func)
 
         if not all(field in records_arr.dtype.names for field in event_dt.names):
@@ -665,9 +710,19 @@ class Positions(Events):
 
         self.main_price = main_price
 
-    def filter_by_mask(self, mask):
+    def filter_by_mask(self, mask, idx_field=None, group_by=None):
         &#34;&#34;&#34;Return a new class instance, filtered by mask.&#34;&#34;&#34;
-        return self.__class__(self.records_arr[mask], self.main_price, freq=self.wrapper.freq, idx_field=self.idx_field)
+        if idx_field is None:
+            idx_field = self.idx_field
+        if group_by is None:
+            group_by = self.grouper.group_by
+        return self.__class__(
+            self.records_arr[mask],
+            self.main_price,
+            freq=self.wrapper.freq,
+            idx_field=idx_field,
+            group_by=group_by
+        )
 
     def plot(self,
              main_price_trace_kwargs={},
@@ -866,11 +921,13 @@ class Positions(Events):
         &#34;&#34;&#34;Duration of each event (in raw format).&#34;&#34;&#34;
         return self.map(nb.event_duration_map_nb)
 
-    @cached_property
-    def coverage(self):
+    @cached_method
+    def coverage(self, group_by=None, columns=None, **kwargs):
         &#34;&#34;&#34;Coverage, that is, total duration divided by the whole period.&#34;&#34;&#34;
-        coverage = to_1d(self.duration.sum(), raw=True) / self.wrapper.shape[0]
-        return self.wrapper.wrap_reduced(coverage)
+        total_duration = to_1d(self.duration.sum(group_by=group_by), raw=True)
+        total_steps = self.grouper.get_group_counts(group_by=group_by) * self.wrapper.shape[0]
+        columns = self.grouper.get_new_index(group_by=group_by, new_index=columns)
+        return self.wrapper.wrap_reduced(total_duration / total_steps, columns=columns, **kwargs)
 
     # ############# PnL ############# #
 
@@ -897,30 +954,6 @@ class Positions(Events):
 </ul>
 <h3 class="section-subtitle">Instance variables</h3>
 <dl>
-<dt id="vectorbt.records.events.BaseEvents.coverage"><code class="name">var <span class="ident fname">coverage</span></code></dt>
-<dd>
-<div class="desc"><p>Coverage, that is, total duration divided by the whole period.</p></div>
-<details class="source">
-<summary>
-<span>Expand source code</span>
-</summary>
-<pre><code class="python">def __get__(self, instance, owner=None):
-    if instance is None:
-        return self
-    if not defaults.caching or self.disabled:  # you can manually disable cache here
-        return super().__get__(instance, owner=owner)
-    cache = instance.__dict__
-    val = cache.get(self.attrname, _NOT_FOUND)
-    if val is _NOT_FOUND:
-        with self.lock:
-            # check if another thread filled cache while we awaited lock
-            val = cache.get(self.attrname, _NOT_FOUND)
-            if val is _NOT_FOUND:
-                val = self.func(instance)
-                cache[self.attrname] = val
-    return val</code></pre>
-</details>
-</dd>
 <dt id="vectorbt.records.events.BaseEvents.duration"><code class="name">var <span class="ident fname">duration</span></code></dt>
 <dd>
 <div class="desc"><p>Duration of each event (in raw format).</p></div>
@@ -996,6 +1029,24 @@ class Positions(Events):
 </dl>
 <h3 class="section-subtitle">Methods</h3>
 <dl>
+<dt id="vectorbt.records.events.BaseEvents.coverage"><code class="name flex">
+<span>def <span class="ident fname">coverage</span></span>(<span>self, group_by=None, columns=None, **kwargs)</span>
+</code></dt>
+<dd>
+<div class="desc"><p>Coverage, that is, total duration divided by the whole period.</p></div>
+<details class="source">
+<summary>
+<span>Expand source code</span>
+</summary>
+<pre><code class="python">@cached_method
+def coverage(self, group_by=None, columns=None, **kwargs):
+    &#34;&#34;&#34;Coverage, that is, total duration divided by the whole period.&#34;&#34;&#34;
+    total_duration = to_1d(self.duration.sum(group_by=group_by), raw=True)
+    total_steps = self.grouper.get_group_counts(group_by=group_by) * self.wrapper.shape[0]
+    columns = self.grouper.get_new_index(group_by=group_by, new_index=columns)
+    return self.wrapper.wrap_reduced(total_duration / total_steps, columns=columns, **kwargs)</code></pre>
+</details>
+</dd>
 <dt id="vectorbt.records.events.BaseEvents.plot"><code class="name flex">
 <span>def <span class="ident fname">plot</span></span>(<span>self, main_price_trace_kwargs={}, entry_trace_kwargs={}, exit_trace_kwargs={}, exit_profit_trace_kwargs={}, exit_loss_trace_kwargs={}, active_trace_kwargs={}, profit_shape_kwargs={}, loss_shape_kwargs={}, fig=None, **layout_kwargs)</span>
 </code></dt>
@@ -1251,7 +1302,7 @@ portfolio.trades.plot()
 </dd>
 <dt id="vectorbt.records.events.BaseEventsByResult"><code class="flex name class">
 <span>class <span class="ident parent-fname">BaseEventsByResult</span></span>
-<span>(</span><span>records_arr, main_price, freq=None, idx_field='exit_idx')</span>
+<span>(</span><span>records_arr, main_price, freq=None, idx_field='exit_idx', group_by=None)</span>
 </code></dt>
 <dd>
 <div class="desc"><p>Extends <code><a title="vectorbt.records.events.BaseEvents" href="#vectorbt.records.events.BaseEvents">BaseEvents</a></code> by further dividing events into winning and losing events.</p></div>
@@ -1270,7 +1321,8 @@ portfolio.trades.plot()
             self.records_arr[filter_mask],
             self.main_price,
             freq=self.wrapper.freq,
-            idx_field=self.idx_field
+            idx_field=self.idx_field,
+            group_by=self.grouper.group_by
         )
 
     @cached_property
@@ -1281,55 +1333,58 @@ portfolio.trades.plot()
             self.records_arr[filter_mask],
             self.main_price,
             freq=self.wrapper.freq,
-            idx_field=self.idx_field
+            idx_field=self.idx_field,
+            group_by=self.grouper.group_by
         )
 
-    @cached_property
-    def win_rate(self):
+    @cached_method
+    def win_rate(self, group_by=None, columns=None, **kwargs):
         &#34;&#34;&#34;Rate of profitable events.&#34;&#34;&#34;
-        winning_count = to_1d(self.winning.count, raw=True)
-        count = to_1d(self.count, raw=True)
+        win_count = to_1d(self.winning.count(group_by=group_by), raw=True)
+        total_count = to_1d(self.count(group_by=group_by), raw=True)
+        columns = self.grouper.get_new_index(group_by=group_by, new_index=columns)
+        return self.wrapper.wrap_reduced(win_count / total_count, columns=columns, **kwargs)
 
-        win_rate = winning_count / count
-        return self.wrapper.wrap_reduced(win_rate)
-
-    @cached_property
-    def profit_factor(self):
+    @cached_method
+    def profit_factor(self, group_by=None, columns=None, **kwargs):
         &#34;&#34;&#34;Profit factor.&#34;&#34;&#34;
-        total_win = to_1d(self.winning.pnl.sum(), raw=True)
-        total_loss = to_1d(self.losing.pnl.sum(), raw=True)
+        total_win = to_1d(self.winning.pnl.sum(group_by=group_by), raw=True)
+        total_loss = to_1d(self.losing.pnl.sum(group_by=group_by), raw=True)
 
         # Otherwise columns with only wins or losses will become NaNs
-        has_values = to_1d(self.count, raw=True) &gt; 0
+        has_values = to_1d(self.count(group_by=group_by), raw=True) &gt; 0
         total_win[np.isnan(total_win) &amp; has_values] = 0.
         total_loss[np.isnan(total_loss) &amp; has_values] = 0.
 
         profit_factor = total_win / np.abs(total_loss)
-        return self.wrapper.wrap_reduced(profit_factor)
+        columns = self.grouper.get_new_index(group_by=group_by, new_index=columns)
+        return self.wrapper.wrap_reduced(profit_factor, columns=columns, **kwargs)
 
-    @cached_property
-    def expectancy(self):
+    @cached_method
+    def expectancy(self, group_by=None, columns=None, **kwargs):
         &#34;&#34;&#34;Average profitability.&#34;&#34;&#34;
-        win_rate = to_1d(self.win_rate, raw=True)
-        avg_win = to_1d(self.winning.pnl.mean(), raw=True)
-        avg_loss = to_1d(self.losing.pnl.mean(), raw=True)
+        win_rate = to_1d(self.win_rate(group_by=group_by), raw=True)
+        avg_win = to_1d(self.winning.pnl.mean(group_by=group_by), raw=True)
+        avg_loss = to_1d(self.losing.pnl.mean(group_by=group_by), raw=True)
 
         # Otherwise columns with only wins or losses will become NaNs
-        has_values = to_1d(self.count, raw=True) &gt; 0
+        has_values = to_1d(self.count(group_by=group_by), raw=True) &gt; 0
         avg_win[np.isnan(avg_win) &amp; has_values] = 0.
         avg_loss[np.isnan(avg_loss) &amp; has_values] = 0.
 
         expectancy = win_rate * avg_win - (1 - win_rate) * np.abs(avg_loss)
-        return self.wrapper.wrap_reduced(expectancy)
+        columns = self.grouper.get_new_index(group_by=group_by, new_index=columns)
+        return self.wrapper.wrap_reduced(expectancy, columns=columns, **kwargs)
 
-    @cached_property
-    def sqn(self):
+    @cached_method
+    def sqn(self, group_by=None, columns=None, **kwargs):
         &#34;&#34;&#34;System Quality Number (SQN).&#34;&#34;&#34;
-        count = to_1d(self.count, raw=True)
-        pnl_mean = to_1d(self.pnl.mean(), raw=True)
-        pnl_std = to_1d(self.pnl.std(), raw=True)
+        count = to_1d(self.count(group_by=group_by), raw=True)
+        pnl_mean = to_1d(self.pnl.mean(group_by=group_by), raw=True)
+        pnl_std = to_1d(self.pnl.std(group_by=group_by), raw=True)
         sqn = np.sqrt(count) * pnl_mean / pnl_std
-        return self.wrapper.wrap_reduced(sqn)</code></pre>
+        columns = self.grouper.get_new_index(group_by=group_by, new_index=columns)
+        return self.wrapper.wrap_reduced(sqn, columns=columns, **kwargs)</code></pre>
 </details>
 <h3 class="section-subtitle">Ancestors</h3>
 <ul class="hlist">
@@ -1343,105 +1398,9 @@ portfolio.trades.plot()
 </ul>
 <h3 class="section-subtitle">Instance variables</h3>
 <dl>
-<dt id="vectorbt.records.events.BaseEventsByResult.expectancy"><code class="name">var <span class="ident fname">expectancy</span></code></dt>
-<dd>
-<div class="desc"><p>Average profitability.</p></div>
-<details class="source">
-<summary>
-<span>Expand source code</span>
-</summary>
-<pre><code class="python">def __get__(self, instance, owner=None):
-    if instance is None:
-        return self
-    if not defaults.caching or self.disabled:  # you can manually disable cache here
-        return super().__get__(instance, owner=owner)
-    cache = instance.__dict__
-    val = cache.get(self.attrname, _NOT_FOUND)
-    if val is _NOT_FOUND:
-        with self.lock:
-            # check if another thread filled cache while we awaited lock
-            val = cache.get(self.attrname, _NOT_FOUND)
-            if val is _NOT_FOUND:
-                val = self.func(instance)
-                cache[self.attrname] = val
-    return val</code></pre>
-</details>
-</dd>
 <dt id="vectorbt.records.events.BaseEventsByResult.losing"><code class="name">var <span class="ident fname">losing</span></code></dt>
 <dd>
 <div class="desc"><p>Losing events of type <code><a title="vectorbt.records.events.BaseEvents" href="#vectorbt.records.events.BaseEvents">BaseEvents</a></code>.</p></div>
-<details class="source">
-<summary>
-<span>Expand source code</span>
-</summary>
-<pre><code class="python">def __get__(self, instance, owner=None):
-    if instance is None:
-        return self
-    if not defaults.caching or self.disabled:  # you can manually disable cache here
-        return super().__get__(instance, owner=owner)
-    cache = instance.__dict__
-    val = cache.get(self.attrname, _NOT_FOUND)
-    if val is _NOT_FOUND:
-        with self.lock:
-            # check if another thread filled cache while we awaited lock
-            val = cache.get(self.attrname, _NOT_FOUND)
-            if val is _NOT_FOUND:
-                val = self.func(instance)
-                cache[self.attrname] = val
-    return val</code></pre>
-</details>
-</dd>
-<dt id="vectorbt.records.events.BaseEventsByResult.profit_factor"><code class="name">var <span class="ident fname">profit_factor</span></code></dt>
-<dd>
-<div class="desc"><p>Profit factor.</p></div>
-<details class="source">
-<summary>
-<span>Expand source code</span>
-</summary>
-<pre><code class="python">def __get__(self, instance, owner=None):
-    if instance is None:
-        return self
-    if not defaults.caching or self.disabled:  # you can manually disable cache here
-        return super().__get__(instance, owner=owner)
-    cache = instance.__dict__
-    val = cache.get(self.attrname, _NOT_FOUND)
-    if val is _NOT_FOUND:
-        with self.lock:
-            # check if another thread filled cache while we awaited lock
-            val = cache.get(self.attrname, _NOT_FOUND)
-            if val is _NOT_FOUND:
-                val = self.func(instance)
-                cache[self.attrname] = val
-    return val</code></pre>
-</details>
-</dd>
-<dt id="vectorbt.records.events.BaseEventsByResult.sqn"><code class="name">var <span class="ident fname">sqn</span></code></dt>
-<dd>
-<div class="desc"><p>System Quality Number (SQN).</p></div>
-<details class="source">
-<summary>
-<span>Expand source code</span>
-</summary>
-<pre><code class="python">def __get__(self, instance, owner=None):
-    if instance is None:
-        return self
-    if not defaults.caching or self.disabled:  # you can manually disable cache here
-        return super().__get__(instance, owner=owner)
-    cache = instance.__dict__
-    val = cache.get(self.attrname, _NOT_FOUND)
-    if val is _NOT_FOUND:
-        with self.lock:
-            # check if another thread filled cache while we awaited lock
-            val = cache.get(self.attrname, _NOT_FOUND)
-            if val is _NOT_FOUND:
-                val = self.func(instance)
-                cache[self.attrname] = val
-    return val</code></pre>
-</details>
-</dd>
-<dt id="vectorbt.records.events.BaseEventsByResult.win_rate"><code class="name">var <span class="ident fname">win_rate</span></code></dt>
-<dd>
-<div class="desc"><p>Rate of profitable events.</p></div>
 <details class="source">
 <summary>
 <span>Expand source code</span>
@@ -1488,6 +1447,98 @@ portfolio.trades.plot()
 </details>
 </dd>
 </dl>
+<h3 class="section-subtitle">Methods</h3>
+<dl>
+<dt id="vectorbt.records.events.BaseEventsByResult.expectancy"><code class="name flex">
+<span>def <span class="ident fname">expectancy</span></span>(<span>self, group_by=None, columns=None, **kwargs)</span>
+</code></dt>
+<dd>
+<div class="desc"><p>Average profitability.</p></div>
+<details class="source">
+<summary>
+<span>Expand source code</span>
+</summary>
+<pre><code class="python">@cached_method
+def expectancy(self, group_by=None, columns=None, **kwargs):
+    &#34;&#34;&#34;Average profitability.&#34;&#34;&#34;
+    win_rate = to_1d(self.win_rate(group_by=group_by), raw=True)
+    avg_win = to_1d(self.winning.pnl.mean(group_by=group_by), raw=True)
+    avg_loss = to_1d(self.losing.pnl.mean(group_by=group_by), raw=True)
+
+    # Otherwise columns with only wins or losses will become NaNs
+    has_values = to_1d(self.count(group_by=group_by), raw=True) &gt; 0
+    avg_win[np.isnan(avg_win) &amp; has_values] = 0.
+    avg_loss[np.isnan(avg_loss) &amp; has_values] = 0.
+
+    expectancy = win_rate * avg_win - (1 - win_rate) * np.abs(avg_loss)
+    columns = self.grouper.get_new_index(group_by=group_by, new_index=columns)
+    return self.wrapper.wrap_reduced(expectancy, columns=columns, **kwargs)</code></pre>
+</details>
+</dd>
+<dt id="vectorbt.records.events.BaseEventsByResult.profit_factor"><code class="name flex">
+<span>def <span class="ident fname">profit_factor</span></span>(<span>self, group_by=None, columns=None, **kwargs)</span>
+</code></dt>
+<dd>
+<div class="desc"><p>Profit factor.</p></div>
+<details class="source">
+<summary>
+<span>Expand source code</span>
+</summary>
+<pre><code class="python">@cached_method
+def profit_factor(self, group_by=None, columns=None, **kwargs):
+    &#34;&#34;&#34;Profit factor.&#34;&#34;&#34;
+    total_win = to_1d(self.winning.pnl.sum(group_by=group_by), raw=True)
+    total_loss = to_1d(self.losing.pnl.sum(group_by=group_by), raw=True)
+
+    # Otherwise columns with only wins or losses will become NaNs
+    has_values = to_1d(self.count(group_by=group_by), raw=True) &gt; 0
+    total_win[np.isnan(total_win) &amp; has_values] = 0.
+    total_loss[np.isnan(total_loss) &amp; has_values] = 0.
+
+    profit_factor = total_win / np.abs(total_loss)
+    columns = self.grouper.get_new_index(group_by=group_by, new_index=columns)
+    return self.wrapper.wrap_reduced(profit_factor, columns=columns, **kwargs)</code></pre>
+</details>
+</dd>
+<dt id="vectorbt.records.events.BaseEventsByResult.sqn"><code class="name flex">
+<span>def <span class="ident fname">sqn</span></span>(<span>self, group_by=None, columns=None, **kwargs)</span>
+</code></dt>
+<dd>
+<div class="desc"><p>System Quality Number (SQN).</p></div>
+<details class="source">
+<summary>
+<span>Expand source code</span>
+</summary>
+<pre><code class="python">@cached_method
+def sqn(self, group_by=None, columns=None, **kwargs):
+    &#34;&#34;&#34;System Quality Number (SQN).&#34;&#34;&#34;
+    count = to_1d(self.count(group_by=group_by), raw=True)
+    pnl_mean = to_1d(self.pnl.mean(group_by=group_by), raw=True)
+    pnl_std = to_1d(self.pnl.std(group_by=group_by), raw=True)
+    sqn = np.sqrt(count) * pnl_mean / pnl_std
+    columns = self.grouper.get_new_index(group_by=group_by, new_index=columns)
+    return self.wrapper.wrap_reduced(sqn, columns=columns, **kwargs)</code></pre>
+</details>
+</dd>
+<dt id="vectorbt.records.events.BaseEventsByResult.win_rate"><code class="name flex">
+<span>def <span class="ident fname">win_rate</span></span>(<span>self, group_by=None, columns=None, **kwargs)</span>
+</code></dt>
+<dd>
+<div class="desc"><p>Rate of profitable events.</p></div>
+<details class="source">
+<summary>
+<span>Expand source code</span>
+</summary>
+<pre><code class="python">@cached_method
+def win_rate(self, group_by=None, columns=None, **kwargs):
+    &#34;&#34;&#34;Rate of profitable events.&#34;&#34;&#34;
+    win_count = to_1d(self.winning.count(group_by=group_by), raw=True)
+    total_count = to_1d(self.count(group_by=group_by), raw=True)
+    columns = self.grouper.get_new_index(group_by=group_by, new_index=columns)
+    return self.wrapper.wrap_reduced(win_count / total_count, columns=columns, **kwargs)</code></pre>
+</details>
+</dd>
+</dl>
 <h3 class="section-subtitle">Inherited members</h3>
 <ul class="hlist">
 <li><code><b><a title="vectorbt.records.events.BaseEvents" href="#vectorbt.records.events.BaseEvents">BaseEvents</a></b></code>:
@@ -1513,7 +1564,7 @@ portfolio.trades.plot()
 </dd>
 <dt id="vectorbt.records.events.Events"><code class="flex name class">
 <span>class <span class="ident parent-fname">Events</span></span>
-<span>(</span><span>records_arr, main_price, freq=None, idx_field='exit_idx')</span>
+<span>(</span><span>records_arr, main_price, freq=None, idx_field='exit_idx', group_by=None)</span>
 </code></dt>
 <dd>
 <div class="desc"><p>Extends <code><a title="vectorbt.records.events.BaseEventsByResult" href="#vectorbt.records.events.BaseEventsByResult">BaseEventsByResult</a></code> by further dividing events by status.</p></div>
@@ -1529,11 +1580,13 @@ portfolio.trades.plot()
         &#34;&#34;&#34;See `vectorbt.records.enums.EventStatus`.&#34;&#34;&#34;
         return self.map_field(&#39;status&#39;)
 
-    @cached_property
-    def closed_rate(self):
+    @cached_method
+    def closed_rate(self, group_by=None, columns=None, **kwargs):
         &#34;&#34;&#34;Rate of closed events.&#34;&#34;&#34;
-        closed_rate = to_1d(self.closed.count, raw=True) / to_1d(self.count, raw=True)
-        return self.wrapper.wrap_reduced(closed_rate)
+        closed_count = to_1d(self.closed.count(group_by=group_by), raw=True)
+        total_count = to_1d(self.count(group_by=group_by), raw=True)
+        columns = self.grouper.get_new_index(group_by=group_by, new_index=columns)
+        return self.wrapper.wrap_reduced(closed_count / total_count, columns=columns, **kwargs)
 
     @cached_property
     def open(self):
@@ -1543,7 +1596,8 @@ portfolio.trades.plot()
             self.records_arr[filter_mask],
             self.main_price,
             freq=self.wrapper.freq,
-            idx_field=self.idx_field
+            idx_field=self.idx_field,
+            group_by=self.grouper.group_by
         )
 
     @cached_property
@@ -1554,7 +1608,8 @@ portfolio.trades.plot()
             self.records_arr[filter_mask],
             self.main_price,
             freq=self.wrapper.freq,
-            idx_field=self.idx_field
+            idx_field=self.idx_field,
+            group_by=self.grouper.group_by
         )</code></pre>
 </details>
 <h3 class="section-subtitle">Ancestors</h3>
@@ -1574,30 +1629,6 @@ portfolio.trades.plot()
 <dt id="vectorbt.records.events.Events.closed"><code class="name">var <span class="ident fname">closed</span></code></dt>
 <dd>
 <div class="desc"><p>Closed events of type <code><a title="vectorbt.records.events.BaseEventsByResult" href="#vectorbt.records.events.BaseEventsByResult">BaseEventsByResult</a></code>.</p></div>
-<details class="source">
-<summary>
-<span>Expand source code</span>
-</summary>
-<pre><code class="python">def __get__(self, instance, owner=None):
-    if instance is None:
-        return self
-    if not defaults.caching or self.disabled:  # you can manually disable cache here
-        return super().__get__(instance, owner=owner)
-    cache = instance.__dict__
-    val = cache.get(self.attrname, _NOT_FOUND)
-    if val is _NOT_FOUND:
-        with self.lock:
-            # check if another thread filled cache while we awaited lock
-            val = cache.get(self.attrname, _NOT_FOUND)
-            if val is _NOT_FOUND:
-                val = self.func(instance)
-                cache[self.attrname] = val
-    return val</code></pre>
-</details>
-</dd>
-<dt id="vectorbt.records.events.Events.closed_rate"><code class="name">var <span class="ident fname">closed_rate</span></code></dt>
-<dd>
-<div class="desc"><p>Rate of closed events.</p></div>
 <details class="source">
 <summary>
 <span>Expand source code</span>
@@ -1668,6 +1699,27 @@ portfolio.trades.plot()
 </details>
 </dd>
 </dl>
+<h3 class="section-subtitle">Methods</h3>
+<dl>
+<dt id="vectorbt.records.events.Events.closed_rate"><code class="name flex">
+<span>def <span class="ident fname">closed_rate</span></span>(<span>self, group_by=None, columns=None, **kwargs)</span>
+</code></dt>
+<dd>
+<div class="desc"><p>Rate of closed events.</p></div>
+<details class="source">
+<summary>
+<span>Expand source code</span>
+</summary>
+<pre><code class="python">@cached_method
+def closed_rate(self, group_by=None, columns=None, **kwargs):
+    &#34;&#34;&#34;Rate of closed events.&#34;&#34;&#34;
+    closed_count = to_1d(self.closed.count(group_by=group_by), raw=True)
+    total_count = to_1d(self.count(group_by=group_by), raw=True)
+    columns = self.grouper.get_new_index(group_by=group_by, new_index=columns)
+    return self.wrapper.wrap_reduced(closed_count / total_count, columns=columns, **kwargs)</code></pre>
+</details>
+</dd>
+</dl>
 <h3 class="section-subtitle">Inherited members</h3>
 <ul class="hlist">
 <li><code><b><a title="vectorbt.records.events.BaseEventsByResult" href="#vectorbt.records.events.BaseEventsByResult">BaseEventsByResult</a></b></code>:
@@ -1710,7 +1762,10 @@ A position opens with first buy operation and closes with last sell operation th
 in no security holdings.</p>
 <h2 id="example">Example</h2>
 <p>Increasing position:</p>
-<pre><code class="python-repl">&gt;&gt;&gt; vbt.Portfolio.from_orders(
+<pre><code class="python-repl">&gt;&gt;&gt; import vectorbt as vbt
+&gt;&gt;&gt; import pandas as pd
+
+&gt;&gt;&gt; vbt.Portfolio.from_orders(
 ...     pd.Series([1, 2, 3, 4, 5]),
 ...     pd.Series([1, 1, 1, 1, -4]),
 ...     fixed_fees=1, freq='1D'
@@ -1748,16 +1803,13 @@ in no security holdings.</p>
 1        1.0 -1.0    -0.2       1
 </code></pre>
 <p>Get count and P&amp;L of positions:</p>
-<pre><code class="python-repl">&gt;&gt;&gt; import vectorbt as vbt
-&gt;&gt;&gt; import pandas as pd
-
-&gt;&gt;&gt; price = pd.Series([1, 2, 3, 4, 3, 2, 1])
+<pre><code class="python-repl">&gt;&gt;&gt; price = pd.Series([1, 2, 3, 4, 3, 2, 1])
 &gt;&gt;&gt; orders = pd.Series([1, -0.5, -0.5, 1, -1, 2, -1])
 &gt;&gt;&gt; portfolio = vbt.Portfolio.from_orders(price, orders,
 ...      init_capital=100, freq='1D')
 
 &gt;&gt;&gt; positions = vbt.Positions.from_orders(portfolio.orders)
-&gt;&gt;&gt; positions.count
+&gt;&gt;&gt; positions.count()
 3
 &gt;&gt;&gt; positions.pnl.sum()
 -1.5
@@ -1769,7 +1821,7 @@ in no security holdings.</p>
 <p>Get count and P&amp;L of positions with size of more than 1 share:</p>
 <pre><code class="python-repl">&gt;&gt;&gt; mask = positions.records['size'] &gt; 1
 &gt;&gt;&gt; positions_filtered = positions.filter_by_mask(mask)
-&gt;&gt;&gt; positions_filtered.count
+&gt;&gt;&gt; positions_filtered.count()
 1
 &gt;&gt;&gt; positions_filtered.pnl.sum()
 -2.0
@@ -1791,6 +1843,9 @@ in no security holdings.</p>
     Example:
         Increasing position:
         ```python-repl
+        &gt;&gt;&gt; import vectorbt as vbt
+        &gt;&gt;&gt; import pandas as pd
+
         &gt;&gt;&gt; vbt.Portfolio.from_orders(
         ...     pd.Series([1, 2, 3, 4, 5]),
         ...     pd.Series([1, 1, 1, 1, -4]),
@@ -1835,16 +1890,13 @@ in no security holdings.</p>
 
         Get count and P&amp;L of positions:
         ```python-repl
-        &gt;&gt;&gt; import vectorbt as vbt
-        &gt;&gt;&gt; import pandas as pd
-
         &gt;&gt;&gt; price = pd.Series([1, 2, 3, 4, 3, 2, 1])
         &gt;&gt;&gt; orders = pd.Series([1, -0.5, -0.5, 1, -1, 2, -1])
         &gt;&gt;&gt; portfolio = vbt.Portfolio.from_orders(price, orders,
         ...      init_capital=100, freq=&#39;1D&#39;)
 
         &gt;&gt;&gt; positions = vbt.Positions.from_orders(portfolio.orders)
-        &gt;&gt;&gt; positions.count
+        &gt;&gt;&gt; positions.count()
         3
         &gt;&gt;&gt; positions.pnl.sum()
         -1.5
@@ -1858,7 +1910,7 @@ in no security holdings.</p>
         ```python-repl
         &gt;&gt;&gt; mask = positions.records[&#39;size&#39;] &gt; 1
         &gt;&gt;&gt; positions_filtered = positions.filter_by_mask(mask)
-        &gt;&gt;&gt; positions_filtered.count
+        &gt;&gt;&gt; positions_filtered.count()
         1
         &gt;&gt;&gt; positions_filtered.pnl.sum()
         -2.0
@@ -1871,10 +1923,12 @@ in no security holdings.</p>
             raise ValueError(&#34;Records array must have all fields defined in position_dt&#34;)
 
     @classmethod
-    def from_orders(cls, orders, **kwargs):
+    def from_orders(cls, orders, group_by=None, **kwargs):
         &#34;&#34;&#34;Build `Positions` from `Orders`.&#34;&#34;&#34;
         position_records = nb.position_records_nb(orders.main_price.vbt.to_2d_array(), orders.records_arr)
-        return cls(position_records, orders.main_price, freq=orders.wrapper.freq, **kwargs)</code></pre>
+        if group_by is None:
+            group_by = orders.grouper.group_by
+        return cls(position_records, orders.main_price, freq=orders.wrapper.freq, group_by=group_by, **kwargs)</code></pre>
 </details>
 <h3 class="section-subtitle">Ancestors</h3>
 <ul class="hlist">
@@ -1887,7 +1941,7 @@ in no security holdings.</p>
 <h3 class="section-subtitle">Static methods</h3>
 <dl>
 <dt id="vectorbt.records.events.Positions.from_orders"><code class="name flex">
-<span>def <span class="ident fname">from_orders</span></span>(<span>orders, **kwargs)</span>
+<span>def <span class="ident fname">from_orders</span></span>(<span>orders, group_by=None, **kwargs)</span>
 </code></dt>
 <dd>
 <div class="desc"><p>Build <code><a title="vectorbt.records.events.Positions" href="#vectorbt.records.events.Positions">Positions</a></code> from <code>Orders</code>.</p></div>
@@ -1896,10 +1950,12 @@ in no security holdings.</p>
 <span>Expand source code</span>
 </summary>
 <pre><code class="python">@classmethod
-def from_orders(cls, orders, **kwargs):
+def from_orders(cls, orders, group_by=None, **kwargs):
     &#34;&#34;&#34;Build `Positions` from `Orders`.&#34;&#34;&#34;
     position_records = nb.position_records_nb(orders.main_price.vbt.to_2d_array(), orders.records_arr)
-    return cls(position_records, orders.main_price, freq=orders.wrapper.freq, **kwargs)</code></pre>
+    if group_by is None:
+        group_by = orders.grouper.group_by
+    return cls(position_records, orders.main_price, freq=orders.wrapper.freq, group_by=group_by, **kwargs)</code></pre>
 </details>
 </dd>
 </dl>
@@ -1950,7 +2006,10 @@ sell operation will generate a single trade with buy price being a size-weighted
 purchase prices, and opening size and fees being the sum over all sizes and fees.</p>
 <h2 id="example">Example</h2>
 <p>Increasing position:</p>
-<pre><code class="python-repl">&gt;&gt;&gt; vbt.Portfolio.from_orders(
+<pre><code class="python-repl">&gt;&gt;&gt; import vectorbt as vbt
+&gt;&gt;&gt; import pandas as pd
+
+&gt;&gt;&gt; vbt.Portfolio.from_orders(
 ...     pd.Series([1, 2, 3, 4, 5]),
 ...     pd.Series([1, 1, 1, 1, -4]),
 ...     fixed_fees=1, freq='1D'
@@ -1994,20 +2053,17 @@ purchase prices, and opening size and fees being the sum over all sizes and fees
 1        1.0 -1.0    -0.2       1             1
 </code></pre>
 <p>Get count and P&amp;L of trades:</p>
-<pre><code class="python-repl">&gt;&gt;&gt; import vectorbt as vbt
-&gt;&gt;&gt; import pandas as pd
-
-&gt;&gt;&gt; price = pd.Series([1, 2, 3, 4, 3, 2, 1])
+<pre><code class="python-repl">&gt;&gt;&gt; price = pd.Series([1, 2, 3, 4, 3, 2, 1])
 &gt;&gt;&gt; orders = pd.Series([1, -0.5, -0.5, 2, -0.5, -0.5, -0.5])
 &gt;&gt;&gt; portfolio = vbt.Portfolio.from_orders(price, orders,
 ...      init_capital=100, freq='1D')
 
 &gt;&gt;&gt; trades = vbt.Trades.from_orders(portfolio.orders)
-&gt;&gt;&gt; trades.count
+&gt;&gt;&gt; trades.count()
 6
 &gt;&gt;&gt; trades.pnl.sum()
 -3.0
-&gt;&gt;&gt; trades.winning.count
+&gt;&gt;&gt; trades.winning.count()
 2
 &gt;&gt;&gt; trades.winning.pnl.sum()
 1.5
@@ -2015,7 +2071,7 @@ purchase prices, and opening size and fees being the sum over all sizes and fees
 <p>Get count and P&amp;L of trades with duration of more than 2 days:</p>
 <pre><code class="python-repl">&gt;&gt;&gt; mask = (trades.records['exit_idx'] - trades.records['entry_idx']) &gt; 2
 &gt;&gt;&gt; trades_filtered = trades.filter_by_mask(mask)
-&gt;&gt;&gt; trades_filtered.count
+&gt;&gt;&gt; trades_filtered.count()
 2
 &gt;&gt;&gt; trades_filtered.pnl.sum()
 -3.0
@@ -2038,6 +2094,9 @@ purchase prices, and opening size and fees being the sum over all sizes and fees
     Example:
         Increasing position:
         ```python-repl
+        &gt;&gt;&gt; import vectorbt as vbt
+        &gt;&gt;&gt; import pandas as pd
+
         &gt;&gt;&gt; vbt.Portfolio.from_orders(
         ...     pd.Series([1, 2, 3, 4, 5]),
         ...     pd.Series([1, 1, 1, 1, -4]),
@@ -2088,20 +2147,17 @@ purchase prices, and opening size and fees being the sum over all sizes and fees
 
         Get count and P&amp;L of trades:
         ```python-repl
-        &gt;&gt;&gt; import vectorbt as vbt
-        &gt;&gt;&gt; import pandas as pd
-
         &gt;&gt;&gt; price = pd.Series([1, 2, 3, 4, 3, 2, 1])
         &gt;&gt;&gt; orders = pd.Series([1, -0.5, -0.5, 2, -0.5, -0.5, -0.5])
         &gt;&gt;&gt; portfolio = vbt.Portfolio.from_orders(price, orders,
         ...      init_capital=100, freq=&#39;1D&#39;)
 
         &gt;&gt;&gt; trades = vbt.Trades.from_orders(portfolio.orders)
-        &gt;&gt;&gt; trades.count
+        &gt;&gt;&gt; trades.count()
         6
         &gt;&gt;&gt; trades.pnl.sum()
         -3.0
-        &gt;&gt;&gt; trades.winning.count
+        &gt;&gt;&gt; trades.winning.count()
         2
         &gt;&gt;&gt; trades.winning.pnl.sum()
         1.5
@@ -2111,7 +2167,7 @@ purchase prices, and opening size and fees being the sum over all sizes and fees
         ```python-repl
         &gt;&gt;&gt; mask = (trades.records[&#39;exit_idx&#39;] - trades.records[&#39;entry_idx&#39;]) &gt; 2
         &gt;&gt;&gt; trades_filtered = trades.filter_by_mask(mask)
-        &gt;&gt;&gt; trades_filtered.count
+        &gt;&gt;&gt; trades_filtered.count()
         2
         &gt;&gt;&gt; trades_filtered.pnl.sum()
         -3.0
@@ -2124,10 +2180,12 @@ purchase prices, and opening size and fees being the sum over all sizes and fees
             raise ValueError(&#34;Records array must have all fields defined in trade_dt&#34;)
 
     @classmethod
-    def from_orders(cls, orders, **kwargs):
+    def from_orders(cls, orders, group_by=None, **kwargs):
         &#34;&#34;&#34;Build `Trades` from `Orders`.&#34;&#34;&#34;
         trade_records = nb.trade_records_nb(orders.main_price.vbt.to_2d_array(), orders.records_arr)
-        return cls(trade_records, orders.main_price, freq=orders.wrapper.freq, **kwargs)
+        if group_by is None:
+            group_by = orders.grouper.group_by
+        return cls(trade_records, orders.main_price, freq=orders.wrapper.freq, group_by=group_by, **kwargs)
 
     @cached_property
     def position_idx(self):
@@ -2145,7 +2203,7 @@ purchase prices, and opening size and fees being the sum over all sizes and fees
 <h3 class="section-subtitle">Static methods</h3>
 <dl>
 <dt id="vectorbt.records.events.Trades.from_orders"><code class="name flex">
-<span>def <span class="ident fname">from_orders</span></span>(<span>orders, **kwargs)</span>
+<span>def <span class="ident fname">from_orders</span></span>(<span>orders, group_by=None, **kwargs)</span>
 </code></dt>
 <dd>
 <div class="desc"><p>Build <code><a title="vectorbt.records.events.Trades" href="#vectorbt.records.events.Trades">Trades</a></code> from <code>Orders</code>.</p></div>
@@ -2154,10 +2212,12 @@ purchase prices, and opening size and fees being the sum over all sizes and fees
 <span>Expand source code</span>
 </summary>
 <pre><code class="python">@classmethod
-def from_orders(cls, orders, **kwargs):
+def from_orders(cls, orders, group_by=None, **kwargs):
     &#34;&#34;&#34;Build `Trades` from `Orders`.&#34;&#34;&#34;
     trade_records = nb.trade_records_nb(orders.main_price.vbt.to_2d_array(), orders.records_arr)
-    return cls(trade_records, orders.main_price, freq=orders.wrapper.freq, **kwargs)</code></pre>
+    if group_by is None:
+        group_by = orders.grouper.group_by
+    return cls(trade_records, orders.main_price, freq=orders.wrapper.freq, group_by=group_by, **kwargs)</code></pre>
 </details>
 </dd>
 </dl>

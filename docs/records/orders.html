@@ -50,8 +50,18 @@ from vectorbt.records.enums import OrderSide, order_dt
 
 def _indexing_func(obj, pd_indexing_func):
     &#34;&#34;&#34;Perform indexing on `BaseOrders`.&#34;&#34;&#34;
-    records_arr, _ = indexing_on_records(obj, pd_indexing_func)
-    return obj.__class__(records_arr, pd_indexing_func(obj.main_price), freq=obj.wrapper.freq, idx_field=obj.idx_field)
+    new_cols, new_records, _ = indexing_on_records(obj, pd_indexing_func)
+    if obj.grouper.group_by is not None:
+        new_group_by = obj.grouper.group_by[new_cols]
+    else:
+        new_group_by = None
+    return obj.__class__(
+        new_records,
+        pd_indexing_func(obj.main_price),
+        freq=obj.wrapper.freq,
+        idx_field=obj.idx_field,
+        group_by=new_group_by
+    )
 
 
 class BaseOrders(Records):
@@ -68,14 +78,20 @@ class BaseOrders(Records):
         &gt;&gt;&gt; portfolio = vbt.Portfolio.from_orders(price, orders,
         ...      init_capital=100, freq=&#39;1D&#39;)
 
-        &gt;&gt;&gt; portfolio.orders.buy.count
+        &gt;&gt;&gt; portfolio.orders.buy.count()
         4
-        &gt;&gt;&gt; portfolio.orders.sell.count
+        &gt;&gt;&gt; portfolio.orders.sell.count()
         1
         ```&#34;&#34;&#34;
 
-    def __init__(self, records_arr, main_price, freq=None, idx_field=&#39;idx&#39;):
-        Records.__init__(self, records_arr, ArrayWrapper.from_obj(main_price, freq=freq), idx_field=idx_field)
+    def __init__(self, records_arr, main_price, freq=None, idx_field=&#39;idx&#39;, group_by=None):
+        Records.__init__(
+            self,
+            records_arr,
+            ArrayWrapper.from_obj(main_price, freq=freq),
+            idx_field=idx_field,
+            group_by=group_by
+        )
         PandasIndexer.__init__(self, _indexing_func)
 
         if not all(field in records_arr.dtype.names for field in order_dt.names):
@@ -83,9 +99,19 @@ class BaseOrders(Records):
 
         self.main_price = main_price
 
-    def filter_by_mask(self, mask):
+    def filter_by_mask(self, mask, idx_field=None, group_by=None):
         &#34;&#34;&#34;Return a new class instance, filtered by mask.&#34;&#34;&#34;
-        return self.__class__(self.records_arr[mask], self.main_price, freq=self.wrapper.freq, idx_field=self.idx_field)
+        if idx_field is None:
+            idx_field = self.idx_field
+        if group_by is None:
+            group_by = self.grouper.group_by
+        return self.__class__(
+            self.records_arr[mask],
+            self.main_price,
+            freq=self.wrapper.freq,
+            idx_field=idx_field,
+            group_by=group_by
+        )
 
     def plot(self,
              main_price_trace_kwargs={},
@@ -202,7 +228,8 @@ class Orders(BaseOrders):
             self.records_arr[filter_mask],
             self.main_price,
             freq=self.wrapper.freq,
-            idx_field=self.idx_field
+            idx_field=self.idx_field,
+            group_by=self.grouper.group_by
         )
 
     @cached_property
@@ -213,7 +240,8 @@ class Orders(BaseOrders):
             self.records_arr[filter_mask],
             self.main_price,
             freq=self.wrapper.freq,
-            idx_field=self.idx_field
+            idx_field=self.idx_field,
+            group_by=self.grouper.group_by
         )</code></pre>
 </details>
 </section>
@@ -228,7 +256,7 @@ class Orders(BaseOrders):
 <dl>
 <dt id="vectorbt.records.orders.BaseOrders"><code class="flex name class">
 <span>class <span class="ident parent-fname">BaseOrders</span></span>
-<span>(</span><span>records_arr, main_price, freq=None, idx_field='idx')</span>
+<span>(</span><span>records_arr, main_price, freq=None, idx_field='idx', group_by=None)</span>
 </code></dt>
 <dd>
 <div class="desc"><p>Extends <code>Records</code> for working with order records.</p>
@@ -242,9 +270,9 @@ class Orders(BaseOrders):
 &gt;&gt;&gt; portfolio = vbt.Portfolio.from_orders(price, orders,
 ...      init_capital=100, freq='1D')
 
-&gt;&gt;&gt; portfolio.orders.buy.count
+&gt;&gt;&gt; portfolio.orders.buy.count()
 4
-&gt;&gt;&gt; portfolio.orders.sell.count
+&gt;&gt;&gt; portfolio.orders.sell.count()
 1
 </code></pre></div>
 <details class="source">
@@ -265,14 +293,20 @@ class Orders(BaseOrders):
         &gt;&gt;&gt; portfolio = vbt.Portfolio.from_orders(price, orders,
         ...      init_capital=100, freq=&#39;1D&#39;)
 
-        &gt;&gt;&gt; portfolio.orders.buy.count
+        &gt;&gt;&gt; portfolio.orders.buy.count()
         4
-        &gt;&gt;&gt; portfolio.orders.sell.count
+        &gt;&gt;&gt; portfolio.orders.sell.count()
         1
         ```&#34;&#34;&#34;
 
-    def __init__(self, records_arr, main_price, freq=None, idx_field=&#39;idx&#39;):
-        Records.__init__(self, records_arr, ArrayWrapper.from_obj(main_price, freq=freq), idx_field=idx_field)
+    def __init__(self, records_arr, main_price, freq=None, idx_field=&#39;idx&#39;, group_by=None):
+        Records.__init__(
+            self,
+            records_arr,
+            ArrayWrapper.from_obj(main_price, freq=freq),
+            idx_field=idx_field,
+            group_by=group_by
+        )
         PandasIndexer.__init__(self, _indexing_func)
 
         if not all(field in records_arr.dtype.names for field in order_dt.names):
@@ -280,9 +314,19 @@ class Orders(BaseOrders):
 
         self.main_price = main_price
 
-    def filter_by_mask(self, mask):
+    def filter_by_mask(self, mask, idx_field=None, group_by=None):
         &#34;&#34;&#34;Return a new class instance, filtered by mask.&#34;&#34;&#34;
-        return self.__class__(self.records_arr[mask], self.main_price, freq=self.wrapper.freq, idx_field=self.idx_field)
+        if idx_field is None:
+            idx_field = self.idx_field
+        if group_by is None:
+            group_by = self.grouper.group_by
+        return self.__class__(
+            self.records_arr[mask],
+            self.main_price,
+            freq=self.wrapper.freq,
+            idx_field=idx_field,
+            group_by=group_by
+        )
 
     def plot(self,
              main_price_trace_kwargs={},
@@ -595,7 +639,7 @@ class Orders(BaseOrders):
 </dd>
 <dt id="vectorbt.records.orders.Orders"><code class="flex name class">
 <span>class <span class="ident parent-fname">Orders</span></span>
-<span>(</span><span>records_arr, main_price, freq=None, idx_field='idx')</span>
+<span>(</span><span>records_arr, main_price, freq=None, idx_field='idx', group_by=None)</span>
 </code></dt>
 <dd>
 <div class="desc"><p>Extends <code><a title="vectorbt.records.orders.BaseOrders" href="#vectorbt.records.orders.BaseOrders">BaseOrders</a></code> by further dividing orders into buy and sell orders.</p></div>
@@ -621,7 +665,8 @@ class Orders(BaseOrders):
             self.records_arr[filter_mask],
             self.main_price,
             freq=self.wrapper.freq,
-            idx_field=self.idx_field
+            idx_field=self.idx_field,
+            group_by=self.grouper.group_by
         )
 
     @cached_property
@@ -632,7 +677,8 @@ class Orders(BaseOrders):
             self.records_arr[filter_mask],
             self.main_price,
             freq=self.wrapper.freq,
-            idx_field=self.idx_field
+            idx_field=self.idx_field,
+            group_by=self.grouper.group_by
         )</code></pre>
 </details>
 <h3 class="section-subtitle">Ancestors</h3>
