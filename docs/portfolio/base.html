@@ -204,7 +204,7 @@ from vectorbt.base.indexing import PandasIndexer
 from vectorbt.base.array_wrapper import ArrayWrapper
 from vectorbt.generic import nb as generic_nb
 from vectorbt.portfolio import nb
-from vectorbt.portfolio.enums import SizeType
+from vectorbt.portfolio.enums import SizeType, AccumulateExitMode, ConflictMode
 from vectorbt.records import Orders, Trades, Positions, Drawdowns
 
 
@@ -340,11 +340,12 @@ class Portfolio(PandasIndexer):
     @classmethod
     def from_signals(cls, main_price, entries, exits, size=np.inf, size_type=SizeType.Shares,
                      entry_price=None, exit_price=None, init_capital=None, fees=None, fixed_fees=None,
-                     slippage=None, accumulate=False, broadcast_kwargs={}, freq=None, **kwargs):
+                     slippage=None, accumulate=None, accumulate_exit_mode=None, conflict_mode=None,
+                     broadcast_kwargs={}, freq=None, **kwargs):
         &#34;&#34;&#34;Build portfolio from entry and exit signals.
 
         For each signal in `entries`, buys `size` of shares for `entry_price` to enter
-        a position. For each signal in `exits`, sells everything for `exit_price`
+        the position. For each signal in `exits`, sells everything for `exit_price`
         to exit the position. Accumulation of orders is disabled by default.
 
         For more details, see `vectorbt.portfolio.nb.simulate_from_signals_nb`.
@@ -369,6 +370,8 @@ class Portfolio(PandasIndexer):
             slippage (float or array_like): Slippage in percentage of price. Will broadcast.
             accumulate (bool): If `accumulate` is `True`, entering the market when already
                 in the market will be allowed to increase a position.
+            accumulate_exit_mode: See `vectorbt.portfolio.enums.AccumulateExitMode`.
+            conflict_mode: See `vectorbt.portfolio.enums.ConflictMode`.
             broadcast_kwargs: Keyword arguments passed to `vectorbt.base.reshape_fns.broadcast`.
             freq (any): Index frequency in case `main_price.index` is not datetime-like.
             **kwargs: Keyword arguments passed to the `__init__` method.
@@ -392,8 +395,8 @@ class Portfolio(PandasIndexer):
             ...     &#39;c&#39;: [True, True, True, True, True]
             ... }, index=index)
             &gt;&gt;&gt; portfolio = vbt.Portfolio.from_signals(
-            ...     price, entries, exits, size=10,
-            ...     init_capital=100, fees=0.0025, fixed_fees=1., slippage=0.001)
+            ...     price, entries, exits, size=10, init_capital=100,
+            ...     fees=0.0025, fixed_fees=1., slippage=0.001)
 
             &gt;&gt;&gt; portfolio.orders.records
                col  idx  size  price      fees  side
@@ -424,12 +427,24 @@ class Portfolio(PandasIndexer):
             size = defaults.portfolio[&#39;size&#39;]
         if size_type is None:
             size_type = defaults.portfolio[&#39;size_type&#39;]
+            if isinstance(size_type, str):
+                size_type = getattr(SizeType, size_type)
         if fees is None:
             fees = defaults.portfolio[&#39;fees&#39;]
         if fixed_fees is None:
             fixed_fees = defaults.portfolio[&#39;fixed_fees&#39;]
         if slippage is None:
             slippage = defaults.portfolio[&#39;slippage&#39;]
+        if accumulate is None:
+            accumulate = defaults.portfolio[&#39;accumulate&#39;]
+        if accumulate_exit_mode is None:
+            accumulate_exit_mode = defaults.portfolio[&#39;accumulate_exit_mode&#39;]
+            if isinstance(accumulate_exit_mode, str):
+                accumulate_exit_mode = getattr(AccumulateExitMode, accumulate_exit_mode)
+        if conflict_mode is None:
+            conflict_mode = defaults.portfolio[&#39;conflict_mode&#39;]
+            if isinstance(conflict_mode, str):
+                conflict_mode = getattr(ConflictMode, conflict_mode)
 
         # Perform checks
         checks.assert_type(main_price, (pd.Series, pd.DataFrame))
@@ -449,8 +464,22 @@ class Portfolio(PandasIndexer):
 
         # Perform calculation
         order_records, cash, shares = nb.simulate_from_signals_nb(
-            target_shape, init_capital, entries, exits, size, size_type, entry_price,
-            exit_price, fees, fixed_fees, slippage, accumulate, is_2d=main_price.ndim == 2)
+            target_shape,
+            init_capital,
+            entries,
+            exits,
+            size,
+            size_type,
+            entry_price,
+            exit_price,
+            fees,
+            fixed_fees,
+            slippage,
+            accumulate,
+            accumulate_exit_mode,
+            conflict_mode,
+            is_2d=main_price.ndim == 2
+        )
 
         # Bring to the same meta
         cash = main_price.vbt.wrap(cash)
@@ -465,9 +494,9 @@ class Portfolio(PandasIndexer):
         return cls(main_price, init_capital, orders, cash, shares, freq=freq, **kwargs)
 
     @classmethod
-    def from_orders(cls, main_price, order_size, size_type=SizeType.Shares, order_price=None,
-                    init_capital=None, fees=None, fixed_fees=None, slippage=None, broadcast_kwargs={},
-                    freq=None, **kwargs):
+    def from_orders(cls, main_price, order_size, size_type=None, order_price=None,
+                    init_capital=None, fees=None, fixed_fees=None, slippage=None,
+                    broadcast_kwargs={}, freq=None, **kwargs):
         &#34;&#34;&#34;Build portfolio from orders.
 
         Starting with initial capital `init_capital`, at each time step, orders the number
@@ -530,6 +559,10 @@ class Portfolio(PandasIndexer):
         # Get defaults
         if order_price is None:
             order_price = main_price
+        if size_type is None:
+            size_type = defaults.portfolio[&#39;size_type&#39;]
+            if isinstance(size_type, str):
+                size_type = getattr(SizeType, size_type)
         if init_capital is None:
             init_capital = defaults.portfolio[&#39;init_capital&#39;]
         if fees is None:
@@ -1165,11 +1198,12 @@ The <code>__init__</code> method is reserved for indexing purposes.</p>
     @classmethod
     def from_signals(cls, main_price, entries, exits, size=np.inf, size_type=SizeType.Shares,
                      entry_price=None, exit_price=None, init_capital=None, fees=None, fixed_fees=None,
-                     slippage=None, accumulate=False, broadcast_kwargs={}, freq=None, **kwargs):
+                     slippage=None, accumulate=None, accumulate_exit_mode=None, conflict_mode=None,
+                     broadcast_kwargs={}, freq=None, **kwargs):
         &#34;&#34;&#34;Build portfolio from entry and exit signals.
 
         For each signal in `entries`, buys `size` of shares for `entry_price` to enter
-        a position. For each signal in `exits`, sells everything for `exit_price`
+        the position. For each signal in `exits`, sells everything for `exit_price`
         to exit the position. Accumulation of orders is disabled by default.
 
         For more details, see `vectorbt.portfolio.nb.simulate_from_signals_nb`.
@@ -1194,6 +1228,8 @@ The <code>__init__</code> method is reserved for indexing purposes.</p>
             slippage (float or array_like): Slippage in percentage of price. Will broadcast.
             accumulate (bool): If `accumulate` is `True`, entering the market when already
                 in the market will be allowed to increase a position.
+            accumulate_exit_mode: See `vectorbt.portfolio.enums.AccumulateExitMode`.
+            conflict_mode: See `vectorbt.portfolio.enums.ConflictMode`.
             broadcast_kwargs: Keyword arguments passed to `vectorbt.base.reshape_fns.broadcast`.
             freq (any): Index frequency in case `main_price.index` is not datetime-like.
             **kwargs: Keyword arguments passed to the `__init__` method.
@@ -1217,8 +1253,8 @@ The <code>__init__</code> method is reserved for indexing purposes.</p>
             ...     &#39;c&#39;: [True, True, True, True, True]
             ... }, index=index)
             &gt;&gt;&gt; portfolio = vbt.Portfolio.from_signals(
-            ...     price, entries, exits, size=10,
-            ...     init_capital=100, fees=0.0025, fixed_fees=1., slippage=0.001)
+            ...     price, entries, exits, size=10, init_capital=100,
+            ...     fees=0.0025, fixed_fees=1., slippage=0.001)
 
             &gt;&gt;&gt; portfolio.orders.records
                col  idx  size  price      fees  side
@@ -1249,12 +1285,24 @@ The <code>__init__</code> method is reserved for indexing purposes.</p>
             size = defaults.portfolio[&#39;size&#39;]
         if size_type is None:
             size_type = defaults.portfolio[&#39;size_type&#39;]
+            if isinstance(size_type, str):
+                size_type = getattr(SizeType, size_type)
         if fees is None:
             fees = defaults.portfolio[&#39;fees&#39;]
         if fixed_fees is None:
             fixed_fees = defaults.portfolio[&#39;fixed_fees&#39;]
         if slippage is None:
             slippage = defaults.portfolio[&#39;slippage&#39;]
+        if accumulate is None:
+            accumulate = defaults.portfolio[&#39;accumulate&#39;]
+        if accumulate_exit_mode is None:
+            accumulate_exit_mode = defaults.portfolio[&#39;accumulate_exit_mode&#39;]
+            if isinstance(accumulate_exit_mode, str):
+                accumulate_exit_mode = getattr(AccumulateExitMode, accumulate_exit_mode)
+        if conflict_mode is None:
+            conflict_mode = defaults.portfolio[&#39;conflict_mode&#39;]
+            if isinstance(conflict_mode, str):
+                conflict_mode = getattr(ConflictMode, conflict_mode)
 
         # Perform checks
         checks.assert_type(main_price, (pd.Series, pd.DataFrame))
@@ -1274,8 +1322,22 @@ The <code>__init__</code> method is reserved for indexing purposes.</p>
 
         # Perform calculation
         order_records, cash, shares = nb.simulate_from_signals_nb(
-            target_shape, init_capital, entries, exits, size, size_type, entry_price,
-            exit_price, fees, fixed_fees, slippage, accumulate, is_2d=main_price.ndim == 2)
+            target_shape,
+            init_capital,
+            entries,
+            exits,
+            size,
+            size_type,
+            entry_price,
+            exit_price,
+            fees,
+            fixed_fees,
+            slippage,
+            accumulate,
+            accumulate_exit_mode,
+            conflict_mode,
+            is_2d=main_price.ndim == 2
+        )
 
         # Bring to the same meta
         cash = main_price.vbt.wrap(cash)
@@ -1290,9 +1352,9 @@ The <code>__init__</code> method is reserved for indexing purposes.</p>
         return cls(main_price, init_capital, orders, cash, shares, freq=freq, **kwargs)
 
     @classmethod
-    def from_orders(cls, main_price, order_size, size_type=SizeType.Shares, order_price=None,
-                    init_capital=None, fees=None, fixed_fees=None, slippage=None, broadcast_kwargs={},
-                    freq=None, **kwargs):
+    def from_orders(cls, main_price, order_size, size_type=None, order_price=None,
+                    init_capital=None, fees=None, fixed_fees=None, slippage=None,
+                    broadcast_kwargs={}, freq=None, **kwargs):
         &#34;&#34;&#34;Build portfolio from orders.
 
         Starting with initial capital `init_capital`, at each time step, orders the number
@@ -1355,6 +1417,10 @@ The <code>__init__</code> method is reserved for indexing purposes.</p>
         # Get defaults
         if order_price is None:
             order_price = main_price
+        if size_type is None:
+            size_type = defaults.portfolio[&#39;size_type&#39;]
+            if isinstance(size_type, str):
+                size_type = getattr(SizeType, size_type)
         if init_capital is None:
             init_capital = defaults.portfolio[&#39;init_capital&#39;]
         if fees is None:
@@ -2019,7 +2085,7 @@ def from_order_func(cls, main_price, order_func_nb, *args, init_capital=None, ro
 </details>
 </dd>
 <dt id="vectorbt.portfolio.base.Portfolio.from_orders"><code class="name flex">
-<span>def <span class="ident fname">from_orders</span></span>(<span>main_price, order_size, size_type=0, order_price=None, init_capital=None, fees=None, fixed_fees=None, slippage=None, broadcast_kwargs={}, freq=None, **kwargs)</span>
+<span>def <span class="ident fname">from_orders</span></span>(<span>main_price, order_size, size_type=None, order_price=None, init_capital=None, fees=None, fixed_fees=None, slippage=None, broadcast_kwargs={}, freq=None, **kwargs)</span>
 </code></dt>
 <dd>
 <div class="desc"><p>Build portfolio from orders.</p>
@@ -2093,9 +2159,9 @@ At the end, they will have the same metadata.</p>
 <span>Expand source code</span>
 </summary>
 <pre><code class="python">@classmethod
-def from_orders(cls, main_price, order_size, size_type=SizeType.Shares, order_price=None,
-                init_capital=None, fees=None, fixed_fees=None, slippage=None, broadcast_kwargs={},
-                freq=None, **kwargs):
+def from_orders(cls, main_price, order_size, size_type=None, order_price=None,
+                init_capital=None, fees=None, fixed_fees=None, slippage=None,
+                broadcast_kwargs={}, freq=None, **kwargs):
     &#34;&#34;&#34;Build portfolio from orders.
 
     Starting with initial capital `init_capital`, at each time step, orders the number
@@ -2158,6 +2224,10 @@ def from_orders(cls, main_price, order_size, size_type=SizeType.Shares, order_pr
     # Get defaults
     if order_price is None:
         order_price = main_price
+    if size_type is None:
+        size_type = defaults.portfolio[&#39;size_type&#39;]
+        if isinstance(size_type, str):
+            size_type = getattr(SizeType, size_type)
     if init_capital is None:
         init_capital = defaults.portfolio[&#39;init_capital&#39;]
     if fees is None:
@@ -2198,12 +2268,12 @@ def from_orders(cls, main_price, order_size, size_type=SizeType.Shares, order_pr
 </details>
 </dd>
 <dt id="vectorbt.portfolio.base.Portfolio.from_signals"><code class="name flex">
-<span>def <span class="ident fname">from_signals</span></span>(<span>main_price, entries, exits, size=inf, size_type=0, entry_price=None, exit_price=None, init_capital=None, fees=None, fixed_fees=None, slippage=None, accumulate=False, broadcast_kwargs={}, freq=None, **kwargs)</span>
+<span>def <span class="ident fname">from_signals</span></span>(<span>main_price, entries, exits, size=inf, size_type=0, entry_price=None, exit_price=None, init_capital=None, fees=None, fixed_fees=None, slippage=None, accumulate=None, accumulate_exit_mode=None, conflict_mode=None, broadcast_kwargs={}, freq=None, **kwargs)</span>
 </code></dt>
 <dd>
 <div class="desc"><p>Build portfolio from entry and exit signals.</p>
 <p>For each signal in <code>entries</code>, buys <code>size</code> of shares for <code>entry_price</code> to enter
-a position. For each signal in <code>exits</code>, sells everything for <code>exit_price</code>
+the position. For each signal in <code>exits</code>, sells everything for <code>exit_price</code>
 to exit the position. Accumulation of orders is disabled by default.</p>
 <p>For more details, see <code><a title="vectorbt.portfolio.nb.simulate_from_signals_nb" href="nb.html#vectorbt.portfolio.nb.simulate_from_signals_nb">simulate_from_signals_nb()</a></code>.</p>
 <h2 id="args">Args</h2>
@@ -2242,6 +2312,10 @@ to exit the position. Accumulation of orders is disabled by default.</p>
 <dt><strong><code>accumulate</code></strong> :&ensp;<code>bool</code></dt>
 <dd>If <code>accumulate</code> is <code>True</code>, entering the market when already
 in the market will be allowed to increase a position.</dd>
+<dt><strong><code>accumulate_exit_mode</code></strong></dt>
+<dd>See <code><a title="vectorbt.portfolio.enums.AccumulateExitMode" href="enums.html#vectorbt.portfolio.enums.AccumulateExitMode">AccumulateExitMode</a></code>.</dd>
+<dt><strong><code>conflict_mode</code></strong></dt>
+<dd>See <code><a title="vectorbt.portfolio.enums.ConflictMode" href="enums.html#vectorbt.portfolio.enums.ConflictMode">ConflictMode</a></code>.</dd>
 <dt><strong><code>broadcast_kwargs</code></strong></dt>
 <dd>Keyword arguments passed to <code><a title="vectorbt.base.reshape_fns.broadcast" href="../base/reshape_fns.html#vectorbt.base.reshape_fns.broadcast">broadcast()</a></code>.</dd>
 <dt><strong><code>freq</code></strong> :&ensp;<code>any</code></dt>
@@ -2265,8 +2339,8 @@ At the end, they will have the same metadata.</p>
 ...     'c': [True, True, True, True, True]
 ... }, index=index)
 &gt;&gt;&gt; portfolio = vbt.Portfolio.from_signals(
-...     price, entries, exits, size=10,
-...     init_capital=100, fees=0.0025, fixed_fees=1., slippage=0.001)
+...     price, entries, exits, size=10, init_capital=100,
+...     fees=0.0025, fixed_fees=1., slippage=0.001)
 
 &gt;&gt;&gt; portfolio.orders.records
    col  idx  size  price      fees  side
@@ -2292,11 +2366,12 @@ At the end, they will have the same metadata.</p>
 <pre><code class="python">@classmethod
 def from_signals(cls, main_price, entries, exits, size=np.inf, size_type=SizeType.Shares,
                  entry_price=None, exit_price=None, init_capital=None, fees=None, fixed_fees=None,
-                 slippage=None, accumulate=False, broadcast_kwargs={}, freq=None, **kwargs):
+                 slippage=None, accumulate=None, accumulate_exit_mode=None, conflict_mode=None,
+                 broadcast_kwargs={}, freq=None, **kwargs):
     &#34;&#34;&#34;Build portfolio from entry and exit signals.
 
     For each signal in `entries`, buys `size` of shares for `entry_price` to enter
-    a position. For each signal in `exits`, sells everything for `exit_price`
+    the position. For each signal in `exits`, sells everything for `exit_price`
     to exit the position. Accumulation of orders is disabled by default.
 
     For more details, see `vectorbt.portfolio.nb.simulate_from_signals_nb`.
@@ -2321,6 +2396,8 @@ def from_signals(cls, main_price, entries, exits, size=np.inf, size_type=SizeTyp
         slippage (float or array_like): Slippage in percentage of price. Will broadcast.
         accumulate (bool): If `accumulate` is `True`, entering the market when already
             in the market will be allowed to increase a position.
+        accumulate_exit_mode: See `vectorbt.portfolio.enums.AccumulateExitMode`.
+        conflict_mode: See `vectorbt.portfolio.enums.ConflictMode`.
         broadcast_kwargs: Keyword arguments passed to `vectorbt.base.reshape_fns.broadcast`.
         freq (any): Index frequency in case `main_price.index` is not datetime-like.
         **kwargs: Keyword arguments passed to the `__init__` method.
@@ -2344,8 +2421,8 @@ def from_signals(cls, main_price, entries, exits, size=np.inf, size_type=SizeTyp
         ...     &#39;c&#39;: [True, True, True, True, True]
         ... }, index=index)
         &gt;&gt;&gt; portfolio = vbt.Portfolio.from_signals(
-        ...     price, entries, exits, size=10,
-        ...     init_capital=100, fees=0.0025, fixed_fees=1., slippage=0.001)
+        ...     price, entries, exits, size=10, init_capital=100,
+        ...     fees=0.0025, fixed_fees=1., slippage=0.001)
 
         &gt;&gt;&gt; portfolio.orders.records
            col  idx  size  price      fees  side
@@ -2376,12 +2453,24 @@ def from_signals(cls, main_price, entries, exits, size=np.inf, size_type=SizeTyp
         size = defaults.portfolio[&#39;size&#39;]
     if size_type is None:
         size_type = defaults.portfolio[&#39;size_type&#39;]
+        if isinstance(size_type, str):
+            size_type = getattr(SizeType, size_type)
     if fees is None:
         fees = defaults.portfolio[&#39;fees&#39;]
     if fixed_fees is None:
         fixed_fees = defaults.portfolio[&#39;fixed_fees&#39;]
     if slippage is None:
         slippage = defaults.portfolio[&#39;slippage&#39;]
+    if accumulate is None:
+        accumulate = defaults.portfolio[&#39;accumulate&#39;]
+    if accumulate_exit_mode is None:
+        accumulate_exit_mode = defaults.portfolio[&#39;accumulate_exit_mode&#39;]
+        if isinstance(accumulate_exit_mode, str):
+            accumulate_exit_mode = getattr(AccumulateExitMode, accumulate_exit_mode)
+    if conflict_mode is None:
+        conflict_mode = defaults.portfolio[&#39;conflict_mode&#39;]
+        if isinstance(conflict_mode, str):
+            conflict_mode = getattr(ConflictMode, conflict_mode)
 
     # Perform checks
     checks.assert_type(main_price, (pd.Series, pd.DataFrame))
@@ -2401,8 +2490,22 @@ def from_signals(cls, main_price, entries, exits, size=np.inf, size_type=SizeTyp
 
     # Perform calculation
     order_records, cash, shares = nb.simulate_from_signals_nb(
-        target_shape, init_capital, entries, exits, size, size_type, entry_price,
-        exit_price, fees, fixed_fees, slippage, accumulate, is_2d=main_price.ndim == 2)
+        target_shape,
+        init_capital,
+        entries,
+        exits,
+        size,
+        size_type,
+        entry_price,
+        exit_price,
+        fees,
+        fixed_fees,
+        slippage,
+        accumulate,
+        accumulate_exit_mode,
+        conflict_mode,
+        is_2d=main_price.ndim == 2
+    )
 
     # Bring to the same meta
     cash = main_price.vbt.wrap(cash)
