@@ -82,10 +82,12 @@ def is_hashable(arg):
     return True
 
 
-def is_index_equal(arg1, arg2):
+def is_index_equal(arg1, arg2, strict=True):
     &#34;&#34;&#34;Determine whether indexes are equal.
 
     Introduces naming tests on top of `pd.Index.equals`, but still doesn&#39;t check for types.&#34;&#34;&#34;
+    if not strict:
+        return pd.Index.equals(arg1, arg2)
     if isinstance(arg1, pd.MultiIndex) and isinstance(arg2, pd.MultiIndex):
         if arg1.names != arg2.names:
             return False
@@ -115,10 +117,10 @@ def is_equal(arg1, arg2, equality_func):
 
 # ############# Asserts ############# #
 
-def assert_value_in(value, lst):
-    &#34;&#34;&#34;Raise exception if `value` is not in `lst`.&#34;&#34;&#34;
-    if value not in lst:
-        raise AssertionError(f&#34;Value {value} is outside of {lst}&#34;)
+def assert_in(arg1, arg2):
+    &#34;&#34;&#34;Raise exception if `arg1` is not in `arg2`.&#34;&#34;&#34;
+    if arg1 not in arg2:
+        raise AssertionError(f&#34;{arg1} not found in {arg2}&#34;)
 
 
 def assert_numba_func(func):
@@ -151,7 +153,7 @@ def assert_subclass(arg, classes):
             raise AssertionError(f&#34;Class must be a subclass of {classes}, not {arg}&#34;)
 
 
-def assert_same_type(arg1, arg2):
+def assert_type_equal(arg1, arg2):
     &#34;&#34;&#34;Raise exception if `arg1` and `arg2` have different types.&#34;&#34;&#34;
     if type(arg1) != type(arg2):
         raise AssertionError(f&#34;Types {type(arg1)} and {type(arg2)} do not match&#34;)
@@ -183,7 +185,7 @@ def assert_subdtype(arg, dtype):
             raise AssertionError(f&#34;Data type must be {dtype}, not {arg.dtype}&#34;)
 
 
-def assert_same_dtype(arg1, arg2):
+def assert_dtype_equal(arg1, arg2):
     &#34;&#34;&#34;Raise exception if `arg1` and `arg2` have different data types.&#34;&#34;&#34;
     if not is_array(arg1):
         arg1 = np.asarray(arg1)
@@ -218,7 +220,7 @@ def assert_ndim(arg, ndims):
             raise AssertionError(f&#34;Number of dimensions must be {ndims}, not {arg.ndim}&#34;)
 
 
-def assert_same_len(arg1, arg2):
+def assert_len_equal(arg1, arg2):
     &#34;&#34;&#34;Raise exception if `arg1` and `arg2` have different length.
 
     Does not transform arguments to NumPy arrays.&#34;&#34;&#34;
@@ -226,7 +228,7 @@ def assert_same_len(arg1, arg2):
         raise AssertionError(f&#34;Lengths {len(arg1)} and {len(arg2)} do not match&#34;)
 
 
-def assert_same_shape(arg1, arg2, axis=None):
+def assert_shape_equal(arg1, arg2, axis=None):
     &#34;&#34;&#34;Raise exception if `arg1` and `arg2` have different shapes along `axis`.&#34;&#34;&#34;
     if not is_array(arg1):
         arg1 = np.asarray(arg1)
@@ -245,31 +247,25 @@ def assert_same_shape(arg1, arg2, axis=None):
                 raise AssertionError(f&#34;Axis {axis} of {arg1.shape} and {arg2.shape} do not match&#34;)
 
 
-def assert_same_index(arg1, arg2):
-    &#34;&#34;&#34;Raise exception if `arg1` and `arg2` have different index.&#34;&#34;&#34;
-    if not pd.Index.equals(arg1.index, arg2.index):
-        raise AssertionError(f&#34;Indexes {arg1.index} and {arg2.index} do not match&#34;)
+def assert_index_equal(arg1, arg2, **kwargs):
+    &#34;&#34;&#34;Raise exception if `arg1` and `arg2` have different index/columns.&#34;&#34;&#34;
+    if not is_index_equal(arg1, arg2, **kwargs):
+        raise AssertionError(f&#34;Indexes {arg1} and {arg2} do not match&#34;)
 
 
-def assert_same_columns(arg1, arg2):
-    &#34;&#34;&#34;Raise exception if `arg1` and `arg2` have different columns.&#34;&#34;&#34;
-    if not pd.Index.equals(arg1.columns, arg2.columns):
-        raise AssertionError(f&#34;Columns {arg1.columns} and {arg2.columns} do not match&#34;)
-
-
-def assert_same_meta(arg1, arg2):
+def assert_meta_equal(arg1, arg2):
     &#34;&#34;&#34;Raise exception if `arg1` and `arg2` have different metadata.&#34;&#34;&#34;
-    assert_same_type(arg1, arg2)
-    assert_same_shape(arg1, arg2)
+    assert_type_equal(arg1, arg2)
+    assert_shape_equal(arg1, arg2)
     if is_pandas(arg1):
-        assert_same_index(arg1, arg2)
+        assert_index_equal(arg1.index, arg2.index)
         if is_frame(arg1):
-            assert_same_columns(arg1, arg2)
+            assert_index_equal(arg1.columns, arg2.columns)
 
 
-def assert_same(arg1, arg2):
+def assert_array_equal(arg1, arg2):
     &#34;&#34;&#34;Raise exception if `arg1` and `arg2` have different metadata or values.&#34;&#34;&#34;
-    assert_same_meta(arg1, arg2)
+    assert_meta_equal(arg1, arg2)
     if is_pandas(arg1):
         if arg1.equals(arg2):
             return
@@ -278,7 +274,7 @@ def assert_same(arg1, arg2):
         arg2 = np.asarray(arg2)
         if np.array_equal(arg1, arg2):
             return
-    raise AssertionError(f&#34;Values do not match&#34;)
+    raise AssertionError(f&#34;Arrays do not match&#34;)
 
 
 def assert_level_not_exists(arg, level_name):
@@ -288,7 +284,13 @@ def assert_level_not_exists(arg, level_name):
     else:
         names = [arg.name]
     if level_name in names:
-        raise AssertionError(f&#34;Level {level_name} already exists in {names}&#34;)</code></pre>
+        raise AssertionError(f&#34;Level {level_name} already exists in {names}&#34;)
+
+
+def assert_equal(arg1, arg2):
+    &#34;&#34;&#34;Raise exception if `arg1` and `arg2` are different.&#34;&#34;&#34;
+    if arg1 != arg2:
+        raise AssertionError(f&#34;{len(arg1)} and {len(arg2)} do not match&#34;)</code></pre>
 </details>
 </section>
 <section>
@@ -298,6 +300,29 @@ def assert_level_not_exists(arg, level_name):
 <section>
 <h2 class="section-title" id="header-functions">Functions</h2>
 <dl>
+<dt id="vectorbt.utils.checks.assert_array_equal"><code class="name flex">
+<span>def <span class="ident fname">assert_array_equal</span></span>(<span>arg1, arg2)</span>
+</code></dt>
+<dd>
+<div class="desc"><p>Raise exception if <code>arg1</code> and <code>arg2</code> have different metadata or values.</p></div>
+<details class="source">
+<summary>
+<span>Expand source code</span>
+</summary>
+<pre><code class="python">def assert_array_equal(arg1, arg2):
+    &#34;&#34;&#34;Raise exception if `arg1` and `arg2` have different metadata or values.&#34;&#34;&#34;
+    assert_meta_equal(arg1, arg2)
+    if is_pandas(arg1):
+        if arg1.equals(arg2):
+            return
+    else:
+        arg1 = np.asarray(arg1)
+        arg2 = np.asarray(arg2)
+        if np.array_equal(arg1, arg2):
+            return
+    raise AssertionError(f&#34;Arrays do not match&#34;)</code></pre>
+</details>
+</dd>
 <dt id="vectorbt.utils.checks.assert_dtype"><code class="name flex">
 <span>def <span class="ident fname">assert_dtype</span></span>(<span>arg, dtype)</span>
 </code></dt>
@@ -320,6 +345,101 @@ def assert_level_not_exists(arg, level_name):
             raise AssertionError(f&#34;Data type must be {dtype}, not {arg.dtype}&#34;)</code></pre>
 </details>
 </dd>
+<dt id="vectorbt.utils.checks.assert_dtype_equal"><code class="name flex">
+<span>def <span class="ident fname">assert_dtype_equal</span></span>(<span>arg1, arg2)</span>
+</code></dt>
+<dd>
+<div class="desc"><p>Raise exception if <code>arg1</code> and <code>arg2</code> have different data types.</p></div>
+<details class="source">
+<summary>
+<span>Expand source code</span>
+</summary>
+<pre><code class="python">def assert_dtype_equal(arg1, arg2):
+    &#34;&#34;&#34;Raise exception if `arg1` and `arg2` have different data types.&#34;&#34;&#34;
+    if not is_array(arg1):
+        arg1 = np.asarray(arg1)
+    if not is_array(arg2):
+        arg2 = np.asarray(arg2)
+    if is_frame(arg1):
+        dtypes1 = arg1.dtypes.to_numpy()
+    else:
+        dtypes1 = np.asarray([arg1.dtype])
+    if is_frame(arg2):
+        dtypes2 = arg2.dtypes.to_numpy()
+    else:
+        dtypes2 = np.asarray([arg2.dtype])
+    if len(dtypes1) == len(dtypes2):
+        if (dtypes1 == dtypes2).all():
+            return
+    elif len(np.unique(dtypes1)) == 1 and len(np.unique(dtypes2)) == 1:
+        if (np.unique(dtypes1) == np.unique(dtypes2)).all():
+            return
+    raise AssertionError(f&#34;Data types {dtypes1} and {dtypes2} do not match&#34;)</code></pre>
+</details>
+</dd>
+<dt id="vectorbt.utils.checks.assert_equal"><code class="name flex">
+<span>def <span class="ident fname">assert_equal</span></span>(<span>arg1, arg2)</span>
+</code></dt>
+<dd>
+<div class="desc"><p>Raise exception if <code>arg1</code> and <code>arg2</code> are different.</p></div>
+<details class="source">
+<summary>
+<span>Expand source code</span>
+</summary>
+<pre><code class="python">def assert_equal(arg1, arg2):
+    &#34;&#34;&#34;Raise exception if `arg1` and `arg2` are different.&#34;&#34;&#34;
+    if arg1 != arg2:
+        raise AssertionError(f&#34;{len(arg1)} and {len(arg2)} do not match&#34;)</code></pre>
+</details>
+</dd>
+<dt id="vectorbt.utils.checks.assert_in"><code class="name flex">
+<span>def <span class="ident fname">assert_in</span></span>(<span>arg1, arg2)</span>
+</code></dt>
+<dd>
+<div class="desc"><p>Raise exception if <code>arg1</code> is not in <code>arg2</code>.</p></div>
+<details class="source">
+<summary>
+<span>Expand source code</span>
+</summary>
+<pre><code class="python">def assert_in(arg1, arg2):
+    &#34;&#34;&#34;Raise exception if `arg1` is not in `arg2`.&#34;&#34;&#34;
+    if arg1 not in arg2:
+        raise AssertionError(f&#34;{arg1} not found in {arg2}&#34;)</code></pre>
+</details>
+</dd>
+<dt id="vectorbt.utils.checks.assert_index_equal"><code class="name flex">
+<span>def <span class="ident fname">assert_index_equal</span></span>(<span>arg1, arg2, **kwargs)</span>
+</code></dt>
+<dd>
+<div class="desc"><p>Raise exception if <code>arg1</code> and <code>arg2</code> have different index/columns.</p></div>
+<details class="source">
+<summary>
+<span>Expand source code</span>
+</summary>
+<pre><code class="python">def assert_index_equal(arg1, arg2, **kwargs):
+    &#34;&#34;&#34;Raise exception if `arg1` and `arg2` have different index/columns.&#34;&#34;&#34;
+    if not is_index_equal(arg1, arg2, **kwargs):
+        raise AssertionError(f&#34;Indexes {arg1} and {arg2} do not match&#34;)</code></pre>
+</details>
+</dd>
+<dt id="vectorbt.utils.checks.assert_len_equal"><code class="name flex">
+<span>def <span class="ident fname">assert_len_equal</span></span>(<span>arg1, arg2)</span>
+</code></dt>
+<dd>
+<div class="desc"><p>Raise exception if <code>arg1</code> and <code>arg2</code> have different length.</p>
+<p>Does not transform arguments to NumPy arrays.</p></div>
+<details class="source">
+<summary>
+<span>Expand source code</span>
+</summary>
+<pre><code class="python">def assert_len_equal(arg1, arg2):
+    &#34;&#34;&#34;Raise exception if `arg1` and `arg2` have different length.
+
+    Does not transform arguments to NumPy arrays.&#34;&#34;&#34;
+    if len(arg1) != len(arg2):
+        raise AssertionError(f&#34;Lengths {len(arg1)} and {len(arg2)} do not match&#34;)</code></pre>
+</details>
+</dd>
 <dt id="vectorbt.utils.checks.assert_level_not_exists"><code class="name flex">
 <span>def <span class="ident fname">assert_level_not_exists</span></span>(<span>arg, level_name)</span>
 </code></dt>
@@ -337,6 +457,25 @@ def assert_level_not_exists(arg, level_name):
         names = [arg.name]
     if level_name in names:
         raise AssertionError(f&#34;Level {level_name} already exists in {names}&#34;)</code></pre>
+</details>
+</dd>
+<dt id="vectorbt.utils.checks.assert_meta_equal"><code class="name flex">
+<span>def <span class="ident fname">assert_meta_equal</span></span>(<span>arg1, arg2)</span>
+</code></dt>
+<dd>
+<div class="desc"><p>Raise exception if <code>arg1</code> and <code>arg2</code> have different metadata.</p></div>
+<details class="source">
+<summary>
+<span>Expand source code</span>
+</summary>
+<pre><code class="python">def assert_meta_equal(arg1, arg2):
+    &#34;&#34;&#34;Raise exception if `arg1` and `arg2` have different metadata.&#34;&#34;&#34;
+    assert_type_equal(arg1, arg2)
+    assert_shape_equal(arg1, arg2)
+    if is_pandas(arg1):
+        assert_index_equal(arg1.index, arg2.index)
+        if is_frame(arg1):
+            assert_index_equal(arg1.columns, arg2.columns)</code></pre>
 </details>
 </dd>
 <dt id="vectorbt.utils.checks.assert_ndim"><code class="name flex">
@@ -390,130 +529,8 @@ def assert_level_not_exists(arg, level_name):
         raise AssertionError(f&#34;Function {func} must be Numba compiled&#34;)</code></pre>
 </details>
 </dd>
-<dt id="vectorbt.utils.checks.assert_same"><code class="name flex">
-<span>def <span class="ident fname">assert_same</span></span>(<span>arg1, arg2)</span>
-</code></dt>
-<dd>
-<div class="desc"><p>Raise exception if <code>arg1</code> and <code>arg2</code> have different metadata or values.</p></div>
-<details class="source">
-<summary>
-<span>Expand source code</span>
-</summary>
-<pre><code class="python">def assert_same(arg1, arg2):
-    &#34;&#34;&#34;Raise exception if `arg1` and `arg2` have different metadata or values.&#34;&#34;&#34;
-    assert_same_meta(arg1, arg2)
-    if is_pandas(arg1):
-        if arg1.equals(arg2):
-            return
-    else:
-        arg1 = np.asarray(arg1)
-        arg2 = np.asarray(arg2)
-        if np.array_equal(arg1, arg2):
-            return
-    raise AssertionError(f&#34;Values do not match&#34;)</code></pre>
-</details>
-</dd>
-<dt id="vectorbt.utils.checks.assert_same_columns"><code class="name flex">
-<span>def <span class="ident fname">assert_same_columns</span></span>(<span>arg1, arg2)</span>
-</code></dt>
-<dd>
-<div class="desc"><p>Raise exception if <code>arg1</code> and <code>arg2</code> have different columns.</p></div>
-<details class="source">
-<summary>
-<span>Expand source code</span>
-</summary>
-<pre><code class="python">def assert_same_columns(arg1, arg2):
-    &#34;&#34;&#34;Raise exception if `arg1` and `arg2` have different columns.&#34;&#34;&#34;
-    if not pd.Index.equals(arg1.columns, arg2.columns):
-        raise AssertionError(f&#34;Columns {arg1.columns} and {arg2.columns} do not match&#34;)</code></pre>
-</details>
-</dd>
-<dt id="vectorbt.utils.checks.assert_same_dtype"><code class="name flex">
-<span>def <span class="ident fname">assert_same_dtype</span></span>(<span>arg1, arg2)</span>
-</code></dt>
-<dd>
-<div class="desc"><p>Raise exception if <code>arg1</code> and <code>arg2</code> have different data types.</p></div>
-<details class="source">
-<summary>
-<span>Expand source code</span>
-</summary>
-<pre><code class="python">def assert_same_dtype(arg1, arg2):
-    &#34;&#34;&#34;Raise exception if `arg1` and `arg2` have different data types.&#34;&#34;&#34;
-    if not is_array(arg1):
-        arg1 = np.asarray(arg1)
-    if not is_array(arg2):
-        arg2 = np.asarray(arg2)
-    if is_frame(arg1):
-        dtypes1 = arg1.dtypes.to_numpy()
-    else:
-        dtypes1 = np.asarray([arg1.dtype])
-    if is_frame(arg2):
-        dtypes2 = arg2.dtypes.to_numpy()
-    else:
-        dtypes2 = np.asarray([arg2.dtype])
-    if len(dtypes1) == len(dtypes2):
-        if (dtypes1 == dtypes2).all():
-            return
-    elif len(np.unique(dtypes1)) == 1 and len(np.unique(dtypes2)) == 1:
-        if (np.unique(dtypes1) == np.unique(dtypes2)).all():
-            return
-    raise AssertionError(f&#34;Data types {dtypes1} and {dtypes2} do not match&#34;)</code></pre>
-</details>
-</dd>
-<dt id="vectorbt.utils.checks.assert_same_index"><code class="name flex">
-<span>def <span class="ident fname">assert_same_index</span></span>(<span>arg1, arg2)</span>
-</code></dt>
-<dd>
-<div class="desc"><p>Raise exception if <code>arg1</code> and <code>arg2</code> have different index.</p></div>
-<details class="source">
-<summary>
-<span>Expand source code</span>
-</summary>
-<pre><code class="python">def assert_same_index(arg1, arg2):
-    &#34;&#34;&#34;Raise exception if `arg1` and `arg2` have different index.&#34;&#34;&#34;
-    if not pd.Index.equals(arg1.index, arg2.index):
-        raise AssertionError(f&#34;Indexes {arg1.index} and {arg2.index} do not match&#34;)</code></pre>
-</details>
-</dd>
-<dt id="vectorbt.utils.checks.assert_same_len"><code class="name flex">
-<span>def <span class="ident fname">assert_same_len</span></span>(<span>arg1, arg2)</span>
-</code></dt>
-<dd>
-<div class="desc"><p>Raise exception if <code>arg1</code> and <code>arg2</code> have different length.</p>
-<p>Does not transform arguments to NumPy arrays.</p></div>
-<details class="source">
-<summary>
-<span>Expand source code</span>
-</summary>
-<pre><code class="python">def assert_same_len(arg1, arg2):
-    &#34;&#34;&#34;Raise exception if `arg1` and `arg2` have different length.
-
-    Does not transform arguments to NumPy arrays.&#34;&#34;&#34;
-    if len(arg1) != len(arg2):
-        raise AssertionError(f&#34;Lengths {len(arg1)} and {len(arg2)} do not match&#34;)</code></pre>
-</details>
-</dd>
-<dt id="vectorbt.utils.checks.assert_same_meta"><code class="name flex">
-<span>def <span class="ident fname">assert_same_meta</span></span>(<span>arg1, arg2)</span>
-</code></dt>
-<dd>
-<div class="desc"><p>Raise exception if <code>arg1</code> and <code>arg2</code> have different metadata.</p></div>
-<details class="source">
-<summary>
-<span>Expand source code</span>
-</summary>
-<pre><code class="python">def assert_same_meta(arg1, arg2):
-    &#34;&#34;&#34;Raise exception if `arg1` and `arg2` have different metadata.&#34;&#34;&#34;
-    assert_same_type(arg1, arg2)
-    assert_same_shape(arg1, arg2)
-    if is_pandas(arg1):
-        assert_same_index(arg1, arg2)
-        if is_frame(arg1):
-            assert_same_columns(arg1, arg2)</code></pre>
-</details>
-</dd>
-<dt id="vectorbt.utils.checks.assert_same_shape"><code class="name flex">
-<span>def <span class="ident fname">assert_same_shape</span></span>(<span>arg1, arg2, axis=None)</span>
+<dt id="vectorbt.utils.checks.assert_shape_equal"><code class="name flex">
+<span>def <span class="ident fname">assert_shape_equal</span></span>(<span>arg1, arg2, axis=None)</span>
 </code></dt>
 <dd>
 <div class="desc"><p>Raise exception if <code>arg1</code> and <code>arg2</code> have different shapes along <code>axis</code>.</p></div>
@@ -521,7 +538,7 @@ def assert_level_not_exists(arg, level_name):
 <summary>
 <span>Expand source code</span>
 </summary>
-<pre><code class="python">def assert_same_shape(arg1, arg2, axis=None):
+<pre><code class="python">def assert_shape_equal(arg1, arg2, axis=None):
     &#34;&#34;&#34;Raise exception if `arg1` and `arg2` have different shapes along `axis`.&#34;&#34;&#34;
     if not is_array(arg1):
         arg1 = np.asarray(arg1)
@@ -538,21 +555,6 @@ def assert_level_not_exists(arg, level_name):
         else:
             if arg1.shape[axis] != arg2.shape[axis]:
                 raise AssertionError(f&#34;Axis {axis} of {arg1.shape} and {arg2.shape} do not match&#34;)</code></pre>
-</details>
-</dd>
-<dt id="vectorbt.utils.checks.assert_same_type"><code class="name flex">
-<span>def <span class="ident fname">assert_same_type</span></span>(<span>arg1, arg2)</span>
-</code></dt>
-<dd>
-<div class="desc"><p>Raise exception if <code>arg1</code> and <code>arg2</code> have different types.</p></div>
-<details class="source">
-<summary>
-<span>Expand source code</span>
-</summary>
-<pre><code class="python">def assert_same_type(arg1, arg2):
-    &#34;&#34;&#34;Raise exception if `arg1` and `arg2` have different types.&#34;&#34;&#34;
-    if type(arg1) != type(arg2):
-        raise AssertionError(f&#34;Types {type(arg1)} and {type(arg2)} do not match&#34;)</code></pre>
 </details>
 </dd>
 <dt id="vectorbt.utils.checks.assert_subclass"><code class="name flex">
@@ -613,19 +615,19 @@ def assert_level_not_exists(arg, level_name):
             raise AssertionError(f&#34;Type must be {types}, not {type(arg)}&#34;)</code></pre>
 </details>
 </dd>
-<dt id="vectorbt.utils.checks.assert_value_in"><code class="name flex">
-<span>def <span class="ident fname">assert_value_in</span></span>(<span>value, lst)</span>
+<dt id="vectorbt.utils.checks.assert_type_equal"><code class="name flex">
+<span>def <span class="ident fname">assert_type_equal</span></span>(<span>arg1, arg2)</span>
 </code></dt>
 <dd>
-<div class="desc"><p>Raise exception if <code>value</code> is not in <code>lst</code>.</p></div>
+<div class="desc"><p>Raise exception if <code>arg1</code> and <code>arg2</code> have different types.</p></div>
 <details class="source">
 <summary>
 <span>Expand source code</span>
 </summary>
-<pre><code class="python">def assert_value_in(value, lst):
-    &#34;&#34;&#34;Raise exception if `value` is not in `lst`.&#34;&#34;&#34;
-    if value not in lst:
-        raise AssertionError(f&#34;Value {value} is outside of {lst}&#34;)</code></pre>
+<pre><code class="python">def assert_type_equal(arg1, arg2):
+    &#34;&#34;&#34;Raise exception if `arg1` and `arg2` have different types.&#34;&#34;&#34;
+    if type(arg1) != type(arg2):
+        raise AssertionError(f&#34;Types {type(arg1)} and {type(arg2)} do not match&#34;)</code></pre>
 </details>
 </dd>
 <dt id="vectorbt.utils.checks.is_array"><code class="name flex">
@@ -709,7 +711,7 @@ def assert_level_not_exists(arg, level_name):
 </details>
 </dd>
 <dt id="vectorbt.utils.checks.is_index_equal"><code class="name flex">
-<span>def <span class="ident fname">is_index_equal</span></span>(<span>arg1, arg2)</span>
+<span>def <span class="ident fname">is_index_equal</span></span>(<span>arg1, arg2, strict=True)</span>
 </code></dt>
 <dd>
 <div class="desc"><p>Determine whether indexes are equal.</p>
@@ -718,10 +720,12 @@ def assert_level_not_exists(arg, level_name):
 <summary>
 <span>Expand source code</span>
 </summary>
-<pre><code class="python">def is_index_equal(arg1, arg2):
+<pre><code class="python">def is_index_equal(arg1, arg2, strict=True):
     &#34;&#34;&#34;Determine whether indexes are equal.
 
     Introduces naming tests on top of `pd.Index.equals`, but still doesn&#39;t check for types.&#34;&#34;&#34;
+    if not strict:
+        return pd.Index.equals(arg1, arg2)
     if isinstance(arg1, pd.MultiIndex) and isinstance(arg2, pd.MultiIndex):
         if arg1.names != arg2.names:
             return False
@@ -811,23 +815,23 @@ title="Search"
 </li>
 <li><h3><a href="#header-functions">Functions</a></h3>
 <ul class="">
+<li><code><a title="vectorbt.utils.checks.assert_array_equal" href="#vectorbt.utils.checks.assert_array_equal">assert_array_equal</a></code></li>
 <li><code><a title="vectorbt.utils.checks.assert_dtype" href="#vectorbt.utils.checks.assert_dtype">assert_dtype</a></code></li>
+<li><code><a title="vectorbt.utils.checks.assert_dtype_equal" href="#vectorbt.utils.checks.assert_dtype_equal">assert_dtype_equal</a></code></li>
+<li><code><a title="vectorbt.utils.checks.assert_equal" href="#vectorbt.utils.checks.assert_equal">assert_equal</a></code></li>
+<li><code><a title="vectorbt.utils.checks.assert_in" href="#vectorbt.utils.checks.assert_in">assert_in</a></code></li>
+<li><code><a title="vectorbt.utils.checks.assert_index_equal" href="#vectorbt.utils.checks.assert_index_equal">assert_index_equal</a></code></li>
+<li><code><a title="vectorbt.utils.checks.assert_len_equal" href="#vectorbt.utils.checks.assert_len_equal">assert_len_equal</a></code></li>
 <li><code><a title="vectorbt.utils.checks.assert_level_not_exists" href="#vectorbt.utils.checks.assert_level_not_exists">assert_level_not_exists</a></code></li>
+<li><code><a title="vectorbt.utils.checks.assert_meta_equal" href="#vectorbt.utils.checks.assert_meta_equal">assert_meta_equal</a></code></li>
 <li><code><a title="vectorbt.utils.checks.assert_ndim" href="#vectorbt.utils.checks.assert_ndim">assert_ndim</a></code></li>
 <li><code><a title="vectorbt.utils.checks.assert_not_none" href="#vectorbt.utils.checks.assert_not_none">assert_not_none</a></code></li>
 <li><code><a title="vectorbt.utils.checks.assert_numba_func" href="#vectorbt.utils.checks.assert_numba_func">assert_numba_func</a></code></li>
-<li><code><a title="vectorbt.utils.checks.assert_same" href="#vectorbt.utils.checks.assert_same">assert_same</a></code></li>
-<li><code><a title="vectorbt.utils.checks.assert_same_columns" href="#vectorbt.utils.checks.assert_same_columns">assert_same_columns</a></code></li>
-<li><code><a title="vectorbt.utils.checks.assert_same_dtype" href="#vectorbt.utils.checks.assert_same_dtype">assert_same_dtype</a></code></li>
-<li><code><a title="vectorbt.utils.checks.assert_same_index" href="#vectorbt.utils.checks.assert_same_index">assert_same_index</a></code></li>
-<li><code><a title="vectorbt.utils.checks.assert_same_len" href="#vectorbt.utils.checks.assert_same_len">assert_same_len</a></code></li>
-<li><code><a title="vectorbt.utils.checks.assert_same_meta" href="#vectorbt.utils.checks.assert_same_meta">assert_same_meta</a></code></li>
-<li><code><a title="vectorbt.utils.checks.assert_same_shape" href="#vectorbt.utils.checks.assert_same_shape">assert_same_shape</a></code></li>
-<li><code><a title="vectorbt.utils.checks.assert_same_type" href="#vectorbt.utils.checks.assert_same_type">assert_same_type</a></code></li>
+<li><code><a title="vectorbt.utils.checks.assert_shape_equal" href="#vectorbt.utils.checks.assert_shape_equal">assert_shape_equal</a></code></li>
 <li><code><a title="vectorbt.utils.checks.assert_subclass" href="#vectorbt.utils.checks.assert_subclass">assert_subclass</a></code></li>
 <li><code><a title="vectorbt.utils.checks.assert_subdtype" href="#vectorbt.utils.checks.assert_subdtype">assert_subdtype</a></code></li>
 <li><code><a title="vectorbt.utils.checks.assert_type" href="#vectorbt.utils.checks.assert_type">assert_type</a></code></li>
-<li><code><a title="vectorbt.utils.checks.assert_value_in" href="#vectorbt.utils.checks.assert_value_in">assert_value_in</a></code></li>
+<li><code><a title="vectorbt.utils.checks.assert_type_equal" href="#vectorbt.utils.checks.assert_type_equal">assert_type_equal</a></code></li>
 <li><code><a title="vectorbt.utils.checks.is_array" href="#vectorbt.utils.checks.is_array">is_array</a></code></li>
 <li><code><a title="vectorbt.utils.checks.is_default_index" href="#vectorbt.utils.checks.is_default_index">is_default_index</a></code></li>
 <li><code><a title="vectorbt.utils.checks.is_equal" href="#vectorbt.utils.checks.is_equal">is_equal</a></code></li>

@@ -35,6 +35,7 @@ ga('create', 'UA-142521178-3', 'auto'); ga('send', 'pageview');
 </summary>
 <pre><code class="python">&#34;&#34;&#34;Named tuples and enumerated types.&#34;&#34;&#34;
 
+import numpy as np
 from collections import namedtuple
 import json
 
@@ -42,56 +43,258 @@ __pdoc__ = {}
 
 # We use namedtuple for enums and classes to be able to use them in Numba
 
-# ############# Named tuples ############# #
+# ############# SimulationContext ############# #
 
-OrderContext = namedtuple(&#39;OrderContext&#39;, [
-    &#39;col&#39;,
-    &#39;i&#39;,
+SimulationContext = namedtuple(&#39;SimulationContext&#39;, [
     &#39;target_shape&#39;,
-    &#39;init_capital&#39;,
+    &#39;close&#39;,
+    &#39;group_counts&#39;,
+    &#39;init_cash&#39;,
+    &#39;cash_sharing&#39;,
+    &#39;call_seq&#39;,
+    &#39;active_mask&#39;,
+    &#39;min_size&#39;,
     &#39;order_records&#39;,
-    &#39;cash&#39;,
-    &#39;shares&#39;,
-    &#39;run_cash&#39;,
-    &#39;run_shares&#39;
+    &#39;record_mask&#39;,
+    &#39;last_cash&#39;,
+    &#39;last_shares&#39;,
+    &#39;last_val_price&#39;
 ])
 
-__pdoc__[&#39;OrderContext&#39;] = &#34;A named tuple representing the current order context.&#34;
-__pdoc__[&#39;OrderContext.col&#39;] = &#34;Current column.&#34;
-__pdoc__[&#39;OrderContext.i&#39;] = &#34;Current index.&#34;
-__pdoc__[&#39;OrderContext.target_shape&#39;] = &#34;Target shape.&#34;
-__pdoc__[&#39;OrderContext.init_capital&#39;] = &#34;Initial capital.&#34;
-__pdoc__[&#39;OrderContext.order_records&#39;] = &#34;Order records filled up to this time point. Other elements are empty.&#34;
-__pdoc__[&#39;OrderContext.cash&#39;] = &#34;Cash filled up to this time point. Other elements are empty.&#34;
-__pdoc__[&#39;OrderContext.shares&#39;] = &#34;Shares filled up to this time point. Other elements are empty.&#34;
-__pdoc__[&#39;OrderContext.run_cash&#39;] = &#34;Current cash holdings.&#34;
-__pdoc__[&#39;OrderContext.run_shares&#39;] = &#34;Current shares holdings.&#34;
+__pdoc__[&#39;SimulationContext&#39;] = &#34;A named tuple representing context of the current simulation.&#34;
+__pdoc__[&#39;SimulationContext.target_shape&#39;] = &#34;&#34;&#34;Target shape.
+
+A tuple with exactly two elements: the number of rows and columns.
+&#34;&#34;&#34;
+__pdoc__[&#39;SimulationContext.close&#39;] = &#34;&#34;&#34;Reference price, such as close.
+
+Has shape `target_shape`.
+&#34;&#34;&#34;
+__pdoc__[&#39;SimulationContext.group_counts&#39;] = &#34;&#34;&#34;Column count per group.
+
+Even if columns are not grouped, `group_counts` contains ones - one column per group.
+&#34;&#34;&#34;
+__pdoc__[&#39;SimulationContext.init_cash&#39;] = &#34;&#34;&#34;Initial capital per column, or per group if cash sharing is enabled.
+
+If `cash_sharing` is `True`, has shape `(target_shape[0], group_counts.shape[0])`. 
+Otherwise, has shape `target_shape`.
+&#34;&#34;&#34;
+__pdoc__[&#39;SimulationContext.cash_sharing&#39;] = &#34;&#34;&#34;Whether cash sharing is enabled.&#34;&#34;&#34;
+__pdoc__[&#39;SimulationContext.call_seq&#39;] = &#34;&#34;&#34;Default sequence of calls per segment.
+
+Controls the sequence in which `order_func_nb` is executed within a segment. 
+
+Has shape `target_shape` and each value must exist in the range `[0, group_len)`.
+
+!!! note
+    To change the call sequence dynamically, better change `call_seq_now` in-place.
+&#34;&#34;&#34;
+__pdoc__[&#39;SimulationContext.active_mask&#39;] = &#34;&#34;&#34;Mask of whether a particular segment should be executed.
+
+A segment is simply a sequence of `order_func_nb` calls under the same group and row.
+
+Has shape `(target_shape[0], group_counts.shape[0])`.
+&#34;&#34;&#34;
+__pdoc__[&#39;SimulationContext.min_size&#39;] = &#34;&#34;&#34;Minimum size for an order to be accepted.
+
+Has shape `(target_shape[1],)`.
+&#34;&#34;&#34;
+__pdoc__[&#39;SimulationContext.order_records&#39;] = &#34;&#34;&#34;Order records.
+
+Order records are not filled incrementally from left to right, but based on their position 
+in the matrix. To get index of a record, use `col * target_shape[0] + i`.
+
+!!! warning
+    Initially, all records are empty. Accessing empty records will not raise any errors or warnings, 
+    but provide you with arbitrary data (see [np.empty](https://numpy.org/doc/stable/reference/generated/numpy.empty.html)).
+    To check if a record is set, use `record_mask`.
+&#34;&#34;&#34;
+__pdoc__[&#39;SimulationContext.record_mask&#39;] = &#34;&#34;&#34;Mask of records that have been set.
+
+Has the same length as `order_records`.
+&#34;&#34;&#34;
+__pdoc__[&#39;SimulationContext.last_cash&#39;] = &#34;&#34;&#34;Last cash per column, or per group if cash sharing is enabled.
+
+Has the same shape as `init_cash`.
+&#34;&#34;&#34;
+__pdoc__[&#39;SimulationContext.last_shares&#39;] = &#34;&#34;&#34;Last shares per column.
+
+Has shape `(target_shape[1],)`.
+&#34;&#34;&#34;
+__pdoc__[&#39;SimulationContext.last_val_price&#39;] = &#34;&#34;&#34;Last size valuation price.
+
+Used to calculate `value_now`. Can be changed in-place before group valuation.
+
+Has shape `(target_shape[1],)`.
+&#34;&#34;&#34;
+
+# ############# GroupContext ############# #
+
+GroupContext = namedtuple(&#39;GroupContext&#39;, [
+    *SimulationContext._fields,
+    &#39;group&#39;,
+    &#39;group_len&#39;,
+    &#39;from_col&#39;,
+    &#39;to_col&#39;,
+    &#39;num_records&#39;
+])
+
+__pdoc__[&#39;GroupContext&#39;] = &#34;A named tuple representing context of the current group.&#34;
+for field in SimulationContext._fields:
+    __pdoc__[f&#39;GroupContext.{field}&#39;] = f&#34;See `SimulationContext.{field}`.&#34;
+__pdoc__[&#39;GroupContext.group&#39;] = &#34;&#34;&#34;Index of the current group.
+
+Has range `[0, group_counts.shape[0])`.
+&#34;&#34;&#34;
+__pdoc__[&#39;GroupContext.group_len&#39;] = &#34;&#34;&#34;Number of columns in the current group.
+
+Scalar value. Same as `group_counts[group]`.
+&#34;&#34;&#34;
+__pdoc__[&#39;GroupContext.from_col&#39;] = &#34;&#34;&#34;Index of the first column in the current group.
+
+Has range `[0, target_shape[1])`.
+&#34;&#34;&#34;
+__pdoc__[&#39;GroupContext.to_col&#39;] = &#34;&#34;&#34;Index of the first column in the next group.
+
+Has range `[1, target_shape[1] + 1)`. 
+
+If columns are not grouped, equals `from_col + 1`.
+&#34;&#34;&#34;
+__pdoc__[&#39;GroupContext.num_records&#39;] = &#34;Number of records filled up to this point.&#34;
+
+# ############# RowContext ############# #
 
 RowContext = namedtuple(&#39;RowContext&#39;, [
+    *SimulationContext._fields,
     &#39;i&#39;,
-    &#39;target_shape&#39;,
-    &#39;init_capital&#39;,
-    &#39;order_records&#39;,
-    &#39;cash&#39;,
-    &#39;shares&#39;
+    &#39;num_records&#39;
 ])
+__pdoc__[&#39;RowContext&#39;] = &#34;A named tuple representing context of the current row.&#34;
+for field in SimulationContext._fields:
+    __pdoc__[f&#39;RowContext.{field}&#39;] = f&#34;See `SimulationContext.{field}`.&#34;
+__pdoc__[&#39;RowContext.i&#39;] = &#34;&#34;&#34;Current row (time axis).
 
-__pdoc__[&#39;RowContext&#39;] = &#34;A named tuple representing the current row context.&#34;
-__pdoc__[&#39;RowContext.i&#39;] = __pdoc__[&#39;OrderContext.i&#39;]
-__pdoc__[&#39;RowContext.target_shape&#39;] = __pdoc__[&#39;OrderContext.target_shape&#39;]
-__pdoc__[&#39;RowContext.init_capital&#39;] = __pdoc__[&#39;OrderContext.init_capital&#39;]
-__pdoc__[&#39;RowContext.order_records&#39;] = __pdoc__[&#39;OrderContext.order_records&#39;]
-__pdoc__[&#39;RowContext.cash&#39;] = __pdoc__[&#39;OrderContext.cash&#39;]
-__pdoc__[&#39;RowContext.shares&#39;] = __pdoc__[&#39;OrderContext.shares&#39;]
+Has range `[0, target_shape[0])`.
+&#34;&#34;&#34;
+__pdoc__[&#39;RowContext.num_records&#39;] = &#34;See `GroupContext.num_records`.&#34;
+
+# ############# SegmentContext ############# #
+
+SegmentContext = namedtuple(&#39;SegmentContext&#39;, [
+    *SimulationContext._fields,
+    &#39;i&#39;,
+    &#39;group&#39;,
+    &#39;group_len&#39;,
+    &#39;from_col&#39;,
+    &#39;to_col&#39;,
+    &#39;num_records&#39;,
+    &#39;call_seq_now&#39;
+])
+__pdoc__[&#39;SegmentContext&#39;] = &#34;A named tuple representing context of the current segment.&#34;
+for field in SimulationContext._fields:
+    __pdoc__[f&#39;SegmentContext.{field}&#39;] = f&#34;See `SimulationContext.{field}`.&#34;
+__pdoc__[&#39;SegmentContext.i&#39;] = &#34;See `RowContext.i`.&#34;
+__pdoc__[&#39;SegmentContext.group&#39;] = &#34;See `GroupContext.group`.&#34;
+__pdoc__[&#39;SegmentContext.group_len&#39;] = &#34;See `GroupContext.group_len`.&#34;
+__pdoc__[&#39;SegmentContext.from_col&#39;] = &#34;See `GroupContext.from_col`.&#34;
+__pdoc__[&#39;SegmentContext.to_col&#39;] = &#34;See `GroupContext.to_col`.&#34;
+__pdoc__[&#39;SegmentContext.num_records&#39;] = &#34;See `GroupContext.num_records`.&#34;
+__pdoc__[&#39;SegmentContext.call_seq_now&#39;] = &#34;&#34;&#34;Current sequence of calls.
+
+Has shape `(group_len,)`. 
+&#34;&#34;&#34;
+
+# ############# OrderContext ############# #
+
+OrderContext = namedtuple(&#39;OrderContext&#39;, [
+    *SegmentContext._fields,
+    &#39;col&#39;,
+    &#39;call_idx&#39;,
+    &#39;cash_now&#39;,
+    &#39;shares_now&#39;,
+    &#39;val_price_now&#39;,
+    &#39;value_now&#39;
+])
+__pdoc__[&#39;OrderContext&#39;] = &#34;A named tuple representing context of the current order.&#34;
+for field in SegmentContext._fields:
+    __pdoc__[f&#39;OrderContext.{field}&#39;] = f&#34;See `SegmentContext.{field}`.&#34;
+__pdoc__[&#39;OrderContext.col&#39;] = &#34;&#34;&#34;Current column (feature axis).
+
+Has range `[0, target_shape[1])` and is always within `[from_col, to_col)`.
+&#34;&#34;&#34;
+__pdoc__[&#39;OrderContext.call_idx&#39;] = &#34;&#34;&#34;Index of the current call in `call_seq_now`.
+
+Has range `[0, group_len)`.
+&#34;&#34;&#34;
+__pdoc__[&#39;OrderContext.cash_now&#39;] = &#34;&#34;&#34;Current cash available.
+
+Scalar value. Per group if cash sharing is enabled, otherwise per column.
+&#34;&#34;&#34;
+__pdoc__[&#39;OrderContext.shares_now&#39;] = &#34;&#34;&#34;Current shares available.
+
+Scalar value. Always per column.
+&#34;&#34;&#34;
+__pdoc__[&#39;OrderContext.val_price_now&#39;] = &#34;&#34;&#34;Current size valuation price.
+
+Scalar value. Always per column.
+&#34;&#34;&#34;
+__pdoc__[&#39;OrderContext.value_now&#39;] = &#34;&#34;&#34;Current value.
+
+Scalar value. Per group if cash sharing is enabled, otherwise per column.
+
+Current value is calculated using `last_val_price`.
+&#34;&#34;&#34;
+
+# ############# InitCashMode ############# #
+
+InitCashMode = namedtuple(&#39;InitCashMode&#39;, [
+    &#39;Auto&#39;,
+    &#39;AutoAlign&#39;
+])(*range(2))
+&#34;&#34;&#34;_&#34;&#34;&#34;
+
+__pdoc__[&#39;InitCashMode&#39;] = f&#34;&#34;&#34;Initial cash mode.
+
+```plaintext
+{json.dumps(dict(zip(InitCashMode._fields, InitCashMode)), indent=2)}
+```
+
+Attributes:
+    Auto: Optimal initial cash for each column.
+    AutoAlign: Optimal initial cash aligned across all columns.
+&#34;&#34;&#34;
+
+# ############# CallSeqType ############# #
+
+CallSeqType = namedtuple(&#39;CallSeqType&#39;, [
+    &#39;Default&#39;,
+    &#39;Reversed&#39;,
+    &#39;Random&#39;,
+    &#39;Auto&#39;
+])(*range(4))
+&#34;&#34;&#34;_&#34;&#34;&#34;
+
+__pdoc__[&#39;CallSeqType&#39;] = f&#34;&#34;&#34;Call sequence type.
+
+```plaintext
+{json.dumps(dict(zip(CallSeqType._fields, CallSeqType)), indent=2)}
+```
+
+Attributes:
+    Default: Place calls from left to right.
+    Reversed: Place calls from right to left.
+    Random: Place calls randomly.
+    Auto: Place calls dynamically based on order value.
+&#34;&#34;&#34;
+
+# ############# SizeType ############# #
 
 SizeType = namedtuple(&#39;SizeType&#39;, [
     &#39;Shares&#39;,
     &#39;TargetShares&#39;,
-    &#39;Cash&#39;,
-    &#39;TargetCash&#39;,
     &#39;TargetValue&#39;,
     &#39;TargetPercent&#39;
-])(*range(6))
+])(*range(4))
 &#34;&#34;&#34;_&#34;&#34;&#34;
 
 __pdoc__[&#39;SizeType&#39;] = f&#34;&#34;&#34;Size type.
@@ -99,7 +302,15 @@ __pdoc__[&#39;SizeType&#39;] = f&#34;&#34;&#34;Size type.
 ```plaintext
 {json.dumps(dict(zip(SizeType._fields, SizeType)), indent=2)}
 ```
+
+Attributes:
+    Shares: Number of shares.
+    TargetShares: Number of shares to hold after transaction.
+    TargetValue: Total value of holdings to hold after transaction.
+    TargetPercent: Percentage of total value to hold after transaction.
 &#34;&#34;&#34;
+
+# ############# AccumulateExitMode ############# #
 
 AccumulateExitMode = namedtuple(&#39;AccumulateExitMode&#39;, [
     &#39;Close&#39;,
@@ -109,12 +320,18 @@ AccumulateExitMode = namedtuple(&#39;AccumulateExitMode&#39;, [
 
 __pdoc__[&#39;AccumulateExitMode&#39;] = f&#34;&#34;&#34;Accumulation exit mode.
 
-What should happen if exit signal occurs and accumulation is turned on?
-
 ```plaintext
 {json.dumps(dict(zip(AccumulateExitMode._fields, AccumulateExitMode)), indent=2)}
 ```
+
+What should happen if exit signal occurs and accumulation is turned on?
+
+Attributes:
+    Close: Close the position by selling all.
+    Reduce: Reduce the position by selling size.
 &#34;&#34;&#34;
+
+# ############# ConflictMode ############# #
 
 ConflictMode = namedtuple(&#39;ConflictMode&#39;, [
     &#39;Ignore&#39;,
@@ -125,12 +342,19 @@ ConflictMode = namedtuple(&#39;ConflictMode&#39;, [
 
 __pdoc__[&#39;ConflictMode&#39;] = f&#34;&#34;&#34;Conflict mode.
 
-What should happen if both entry and exit signals occur simultaneously?
-
 ```plaintext
 {json.dumps(dict(zip(ConflictMode._fields, ConflictMode)), indent=2)}
 ```
+
+What should happen if both entry and exit signals occur simultaneously?
+
+Attributes:
+    Ignore: Ignore both signals.
+    Exit: Ignore entry signal.
+    ExitAndEntry: Imitate exit and entry by using entry size as target.
 &#34;&#34;&#34;
+
+# ############# Order ############# #
 
 Order = namedtuple(&#39;Order&#39;, [
     &#39;size&#39;,
@@ -138,28 +362,61 @@ Order = namedtuple(&#39;Order&#39;, [
     &#39;price&#39;,
     &#39;fees&#39;,
     &#39;fixed_fees&#39;,
-    &#39;slippage&#39;
+    &#39;slippage&#39;,
+    &#39;reject_prob&#39;
 ])
 
 __pdoc__[&#39;Order&#39;] = &#34;A named tuple representing an order.&#34;
 __pdoc__[&#39;Order.size&#39;] = &#34;Size in shares. Filled size will depend upon your funds.&#34;
-__pdoc__[&#39;Order.size&#39;] = &#34;See `SizeType`.&#34;
+__pdoc__[&#39;Order.size_type&#39;] = &#34;See `SizeType`.&#34;
 __pdoc__[&#39;Order.price&#39;] = &#34;Price per share. Filled price will depend upon slippage.&#34;
 __pdoc__[&#39;Order.fees&#39;] = &#34;Fees in percentage of the order value.&#34;
 __pdoc__[&#39;Order.fixed_fees&#39;] = &#34;Fixed amount of fees to pay for this order.&#34;
 __pdoc__[&#39;Order.slippage&#39;] = &#34;Slippage in percentage of `price`.&#34;
+__pdoc__[&#39;Order.reject_prob&#39;] = &#34;Probability of rejecting this order.&#34;
 
-FilledOrder = namedtuple(&#39;FilledOrder&#39;, [
+NoOrder = Order(np.nan, -1, np.nan, np.nan, np.nan, np.nan, np.nan)
+&#34;&#34;&#34;_&#34;&#34;&#34;
+
+__pdoc__[&#39;NoOrder&#39;] = &#34;Order that will not be processed.&#34;
+
+# ############# OrderStatus ############# #
+
+OrderStatus = namedtuple(&#39;OrderStatus&#39;, [
+    &#39;Filled&#39;,
+    &#39;Rejected&#39;
+])(*range(2))
+&#34;&#34;&#34;_&#34;&#34;&#34;
+
+__pdoc__[&#39;OrderStatus&#39;] = f&#34;&#34;&#34;Order status.
+
+```plaintext
+{json.dumps(dict(zip(OrderStatus._fields, OrderStatus)), indent=2)}
+```
+
+Attributes:
+    Filled: Order filled.
+    Rejected: Order rejected.
+&#34;&#34;&#34;
+
+# ############# OrderResult ############# #
+
+OrderResult = namedtuple(&#39;OrderResult&#39;, [
     &#39;size&#39;,
     &#39;price&#39;,
     &#39;fees&#39;,
-    &#39;side&#39;
+    &#39;side&#39;,
+    &#39;status&#39;
 ])
 
-__pdoc__[&#39;FilledOrder&#39;] = &#34;A named tuple representing a filled order.&#34;
-__pdoc__[&#39;FilledOrder.size&#39;] = &#34;Filled size in shares.&#34;
-__pdoc__[&#39;FilledOrder.price&#39;] = &#34;Filled price per share, adjusted with slippage.&#34;
-__pdoc__[&#39;FilledOrder.side&#39;] = &#34;See `vectorbt.records.enums.OrderSide`.&#34;</code></pre>
+__pdoc__[&#39;OrderResult&#39;] = &#34;A named tuple representing an order result.&#34;
+__pdoc__[&#39;OrderResult.size&#39;] = &#34;Filled size in shares.&#34;
+__pdoc__[&#39;OrderResult.price&#39;] = &#34;Filled price per share, adjusted with slippage.&#34;
+__pdoc__[&#39;OrderResult.fees&#39;] = &#34;Total fees paid for this order.&#34;
+__pdoc__[&#39;OrderResult.side&#39;] = &#34;See `vectorbt.records.enums.OrderSide`.&#34;
+__pdoc__[&#39;OrderResult.status&#39;] = &#34;See `vectorbt.records.enums.OrderStatus`.&#34;
+
+RejectedOrder = OrderResult(np.nan, np.nan, np.nan, -1, OrderStatus.Rejected)</code></pre>
 </details>
 </section>
 <section>
@@ -170,23 +427,97 @@ __pdoc__[&#39;FilledOrder.side&#39;] = &#34;See `vectorbt.records.enums.OrderSid
 <dt id="vectorbt.portfolio.enums.AccumulateExitMode"><code class="name">var <span class="ident fname">AccumulateExitMode</span></code></dt>
 <dd>
 <div class="desc"><p>Accumulation exit mode.</p>
-<p>What should happen if exit signal occurs and accumulation is turned on?</p>
 <pre><code class="plaintext">{
   &quot;Close&quot;: 0,
   &quot;Reduce&quot;: 1
 }
-</code></pre></div>
+</code></pre>
+<p>What should happen if exit signal occurs and accumulation is turned on?</p>
+<h2 id="attributes">Attributes</h2>
+<dl>
+<dt><strong><code>Close</code></strong></dt>
+<dd>Close the position by selling all.</dd>
+<dt><strong><code>Reduce</code></strong></dt>
+<dd>Reduce the position by selling size.</dd>
+</dl></div>
+</dd>
+<dt id="vectorbt.portfolio.enums.CallSeqType"><code class="name">var <span class="ident fname">CallSeqType</span></code></dt>
+<dd>
+<div class="desc"><p>Call sequence type.</p>
+<pre><code class="plaintext">{
+  &quot;Default&quot;: 0,
+  &quot;Reversed&quot;: 1,
+  &quot;Random&quot;: 2,
+  &quot;Auto&quot;: 3
+}
+</code></pre>
+<h2 id="attributes">Attributes</h2>
+<dl>
+<dt><strong><code>Default</code></strong></dt>
+<dd>Place calls from left to right.</dd>
+<dt><strong><code>Reversed</code></strong></dt>
+<dd>Place calls from right to left.</dd>
+<dt><strong><code>Random</code></strong></dt>
+<dd>Place calls randomly.</dd>
+<dt><strong><code>Auto</code></strong></dt>
+<dd>Place calls dynamically based on order value.</dd>
+</dl></div>
 </dd>
 <dt id="vectorbt.portfolio.enums.ConflictMode"><code class="name">var <span class="ident fname">ConflictMode</span></code></dt>
 <dd>
 <div class="desc"><p>Conflict mode.</p>
-<p>What should happen if both entry and exit signals occur simultaneously?</p>
 <pre><code class="plaintext">{
   &quot;Ignore&quot;: 0,
   &quot;Exit&quot;: 1,
   &quot;ExitAndEntry&quot;: 2
 }
-</code></pre></div>
+</code></pre>
+<p>What should happen if both entry and exit signals occur simultaneously?</p>
+<h2 id="attributes">Attributes</h2>
+<dl>
+<dt><strong><code>Ignore</code></strong></dt>
+<dd>Ignore both signals.</dd>
+<dt><strong><code>Exit</code></strong></dt>
+<dd>Ignore entry signal.</dd>
+<dt><strong><code>ExitAndEntry</code></strong></dt>
+<dd>Imitate exit and entry by using entry size as target.</dd>
+</dl></div>
+</dd>
+<dt id="vectorbt.portfolio.enums.InitCashMode"><code class="name">var <span class="ident fname">InitCashMode</span></code></dt>
+<dd>
+<div class="desc"><p>Initial cash mode.</p>
+<pre><code class="plaintext">{
+  &quot;Auto&quot;: 0,
+  &quot;AutoAlign&quot;: 1
+}
+</code></pre>
+<h2 id="attributes">Attributes</h2>
+<dl>
+<dt><strong><code>Auto</code></strong></dt>
+<dd>Optimal initial cash for each column.</dd>
+<dt><strong><code>AutoAlign</code></strong></dt>
+<dd>Optimal initial cash aligned across all columns.</dd>
+</dl></div>
+</dd>
+<dt id="vectorbt.portfolio.enums.NoOrder"><code class="name">var <span class="ident fname">NoOrder</span></code></dt>
+<dd>
+<div class="desc"><p>Order that will not be processed.</p></div>
+</dd>
+<dt id="vectorbt.portfolio.enums.OrderStatus"><code class="name">var <span class="ident fname">OrderStatus</span></code></dt>
+<dd>
+<div class="desc"><p>Order status.</p>
+<pre><code class="plaintext">{
+  &quot;Filled&quot;: 0,
+  &quot;Rejected&quot;: 1
+}
+</code></pre>
+<h2 id="attributes">Attributes</h2>
+<dl>
+<dt><strong><code>Filled</code></strong></dt>
+<dd>Order filled.</dd>
+<dt><strong><code>Rejected</code></strong></dt>
+<dd>Order rejected.</dd>
+</dl></div>
 </dd>
 <dt id="vectorbt.portfolio.enums.SizeType"><code class="name">var <span class="ident fname">SizeType</span></code></dt>
 <dd>
@@ -194,12 +525,21 @@ __pdoc__[&#39;FilledOrder.side&#39;] = &#34;See `vectorbt.records.enums.OrderSid
 <pre><code class="plaintext">{
   &quot;Shares&quot;: 0,
   &quot;TargetShares&quot;: 1,
-  &quot;Cash&quot;: 2,
-  &quot;TargetCash&quot;: 3,
-  &quot;TargetValue&quot;: 4,
-  &quot;TargetPercent&quot;: 5
+  &quot;TargetValue&quot;: 2,
+  &quot;TargetPercent&quot;: 3
 }
-</code></pre></div>
+</code></pre>
+<h2 id="attributes">Attributes</h2>
+<dl>
+<dt><strong><code>Shares</code></strong></dt>
+<dd>Number of shares.</dd>
+<dt><strong><code>TargetShares</code></strong></dt>
+<dd>Number of shares to hold after transaction.</dd>
+<dt><strong><code>TargetValue</code></strong></dt>
+<dd>Total value of holdings to hold after transaction.</dd>
+<dt><strong><code>TargetPercent</code></strong></dt>
+<dd>Percentage of total value to hold after transaction.</dd>
+</dl></div>
 </dd>
 </dl>
 </section>
@@ -208,39 +548,100 @@ __pdoc__[&#39;FilledOrder.side&#39;] = &#34;See `vectorbt.records.enums.OrderSid
 <section>
 <h2 class="section-title" id="header-classes">Classes</h2>
 <dl>
-<dt id="vectorbt.portfolio.enums.FilledOrder"><code class="flex name class">
-<span>class <span class="ident parent-fname">FilledOrder</span></span>
-<span>(</span><span>size, price, fees, side)</span>
+<dt id="vectorbt.portfolio.enums.GroupContext"><code class="flex name class">
+<span>class <span class="ident parent-fname">GroupContext</span></span>
+<span>(</span><span>target_shape, close, group_counts, init_cash, cash_sharing, call_seq, active_mask, min_size, order_records, record_mask, last_cash, last_shares, last_val_price, group, group_len, from_col, to_col, num_records)</span>
 </code></dt>
 <dd>
-<div class="desc"><p>A named tuple representing a filled order.</p></div>
+<div class="desc"><p>A named tuple representing context of the current group.</p></div>
 <h3 class="section-subtitle">Ancestors</h3>
 <ul class="hlist">
 <li>builtins.tuple</li>
 </ul>
 <h3 class="section-subtitle">Instance variables</h3>
 <dl>
-<dt id="vectorbt.portfolio.enums.FilledOrder.fees"><code class="name">var <span class="ident fname">fees</span></code></dt>
+<dt id="vectorbt.portfolio.enums.GroupContext.active_mask"><code class="name">var <span class="ident fname">active_mask</span></code></dt>
 <dd>
-<div class="desc"><p>Alias for field number 2</p></div>
+<div class="desc"><p>See <code><a title="vectorbt.portfolio.enums.SimulationContext.active_mask" href="#vectorbt.portfolio.enums.SimulationContext.active_mask">SimulationContext.active_mask</a></code>.</p></div>
 </dd>
-<dt id="vectorbt.portfolio.enums.FilledOrder.price"><code class="name">var <span class="ident fname">price</span></code></dt>
+<dt id="vectorbt.portfolio.enums.GroupContext.call_seq"><code class="name">var <span class="ident fname">call_seq</span></code></dt>
 <dd>
-<div class="desc"><p>Filled price per share, adjusted with slippage.</p></div>
+<div class="desc"><p>See <code><a title="vectorbt.portfolio.enums.SimulationContext.call_seq" href="#vectorbt.portfolio.enums.SimulationContext.call_seq">SimulationContext.call_seq</a></code>.</p></div>
 </dd>
-<dt id="vectorbt.portfolio.enums.FilledOrder.side"><code class="name">var <span class="ident fname">side</span></code></dt>
+<dt id="vectorbt.portfolio.enums.GroupContext.cash_sharing"><code class="name">var <span class="ident fname">cash_sharing</span></code></dt>
 <dd>
-<div class="desc"><p>See <code><a title="vectorbt.records.enums.OrderSide" href="../records/enums.html#vectorbt.records.enums.OrderSide">OrderSide</a></code>.</p></div>
+<div class="desc"><p>See <code><a title="vectorbt.portfolio.enums.SimulationContext.cash_sharing" href="#vectorbt.portfolio.enums.SimulationContext.cash_sharing">SimulationContext.cash_sharing</a></code>.</p></div>
 </dd>
-<dt id="vectorbt.portfolio.enums.FilledOrder.size"><code class="name">var <span class="ident fname">size</span></code></dt>
+<dt id="vectorbt.portfolio.enums.GroupContext.close"><code class="name">var <span class="ident fname">close</span></code></dt>
 <dd>
-<div class="desc"><p>Filled size in shares.</p></div>
+<div class="desc"><p>See <code><a title="vectorbt.portfolio.enums.SimulationContext.close" href="#vectorbt.portfolio.enums.SimulationContext.close">SimulationContext.close</a></code>.</p></div>
+</dd>
+<dt id="vectorbt.portfolio.enums.GroupContext.from_col"><code class="name">var <span class="ident fname">from_col</span></code></dt>
+<dd>
+<div class="desc"><p>Index of the first column in the current group.</p>
+<p>Has range <code>[0, target_shape[1])</code>.</p></div>
+</dd>
+<dt id="vectorbt.portfolio.enums.GroupContext.group"><code class="name">var <span class="ident fname">group</span></code></dt>
+<dd>
+<div class="desc"><p>Index of the current group.</p>
+<p>Has range <code>[0, group_counts.shape[0])</code>.</p></div>
+</dd>
+<dt id="vectorbt.portfolio.enums.GroupContext.group_counts"><code class="name">var <span class="ident fname">group_counts</span></code></dt>
+<dd>
+<div class="desc"><p>See <code><a title="vectorbt.portfolio.enums.SimulationContext.group_counts" href="#vectorbt.portfolio.enums.SimulationContext.group_counts">SimulationContext.group_counts</a></code>.</p></div>
+</dd>
+<dt id="vectorbt.portfolio.enums.GroupContext.group_len"><code class="name">var <span class="ident fname">group_len</span></code></dt>
+<dd>
+<div class="desc"><p>Number of columns in the current group.</p>
+<p>Scalar value. Same as <code>group_counts[group]</code>.</p></div>
+</dd>
+<dt id="vectorbt.portfolio.enums.GroupContext.init_cash"><code class="name">var <span class="ident fname">init_cash</span></code></dt>
+<dd>
+<div class="desc"><p>See <code><a title="vectorbt.portfolio.enums.SimulationContext.init_cash" href="#vectorbt.portfolio.enums.SimulationContext.init_cash">SimulationContext.init_cash</a></code>.</p></div>
+</dd>
+<dt id="vectorbt.portfolio.enums.GroupContext.last_cash"><code class="name">var <span class="ident fname">last_cash</span></code></dt>
+<dd>
+<div class="desc"><p>See <code><a title="vectorbt.portfolio.enums.SimulationContext.last_cash" href="#vectorbt.portfolio.enums.SimulationContext.last_cash">SimulationContext.last_cash</a></code>.</p></div>
+</dd>
+<dt id="vectorbt.portfolio.enums.GroupContext.last_shares"><code class="name">var <span class="ident fname">last_shares</span></code></dt>
+<dd>
+<div class="desc"><p>See <code><a title="vectorbt.portfolio.enums.SimulationContext.last_shares" href="#vectorbt.portfolio.enums.SimulationContext.last_shares">SimulationContext.last_shares</a></code>.</p></div>
+</dd>
+<dt id="vectorbt.portfolio.enums.GroupContext.last_val_price"><code class="name">var <span class="ident fname">last_val_price</span></code></dt>
+<dd>
+<div class="desc"><p>See <code><a title="vectorbt.portfolio.enums.SimulationContext.last_val_price" href="#vectorbt.portfolio.enums.SimulationContext.last_val_price">SimulationContext.last_val_price</a></code>.</p></div>
+</dd>
+<dt id="vectorbt.portfolio.enums.GroupContext.min_size"><code class="name">var <span class="ident fname">min_size</span></code></dt>
+<dd>
+<div class="desc"><p>See <code><a title="vectorbt.portfolio.enums.SimulationContext.min_size" href="#vectorbt.portfolio.enums.SimulationContext.min_size">SimulationContext.min_size</a></code>.</p></div>
+</dd>
+<dt id="vectorbt.portfolio.enums.GroupContext.num_records"><code class="name">var <span class="ident fname">num_records</span></code></dt>
+<dd>
+<div class="desc"><p>Number of records filled up to this point.</p></div>
+</dd>
+<dt id="vectorbt.portfolio.enums.GroupContext.order_records"><code class="name">var <span class="ident fname">order_records</span></code></dt>
+<dd>
+<div class="desc"><p>See <code><a title="vectorbt.portfolio.enums.SimulationContext.order_records" href="#vectorbt.portfolio.enums.SimulationContext.order_records">SimulationContext.order_records</a></code>.</p></div>
+</dd>
+<dt id="vectorbt.portfolio.enums.GroupContext.record_mask"><code class="name">var <span class="ident fname">record_mask</span></code></dt>
+<dd>
+<div class="desc"><p>See <code><a title="vectorbt.portfolio.enums.SimulationContext.record_mask" href="#vectorbt.portfolio.enums.SimulationContext.record_mask">SimulationContext.record_mask</a></code>.</p></div>
+</dd>
+<dt id="vectorbt.portfolio.enums.GroupContext.target_shape"><code class="name">var <span class="ident fname">target_shape</span></code></dt>
+<dd>
+<div class="desc"><p>See <code><a title="vectorbt.portfolio.enums.SimulationContext.target_shape" href="#vectorbt.portfolio.enums.SimulationContext.target_shape">SimulationContext.target_shape</a></code>.</p></div>
+</dd>
+<dt id="vectorbt.portfolio.enums.GroupContext.to_col"><code class="name">var <span class="ident fname">to_col</span></code></dt>
+<dd>
+<div class="desc"><p>Index of the first column in the next group.</p>
+<p>Has range <code>[1, target_shape[1] + 1)</code>. </p>
+<p>If columns are not grouped, equals <code>from_col + 1</code>.</p></div>
 </dd>
 </dl>
 </dd>
 <dt id="vectorbt.portfolio.enums.Order"><code class="flex name class">
 <span>class <span class="ident parent-fname">Order</span></span>
-<span>(</span><span>size, size_type, price, fees, fixed_fees, slippage)</span>
+<span>(</span><span>size, size_type, price, fees, fixed_fees, slippage, reject_prob)</span>
 </code></dt>
 <dd>
 <div class="desc"><p>A named tuple representing an order.</p></div>
@@ -262,13 +663,17 @@ __pdoc__[&#39;FilledOrder.side&#39;] = &#34;See `vectorbt.records.enums.OrderSid
 <dd>
 <div class="desc"><p>Price per share. Filled price will depend upon slippage.</p></div>
 </dd>
+<dt id="vectorbt.portfolio.enums.Order.reject_prob"><code class="name">var <span class="ident fname">reject_prob</span></code></dt>
+<dd>
+<div class="desc"><p>Probability of rejecting this order.</p></div>
+</dd>
 <dt id="vectorbt.portfolio.enums.Order.size"><code class="name">var <span class="ident fname">size</span></code></dt>
 <dd>
-<div class="desc"><p>See <code><a title="vectorbt.portfolio.enums.SizeType" href="#vectorbt.portfolio.enums.SizeType">SizeType</a></code>.</p></div>
+<div class="desc"><p>Size in shares. Filled size will depend upon your funds.</p></div>
 </dd>
 <dt id="vectorbt.portfolio.enums.Order.size_type"><code class="name">var <span class="ident fname">size_type</span></code></dt>
 <dd>
-<div class="desc"><p>Alias for field number 1</p></div>
+<div class="desc"><p>See <code><a title="vectorbt.portfolio.enums.SizeType" href="#vectorbt.portfolio.enums.SizeType">SizeType</a></code>.</p></div>
 </dd>
 <dt id="vectorbt.portfolio.enums.Order.slippage"><code class="name">var <span class="ident fname">slippage</span></code></dt>
 <dd>
@@ -278,89 +683,423 @@ __pdoc__[&#39;FilledOrder.side&#39;] = &#34;See `vectorbt.records.enums.OrderSid
 </dd>
 <dt id="vectorbt.portfolio.enums.OrderContext"><code class="flex name class">
 <span>class <span class="ident parent-fname">OrderContext</span></span>
-<span>(</span><span>col, i, target_shape, init_capital, order_records, cash, shares, run_cash, run_shares)</span>
+<span>(</span><span>target_shape, close, group_counts, init_cash, cash_sharing, call_seq, active_mask, min_size, order_records, record_mask, last_cash, last_shares, last_val_price, i, group, group_len, from_col, to_col, num_records, call_seq_now, col, call_idx, cash_now, shares_now, val_price_now, value_now)</span>
 </code></dt>
 <dd>
-<div class="desc"><p>A named tuple representing the current order context.</p></div>
+<div class="desc"><p>A named tuple representing context of the current order.</p></div>
 <h3 class="section-subtitle">Ancestors</h3>
 <ul class="hlist">
 <li>builtins.tuple</li>
 </ul>
 <h3 class="section-subtitle">Instance variables</h3>
 <dl>
-<dt id="vectorbt.portfolio.enums.OrderContext.cash"><code class="name">var <span class="ident fname">cash</span></code></dt>
+<dt id="vectorbt.portfolio.enums.OrderContext.active_mask"><code class="name">var <span class="ident fname">active_mask</span></code></dt>
 <dd>
-<div class="desc"><p>Cash filled up to this time point. Other elements are empty.</p></div>
+<div class="desc"><p>See <code><a title="vectorbt.portfolio.enums.SegmentContext.active_mask" href="#vectorbt.portfolio.enums.SegmentContext.active_mask">SegmentContext.active_mask</a></code>.</p></div>
+</dd>
+<dt id="vectorbt.portfolio.enums.OrderContext.call_idx"><code class="name">var <span class="ident fname">call_idx</span></code></dt>
+<dd>
+<div class="desc"><p>Index of the current call in <code>call_seq_now</code>.</p>
+<p>Has range <code>[0, group_len)</code>.</p></div>
+</dd>
+<dt id="vectorbt.portfolio.enums.OrderContext.call_seq"><code class="name">var <span class="ident fname">call_seq</span></code></dt>
+<dd>
+<div class="desc"><p>See <code><a title="vectorbt.portfolio.enums.SegmentContext.call_seq" href="#vectorbt.portfolio.enums.SegmentContext.call_seq">SegmentContext.call_seq</a></code>.</p></div>
+</dd>
+<dt id="vectorbt.portfolio.enums.OrderContext.call_seq_now"><code class="name">var <span class="ident fname">call_seq_now</span></code></dt>
+<dd>
+<div class="desc"><p>See <code><a title="vectorbt.portfolio.enums.SegmentContext.call_seq_now" href="#vectorbt.portfolio.enums.SegmentContext.call_seq_now">SegmentContext.call_seq_now</a></code>.</p></div>
+</dd>
+<dt id="vectorbt.portfolio.enums.OrderContext.cash_now"><code class="name">var <span class="ident fname">cash_now</span></code></dt>
+<dd>
+<div class="desc"><p>Current cash available.</p>
+<p>Scalar value. Per group if cash sharing is enabled, otherwise per column.</p></div>
+</dd>
+<dt id="vectorbt.portfolio.enums.OrderContext.cash_sharing"><code class="name">var <span class="ident fname">cash_sharing</span></code></dt>
+<dd>
+<div class="desc"><p>See <code><a title="vectorbt.portfolio.enums.SegmentContext.cash_sharing" href="#vectorbt.portfolio.enums.SegmentContext.cash_sharing">SegmentContext.cash_sharing</a></code>.</p></div>
+</dd>
+<dt id="vectorbt.portfolio.enums.OrderContext.close"><code class="name">var <span class="ident fname">close</span></code></dt>
+<dd>
+<div class="desc"><p>See <code><a title="vectorbt.portfolio.enums.SegmentContext.close" href="#vectorbt.portfolio.enums.SegmentContext.close">SegmentContext.close</a></code>.</p></div>
 </dd>
 <dt id="vectorbt.portfolio.enums.OrderContext.col"><code class="name">var <span class="ident fname">col</span></code></dt>
 <dd>
-<div class="desc"><p>Current column.</p></div>
+<div class="desc"><p>Current column (feature axis).</p>
+<p>Has range <code>[0, target_shape[1])</code> and is always within <code>[from_col, to_col)</code>.</p></div>
+</dd>
+<dt id="vectorbt.portfolio.enums.OrderContext.from_col"><code class="name">var <span class="ident fname">from_col</span></code></dt>
+<dd>
+<div class="desc"><p>See <code><a title="vectorbt.portfolio.enums.SegmentContext.from_col" href="#vectorbt.portfolio.enums.SegmentContext.from_col">SegmentContext.from_col</a></code>.</p></div>
+</dd>
+<dt id="vectorbt.portfolio.enums.OrderContext.group"><code class="name">var <span class="ident fname">group</span></code></dt>
+<dd>
+<div class="desc"><p>See <code><a title="vectorbt.portfolio.enums.SegmentContext.group" href="#vectorbt.portfolio.enums.SegmentContext.group">SegmentContext.group</a></code>.</p></div>
+</dd>
+<dt id="vectorbt.portfolio.enums.OrderContext.group_counts"><code class="name">var <span class="ident fname">group_counts</span></code></dt>
+<dd>
+<div class="desc"><p>See <code><a title="vectorbt.portfolio.enums.SegmentContext.group_counts" href="#vectorbt.portfolio.enums.SegmentContext.group_counts">SegmentContext.group_counts</a></code>.</p></div>
+</dd>
+<dt id="vectorbt.portfolio.enums.OrderContext.group_len"><code class="name">var <span class="ident fname">group_len</span></code></dt>
+<dd>
+<div class="desc"><p>See <code><a title="vectorbt.portfolio.enums.SegmentContext.group_len" href="#vectorbt.portfolio.enums.SegmentContext.group_len">SegmentContext.group_len</a></code>.</p></div>
 </dd>
 <dt id="vectorbt.portfolio.enums.OrderContext.i"><code class="name">var <span class="ident fname">i</span></code></dt>
 <dd>
-<div class="desc"><p>Current index.</p></div>
+<div class="desc"><p>See <code><a title="vectorbt.portfolio.enums.SegmentContext.i" href="#vectorbt.portfolio.enums.SegmentContext.i">SegmentContext.i</a></code>.</p></div>
 </dd>
-<dt id="vectorbt.portfolio.enums.OrderContext.init_capital"><code class="name">var <span class="ident fname">init_capital</span></code></dt>
+<dt id="vectorbt.portfolio.enums.OrderContext.init_cash"><code class="name">var <span class="ident fname">init_cash</span></code></dt>
 <dd>
-<div class="desc"><p>Initial capital.</p></div>
+<div class="desc"><p>See <code><a title="vectorbt.portfolio.enums.SegmentContext.init_cash" href="#vectorbt.portfolio.enums.SegmentContext.init_cash">SegmentContext.init_cash</a></code>.</p></div>
+</dd>
+<dt id="vectorbt.portfolio.enums.OrderContext.last_cash"><code class="name">var <span class="ident fname">last_cash</span></code></dt>
+<dd>
+<div class="desc"><p>See <code><a title="vectorbt.portfolio.enums.SegmentContext.last_cash" href="#vectorbt.portfolio.enums.SegmentContext.last_cash">SegmentContext.last_cash</a></code>.</p></div>
+</dd>
+<dt id="vectorbt.portfolio.enums.OrderContext.last_shares"><code class="name">var <span class="ident fname">last_shares</span></code></dt>
+<dd>
+<div class="desc"><p>See <code><a title="vectorbt.portfolio.enums.SegmentContext.last_shares" href="#vectorbt.portfolio.enums.SegmentContext.last_shares">SegmentContext.last_shares</a></code>.</p></div>
+</dd>
+<dt id="vectorbt.portfolio.enums.OrderContext.last_val_price"><code class="name">var <span class="ident fname">last_val_price</span></code></dt>
+<dd>
+<div class="desc"><p>See <code><a title="vectorbt.portfolio.enums.SegmentContext.last_val_price" href="#vectorbt.portfolio.enums.SegmentContext.last_val_price">SegmentContext.last_val_price</a></code>.</p></div>
+</dd>
+<dt id="vectorbt.portfolio.enums.OrderContext.min_size"><code class="name">var <span class="ident fname">min_size</span></code></dt>
+<dd>
+<div class="desc"><p>See <code><a title="vectorbt.portfolio.enums.SegmentContext.min_size" href="#vectorbt.portfolio.enums.SegmentContext.min_size">SegmentContext.min_size</a></code>.</p></div>
+</dd>
+<dt id="vectorbt.portfolio.enums.OrderContext.num_records"><code class="name">var <span class="ident fname">num_records</span></code></dt>
+<dd>
+<div class="desc"><p>See <code><a title="vectorbt.portfolio.enums.SegmentContext.num_records" href="#vectorbt.portfolio.enums.SegmentContext.num_records">SegmentContext.num_records</a></code>.</p></div>
 </dd>
 <dt id="vectorbt.portfolio.enums.OrderContext.order_records"><code class="name">var <span class="ident fname">order_records</span></code></dt>
 <dd>
-<div class="desc"><p>Order records filled up to this time point. Other elements are empty.</p></div>
+<div class="desc"><p>See <code><a title="vectorbt.portfolio.enums.SegmentContext.order_records" href="#vectorbt.portfolio.enums.SegmentContext.order_records">SegmentContext.order_records</a></code>.</p></div>
 </dd>
-<dt id="vectorbt.portfolio.enums.OrderContext.run_cash"><code class="name">var <span class="ident fname">run_cash</span></code></dt>
+<dt id="vectorbt.portfolio.enums.OrderContext.record_mask"><code class="name">var <span class="ident fname">record_mask</span></code></dt>
 <dd>
-<div class="desc"><p>Current cash holdings.</p></div>
+<div class="desc"><p>See <code><a title="vectorbt.portfolio.enums.SegmentContext.record_mask" href="#vectorbt.portfolio.enums.SegmentContext.record_mask">SegmentContext.record_mask</a></code>.</p></div>
 </dd>
-<dt id="vectorbt.portfolio.enums.OrderContext.run_shares"><code class="name">var <span class="ident fname">run_shares</span></code></dt>
+<dt id="vectorbt.portfolio.enums.OrderContext.shares_now"><code class="name">var <span class="ident fname">shares_now</span></code></dt>
 <dd>
-<div class="desc"><p>Current shares holdings.</p></div>
-</dd>
-<dt id="vectorbt.portfolio.enums.OrderContext.shares"><code class="name">var <span class="ident fname">shares</span></code></dt>
-<dd>
-<div class="desc"><p>Shares filled up to this time point. Other elements are empty.</p></div>
+<div class="desc"><p>Current shares available.</p>
+<p>Scalar value. Always per column.</p></div>
 </dd>
 <dt id="vectorbt.portfolio.enums.OrderContext.target_shape"><code class="name">var <span class="ident fname">target_shape</span></code></dt>
 <dd>
-<div class="desc"><p>Target shape.</p></div>
+<div class="desc"><p>See <code><a title="vectorbt.portfolio.enums.SegmentContext.target_shape" href="#vectorbt.portfolio.enums.SegmentContext.target_shape">SegmentContext.target_shape</a></code>.</p></div>
+</dd>
+<dt id="vectorbt.portfolio.enums.OrderContext.to_col"><code class="name">var <span class="ident fname">to_col</span></code></dt>
+<dd>
+<div class="desc"><p>See <code><a title="vectorbt.portfolio.enums.SegmentContext.to_col" href="#vectorbt.portfolio.enums.SegmentContext.to_col">SegmentContext.to_col</a></code>.</p></div>
+</dd>
+<dt id="vectorbt.portfolio.enums.OrderContext.val_price_now"><code class="name">var <span class="ident fname">val_price_now</span></code></dt>
+<dd>
+<div class="desc"><p>Current size valuation price.</p>
+<p>Scalar value. Always per column.</p></div>
+</dd>
+<dt id="vectorbt.portfolio.enums.OrderContext.value_now"><code class="name">var <span class="ident fname">value_now</span></code></dt>
+<dd>
+<div class="desc"><p>Current value.</p>
+<p>Scalar value. Per group if cash sharing is enabled, otherwise per column.</p>
+<p>Current value is calculated using <code>last_val_price</code>.</p></div>
+</dd>
+</dl>
+</dd>
+<dt id="vectorbt.portfolio.enums.OrderResult"><code class="flex name class">
+<span>class <span class="ident parent-fname">OrderResult</span></span>
+<span>(</span><span>size, price, fees, side, status)</span>
+</code></dt>
+<dd>
+<div class="desc"><p>A named tuple representing an order result.</p></div>
+<h3 class="section-subtitle">Ancestors</h3>
+<ul class="hlist">
+<li>builtins.tuple</li>
+</ul>
+<h3 class="section-subtitle">Instance variables</h3>
+<dl>
+<dt id="vectorbt.portfolio.enums.OrderResult.fees"><code class="name">var <span class="ident fname">fees</span></code></dt>
+<dd>
+<div class="desc"><p>Total fees paid for this order.</p></div>
+</dd>
+<dt id="vectorbt.portfolio.enums.OrderResult.price"><code class="name">var <span class="ident fname">price</span></code></dt>
+<dd>
+<div class="desc"><p>Filled price per share, adjusted with slippage.</p></div>
+</dd>
+<dt id="vectorbt.portfolio.enums.OrderResult.side"><code class="name">var <span class="ident fname">side</span></code></dt>
+<dd>
+<div class="desc"><p>See <code><a title="vectorbt.records.enums.OrderSide" href="../records/enums.html#vectorbt.records.enums.OrderSide">OrderSide</a></code>.</p></div>
+</dd>
+<dt id="vectorbt.portfolio.enums.OrderResult.size"><code class="name">var <span class="ident fname">size</span></code></dt>
+<dd>
+<div class="desc"><p>Filled size in shares.</p></div>
+</dd>
+<dt id="vectorbt.portfolio.enums.OrderResult.status"><code class="name">var <span class="ident fname">status</span></code></dt>
+<dd>
+<div class="desc"><p>See <code>vectorbt.records.enums.OrderStatus</code>.</p></div>
 </dd>
 </dl>
 </dd>
 <dt id="vectorbt.portfolio.enums.RowContext"><code class="flex name class">
 <span>class <span class="ident parent-fname">RowContext</span></span>
-<span>(</span><span>i, target_shape, init_capital, order_records, cash, shares)</span>
+<span>(</span><span>target_shape, close, group_counts, init_cash, cash_sharing, call_seq, active_mask, min_size, order_records, record_mask, last_cash, last_shares, last_val_price, i, num_records)</span>
 </code></dt>
 <dd>
-<div class="desc"><p>A named tuple representing the current row context.</p></div>
+<div class="desc"><p>A named tuple representing context of the current row.</p></div>
 <h3 class="section-subtitle">Ancestors</h3>
 <ul class="hlist">
 <li>builtins.tuple</li>
 </ul>
 <h3 class="section-subtitle">Instance variables</h3>
 <dl>
-<dt id="vectorbt.portfolio.enums.RowContext.cash"><code class="name">var <span class="ident fname">cash</span></code></dt>
+<dt id="vectorbt.portfolio.enums.RowContext.active_mask"><code class="name">var <span class="ident fname">active_mask</span></code></dt>
 <dd>
-<div class="desc"><p>Cash filled up to this time point. Other elements are empty.</p></div>
+<div class="desc"><p>See <code><a title="vectorbt.portfolio.enums.SimulationContext.active_mask" href="#vectorbt.portfolio.enums.SimulationContext.active_mask">SimulationContext.active_mask</a></code>.</p></div>
+</dd>
+<dt id="vectorbt.portfolio.enums.RowContext.call_seq"><code class="name">var <span class="ident fname">call_seq</span></code></dt>
+<dd>
+<div class="desc"><p>See <code><a title="vectorbt.portfolio.enums.SimulationContext.call_seq" href="#vectorbt.portfolio.enums.SimulationContext.call_seq">SimulationContext.call_seq</a></code>.</p></div>
+</dd>
+<dt id="vectorbt.portfolio.enums.RowContext.cash_sharing"><code class="name">var <span class="ident fname">cash_sharing</span></code></dt>
+<dd>
+<div class="desc"><p>See <code><a title="vectorbt.portfolio.enums.SimulationContext.cash_sharing" href="#vectorbt.portfolio.enums.SimulationContext.cash_sharing">SimulationContext.cash_sharing</a></code>.</p></div>
+</dd>
+<dt id="vectorbt.portfolio.enums.RowContext.close"><code class="name">var <span class="ident fname">close</span></code></dt>
+<dd>
+<div class="desc"><p>See <code><a title="vectorbt.portfolio.enums.SimulationContext.close" href="#vectorbt.portfolio.enums.SimulationContext.close">SimulationContext.close</a></code>.</p></div>
+</dd>
+<dt id="vectorbt.portfolio.enums.RowContext.group_counts"><code class="name">var <span class="ident fname">group_counts</span></code></dt>
+<dd>
+<div class="desc"><p>See <code><a title="vectorbt.portfolio.enums.SimulationContext.group_counts" href="#vectorbt.portfolio.enums.SimulationContext.group_counts">SimulationContext.group_counts</a></code>.</p></div>
 </dd>
 <dt id="vectorbt.portfolio.enums.RowContext.i"><code class="name">var <span class="ident fname">i</span></code></dt>
 <dd>
-<div class="desc"><p>Current index.</p></div>
+<div class="desc"><p>Current row (time axis).</p>
+<p>Has range <code>[0, target_shape[0])</code>.</p></div>
 </dd>
-<dt id="vectorbt.portfolio.enums.RowContext.init_capital"><code class="name">var <span class="ident fname">init_capital</span></code></dt>
+<dt id="vectorbt.portfolio.enums.RowContext.init_cash"><code class="name">var <span class="ident fname">init_cash</span></code></dt>
 <dd>
-<div class="desc"><p>Initial capital.</p></div>
+<div class="desc"><p>See <code><a title="vectorbt.portfolio.enums.SimulationContext.init_cash" href="#vectorbt.portfolio.enums.SimulationContext.init_cash">SimulationContext.init_cash</a></code>.</p></div>
+</dd>
+<dt id="vectorbt.portfolio.enums.RowContext.last_cash"><code class="name">var <span class="ident fname">last_cash</span></code></dt>
+<dd>
+<div class="desc"><p>See <code><a title="vectorbt.portfolio.enums.SimulationContext.last_cash" href="#vectorbt.portfolio.enums.SimulationContext.last_cash">SimulationContext.last_cash</a></code>.</p></div>
+</dd>
+<dt id="vectorbt.portfolio.enums.RowContext.last_shares"><code class="name">var <span class="ident fname">last_shares</span></code></dt>
+<dd>
+<div class="desc"><p>See <code><a title="vectorbt.portfolio.enums.SimulationContext.last_shares" href="#vectorbt.portfolio.enums.SimulationContext.last_shares">SimulationContext.last_shares</a></code>.</p></div>
+</dd>
+<dt id="vectorbt.portfolio.enums.RowContext.last_val_price"><code class="name">var <span class="ident fname">last_val_price</span></code></dt>
+<dd>
+<div class="desc"><p>See <code><a title="vectorbt.portfolio.enums.SimulationContext.last_val_price" href="#vectorbt.portfolio.enums.SimulationContext.last_val_price">SimulationContext.last_val_price</a></code>.</p></div>
+</dd>
+<dt id="vectorbt.portfolio.enums.RowContext.min_size"><code class="name">var <span class="ident fname">min_size</span></code></dt>
+<dd>
+<div class="desc"><p>See <code><a title="vectorbt.portfolio.enums.SimulationContext.min_size" href="#vectorbt.portfolio.enums.SimulationContext.min_size">SimulationContext.min_size</a></code>.</p></div>
+</dd>
+<dt id="vectorbt.portfolio.enums.RowContext.num_records"><code class="name">var <span class="ident fname">num_records</span></code></dt>
+<dd>
+<div class="desc"><p>See <code><a title="vectorbt.portfolio.enums.GroupContext.num_records" href="#vectorbt.portfolio.enums.GroupContext.num_records">GroupContext.num_records</a></code>.</p></div>
 </dd>
 <dt id="vectorbt.portfolio.enums.RowContext.order_records"><code class="name">var <span class="ident fname">order_records</span></code></dt>
 <dd>
-<div class="desc"><p>Order records filled up to this time point. Other elements are empty.</p></div>
+<div class="desc"><p>See <code><a title="vectorbt.portfolio.enums.SimulationContext.order_records" href="#vectorbt.portfolio.enums.SimulationContext.order_records">SimulationContext.order_records</a></code>.</p></div>
 </dd>
-<dt id="vectorbt.portfolio.enums.RowContext.shares"><code class="name">var <span class="ident fname">shares</span></code></dt>
+<dt id="vectorbt.portfolio.enums.RowContext.record_mask"><code class="name">var <span class="ident fname">record_mask</span></code></dt>
 <dd>
-<div class="desc"><p>Shares filled up to this time point. Other elements are empty.</p></div>
+<div class="desc"><p>See <code><a title="vectorbt.portfolio.enums.SimulationContext.record_mask" href="#vectorbt.portfolio.enums.SimulationContext.record_mask">SimulationContext.record_mask</a></code>.</p></div>
 </dd>
 <dt id="vectorbt.portfolio.enums.RowContext.target_shape"><code class="name">var <span class="ident fname">target_shape</span></code></dt>
 <dd>
-<div class="desc"><p>Target shape.</p></div>
+<div class="desc"><p>See <code><a title="vectorbt.portfolio.enums.SimulationContext.target_shape" href="#vectorbt.portfolio.enums.SimulationContext.target_shape">SimulationContext.target_shape</a></code>.</p></div>
+</dd>
+</dl>
+</dd>
+<dt id="vectorbt.portfolio.enums.SegmentContext"><code class="flex name class">
+<span>class <span class="ident parent-fname">SegmentContext</span></span>
+<span>(</span><span>target_shape, close, group_counts, init_cash, cash_sharing, call_seq, active_mask, min_size, order_records, record_mask, last_cash, last_shares, last_val_price, i, group, group_len, from_col, to_col, num_records, call_seq_now)</span>
+</code></dt>
+<dd>
+<div class="desc"><p>A named tuple representing context of the current segment.</p></div>
+<h3 class="section-subtitle">Ancestors</h3>
+<ul class="hlist">
+<li>builtins.tuple</li>
+</ul>
+<h3 class="section-subtitle">Instance variables</h3>
+<dl>
+<dt id="vectorbt.portfolio.enums.SegmentContext.active_mask"><code class="name">var <span class="ident fname">active_mask</span></code></dt>
+<dd>
+<div class="desc"><p>See <code><a title="vectorbt.portfolio.enums.SimulationContext.active_mask" href="#vectorbt.portfolio.enums.SimulationContext.active_mask">SimulationContext.active_mask</a></code>.</p></div>
+</dd>
+<dt id="vectorbt.portfolio.enums.SegmentContext.call_seq"><code class="name">var <span class="ident fname">call_seq</span></code></dt>
+<dd>
+<div class="desc"><p>See <code><a title="vectorbt.portfolio.enums.SimulationContext.call_seq" href="#vectorbt.portfolio.enums.SimulationContext.call_seq">SimulationContext.call_seq</a></code>.</p></div>
+</dd>
+<dt id="vectorbt.portfolio.enums.SegmentContext.call_seq_now"><code class="name">var <span class="ident fname">call_seq_now</span></code></dt>
+<dd>
+<div class="desc"><p>Current sequence of calls.</p>
+<p>Has shape <code>(group_len,)</code>. </p></div>
+</dd>
+<dt id="vectorbt.portfolio.enums.SegmentContext.cash_sharing"><code class="name">var <span class="ident fname">cash_sharing</span></code></dt>
+<dd>
+<div class="desc"><p>See <code><a title="vectorbt.portfolio.enums.SimulationContext.cash_sharing" href="#vectorbt.portfolio.enums.SimulationContext.cash_sharing">SimulationContext.cash_sharing</a></code>.</p></div>
+</dd>
+<dt id="vectorbt.portfolio.enums.SegmentContext.close"><code class="name">var <span class="ident fname">close</span></code></dt>
+<dd>
+<div class="desc"><p>See <code><a title="vectorbt.portfolio.enums.SimulationContext.close" href="#vectorbt.portfolio.enums.SimulationContext.close">SimulationContext.close</a></code>.</p></div>
+</dd>
+<dt id="vectorbt.portfolio.enums.SegmentContext.from_col"><code class="name">var <span class="ident fname">from_col</span></code></dt>
+<dd>
+<div class="desc"><p>See <code><a title="vectorbt.portfolio.enums.GroupContext.from_col" href="#vectorbt.portfolio.enums.GroupContext.from_col">GroupContext.from_col</a></code>.</p></div>
+</dd>
+<dt id="vectorbt.portfolio.enums.SegmentContext.group"><code class="name">var <span class="ident fname">group</span></code></dt>
+<dd>
+<div class="desc"><p>See <code><a title="vectorbt.portfolio.enums.GroupContext.group" href="#vectorbt.portfolio.enums.GroupContext.group">GroupContext.group</a></code>.</p></div>
+</dd>
+<dt id="vectorbt.portfolio.enums.SegmentContext.group_counts"><code class="name">var <span class="ident fname">group_counts</span></code></dt>
+<dd>
+<div class="desc"><p>See <code><a title="vectorbt.portfolio.enums.SimulationContext.group_counts" href="#vectorbt.portfolio.enums.SimulationContext.group_counts">SimulationContext.group_counts</a></code>.</p></div>
+</dd>
+<dt id="vectorbt.portfolio.enums.SegmentContext.group_len"><code class="name">var <span class="ident fname">group_len</span></code></dt>
+<dd>
+<div class="desc"><p>See <code><a title="vectorbt.portfolio.enums.GroupContext.group_len" href="#vectorbt.portfolio.enums.GroupContext.group_len">GroupContext.group_len</a></code>.</p></div>
+</dd>
+<dt id="vectorbt.portfolio.enums.SegmentContext.i"><code class="name">var <span class="ident fname">i</span></code></dt>
+<dd>
+<div class="desc"><p>See <code><a title="vectorbt.portfolio.enums.RowContext.i" href="#vectorbt.portfolio.enums.RowContext.i">RowContext.i</a></code>.</p></div>
+</dd>
+<dt id="vectorbt.portfolio.enums.SegmentContext.init_cash"><code class="name">var <span class="ident fname">init_cash</span></code></dt>
+<dd>
+<div class="desc"><p>See <code><a title="vectorbt.portfolio.enums.SimulationContext.init_cash" href="#vectorbt.portfolio.enums.SimulationContext.init_cash">SimulationContext.init_cash</a></code>.</p></div>
+</dd>
+<dt id="vectorbt.portfolio.enums.SegmentContext.last_cash"><code class="name">var <span class="ident fname">last_cash</span></code></dt>
+<dd>
+<div class="desc"><p>See <code><a title="vectorbt.portfolio.enums.SimulationContext.last_cash" href="#vectorbt.portfolio.enums.SimulationContext.last_cash">SimulationContext.last_cash</a></code>.</p></div>
+</dd>
+<dt id="vectorbt.portfolio.enums.SegmentContext.last_shares"><code class="name">var <span class="ident fname">last_shares</span></code></dt>
+<dd>
+<div class="desc"><p>See <code><a title="vectorbt.portfolio.enums.SimulationContext.last_shares" href="#vectorbt.portfolio.enums.SimulationContext.last_shares">SimulationContext.last_shares</a></code>.</p></div>
+</dd>
+<dt id="vectorbt.portfolio.enums.SegmentContext.last_val_price"><code class="name">var <span class="ident fname">last_val_price</span></code></dt>
+<dd>
+<div class="desc"><p>See <code><a title="vectorbt.portfolio.enums.SimulationContext.last_val_price" href="#vectorbt.portfolio.enums.SimulationContext.last_val_price">SimulationContext.last_val_price</a></code>.</p></div>
+</dd>
+<dt id="vectorbt.portfolio.enums.SegmentContext.min_size"><code class="name">var <span class="ident fname">min_size</span></code></dt>
+<dd>
+<div class="desc"><p>See <code><a title="vectorbt.portfolio.enums.SimulationContext.min_size" href="#vectorbt.portfolio.enums.SimulationContext.min_size">SimulationContext.min_size</a></code>.</p></div>
+</dd>
+<dt id="vectorbt.portfolio.enums.SegmentContext.num_records"><code class="name">var <span class="ident fname">num_records</span></code></dt>
+<dd>
+<div class="desc"><p>See <code><a title="vectorbt.portfolio.enums.GroupContext.num_records" href="#vectorbt.portfolio.enums.GroupContext.num_records">GroupContext.num_records</a></code>.</p></div>
+</dd>
+<dt id="vectorbt.portfolio.enums.SegmentContext.order_records"><code class="name">var <span class="ident fname">order_records</span></code></dt>
+<dd>
+<div class="desc"><p>See <code><a title="vectorbt.portfolio.enums.SimulationContext.order_records" href="#vectorbt.portfolio.enums.SimulationContext.order_records">SimulationContext.order_records</a></code>.</p></div>
+</dd>
+<dt id="vectorbt.portfolio.enums.SegmentContext.record_mask"><code class="name">var <span class="ident fname">record_mask</span></code></dt>
+<dd>
+<div class="desc"><p>See <code><a title="vectorbt.portfolio.enums.SimulationContext.record_mask" href="#vectorbt.portfolio.enums.SimulationContext.record_mask">SimulationContext.record_mask</a></code>.</p></div>
+</dd>
+<dt id="vectorbt.portfolio.enums.SegmentContext.target_shape"><code class="name">var <span class="ident fname">target_shape</span></code></dt>
+<dd>
+<div class="desc"><p>See <code><a title="vectorbt.portfolio.enums.SimulationContext.target_shape" href="#vectorbt.portfolio.enums.SimulationContext.target_shape">SimulationContext.target_shape</a></code>.</p></div>
+</dd>
+<dt id="vectorbt.portfolio.enums.SegmentContext.to_col"><code class="name">var <span class="ident fname">to_col</span></code></dt>
+<dd>
+<div class="desc"><p>See <code><a title="vectorbt.portfolio.enums.GroupContext.to_col" href="#vectorbt.portfolio.enums.GroupContext.to_col">GroupContext.to_col</a></code>.</p></div>
+</dd>
+</dl>
+</dd>
+<dt id="vectorbt.portfolio.enums.SimulationContext"><code class="flex name class">
+<span>class <span class="ident parent-fname">SimulationContext</span></span>
+<span>(</span><span>target_shape, close, group_counts, init_cash, cash_sharing, call_seq, active_mask, min_size, order_records, record_mask, last_cash, last_shares, last_val_price)</span>
+</code></dt>
+<dd>
+<div class="desc"><p>A named tuple representing context of the current simulation.</p></div>
+<h3 class="section-subtitle">Ancestors</h3>
+<ul class="hlist">
+<li>builtins.tuple</li>
+</ul>
+<h3 class="section-subtitle">Instance variables</h3>
+<dl>
+<dt id="vectorbt.portfolio.enums.SimulationContext.active_mask"><code class="name">var <span class="ident fname">active_mask</span></code></dt>
+<dd>
+<div class="desc"><p>Mask of whether a particular segment should be executed.</p>
+<p>A segment is simply a sequence of <code>order_func_nb</code> calls under the same group and row.</p>
+<p>Has shape <code>(target_shape[0], group_counts.shape[0])</code>.</p></div>
+</dd>
+<dt id="vectorbt.portfolio.enums.SimulationContext.call_seq"><code class="name">var <span class="ident fname">call_seq</span></code></dt>
+<dd>
+<div class="desc"><p>Default sequence of calls per segment.</p>
+<p>Controls the sequence in which <code>order_func_nb</code> is executed within a segment. </p>
+<p>Has shape <code>target_shape</code> and each value must exist in the range <code>[0, group_len)</code>.</p>
+<div class="admonition note">
+<p class="admonition-title">Note</p>
+<p>To change the call sequence dynamically, better change <code>call_seq_now</code> in-place.</p>
+</div></div>
+</dd>
+<dt id="vectorbt.portfolio.enums.SimulationContext.cash_sharing"><code class="name">var <span class="ident fname">cash_sharing</span></code></dt>
+<dd>
+<div class="desc"><p>Whether cash sharing is enabled.</p></div>
+</dd>
+<dt id="vectorbt.portfolio.enums.SimulationContext.close"><code class="name">var <span class="ident fname">close</span></code></dt>
+<dd>
+<div class="desc"><p>Reference price, such as close.</p>
+<p>Has shape <code>target_shape</code>.</p></div>
+</dd>
+<dt id="vectorbt.portfolio.enums.SimulationContext.group_counts"><code class="name">var <span class="ident fname">group_counts</span></code></dt>
+<dd>
+<div class="desc"><p>Column count per group.</p>
+<p>Even if columns are not grouped, <code>group_counts</code> contains ones - one column per group.</p></div>
+</dd>
+<dt id="vectorbt.portfolio.enums.SimulationContext.init_cash"><code class="name">var <span class="ident fname">init_cash</span></code></dt>
+<dd>
+<div class="desc"><p>Initial capital per column, or per group if cash sharing is enabled.</p>
+<p>If <code>cash_sharing</code> is <code>True</code>, has shape <code>(target_shape[0], group_counts.shape[0])</code>.
+Otherwise, has shape <code>target_shape</code>.</p></div>
+</dd>
+<dt id="vectorbt.portfolio.enums.SimulationContext.last_cash"><code class="name">var <span class="ident fname">last_cash</span></code></dt>
+<dd>
+<div class="desc"><p>Last cash per column, or per group if cash sharing is enabled.</p>
+<p>Has the same shape as <code>init_cash</code>.</p></div>
+</dd>
+<dt id="vectorbt.portfolio.enums.SimulationContext.last_shares"><code class="name">var <span class="ident fname">last_shares</span></code></dt>
+<dd>
+<div class="desc"><p>Last shares per column.</p>
+<p>Has shape <code>(target_shape[1],)</code>.</p></div>
+</dd>
+<dt id="vectorbt.portfolio.enums.SimulationContext.last_val_price"><code class="name">var <span class="ident fname">last_val_price</span></code></dt>
+<dd>
+<div class="desc"><p>Last size valuation price.</p>
+<p>Used to calculate <code>value_now</code>. Can be changed in-place before group valuation.</p>
+<p>Has shape <code>(target_shape[1],)</code>.</p></div>
+</dd>
+<dt id="vectorbt.portfolio.enums.SimulationContext.min_size"><code class="name">var <span class="ident fname">min_size</span></code></dt>
+<dd>
+<div class="desc"><p>Minimum size for an order to be accepted.</p>
+<p>Has shape <code>(target_shape[1],)</code>.</p></div>
+</dd>
+<dt id="vectorbt.portfolio.enums.SimulationContext.order_records"><code class="name">var <span class="ident fname">order_records</span></code></dt>
+<dd>
+<div class="desc"><p>Order records.</p>
+<p>Order records are not filled incrementally from left to right, but based on their position
+in the matrix. To get index of a record, use <code>col * target_shape[0] + i</code>.</p>
+<div class="admonition warning">
+<p class="admonition-title">Warning</p>
+<p>Initially, all records are empty. Accessing empty records will not raise any errors or warnings,
+but provide you with arbitrary data (see <a href="https://numpy.org/doc/stable/reference/generated/numpy.empty.html">np.empty</a>).
+To check if a record is set, use <code>record_mask</code>.</p>
+</div></div>
+</dd>
+<dt id="vectorbt.portfolio.enums.SimulationContext.record_mask"><code class="name">var <span class="ident fname">record_mask</span></code></dt>
+<dd>
+<div class="desc"><p>Mask of records that have been set.</p>
+<p>Has the same length as <code>order_records</code>.</p></div>
+</dd>
+<dt id="vectorbt.portfolio.enums.SimulationContext.target_shape"><code class="name">var <span class="ident fname">target_shape</span></code></dt>
+<dd>
+<div class="desc"><p>Target shape.</p>
+<p>A tuple with exactly two elements: the number of rows and columns.</p></div>
 </dd>
 </dl>
 </dd>
@@ -393,21 +1132,39 @@ title="Search"
 </ul>
 </li>
 <li><h3><a href="#header-variables">Global variables</a></h3>
-<ul class="">
+<ul class="two-column">
 <li><code><a title="vectorbt.portfolio.enums.AccumulateExitMode" href="#vectorbt.portfolio.enums.AccumulateExitMode">AccumulateExitMode</a></code></li>
+<li><code><a title="vectorbt.portfolio.enums.CallSeqType" href="#vectorbt.portfolio.enums.CallSeqType">CallSeqType</a></code></li>
 <li><code><a title="vectorbt.portfolio.enums.ConflictMode" href="#vectorbt.portfolio.enums.ConflictMode">ConflictMode</a></code></li>
+<li><code><a title="vectorbt.portfolio.enums.InitCashMode" href="#vectorbt.portfolio.enums.InitCashMode">InitCashMode</a></code></li>
+<li><code><a title="vectorbt.portfolio.enums.NoOrder" href="#vectorbt.portfolio.enums.NoOrder">NoOrder</a></code></li>
+<li><code><a title="vectorbt.portfolio.enums.OrderStatus" href="#vectorbt.portfolio.enums.OrderStatus">OrderStatus</a></code></li>
 <li><code><a title="vectorbt.portfolio.enums.SizeType" href="#vectorbt.portfolio.enums.SizeType">SizeType</a></code></li>
 </ul>
 </li>
 <li><h3><a href="#header-classes">Classes</a></h3>
 <ul>
 <li>
-<h4><code><a title="vectorbt.portfolio.enums.FilledOrder" href="#vectorbt.portfolio.enums.FilledOrder">FilledOrder</a></code></h4>
-<ul class="">
-<li><code><a title="vectorbt.portfolio.enums.FilledOrder.fees" href="#vectorbt.portfolio.enums.FilledOrder.fees">fees</a></code></li>
-<li><code><a title="vectorbt.portfolio.enums.FilledOrder.price" href="#vectorbt.portfolio.enums.FilledOrder.price">price</a></code></li>
-<li><code><a title="vectorbt.portfolio.enums.FilledOrder.side" href="#vectorbt.portfolio.enums.FilledOrder.side">side</a></code></li>
-<li><code><a title="vectorbt.portfolio.enums.FilledOrder.size" href="#vectorbt.portfolio.enums.FilledOrder.size">size</a></code></li>
+<h4><code><a title="vectorbt.portfolio.enums.GroupContext" href="#vectorbt.portfolio.enums.GroupContext">GroupContext</a></code></h4>
+<ul class="two-column">
+<li><code><a title="vectorbt.portfolio.enums.GroupContext.active_mask" href="#vectorbt.portfolio.enums.GroupContext.active_mask">active_mask</a></code></li>
+<li><code><a title="vectorbt.portfolio.enums.GroupContext.call_seq" href="#vectorbt.portfolio.enums.GroupContext.call_seq">call_seq</a></code></li>
+<li><code><a title="vectorbt.portfolio.enums.GroupContext.cash_sharing" href="#vectorbt.portfolio.enums.GroupContext.cash_sharing">cash_sharing</a></code></li>
+<li><code><a title="vectorbt.portfolio.enums.GroupContext.close" href="#vectorbt.portfolio.enums.GroupContext.close">close</a></code></li>
+<li><code><a title="vectorbt.portfolio.enums.GroupContext.from_col" href="#vectorbt.portfolio.enums.GroupContext.from_col">from_col</a></code></li>
+<li><code><a title="vectorbt.portfolio.enums.GroupContext.group" href="#vectorbt.portfolio.enums.GroupContext.group">group</a></code></li>
+<li><code><a title="vectorbt.portfolio.enums.GroupContext.group_counts" href="#vectorbt.portfolio.enums.GroupContext.group_counts">group_counts</a></code></li>
+<li><code><a title="vectorbt.portfolio.enums.GroupContext.group_len" href="#vectorbt.portfolio.enums.GroupContext.group_len">group_len</a></code></li>
+<li><code><a title="vectorbt.portfolio.enums.GroupContext.init_cash" href="#vectorbt.portfolio.enums.GroupContext.init_cash">init_cash</a></code></li>
+<li><code><a title="vectorbt.portfolio.enums.GroupContext.last_cash" href="#vectorbt.portfolio.enums.GroupContext.last_cash">last_cash</a></code></li>
+<li><code><a title="vectorbt.portfolio.enums.GroupContext.last_shares" href="#vectorbt.portfolio.enums.GroupContext.last_shares">last_shares</a></code></li>
+<li><code><a title="vectorbt.portfolio.enums.GroupContext.last_val_price" href="#vectorbt.portfolio.enums.GroupContext.last_val_price">last_val_price</a></code></li>
+<li><code><a title="vectorbt.portfolio.enums.GroupContext.min_size" href="#vectorbt.portfolio.enums.GroupContext.min_size">min_size</a></code></li>
+<li><code><a title="vectorbt.portfolio.enums.GroupContext.num_records" href="#vectorbt.portfolio.enums.GroupContext.num_records">num_records</a></code></li>
+<li><code><a title="vectorbt.portfolio.enums.GroupContext.order_records" href="#vectorbt.portfolio.enums.GroupContext.order_records">order_records</a></code></li>
+<li><code><a title="vectorbt.portfolio.enums.GroupContext.record_mask" href="#vectorbt.portfolio.enums.GroupContext.record_mask">record_mask</a></code></li>
+<li><code><a title="vectorbt.portfolio.enums.GroupContext.target_shape" href="#vectorbt.portfolio.enums.GroupContext.target_shape">target_shape</a></code></li>
+<li><code><a title="vectorbt.portfolio.enums.GroupContext.to_col" href="#vectorbt.portfolio.enums.GroupContext.to_col">to_col</a></code></li>
 </ul>
 </li>
 <li>
@@ -416,6 +1173,7 @@ title="Search"
 <li><code><a title="vectorbt.portfolio.enums.Order.fees" href="#vectorbt.portfolio.enums.Order.fees">fees</a></code></li>
 <li><code><a title="vectorbt.portfolio.enums.Order.fixed_fees" href="#vectorbt.portfolio.enums.Order.fixed_fees">fixed_fees</a></code></li>
 <li><code><a title="vectorbt.portfolio.enums.Order.price" href="#vectorbt.portfolio.enums.Order.price">price</a></code></li>
+<li><code><a title="vectorbt.portfolio.enums.Order.reject_prob" href="#vectorbt.portfolio.enums.Order.reject_prob">reject_prob</a></code></li>
 <li><code><a title="vectorbt.portfolio.enums.Order.size" href="#vectorbt.portfolio.enums.Order.size">size</a></code></li>
 <li><code><a title="vectorbt.portfolio.enums.Order.size_type" href="#vectorbt.portfolio.enums.Order.size_type">size_type</a></code></li>
 <li><code><a title="vectorbt.portfolio.enums.Order.slippage" href="#vectorbt.portfolio.enums.Order.slippage">slippage</a></code></li>
@@ -424,26 +1182,105 @@ title="Search"
 <li>
 <h4><code><a title="vectorbt.portfolio.enums.OrderContext" href="#vectorbt.portfolio.enums.OrderContext">OrderContext</a></code></h4>
 <ul class="two-column">
-<li><code><a title="vectorbt.portfolio.enums.OrderContext.cash" href="#vectorbt.portfolio.enums.OrderContext.cash">cash</a></code></li>
+<li><code><a title="vectorbt.portfolio.enums.OrderContext.active_mask" href="#vectorbt.portfolio.enums.OrderContext.active_mask">active_mask</a></code></li>
+<li><code><a title="vectorbt.portfolio.enums.OrderContext.call_idx" href="#vectorbt.portfolio.enums.OrderContext.call_idx">call_idx</a></code></li>
+<li><code><a title="vectorbt.portfolio.enums.OrderContext.call_seq" href="#vectorbt.portfolio.enums.OrderContext.call_seq">call_seq</a></code></li>
+<li><code><a title="vectorbt.portfolio.enums.OrderContext.call_seq_now" href="#vectorbt.portfolio.enums.OrderContext.call_seq_now">call_seq_now</a></code></li>
+<li><code><a title="vectorbt.portfolio.enums.OrderContext.cash_now" href="#vectorbt.portfolio.enums.OrderContext.cash_now">cash_now</a></code></li>
+<li><code><a title="vectorbt.portfolio.enums.OrderContext.cash_sharing" href="#vectorbt.portfolio.enums.OrderContext.cash_sharing">cash_sharing</a></code></li>
+<li><code><a title="vectorbt.portfolio.enums.OrderContext.close" href="#vectorbt.portfolio.enums.OrderContext.close">close</a></code></li>
 <li><code><a title="vectorbt.portfolio.enums.OrderContext.col" href="#vectorbt.portfolio.enums.OrderContext.col">col</a></code></li>
+<li><code><a title="vectorbt.portfolio.enums.OrderContext.from_col" href="#vectorbt.portfolio.enums.OrderContext.from_col">from_col</a></code></li>
+<li><code><a title="vectorbt.portfolio.enums.OrderContext.group" href="#vectorbt.portfolio.enums.OrderContext.group">group</a></code></li>
+<li><code><a title="vectorbt.portfolio.enums.OrderContext.group_counts" href="#vectorbt.portfolio.enums.OrderContext.group_counts">group_counts</a></code></li>
+<li><code><a title="vectorbt.portfolio.enums.OrderContext.group_len" href="#vectorbt.portfolio.enums.OrderContext.group_len">group_len</a></code></li>
 <li><code><a title="vectorbt.portfolio.enums.OrderContext.i" href="#vectorbt.portfolio.enums.OrderContext.i">i</a></code></li>
-<li><code><a title="vectorbt.portfolio.enums.OrderContext.init_capital" href="#vectorbt.portfolio.enums.OrderContext.init_capital">init_capital</a></code></li>
+<li><code><a title="vectorbt.portfolio.enums.OrderContext.init_cash" href="#vectorbt.portfolio.enums.OrderContext.init_cash">init_cash</a></code></li>
+<li><code><a title="vectorbt.portfolio.enums.OrderContext.last_cash" href="#vectorbt.portfolio.enums.OrderContext.last_cash">last_cash</a></code></li>
+<li><code><a title="vectorbt.portfolio.enums.OrderContext.last_shares" href="#vectorbt.portfolio.enums.OrderContext.last_shares">last_shares</a></code></li>
+<li><code><a title="vectorbt.portfolio.enums.OrderContext.last_val_price" href="#vectorbt.portfolio.enums.OrderContext.last_val_price">last_val_price</a></code></li>
+<li><code><a title="vectorbt.portfolio.enums.OrderContext.min_size" href="#vectorbt.portfolio.enums.OrderContext.min_size">min_size</a></code></li>
+<li><code><a title="vectorbt.portfolio.enums.OrderContext.num_records" href="#vectorbt.portfolio.enums.OrderContext.num_records">num_records</a></code></li>
 <li><code><a title="vectorbt.portfolio.enums.OrderContext.order_records" href="#vectorbt.portfolio.enums.OrderContext.order_records">order_records</a></code></li>
-<li><code><a title="vectorbt.portfolio.enums.OrderContext.run_cash" href="#vectorbt.portfolio.enums.OrderContext.run_cash">run_cash</a></code></li>
-<li><code><a title="vectorbt.portfolio.enums.OrderContext.run_shares" href="#vectorbt.portfolio.enums.OrderContext.run_shares">run_shares</a></code></li>
-<li><code><a title="vectorbt.portfolio.enums.OrderContext.shares" href="#vectorbt.portfolio.enums.OrderContext.shares">shares</a></code></li>
+<li><code><a title="vectorbt.portfolio.enums.OrderContext.record_mask" href="#vectorbt.portfolio.enums.OrderContext.record_mask">record_mask</a></code></li>
+<li><code><a title="vectorbt.portfolio.enums.OrderContext.shares_now" href="#vectorbt.portfolio.enums.OrderContext.shares_now">shares_now</a></code></li>
 <li><code><a title="vectorbt.portfolio.enums.OrderContext.target_shape" href="#vectorbt.portfolio.enums.OrderContext.target_shape">target_shape</a></code></li>
+<li><code><a title="vectorbt.portfolio.enums.OrderContext.to_col" href="#vectorbt.portfolio.enums.OrderContext.to_col">to_col</a></code></li>
+<li><code><a title="vectorbt.portfolio.enums.OrderContext.val_price_now" href="#vectorbt.portfolio.enums.OrderContext.val_price_now">val_price_now</a></code></li>
+<li><code><a title="vectorbt.portfolio.enums.OrderContext.value_now" href="#vectorbt.portfolio.enums.OrderContext.value_now">value_now</a></code></li>
+</ul>
+</li>
+<li>
+<h4><code><a title="vectorbt.portfolio.enums.OrderResult" href="#vectorbt.portfolio.enums.OrderResult">OrderResult</a></code></h4>
+<ul class="">
+<li><code><a title="vectorbt.portfolio.enums.OrderResult.fees" href="#vectorbt.portfolio.enums.OrderResult.fees">fees</a></code></li>
+<li><code><a title="vectorbt.portfolio.enums.OrderResult.price" href="#vectorbt.portfolio.enums.OrderResult.price">price</a></code></li>
+<li><code><a title="vectorbt.portfolio.enums.OrderResult.side" href="#vectorbt.portfolio.enums.OrderResult.side">side</a></code></li>
+<li><code><a title="vectorbt.portfolio.enums.OrderResult.size" href="#vectorbt.portfolio.enums.OrderResult.size">size</a></code></li>
+<li><code><a title="vectorbt.portfolio.enums.OrderResult.status" href="#vectorbt.portfolio.enums.OrderResult.status">status</a></code></li>
 </ul>
 </li>
 <li>
 <h4><code><a title="vectorbt.portfolio.enums.RowContext" href="#vectorbt.portfolio.enums.RowContext">RowContext</a></code></h4>
 <ul class="two-column">
-<li><code><a title="vectorbt.portfolio.enums.RowContext.cash" href="#vectorbt.portfolio.enums.RowContext.cash">cash</a></code></li>
+<li><code><a title="vectorbt.portfolio.enums.RowContext.active_mask" href="#vectorbt.portfolio.enums.RowContext.active_mask">active_mask</a></code></li>
+<li><code><a title="vectorbt.portfolio.enums.RowContext.call_seq" href="#vectorbt.portfolio.enums.RowContext.call_seq">call_seq</a></code></li>
+<li><code><a title="vectorbt.portfolio.enums.RowContext.cash_sharing" href="#vectorbt.portfolio.enums.RowContext.cash_sharing">cash_sharing</a></code></li>
+<li><code><a title="vectorbt.portfolio.enums.RowContext.close" href="#vectorbt.portfolio.enums.RowContext.close">close</a></code></li>
+<li><code><a title="vectorbt.portfolio.enums.RowContext.group_counts" href="#vectorbt.portfolio.enums.RowContext.group_counts">group_counts</a></code></li>
 <li><code><a title="vectorbt.portfolio.enums.RowContext.i" href="#vectorbt.portfolio.enums.RowContext.i">i</a></code></li>
-<li><code><a title="vectorbt.portfolio.enums.RowContext.init_capital" href="#vectorbt.portfolio.enums.RowContext.init_capital">init_capital</a></code></li>
+<li><code><a title="vectorbt.portfolio.enums.RowContext.init_cash" href="#vectorbt.portfolio.enums.RowContext.init_cash">init_cash</a></code></li>
+<li><code><a title="vectorbt.portfolio.enums.RowContext.last_cash" href="#vectorbt.portfolio.enums.RowContext.last_cash">last_cash</a></code></li>
+<li><code><a title="vectorbt.portfolio.enums.RowContext.last_shares" href="#vectorbt.portfolio.enums.RowContext.last_shares">last_shares</a></code></li>
+<li><code><a title="vectorbt.portfolio.enums.RowContext.last_val_price" href="#vectorbt.portfolio.enums.RowContext.last_val_price">last_val_price</a></code></li>
+<li><code><a title="vectorbt.portfolio.enums.RowContext.min_size" href="#vectorbt.portfolio.enums.RowContext.min_size">min_size</a></code></li>
+<li><code><a title="vectorbt.portfolio.enums.RowContext.num_records" href="#vectorbt.portfolio.enums.RowContext.num_records">num_records</a></code></li>
 <li><code><a title="vectorbt.portfolio.enums.RowContext.order_records" href="#vectorbt.portfolio.enums.RowContext.order_records">order_records</a></code></li>
-<li><code><a title="vectorbt.portfolio.enums.RowContext.shares" href="#vectorbt.portfolio.enums.RowContext.shares">shares</a></code></li>
+<li><code><a title="vectorbt.portfolio.enums.RowContext.record_mask" href="#vectorbt.portfolio.enums.RowContext.record_mask">record_mask</a></code></li>
 <li><code><a title="vectorbt.portfolio.enums.RowContext.target_shape" href="#vectorbt.portfolio.enums.RowContext.target_shape">target_shape</a></code></li>
+</ul>
+</li>
+<li>
+<h4><code><a title="vectorbt.portfolio.enums.SegmentContext" href="#vectorbt.portfolio.enums.SegmentContext">SegmentContext</a></code></h4>
+<ul class="two-column">
+<li><code><a title="vectorbt.portfolio.enums.SegmentContext.active_mask" href="#vectorbt.portfolio.enums.SegmentContext.active_mask">active_mask</a></code></li>
+<li><code><a title="vectorbt.portfolio.enums.SegmentContext.call_seq" href="#vectorbt.portfolio.enums.SegmentContext.call_seq">call_seq</a></code></li>
+<li><code><a title="vectorbt.portfolio.enums.SegmentContext.call_seq_now" href="#vectorbt.portfolio.enums.SegmentContext.call_seq_now">call_seq_now</a></code></li>
+<li><code><a title="vectorbt.portfolio.enums.SegmentContext.cash_sharing" href="#vectorbt.portfolio.enums.SegmentContext.cash_sharing">cash_sharing</a></code></li>
+<li><code><a title="vectorbt.portfolio.enums.SegmentContext.close" href="#vectorbt.portfolio.enums.SegmentContext.close">close</a></code></li>
+<li><code><a title="vectorbt.portfolio.enums.SegmentContext.from_col" href="#vectorbt.portfolio.enums.SegmentContext.from_col">from_col</a></code></li>
+<li><code><a title="vectorbt.portfolio.enums.SegmentContext.group" href="#vectorbt.portfolio.enums.SegmentContext.group">group</a></code></li>
+<li><code><a title="vectorbt.portfolio.enums.SegmentContext.group_counts" href="#vectorbt.portfolio.enums.SegmentContext.group_counts">group_counts</a></code></li>
+<li><code><a title="vectorbt.portfolio.enums.SegmentContext.group_len" href="#vectorbt.portfolio.enums.SegmentContext.group_len">group_len</a></code></li>
+<li><code><a title="vectorbt.portfolio.enums.SegmentContext.i" href="#vectorbt.portfolio.enums.SegmentContext.i">i</a></code></li>
+<li><code><a title="vectorbt.portfolio.enums.SegmentContext.init_cash" href="#vectorbt.portfolio.enums.SegmentContext.init_cash">init_cash</a></code></li>
+<li><code><a title="vectorbt.portfolio.enums.SegmentContext.last_cash" href="#vectorbt.portfolio.enums.SegmentContext.last_cash">last_cash</a></code></li>
+<li><code><a title="vectorbt.portfolio.enums.SegmentContext.last_shares" href="#vectorbt.portfolio.enums.SegmentContext.last_shares">last_shares</a></code></li>
+<li><code><a title="vectorbt.portfolio.enums.SegmentContext.last_val_price" href="#vectorbt.portfolio.enums.SegmentContext.last_val_price">last_val_price</a></code></li>
+<li><code><a title="vectorbt.portfolio.enums.SegmentContext.min_size" href="#vectorbt.portfolio.enums.SegmentContext.min_size">min_size</a></code></li>
+<li><code><a title="vectorbt.portfolio.enums.SegmentContext.num_records" href="#vectorbt.portfolio.enums.SegmentContext.num_records">num_records</a></code></li>
+<li><code><a title="vectorbt.portfolio.enums.SegmentContext.order_records" href="#vectorbt.portfolio.enums.SegmentContext.order_records">order_records</a></code></li>
+<li><code><a title="vectorbt.portfolio.enums.SegmentContext.record_mask" href="#vectorbt.portfolio.enums.SegmentContext.record_mask">record_mask</a></code></li>
+<li><code><a title="vectorbt.portfolio.enums.SegmentContext.target_shape" href="#vectorbt.portfolio.enums.SegmentContext.target_shape">target_shape</a></code></li>
+<li><code><a title="vectorbt.portfolio.enums.SegmentContext.to_col" href="#vectorbt.portfolio.enums.SegmentContext.to_col">to_col</a></code></li>
+</ul>
+</li>
+<li>
+<h4><code><a title="vectorbt.portfolio.enums.SimulationContext" href="#vectorbt.portfolio.enums.SimulationContext">SimulationContext</a></code></h4>
+<ul class="two-column">
+<li><code><a title="vectorbt.portfolio.enums.SimulationContext.active_mask" href="#vectorbt.portfolio.enums.SimulationContext.active_mask">active_mask</a></code></li>
+<li><code><a title="vectorbt.portfolio.enums.SimulationContext.call_seq" href="#vectorbt.portfolio.enums.SimulationContext.call_seq">call_seq</a></code></li>
+<li><code><a title="vectorbt.portfolio.enums.SimulationContext.cash_sharing" href="#vectorbt.portfolio.enums.SimulationContext.cash_sharing">cash_sharing</a></code></li>
+<li><code><a title="vectorbt.portfolio.enums.SimulationContext.close" href="#vectorbt.portfolio.enums.SimulationContext.close">close</a></code></li>
+<li><code><a title="vectorbt.portfolio.enums.SimulationContext.group_counts" href="#vectorbt.portfolio.enums.SimulationContext.group_counts">group_counts</a></code></li>
+<li><code><a title="vectorbt.portfolio.enums.SimulationContext.init_cash" href="#vectorbt.portfolio.enums.SimulationContext.init_cash">init_cash</a></code></li>
+<li><code><a title="vectorbt.portfolio.enums.SimulationContext.last_cash" href="#vectorbt.portfolio.enums.SimulationContext.last_cash">last_cash</a></code></li>
+<li><code><a title="vectorbt.portfolio.enums.SimulationContext.last_shares" href="#vectorbt.portfolio.enums.SimulationContext.last_shares">last_shares</a></code></li>
+<li><code><a title="vectorbt.portfolio.enums.SimulationContext.last_val_price" href="#vectorbt.portfolio.enums.SimulationContext.last_val_price">last_val_price</a></code></li>
+<li><code><a title="vectorbt.portfolio.enums.SimulationContext.min_size" href="#vectorbt.portfolio.enums.SimulationContext.min_size">min_size</a></code></li>
+<li><code><a title="vectorbt.portfolio.enums.SimulationContext.order_records" href="#vectorbt.portfolio.enums.SimulationContext.order_records">order_records</a></code></li>
+<li><code><a title="vectorbt.portfolio.enums.SimulationContext.record_mask" href="#vectorbt.portfolio.enums.SimulationContext.record_mask">record_mask</a></code></li>
+<li><code><a title="vectorbt.portfolio.enums.SimulationContext.target_shape" href="#vectorbt.portfolio.enums.SimulationContext.target_shape">target_shape</a></code></li>
 </ul>
 </li>
 </ul>

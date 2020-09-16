@@ -32,6 +32,7 @@ ga('create', 'UA-142521178-3', 'auto'); ga('send', 'pageview');
 <div class="admonition note">
 <p class="admonition-title">Note</p>
 <p>Input arrays can be of any type, but most output arrays are <code>np.float64</code>.</p>
+<p>Accessors do not utilize caching.</p>
 </div>
 <pre><code class="python-repl">&gt;&gt;&gt; import vectorbt as vbt
 &gt;&gt;&gt; import numpy as np
@@ -66,6 +67,8 @@ ga('create', 'UA-142521178-3', 'auto'); ga('send', 'pageview');
 
 !!! note
     Input arrays can be of any type, but most output arrays are `np.float64`.
+
+    Accessors do not utilize caching.
     
 ```python-repl
 &gt;&gt;&gt; import vectorbt as vbt
@@ -101,7 +104,6 @@ from numba.typed import Dict
 import warnings
 
 from vectorbt.utils import checks
-from vectorbt.utils.decorators import cached_property
 from vectorbt.utils.config import merge_kwargs
 from vectorbt.base import index_fns, reshape_fns
 from vectorbt.base.accessors import Base_Accessor, Base_DFAccessor, Base_SRAccessor
@@ -162,15 +164,19 @@ class Generic_Accessor(Base_Accessor):
         Base_Accessor.__init__(self, obj, freq=freq)
 
     def rolling_std(self, window, minp=1, ddof=1):  # pragma: no cover
+        &#34;&#34;&#34;See `vectorbt.generic.nb.rolling_std_nb`.&#34;&#34;&#34;
         return self.wrap(nb.rolling_std_nb(self.to_2d_array(), window, minp=minp, ddof=ddof))
 
     def expanding_std(self, minp=1, ddof=1):  # pragma: no cover
+        &#34;&#34;&#34;See `vectorbt.generic.nb.expanding_std_nb`.&#34;&#34;&#34;
         return self.wrap(nb.expanding_std_nb(self.to_2d_array(), minp=minp, ddof=ddof))
 
     def ewm_mean(self, span, minp=0, adjust=True):  # pragma: no cover
+        &#34;&#34;&#34;See `vectorbt.generic.nb.ewm_mean_nb`.&#34;&#34;&#34;
         return self.wrap(nb.ewm_mean_nb(self.to_2d_array(), span, minp=minp, adjust=adjust))
 
     def ewm_std(self, span, minp=0, adjust=True, ddof=1):  # pragma: no cover
+        &#34;&#34;&#34;See `vectorbt.generic.nb.ewm_std_nb`.&#34;&#34;&#34;
         return self.wrap(nb.ewm_std_nb(self.to_2d_array(), span, minp=minp, adjust=adjust, ddof=ddof))
 
     def split_into_ranges(self, n=None, range_len=None, start_idxs=None, end_idxs=None):
@@ -287,10 +293,10 @@ class Generic_Accessor(Base_Accessor):
         checks.assert_numba_func(apply_func_nb)
 
         if on_matrix:
-            result = nb.rolling_apply_matrix_nb(self.to_2d_array(), window, apply_func_nb, *args)
+            out = nb.rolling_apply_matrix_nb(self.to_2d_array(), window, apply_func_nb, *args)
         else:
-            result = nb.rolling_apply_nb(self.to_2d_array(), window, apply_func_nb, *args)
-        return self.wrap(result)
+            out = nb.rolling_apply_nb(self.to_2d_array(), window, apply_func_nb, *args)
+        return self.wrap(out)
 
     def expanding_apply(self, apply_func_nb, *args, on_matrix=False):
         &#34;&#34;&#34;See `vectorbt.generic.nb.expanding_apply_nb` and
@@ -318,10 +324,10 @@ class Generic_Accessor(Base_Accessor):
         checks.assert_numba_func(apply_func_nb)
 
         if on_matrix:
-            result = nb.expanding_apply_matrix_nb(self.to_2d_array(), apply_func_nb, *args)
+            out = nb.expanding_apply_matrix_nb(self.to_2d_array(), apply_func_nb, *args)
         else:
-            result = nb.expanding_apply_nb(self.to_2d_array(), apply_func_nb, *args)
-        return self.wrap(result)
+            out = nb.expanding_apply_nb(self.to_2d_array(), apply_func_nb, *args)
+        return self.wrap(out)
 
     def groupby_apply(self, by, apply_func_nb, *args, on_matrix=False, **kwargs):
         &#34;&#34;&#34;See `vectorbt.generic.nb.groupby_apply_nb` and
@@ -351,10 +357,10 @@ class Generic_Accessor(Base_Accessor):
         for i, (k, v) in enumerate(regrouped.indices.items()):
             groups[i] = np.asarray(v)
         if on_matrix:
-            result = nb.groupby_apply_matrix_nb(self.to_2d_array(), groups, apply_func_nb, *args)
+            out = nb.groupby_apply_matrix_nb(self.to_2d_array(), groups, apply_func_nb, *args)
         else:
-            result = nb.groupby_apply_nb(self.to_2d_array(), groups, apply_func_nb, *args)
-        return self.wrap_reduced(result, index=list(regrouped.indices.keys()))
+            out = nb.groupby_apply_nb(self.to_2d_array(), groups, apply_func_nb, *args)
+        return self.wrap_reduced(out, index=list(regrouped.indices.keys()))
 
     def resample_apply(self, freq, apply_func_nb, *args, on_matrix=False, **kwargs):
         &#34;&#34;&#34;See `vectorbt.generic.nb.groupby_apply_nb` and
@@ -384,13 +390,13 @@ class Generic_Accessor(Base_Accessor):
         for i, (k, v) in enumerate(resampled.indices.items()):
             groups[i] = np.asarray(v)
         if on_matrix:
-            result = nb.groupby_apply_matrix_nb(self.to_2d_array(), groups, apply_func_nb, *args)
+            out = nb.groupby_apply_matrix_nb(self.to_2d_array(), groups, apply_func_nb, *args)
         else:
-            result = nb.groupby_apply_nb(self.to_2d_array(), groups, apply_func_nb, *args)
-        result_obj = self.wrap(result, index=list(resampled.indices.keys()))
+            out = nb.groupby_apply_nb(self.to_2d_array(), groups, apply_func_nb, *args)
+        out_obj = self.wrap(out, index=list(resampled.indices.keys()))
         resampled_arr = np.full((resampled.ngroups, self.to_2d_array().shape[1]), np.nan)
         resampled_obj = self.wrap(resampled_arr, index=pd.Index(list(resampled.groups.keys()), freq=freq))
-        resampled_obj.loc[result_obj.index] = result_obj.values
+        resampled_obj.loc[out_obj.index] = out_obj.values
         return resampled_obj
 
     def applymap(self, apply_func_nb, *args):
@@ -409,8 +415,8 @@ class Generic_Accessor(Base_Accessor):
             ```&#34;&#34;&#34;
         checks.assert_numba_func(apply_func_nb)
 
-        result = nb.applymap_nb(self.to_2d_array(), apply_func_nb, *args)
-        return self.wrap(result)
+        out = nb.applymap_nb(self.to_2d_array(), apply_func_nb, *args)
+        return self.wrap(out)
 
     def filter(self, filter_func_nb, *args):
         &#34;&#34;&#34;See `vectorbt.generic.nb.filter_nb`.
@@ -428,8 +434,8 @@ class Generic_Accessor(Base_Accessor):
             ```&#34;&#34;&#34;
         checks.assert_numba_func(filter_func_nb)
 
-        result = nb.filter_nb(self.to_2d_array(), filter_func_nb, *args)
-        return self.wrap(result)
+        out = nb.filter_nb(self.to_2d_array(), filter_func_nb, *args)
+        return self.wrap(out)
 
     def apply_and_reduce(self, apply_func_nb, reduce_func_nb, *args, **kwargs):
         &#34;&#34;&#34;See `vectorbt.generic.nb.apply_and_reduce_nb`.
@@ -449,8 +455,8 @@ class Generic_Accessor(Base_Accessor):
         checks.assert_numba_func(apply_func_nb)
         checks.assert_numba_func(reduce_func_nb)
 
-        result = nb.apply_and_reduce_nb(self.to_2d_array(), apply_func_nb, reduce_func_nb, *args)
-        return self.wrap_reduced(result, **kwargs)
+        out = nb.apply_and_reduce_nb(self.to_2d_array(), apply_func_nb, reduce_func_nb, *args)
+        return self.wrap_reduced(out, **kwargs)
 
     def reduce(self, reduce_func_nb, *args, **kwargs):
         &#34;&#34;&#34;See `vectorbt.generic.nb.reduce_nb`.
@@ -468,8 +474,8 @@ class Generic_Accessor(Base_Accessor):
             ```&#34;&#34;&#34;
         checks.assert_numba_func(reduce_func_nb)
 
-        result = nb.reduce_nb(self.to_2d_array(), reduce_func_nb, *args)
-        return self.wrap_reduced(result, **kwargs)
+        out = nb.reduce_nb(self.to_2d_array(), reduce_func_nb, *args)
+        return self.wrap_reduced(out, **kwargs)
 
     def reduce_to_array(self, reduce_func_nb, *args, **kwargs):
         &#34;&#34;&#34;See `vectorbt.generic.nb.reduce_to_array_nb`.
@@ -486,8 +492,8 @@ class Generic_Accessor(Base_Accessor):
             ```&#34;&#34;&#34;
         checks.assert_numba_func(reduce_func_nb)
 
-        result = nb.reduce_to_array_nb(self.to_2d_array(), reduce_func_nb, *args)
-        return self.wrap_reduced(result, **kwargs)
+        out = nb.reduce_to_array_nb(self.to_2d_array(), reduce_func_nb, *args)
+        return self.wrap_reduced(out, **kwargs)
 
     def min(self, **kwargs):
         &#34;&#34;&#34;Return min of non-NaN elements.&#34;&#34;&#34;
@@ -556,18 +562,18 @@ class Generic_Accessor(Base_Accessor):
     def idxmin(self, **kwargs):
         &#34;&#34;&#34;Return labeled index of min of non-NaN elements.&#34;&#34;&#34;
         obj = self.to_2d_array()
-        result = np.full(obj.shape[1], np.nan, dtype=np.object)
+        out = np.full(obj.shape[1], np.nan, dtype=np.object)
         nan_mask = np.all(np.isnan(obj), axis=0)
-        result[~nan_mask] = self.index[nanargmin(obj[:, ~nan_mask], axis=0)]
-        return self.wrap_reduced(result, **kwargs)
+        out[~nan_mask] = self.index[nanargmin(obj[:, ~nan_mask], axis=0)]
+        return self.wrap_reduced(out, **kwargs)
 
     def idxmax(self, **kwargs):
         &#34;&#34;&#34;Return labeled index of max of non-NaN elements.&#34;&#34;&#34;
         obj = self.to_2d_array()
-        result = np.full(obj.shape[1], np.nan, dtype=np.object)
+        out = np.full(obj.shape[1], np.nan, dtype=np.object)
         nan_mask = np.all(np.isnan(obj), axis=0)
-        result[~nan_mask] = self.index[nanargmax(obj[:, ~nan_mask], axis=0)]
-        return self.wrap_reduced(result, **kwargs)
+        out[~nan_mask] = self.index[nanargmax(obj[:, ~nan_mask], axis=0)]
+        return self.wrap_reduced(out, **kwargs)
 
     def describe(self, percentiles=None, ddof=1, **kwargs):
         &#34;&#34;&#34;See `vectorbt.generic.nb.describe_reduce_nb`.
@@ -605,12 +611,11 @@ class Generic_Accessor(Base_Accessor):
         &#34;&#34;&#34;Drawdown series.&#34;&#34;&#34;
         return self.wrap(self.to_2d_array() / nb.expanding_max_nb(self.to_2d_array()) - 1)
 
-    @cached_property
-    def drawdowns(self):
-        &#34;&#34;&#34;Drawdown records.
+    def drawdowns(self, **kwargs):
+        &#34;&#34;&#34;Generate drawdown records.
 
         See `vectorbt.records.drawdowns.Drawdowns`.&#34;&#34;&#34;
-        return Drawdowns.from_ts(self._obj, freq=self.freq)
+        return Drawdowns.from_ts(self._obj, freq=self.freq, **kwargs)
 
     # ############# Plotting ############# #
 
@@ -985,15 +990,19 @@ class Generic_DFAccessor(Generic_Accessor, Base_DFAccessor):
         Base_Accessor.__init__(self, obj, freq=freq)
 
     def rolling_std(self, window, minp=1, ddof=1):  # pragma: no cover
+        &#34;&#34;&#34;See `vectorbt.generic.nb.rolling_std_nb`.&#34;&#34;&#34;
         return self.wrap(nb.rolling_std_nb(self.to_2d_array(), window, minp=minp, ddof=ddof))
 
     def expanding_std(self, minp=1, ddof=1):  # pragma: no cover
+        &#34;&#34;&#34;See `vectorbt.generic.nb.expanding_std_nb`.&#34;&#34;&#34;
         return self.wrap(nb.expanding_std_nb(self.to_2d_array(), minp=minp, ddof=ddof))
 
     def ewm_mean(self, span, minp=0, adjust=True):  # pragma: no cover
+        &#34;&#34;&#34;See `vectorbt.generic.nb.ewm_mean_nb`.&#34;&#34;&#34;
         return self.wrap(nb.ewm_mean_nb(self.to_2d_array(), span, minp=minp, adjust=adjust))
 
     def ewm_std(self, span, minp=0, adjust=True, ddof=1):  # pragma: no cover
+        &#34;&#34;&#34;See `vectorbt.generic.nb.ewm_std_nb`.&#34;&#34;&#34;
         return self.wrap(nb.ewm_std_nb(self.to_2d_array(), span, minp=minp, adjust=adjust, ddof=ddof))
 
     def split_into_ranges(self, n=None, range_len=None, start_idxs=None, end_idxs=None):
@@ -1110,10 +1119,10 @@ class Generic_DFAccessor(Generic_Accessor, Base_DFAccessor):
         checks.assert_numba_func(apply_func_nb)
 
         if on_matrix:
-            result = nb.rolling_apply_matrix_nb(self.to_2d_array(), window, apply_func_nb, *args)
+            out = nb.rolling_apply_matrix_nb(self.to_2d_array(), window, apply_func_nb, *args)
         else:
-            result = nb.rolling_apply_nb(self.to_2d_array(), window, apply_func_nb, *args)
-        return self.wrap(result)
+            out = nb.rolling_apply_nb(self.to_2d_array(), window, apply_func_nb, *args)
+        return self.wrap(out)
 
     def expanding_apply(self, apply_func_nb, *args, on_matrix=False):
         &#34;&#34;&#34;See `vectorbt.generic.nb.expanding_apply_nb` and
@@ -1141,10 +1150,10 @@ class Generic_DFAccessor(Generic_Accessor, Base_DFAccessor):
         checks.assert_numba_func(apply_func_nb)
 
         if on_matrix:
-            result = nb.expanding_apply_matrix_nb(self.to_2d_array(), apply_func_nb, *args)
+            out = nb.expanding_apply_matrix_nb(self.to_2d_array(), apply_func_nb, *args)
         else:
-            result = nb.expanding_apply_nb(self.to_2d_array(), apply_func_nb, *args)
-        return self.wrap(result)
+            out = nb.expanding_apply_nb(self.to_2d_array(), apply_func_nb, *args)
+        return self.wrap(out)
 
     def groupby_apply(self, by, apply_func_nb, *args, on_matrix=False, **kwargs):
         &#34;&#34;&#34;See `vectorbt.generic.nb.groupby_apply_nb` and
@@ -1174,10 +1183,10 @@ class Generic_DFAccessor(Generic_Accessor, Base_DFAccessor):
         for i, (k, v) in enumerate(regrouped.indices.items()):
             groups[i] = np.asarray(v)
         if on_matrix:
-            result = nb.groupby_apply_matrix_nb(self.to_2d_array(), groups, apply_func_nb, *args)
+            out = nb.groupby_apply_matrix_nb(self.to_2d_array(), groups, apply_func_nb, *args)
         else:
-            result = nb.groupby_apply_nb(self.to_2d_array(), groups, apply_func_nb, *args)
-        return self.wrap_reduced(result, index=list(regrouped.indices.keys()))
+            out = nb.groupby_apply_nb(self.to_2d_array(), groups, apply_func_nb, *args)
+        return self.wrap_reduced(out, index=list(regrouped.indices.keys()))
 
     def resample_apply(self, freq, apply_func_nb, *args, on_matrix=False, **kwargs):
         &#34;&#34;&#34;See `vectorbt.generic.nb.groupby_apply_nb` and
@@ -1207,13 +1216,13 @@ class Generic_DFAccessor(Generic_Accessor, Base_DFAccessor):
         for i, (k, v) in enumerate(resampled.indices.items()):
             groups[i] = np.asarray(v)
         if on_matrix:
-            result = nb.groupby_apply_matrix_nb(self.to_2d_array(), groups, apply_func_nb, *args)
+            out = nb.groupby_apply_matrix_nb(self.to_2d_array(), groups, apply_func_nb, *args)
         else:
-            result = nb.groupby_apply_nb(self.to_2d_array(), groups, apply_func_nb, *args)
-        result_obj = self.wrap(result, index=list(resampled.indices.keys()))
+            out = nb.groupby_apply_nb(self.to_2d_array(), groups, apply_func_nb, *args)
+        out_obj = self.wrap(out, index=list(resampled.indices.keys()))
         resampled_arr = np.full((resampled.ngroups, self.to_2d_array().shape[1]), np.nan)
         resampled_obj = self.wrap(resampled_arr, index=pd.Index(list(resampled.groups.keys()), freq=freq))
-        resampled_obj.loc[result_obj.index] = result_obj.values
+        resampled_obj.loc[out_obj.index] = out_obj.values
         return resampled_obj
 
     def applymap(self, apply_func_nb, *args):
@@ -1232,8 +1241,8 @@ class Generic_DFAccessor(Generic_Accessor, Base_DFAccessor):
             ```&#34;&#34;&#34;
         checks.assert_numba_func(apply_func_nb)
 
-        result = nb.applymap_nb(self.to_2d_array(), apply_func_nb, *args)
-        return self.wrap(result)
+        out = nb.applymap_nb(self.to_2d_array(), apply_func_nb, *args)
+        return self.wrap(out)
 
     def filter(self, filter_func_nb, *args):
         &#34;&#34;&#34;See `vectorbt.generic.nb.filter_nb`.
@@ -1251,8 +1260,8 @@ class Generic_DFAccessor(Generic_Accessor, Base_DFAccessor):
             ```&#34;&#34;&#34;
         checks.assert_numba_func(filter_func_nb)
 
-        result = nb.filter_nb(self.to_2d_array(), filter_func_nb, *args)
-        return self.wrap(result)
+        out = nb.filter_nb(self.to_2d_array(), filter_func_nb, *args)
+        return self.wrap(out)
 
     def apply_and_reduce(self, apply_func_nb, reduce_func_nb, *args, **kwargs):
         &#34;&#34;&#34;See `vectorbt.generic.nb.apply_and_reduce_nb`.
@@ -1272,8 +1281,8 @@ class Generic_DFAccessor(Generic_Accessor, Base_DFAccessor):
         checks.assert_numba_func(apply_func_nb)
         checks.assert_numba_func(reduce_func_nb)
 
-        result = nb.apply_and_reduce_nb(self.to_2d_array(), apply_func_nb, reduce_func_nb, *args)
-        return self.wrap_reduced(result, **kwargs)
+        out = nb.apply_and_reduce_nb(self.to_2d_array(), apply_func_nb, reduce_func_nb, *args)
+        return self.wrap_reduced(out, **kwargs)
 
     def reduce(self, reduce_func_nb, *args, **kwargs):
         &#34;&#34;&#34;See `vectorbt.generic.nb.reduce_nb`.
@@ -1291,8 +1300,8 @@ class Generic_DFAccessor(Generic_Accessor, Base_DFAccessor):
             ```&#34;&#34;&#34;
         checks.assert_numba_func(reduce_func_nb)
 
-        result = nb.reduce_nb(self.to_2d_array(), reduce_func_nb, *args)
-        return self.wrap_reduced(result, **kwargs)
+        out = nb.reduce_nb(self.to_2d_array(), reduce_func_nb, *args)
+        return self.wrap_reduced(out, **kwargs)
 
     def reduce_to_array(self, reduce_func_nb, *args, **kwargs):
         &#34;&#34;&#34;See `vectorbt.generic.nb.reduce_to_array_nb`.
@@ -1309,8 +1318,8 @@ class Generic_DFAccessor(Generic_Accessor, Base_DFAccessor):
             ```&#34;&#34;&#34;
         checks.assert_numba_func(reduce_func_nb)
 
-        result = nb.reduce_to_array_nb(self.to_2d_array(), reduce_func_nb, *args)
-        return self.wrap_reduced(result, **kwargs)
+        out = nb.reduce_to_array_nb(self.to_2d_array(), reduce_func_nb, *args)
+        return self.wrap_reduced(out, **kwargs)
 
     def min(self, **kwargs):
         &#34;&#34;&#34;Return min of non-NaN elements.&#34;&#34;&#34;
@@ -1379,18 +1388,18 @@ class Generic_DFAccessor(Generic_Accessor, Base_DFAccessor):
     def idxmin(self, **kwargs):
         &#34;&#34;&#34;Return labeled index of min of non-NaN elements.&#34;&#34;&#34;
         obj = self.to_2d_array()
-        result = np.full(obj.shape[1], np.nan, dtype=np.object)
+        out = np.full(obj.shape[1], np.nan, dtype=np.object)
         nan_mask = np.all(np.isnan(obj), axis=0)
-        result[~nan_mask] = self.index[nanargmin(obj[:, ~nan_mask], axis=0)]
-        return self.wrap_reduced(result, **kwargs)
+        out[~nan_mask] = self.index[nanargmin(obj[:, ~nan_mask], axis=0)]
+        return self.wrap_reduced(out, **kwargs)
 
     def idxmax(self, **kwargs):
         &#34;&#34;&#34;Return labeled index of max of non-NaN elements.&#34;&#34;&#34;
         obj = self.to_2d_array()
-        result = np.full(obj.shape[1], np.nan, dtype=np.object)
+        out = np.full(obj.shape[1], np.nan, dtype=np.object)
         nan_mask = np.all(np.isnan(obj), axis=0)
-        result[~nan_mask] = self.index[nanargmax(obj[:, ~nan_mask], axis=0)]
-        return self.wrap_reduced(result, **kwargs)
+        out[~nan_mask] = self.index[nanargmax(obj[:, ~nan_mask], axis=0)]
+        return self.wrap_reduced(out, **kwargs)
 
     def describe(self, percentiles=None, ddof=1, **kwargs):
         &#34;&#34;&#34;See `vectorbt.generic.nb.describe_reduce_nb`.
@@ -1428,12 +1437,11 @@ class Generic_DFAccessor(Generic_Accessor, Base_DFAccessor):
         &#34;&#34;&#34;Drawdown series.&#34;&#34;&#34;
         return self.wrap(self.to_2d_array() / nb.expanding_max_nb(self.to_2d_array()) - 1)
 
-    @cached_property
-    def drawdowns(self):
-        &#34;&#34;&#34;Drawdown records.
+    def drawdowns(self, **kwargs):
+        &#34;&#34;&#34;Generate drawdown records.
 
         See `vectorbt.records.drawdowns.Drawdowns`.&#34;&#34;&#34;
-        return Drawdowns.from_ts(self._obj, freq=self.freq)
+        return Drawdowns.from_ts(self._obj, freq=self.freq, **kwargs)
 
     # ############# Plotting ############# #
 
@@ -1491,6 +1499,8 @@ class Generic_DFAccessor(Generic_Accessor, Base_DFAccessor):
 <ul class="hlist">
 <li><a title="vectorbt.base.accessors.Base_Accessor" href="../base/accessors.html#vectorbt.base.accessors.Base_Accessor">Base_Accessor</a></li>
 <li><a title="vectorbt.base.array_wrapper.ArrayWrapper" href="../base/array_wrapper.html#vectorbt.base.array_wrapper.ArrayWrapper">ArrayWrapper</a></li>
+<li><a title="vectorbt.utils.config.Configured" href="../utils/config.html#vectorbt.utils.config.Configured">Configured</a></li>
+<li><a title="vectorbt.base.indexing.PandasIndexer" href="../base/indexing.html#vectorbt.base.indexing.PandasIndexer">PandasIndexer</a></li>
 </ul>
 <h3 class="section-subtitle">Subclasses</h3>
 <ul class="hlist">
@@ -1499,34 +1509,6 @@ class Generic_DFAccessor(Generic_Accessor, Base_DFAccessor):
 <li><a title="vectorbt.returns.accessors.Returns_Accessor" href="../returns/accessors.html#vectorbt.returns.accessors.Returns_Accessor">Returns_Accessor</a></li>
 <li><a title="vectorbt.signals.accessors.Signals_Accessor" href="../signals/accessors.html#vectorbt.signals.accessors.Signals_Accessor">Signals_Accessor</a></li>
 </ul>
-<h3 class="section-subtitle">Instance variables</h3>
-<dl>
-<dt id="vectorbt.generic.accessors.Generic_Accessor.drawdowns"><code class="name">var <span class="ident fname">drawdowns</span></code></dt>
-<dd>
-<div class="desc"><p>Drawdown records.</p>
-<p>See <code><a title="vectorbt.records.drawdowns.Drawdowns" href="../records/drawdowns.html#vectorbt.records.drawdowns.Drawdowns">Drawdowns</a></code>.</p></div>
-<details class="source">
-<summary>
-<span>Expand source code</span>
-</summary>
-<pre><code class="python">def __get__(self, instance, owner=None):
-    if instance is None:
-        return self
-    if not defaults.caching or self.disabled:  # you can manually disable cache here
-        return super().__get__(instance, owner=owner)
-    cache = instance.__dict__
-    val = cache.get(self.attrname, _NOT_FOUND)
-    if val is _NOT_FOUND:
-        with self.lock:
-            # check if another thread filled cache while we awaited lock
-            val = cache.get(self.attrname, _NOT_FOUND)
-            if val is _NOT_FOUND:
-                val = self.func(instance)
-                cache[self.attrname] = val
-    return val</code></pre>
-</details>
-</dd>
-</dl>
 <h3 class="section-subtitle">Methods</h3>
 <dl>
 <dt id="vectorbt.generic.accessors.Generic_Accessor.apply_and_reduce"><code class="name flex">
@@ -1566,8 +1548,8 @@ dtype: float64
     checks.assert_numba_func(apply_func_nb)
     checks.assert_numba_func(reduce_func_nb)
 
-    result = nb.apply_and_reduce_nb(self.to_2d_array(), apply_func_nb, reduce_func_nb, *args)
-    return self.wrap_reduced(result, **kwargs)</code></pre>
+    out = nb.apply_and_reduce_nb(self.to_2d_array(), apply_func_nb, reduce_func_nb, *args)
+    return self.wrap_reduced(out, **kwargs)</code></pre>
 </details>
 </dd>
 <dt id="vectorbt.generic.accessors.Generic_Accessor.applymap"><code class="name flex">
@@ -1605,8 +1587,8 @@ dtype: float64
         ```&#34;&#34;&#34;
     checks.assert_numba_func(apply_func_nb)
 
-    result = nb.applymap_nb(self.to_2d_array(), apply_func_nb, *args)
-    return self.wrap(result)</code></pre>
+    out = nb.applymap_nb(self.to_2d_array(), apply_func_nb, *args)
+    return self.wrap(out)</code></pre>
 </details>
 </dd>
 <dt id="vectorbt.generic.accessors.Generic_Accessor.bar"><code class="name flex">
@@ -1810,16 +1792,34 @@ max    5.000000  5.000000  3.00000
     return self.wrap(self.to_2d_array() / nb.expanding_max_nb(self.to_2d_array()) - 1)</code></pre>
 </details>
 </dd>
+<dt id="vectorbt.generic.accessors.Generic_Accessor.drawdowns"><code class="name flex">
+<span>def <span class="ident fname">drawdowns</span></span>(<span>self, **kwargs)</span>
+</code></dt>
+<dd>
+<div class="desc"><p>Generate drawdown records.</p>
+<p>See <code><a title="vectorbt.records.drawdowns.Drawdowns" href="../records/drawdowns.html#vectorbt.records.drawdowns.Drawdowns">Drawdowns</a></code>.</p></div>
+<details class="source">
+<summary>
+<span>Expand source code</span>
+</summary>
+<pre><code class="python">def drawdowns(self, **kwargs):
+    &#34;&#34;&#34;Generate drawdown records.
+
+    See `vectorbt.records.drawdowns.Drawdowns`.&#34;&#34;&#34;
+    return Drawdowns.from_ts(self._obj, freq=self.freq, **kwargs)</code></pre>
+</details>
+</dd>
 <dt id="vectorbt.generic.accessors.Generic_Accessor.ewm_mean"><code class="name flex">
 <span>def <span class="ident fname">ewm_mean</span></span>(<span>self, span, minp=0, adjust=True)</span>
 </code></dt>
 <dd>
-<div class="desc"></div>
+<div class="desc"><p>See <code><a title="vectorbt.generic.nb.ewm_mean_nb" href="nb.html#vectorbt.generic.nb.ewm_mean_nb">ewm_mean_nb()</a></code>.</p></div>
 <details class="source">
 <summary>
 <span>Expand source code</span>
 </summary>
 <pre><code class="python">def ewm_mean(self, span, minp=0, adjust=True):  # pragma: no cover
+    &#34;&#34;&#34;See `vectorbt.generic.nb.ewm_mean_nb`.&#34;&#34;&#34;
     return self.wrap(nb.ewm_mean_nb(self.to_2d_array(), span, minp=minp, adjust=adjust))</code></pre>
 </details>
 </dd>
@@ -1827,12 +1827,13 @@ max    5.000000  5.000000  3.00000
 <span>def <span class="ident fname">ewm_std</span></span>(<span>self, span, minp=0, adjust=True, ddof=1)</span>
 </code></dt>
 <dd>
-<div class="desc"></div>
+<div class="desc"><p>See <code><a title="vectorbt.generic.nb.ewm_std_nb" href="nb.html#vectorbt.generic.nb.ewm_std_nb">ewm_std_nb()</a></code>.</p></div>
 <details class="source">
 <summary>
 <span>Expand source code</span>
 </summary>
 <pre><code class="python">def ewm_std(self, span, minp=0, adjust=True, ddof=1):  # pragma: no cover
+    &#34;&#34;&#34;See `vectorbt.generic.nb.ewm_std_nb`.&#34;&#34;&#34;
     return self.wrap(nb.ewm_std_nb(self.to_2d_array(), span, minp=minp, adjust=adjust, ddof=ddof))</code></pre>
 </details>
 </dd>
@@ -1890,10 +1891,10 @@ max    5.000000  5.000000  3.00000
     checks.assert_numba_func(apply_func_nb)
 
     if on_matrix:
-        result = nb.expanding_apply_matrix_nb(self.to_2d_array(), apply_func_nb, *args)
+        out = nb.expanding_apply_matrix_nb(self.to_2d_array(), apply_func_nb, *args)
     else:
-        result = nb.expanding_apply_nb(self.to_2d_array(), apply_func_nb, *args)
-    return self.wrap(result)</code></pre>
+        out = nb.expanding_apply_nb(self.to_2d_array(), apply_func_nb, *args)
+    return self.wrap(out)</code></pre>
 </details>
 </dd>
 <dt id="vectorbt.generic.accessors.Generic_Accessor.expanding_max"><code class="name flex">
@@ -1972,12 +1973,13 @@ max    5.000000  5.000000  3.00000
 <span>def <span class="ident fname">expanding_std</span></span>(<span>self, minp=1, ddof=1)</span>
 </code></dt>
 <dd>
-<div class="desc"></div>
+<div class="desc"><p>See <code><a title="vectorbt.generic.nb.expanding_std_nb" href="nb.html#vectorbt.generic.nb.expanding_std_nb">expanding_std_nb()</a></code>.</p></div>
 <details class="source">
 <summary>
 <span>Expand source code</span>
 </summary>
 <pre><code class="python">def expanding_std(self, minp=1, ddof=1):  # pragma: no cover
+    &#34;&#34;&#34;See `vectorbt.generic.nb.expanding_std_nb`.&#34;&#34;&#34;
     return self.wrap(nb.expanding_std_nb(self.to_2d_array(), minp=minp, ddof=ddof))</code></pre>
 </details>
 </dd>
@@ -2064,8 +2066,8 @@ max    5.000000  5.000000  3.00000
         ```&#34;&#34;&#34;
     checks.assert_numba_func(filter_func_nb)
 
-    result = nb.filter_nb(self.to_2d_array(), filter_func_nb, *args)
-    return self.wrap(result)</code></pre>
+    out = nb.filter_nb(self.to_2d_array(), filter_func_nb, *args)
+    return self.wrap(out)</code></pre>
 </details>
 </dd>
 <dt id="vectorbt.generic.accessors.Generic_Accessor.fshift"><code class="name flex">
@@ -2145,10 +2147,10 @@ max    5.000000  5.000000  3.00000
     for i, (k, v) in enumerate(regrouped.indices.items()):
         groups[i] = np.asarray(v)
     if on_matrix:
-        result = nb.groupby_apply_matrix_nb(self.to_2d_array(), groups, apply_func_nb, *args)
+        out = nb.groupby_apply_matrix_nb(self.to_2d_array(), groups, apply_func_nb, *args)
     else:
-        result = nb.groupby_apply_nb(self.to_2d_array(), groups, apply_func_nb, *args)
-    return self.wrap_reduced(result, index=list(regrouped.indices.keys()))</code></pre>
+        out = nb.groupby_apply_nb(self.to_2d_array(), groups, apply_func_nb, *args)
+    return self.wrap_reduced(out, index=list(regrouped.indices.keys()))</code></pre>
 </details>
 </dd>
 <dt id="vectorbt.generic.accessors.Generic_Accessor.hist"><code class="name flex">
@@ -2184,10 +2186,10 @@ max    5.000000  5.000000  3.00000
 <pre><code class="python">def idxmax(self, **kwargs):
     &#34;&#34;&#34;Return labeled index of max of non-NaN elements.&#34;&#34;&#34;
     obj = self.to_2d_array()
-    result = np.full(obj.shape[1], np.nan, dtype=np.object)
+    out = np.full(obj.shape[1], np.nan, dtype=np.object)
     nan_mask = np.all(np.isnan(obj), axis=0)
-    result[~nan_mask] = self.index[nanargmax(obj[:, ~nan_mask], axis=0)]
-    return self.wrap_reduced(result, **kwargs)</code></pre>
+    out[~nan_mask] = self.index[nanargmax(obj[:, ~nan_mask], axis=0)]
+    return self.wrap_reduced(out, **kwargs)</code></pre>
 </details>
 </dd>
 <dt id="vectorbt.generic.accessors.Generic_Accessor.idxmin"><code class="name flex">
@@ -2202,10 +2204,10 @@ max    5.000000  5.000000  3.00000
 <pre><code class="python">def idxmin(self, **kwargs):
     &#34;&#34;&#34;Return labeled index of min of non-NaN elements.&#34;&#34;&#34;
     obj = self.to_2d_array()
-    result = np.full(obj.shape[1], np.nan, dtype=np.object)
+    out = np.full(obj.shape[1], np.nan, dtype=np.object)
     nan_mask = np.all(np.isnan(obj), axis=0)
-    result[~nan_mask] = self.index[nanargmin(obj[:, ~nan_mask], axis=0)]
-    return self.wrap_reduced(result, **kwargs)</code></pre>
+    out[~nan_mask] = self.index[nanargmin(obj[:, ~nan_mask], axis=0)]
+    return self.wrap_reduced(out, **kwargs)</code></pre>
 </details>
 </dd>
 <dt id="vectorbt.generic.accessors.Generic_Accessor.max"><code class="name flex">
@@ -2370,8 +2372,8 @@ dtype: float64
         ```&#34;&#34;&#34;
     checks.assert_numba_func(reduce_func_nb)
 
-    result = nb.reduce_nb(self.to_2d_array(), reduce_func_nb, *args)
-    return self.wrap_reduced(result, **kwargs)</code></pre>
+    out = nb.reduce_nb(self.to_2d_array(), reduce_func_nb, *args)
+    return self.wrap_reduced(out, **kwargs)</code></pre>
 </details>
 </dd>
 <dt id="vectorbt.generic.accessors.Generic_Accessor.reduce_to_array"><code class="name flex">
@@ -2406,8 +2408,8 @@ max  5.0  5.0  3.0
         ```&#34;&#34;&#34;
     checks.assert_numba_func(reduce_func_nb)
 
-    result = nb.reduce_to_array_nb(self.to_2d_array(), reduce_func_nb, *args)
-    return self.wrap_reduced(result, **kwargs)</code></pre>
+    out = nb.reduce_to_array_nb(self.to_2d_array(), reduce_func_nb, *args)
+    return self.wrap_reduced(out, **kwargs)</code></pre>
 </details>
 </dd>
 <dt id="vectorbt.generic.accessors.Generic_Accessor.resample_apply"><code class="name flex">
@@ -2463,13 +2465,13 @@ max  5.0  5.0  3.0
     for i, (k, v) in enumerate(resampled.indices.items()):
         groups[i] = np.asarray(v)
     if on_matrix:
-        result = nb.groupby_apply_matrix_nb(self.to_2d_array(), groups, apply_func_nb, *args)
+        out = nb.groupby_apply_matrix_nb(self.to_2d_array(), groups, apply_func_nb, *args)
     else:
-        result = nb.groupby_apply_nb(self.to_2d_array(), groups, apply_func_nb, *args)
-    result_obj = self.wrap(result, index=list(resampled.indices.keys()))
+        out = nb.groupby_apply_nb(self.to_2d_array(), groups, apply_func_nb, *args)
+    out_obj = self.wrap(out, index=list(resampled.indices.keys()))
     resampled_arr = np.full((resampled.ngroups, self.to_2d_array().shape[1]), np.nan)
     resampled_obj = self.wrap(resampled_arr, index=pd.Index(list(resampled.groups.keys()), freq=freq))
-    resampled_obj.loc[result_obj.index] = result_obj.values
+    resampled_obj.loc[out_obj.index] = out_obj.values
     return resampled_obj</code></pre>
 </details>
 </dd>
@@ -2527,10 +2529,10 @@ max  5.0  5.0  3.0
     checks.assert_numba_func(apply_func_nb)
 
     if on_matrix:
-        result = nb.rolling_apply_matrix_nb(self.to_2d_array(), window, apply_func_nb, *args)
+        out = nb.rolling_apply_matrix_nb(self.to_2d_array(), window, apply_func_nb, *args)
     else:
-        result = nb.rolling_apply_nb(self.to_2d_array(), window, apply_func_nb, *args)
-    return self.wrap(result)</code></pre>
+        out = nb.rolling_apply_nb(self.to_2d_array(), window, apply_func_nb, *args)
+    return self.wrap(out)</code></pre>
 </details>
 </dd>
 <dt id="vectorbt.generic.accessors.Generic_Accessor.rolling_max"><code class="name flex">
@@ -2609,12 +2611,13 @@ max  5.0  5.0  3.0
 <span>def <span class="ident fname">rolling_std</span></span>(<span>self, window, minp=1, ddof=1)</span>
 </code></dt>
 <dd>
-<div class="desc"></div>
+<div class="desc"><p>See <code><a title="vectorbt.generic.nb.rolling_std_nb" href="nb.html#vectorbt.generic.nb.rolling_std_nb">rolling_std_nb()</a></code>.</p></div>
 <details class="source">
 <summary>
 <span>Expand source code</span>
 </summary>
 <pre><code class="python">def rolling_std(self, window, minp=1, ddof=1):  # pragma: no cover
+    &#34;&#34;&#34;See `vectorbt.generic.nb.rolling_std_nb`.&#34;&#34;&#34;
     return self.wrap(nb.rolling_std_nb(self.to_2d_array(), window, minp=minp, ddof=ddof))</code></pre>
 </details>
 </dd>
@@ -2838,10 +2841,13 @@ range_end   2020-01-02 2020-01-04 2020-01-02 2020-01-04 2020-01-02 2020-01-04
 <li><code><a title="vectorbt.base.accessors.Base_Accessor.apply_on_index" href="../base/accessors.html#vectorbt.base.accessors.Base_Accessor.apply_on_index">apply_on_index</a></code></li>
 <li><code><a title="vectorbt.base.accessors.Base_Accessor.broadcast" href="../base/accessors.html#vectorbt.base.accessors.Base_Accessor.broadcast">broadcast</a></code></li>
 <li><code><a title="vectorbt.base.accessors.Base_Accessor.broadcast_to" href="../base/accessors.html#vectorbt.base.accessors.Base_Accessor.broadcast_to">broadcast_to</a></code></li>
+<li><code><a title="vectorbt.base.accessors.Base_Accessor.column_only_select" href="../base/array_wrapper.html#vectorbt.base.array_wrapper.ArrayWrapper.column_only_select">column_only_select</a></code></li>
 <li><code><a title="vectorbt.base.accessors.Base_Accessor.columns" href="../base/array_wrapper.html#vectorbt.base.array_wrapper.ArrayWrapper.columns">columns</a></code></li>
 <li><code><a title="vectorbt.base.accessors.Base_Accessor.combine_with" href="../base/accessors.html#vectorbt.base.accessors.Base_Accessor.combine_with">combine_with</a></code></li>
 <li><code><a title="vectorbt.base.accessors.Base_Accessor.combine_with_multiple" href="../base/accessors.html#vectorbt.base.accessors.Base_Accessor.combine_with_multiple">combine_with_multiple</a></code></li>
 <li><code><a title="vectorbt.base.accessors.Base_Accessor.concat" href="../base/accessors.html#vectorbt.base.accessors.Base_Accessor.concat">concat</a></code></li>
+<li><code><a title="vectorbt.base.accessors.Base_Accessor.config" href="../utils/config.html#vectorbt.utils.config.Configured.config">config</a></code></li>
+<li><code><a title="vectorbt.base.accessors.Base_Accessor.copy" href="../utils/config.html#vectorbt.utils.config.Configured.copy">copy</a></code></li>
 <li><code><a title="vectorbt.base.accessors.Base_Accessor.drop_duplicate_levels" href="../base/accessors.html#vectorbt.base.accessors.Base_Accessor.drop_duplicate_levels">drop_duplicate_levels</a></code></li>
 <li><code><a title="vectorbt.base.accessors.Base_Accessor.drop_levels" href="../base/accessors.html#vectorbt.base.accessors.Base_Accessor.drop_levels">drop_levels</a></code></li>
 <li><code><a title="vectorbt.base.accessors.Base_Accessor.drop_redundant_levels" href="../base/accessors.html#vectorbt.base.accessors.Base_Accessor.drop_redundant_levels">drop_redundant_levels</a></code></li>
@@ -2849,14 +2855,21 @@ range_end   2020-01-02 2020-01-04 2020-01-02 2020-01-04 2020-01-02 2020-01-04
 <li><code><a title="vectorbt.base.accessors.Base_Accessor.empty_like" href="../base/accessors.html#vectorbt.base.accessors.Base_Accessor.empty_like">empty_like</a></code></li>
 <li><code><a title="vectorbt.base.accessors.Base_Accessor.freq" href="../base/array_wrapper.html#vectorbt.base.array_wrapper.ArrayWrapper.freq">freq</a></code></li>
 <li><code><a title="vectorbt.base.accessors.Base_Accessor.from_obj" href="../base/array_wrapper.html#vectorbt.base.array_wrapper.ArrayWrapper.from_obj">from_obj</a></code></li>
+<li><code><a title="vectorbt.base.accessors.Base_Accessor.group_select" href="../base/array_wrapper.html#vectorbt.base.array_wrapper.ArrayWrapper.group_select">group_select</a></code></li>
+<li><code><a title="vectorbt.base.accessors.Base_Accessor.grouped_ndim" href="../base/array_wrapper.html#vectorbt.base.array_wrapper.ArrayWrapper.grouped_ndim">grouped_ndim</a></code></li>
+<li><code><a title="vectorbt.base.accessors.Base_Accessor.grouper" href="../base/array_wrapper.html#vectorbt.base.array_wrapper.ArrayWrapper.grouper">grouper</a></code></li>
+<li><code><a title="vectorbt.base.accessors.Base_Accessor.iloc" href="../base/indexing.html#vectorbt.base.indexing.PandasIndexer.iloc">iloc</a></code></li>
 <li><code><a title="vectorbt.base.accessors.Base_Accessor.index" href="../base/array_wrapper.html#vectorbt.base.array_wrapper.ArrayWrapper.index">index</a></code></li>
+<li><code><a title="vectorbt.base.accessors.Base_Accessor.loc" href="../base/indexing.html#vectorbt.base.indexing.PandasIndexer.loc">loc</a></code></li>
 <li><code><a title="vectorbt.base.accessors.Base_Accessor.make_symmetric" href="../base/accessors.html#vectorbt.base.accessors.Base_Accessor.make_symmetric">make_symmetric</a></code></li>
 <li><code><a title="vectorbt.base.accessors.Base_Accessor.name" href="../base/array_wrapper.html#vectorbt.base.array_wrapper.ArrayWrapper.name">name</a></code></li>
 <li><code><a title="vectorbt.base.accessors.Base_Accessor.ndim" href="../base/array_wrapper.html#vectorbt.base.array_wrapper.ArrayWrapper.ndim">ndim</a></code></li>
+<li><code><a title="vectorbt.base.accessors.Base_Accessor.regroup" href="../base/array_wrapper.html#vectorbt.base.array_wrapper.ArrayWrapper.regroup">regroup</a></code></li>
 <li><code><a title="vectorbt.base.accessors.Base_Accessor.rename_levels" href="../base/accessors.html#vectorbt.base.accessors.Base_Accessor.rename_levels">rename_levels</a></code></li>
 <li><code><a title="vectorbt.base.accessors.Base_Accessor.repeat" href="../base/accessors.html#vectorbt.base.accessors.Base_Accessor.repeat">repeat</a></code></li>
 <li><code><a title="vectorbt.base.accessors.Base_Accessor.select_levels" href="../base/accessors.html#vectorbt.base.accessors.Base_Accessor.select_levels">select_levels</a></code></li>
 <li><code><a title="vectorbt.base.accessors.Base_Accessor.shape" href="../base/array_wrapper.html#vectorbt.base.array_wrapper.ArrayWrapper.shape">shape</a></code></li>
+<li><code><a title="vectorbt.base.accessors.Base_Accessor.shape_2d" href="../base/array_wrapper.html#vectorbt.base.array_wrapper.ArrayWrapper.shape_2d">shape_2d</a></code></li>
 <li><code><a title="vectorbt.base.accessors.Base_Accessor.stack_index" href="../base/accessors.html#vectorbt.base.accessors.Base_Accessor.stack_index">stack_index</a></code></li>
 <li><code><a title="vectorbt.base.accessors.Base_Accessor.tile" href="../base/accessors.html#vectorbt.base.accessors.Base_Accessor.tile">tile</a></code></li>
 <li><code><a title="vectorbt.base.accessors.Base_Accessor.to_1d_array" href="../base/accessors.html#vectorbt.base.accessors.Base_Accessor.to_1d_array">to_1d_array</a></code></li>
@@ -2866,6 +2879,7 @@ range_end   2020-01-02 2020-01-04 2020-01-02 2020-01-04 2020-01-02 2020-01-04
 <li><code><a title="vectorbt.base.accessors.Base_Accessor.unstack_to_df" href="../base/accessors.html#vectorbt.base.accessors.Base_Accessor.unstack_to_df">unstack_to_df</a></code></li>
 <li><code><a title="vectorbt.base.accessors.Base_Accessor.wrap" href="../base/array_wrapper.html#vectorbt.base.array_wrapper.ArrayWrapper.wrap">wrap</a></code></li>
 <li><code><a title="vectorbt.base.accessors.Base_Accessor.wrap_reduced" href="../base/array_wrapper.html#vectorbt.base.array_wrapper.ArrayWrapper.wrap_reduced">wrap_reduced</a></code></li>
+<li><code><a title="vectorbt.base.accessors.Base_Accessor.xs" href="../base/indexing.html#vectorbt.base.indexing.PandasIndexer.xs">xs</a></code></li>
 </ul>
 </li>
 </ul>
@@ -2935,6 +2949,8 @@ range_end   2020-01-02 2020-01-04 2020-01-02 2020-01-04 2020-01-02 2020-01-04
 <li><a title="vectorbt.base.accessors.Base_DFAccessor" href="../base/accessors.html#vectorbt.base.accessors.Base_DFAccessor">Base_DFAccessor</a></li>
 <li><a title="vectorbt.base.accessors.Base_Accessor" href="../base/accessors.html#vectorbt.base.accessors.Base_Accessor">Base_Accessor</a></li>
 <li><a title="vectorbt.base.array_wrapper.ArrayWrapper" href="../base/array_wrapper.html#vectorbt.base.array_wrapper.ArrayWrapper">ArrayWrapper</a></li>
+<li><a title="vectorbt.utils.config.Configured" href="../utils/config.html#vectorbt.utils.config.Configured">Configured</a></li>
+<li><a title="vectorbt.base.indexing.PandasIndexer" href="../base/indexing.html#vectorbt.base.indexing.PandasIndexer">PandasIndexer</a></li>
 </ul>
 <h3 class="section-subtitle">Subclasses</h3>
 <ul class="hlist">
@@ -3029,10 +3045,13 @@ range_end   2020-01-02 2020-01-04 2020-01-02 2020-01-04 2020-01-02 2020-01-04
 <li><code><a title="vectorbt.generic.accessors.Generic_Accessor.box" href="#vectorbt.generic.accessors.Generic_Accessor.box">box</a></code></li>
 <li><code><a title="vectorbt.generic.accessors.Generic_Accessor.broadcast" href="../base/accessors.html#vectorbt.base.accessors.Base_Accessor.broadcast">broadcast</a></code></li>
 <li><code><a title="vectorbt.generic.accessors.Generic_Accessor.broadcast_to" href="../base/accessors.html#vectorbt.base.accessors.Base_Accessor.broadcast_to">broadcast_to</a></code></li>
+<li><code><a title="vectorbt.generic.accessors.Generic_Accessor.column_only_select" href="../base/array_wrapper.html#vectorbt.base.array_wrapper.ArrayWrapper.column_only_select">column_only_select</a></code></li>
 <li><code><a title="vectorbt.generic.accessors.Generic_Accessor.columns" href="../base/array_wrapper.html#vectorbt.base.array_wrapper.ArrayWrapper.columns">columns</a></code></li>
 <li><code><a title="vectorbt.generic.accessors.Generic_Accessor.combine_with" href="../base/accessors.html#vectorbt.base.accessors.Base_Accessor.combine_with">combine_with</a></code></li>
 <li><code><a title="vectorbt.generic.accessors.Generic_Accessor.combine_with_multiple" href="../base/accessors.html#vectorbt.base.accessors.Base_Accessor.combine_with_multiple">combine_with_multiple</a></code></li>
 <li><code><a title="vectorbt.generic.accessors.Generic_Accessor.concat" href="../base/accessors.html#vectorbt.base.accessors.Base_Accessor.concat">concat</a></code></li>
+<li><code><a title="vectorbt.generic.accessors.Generic_Accessor.config" href="../utils/config.html#vectorbt.utils.config.Configured.config">config</a></code></li>
+<li><code><a title="vectorbt.generic.accessors.Generic_Accessor.copy" href="../utils/config.html#vectorbt.utils.config.Configured.copy">copy</a></code></li>
 <li><code><a title="vectorbt.generic.accessors.Generic_Accessor.count" href="#vectorbt.generic.accessors.Generic_Accessor.count">count</a></code></li>
 <li><code><a title="vectorbt.generic.accessors.Generic_Accessor.cumprod" href="#vectorbt.generic.accessors.Generic_Accessor.cumprod">cumprod</a></code></li>
 <li><code><a title="vectorbt.generic.accessors.Generic_Accessor.cumsum" href="#vectorbt.generic.accessors.Generic_Accessor.cumsum">cumsum</a></code></li>
@@ -3045,21 +3064,29 @@ range_end   2020-01-02 2020-01-04 2020-01-02 2020-01-04 2020-01-02 2020-01-04
 <li><code><a title="vectorbt.generic.accessors.Generic_Accessor.drop_redundant_levels" href="../base/accessors.html#vectorbt.base.accessors.Base_Accessor.drop_redundant_levels">drop_redundant_levels</a></code></li>
 <li><code><a title="vectorbt.generic.accessors.Generic_Accessor.empty" href="../base/accessors.html#vectorbt.base.accessors.Base_Accessor.empty">empty</a></code></li>
 <li><code><a title="vectorbt.generic.accessors.Generic_Accessor.empty_like" href="../base/accessors.html#vectorbt.base.accessors.Base_Accessor.empty_like">empty_like</a></code></li>
+<li><code><a title="vectorbt.generic.accessors.Generic_Accessor.ewm_mean" href="#vectorbt.generic.accessors.Generic_Accessor.ewm_mean">ewm_mean</a></code></li>
+<li><code><a title="vectorbt.generic.accessors.Generic_Accessor.ewm_std" href="#vectorbt.generic.accessors.Generic_Accessor.ewm_std">ewm_std</a></code></li>
 <li><code><a title="vectorbt.generic.accessors.Generic_Accessor.expanding_apply" href="#vectorbt.generic.accessors.Generic_Accessor.expanding_apply">expanding_apply</a></code></li>
 <li><code><a title="vectorbt.generic.accessors.Generic_Accessor.expanding_max" href="#vectorbt.generic.accessors.Generic_Accessor.expanding_max">expanding_max</a></code></li>
 <li><code><a title="vectorbt.generic.accessors.Generic_Accessor.expanding_mean" href="#vectorbt.generic.accessors.Generic_Accessor.expanding_mean">expanding_mean</a></code></li>
 <li><code><a title="vectorbt.generic.accessors.Generic_Accessor.expanding_min" href="#vectorbt.generic.accessors.Generic_Accessor.expanding_min">expanding_min</a></code></li>
+<li><code><a title="vectorbt.generic.accessors.Generic_Accessor.expanding_std" href="#vectorbt.generic.accessors.Generic_Accessor.expanding_std">expanding_std</a></code></li>
 <li><code><a title="vectorbt.generic.accessors.Generic_Accessor.ffill" href="#vectorbt.generic.accessors.Generic_Accessor.ffill">ffill</a></code></li>
 <li><code><a title="vectorbt.generic.accessors.Generic_Accessor.fillna" href="#vectorbt.generic.accessors.Generic_Accessor.fillna">fillna</a></code></li>
 <li><code><a title="vectorbt.generic.accessors.Generic_Accessor.filter" href="#vectorbt.generic.accessors.Generic_Accessor.filter">filter</a></code></li>
 <li><code><a title="vectorbt.generic.accessors.Generic_Accessor.freq" href="../base/array_wrapper.html#vectorbt.base.array_wrapper.ArrayWrapper.freq">freq</a></code></li>
 <li><code><a title="vectorbt.generic.accessors.Generic_Accessor.from_obj" href="../base/array_wrapper.html#vectorbt.base.array_wrapper.ArrayWrapper.from_obj">from_obj</a></code></li>
 <li><code><a title="vectorbt.generic.accessors.Generic_Accessor.fshift" href="#vectorbt.generic.accessors.Generic_Accessor.fshift">fshift</a></code></li>
+<li><code><a title="vectorbt.generic.accessors.Generic_Accessor.group_select" href="../base/array_wrapper.html#vectorbt.base.array_wrapper.ArrayWrapper.group_select">group_select</a></code></li>
 <li><code><a title="vectorbt.generic.accessors.Generic_Accessor.groupby_apply" href="#vectorbt.generic.accessors.Generic_Accessor.groupby_apply">groupby_apply</a></code></li>
+<li><code><a title="vectorbt.generic.accessors.Generic_Accessor.grouped_ndim" href="../base/array_wrapper.html#vectorbt.base.array_wrapper.ArrayWrapper.grouped_ndim">grouped_ndim</a></code></li>
+<li><code><a title="vectorbt.generic.accessors.Generic_Accessor.grouper" href="../base/array_wrapper.html#vectorbt.base.array_wrapper.ArrayWrapper.grouper">grouper</a></code></li>
 <li><code><a title="vectorbt.generic.accessors.Generic_Accessor.hist" href="#vectorbt.generic.accessors.Generic_Accessor.hist">hist</a></code></li>
 <li><code><a title="vectorbt.generic.accessors.Generic_Accessor.idxmax" href="#vectorbt.generic.accessors.Generic_Accessor.idxmax">idxmax</a></code></li>
 <li><code><a title="vectorbt.generic.accessors.Generic_Accessor.idxmin" href="#vectorbt.generic.accessors.Generic_Accessor.idxmin">idxmin</a></code></li>
+<li><code><a title="vectorbt.generic.accessors.Generic_Accessor.iloc" href="../base/indexing.html#vectorbt.base.indexing.PandasIndexer.iloc">iloc</a></code></li>
 <li><code><a title="vectorbt.generic.accessors.Generic_Accessor.index" href="../base/array_wrapper.html#vectorbt.base.array_wrapper.ArrayWrapper.index">index</a></code></li>
+<li><code><a title="vectorbt.generic.accessors.Generic_Accessor.loc" href="../base/indexing.html#vectorbt.base.indexing.PandasIndexer.loc">loc</a></code></li>
 <li><code><a title="vectorbt.generic.accessors.Generic_Accessor.make_symmetric" href="../base/accessors.html#vectorbt.base.accessors.Base_Accessor.make_symmetric">make_symmetric</a></code></li>
 <li><code><a title="vectorbt.generic.accessors.Generic_Accessor.max" href="#vectorbt.generic.accessors.Generic_Accessor.max">max</a></code></li>
 <li><code><a title="vectorbt.generic.accessors.Generic_Accessor.mean" href="#vectorbt.generic.accessors.Generic_Accessor.mean">mean</a></code></li>
@@ -3071,6 +3098,7 @@ range_end   2020-01-02 2020-01-04 2020-01-02 2020-01-04 2020-01-02 2020-01-04
 <li><code><a title="vectorbt.generic.accessors.Generic_Accessor.product" href="#vectorbt.generic.accessors.Generic_Accessor.product">product</a></code></li>
 <li><code><a title="vectorbt.generic.accessors.Generic_Accessor.reduce" href="#vectorbt.generic.accessors.Generic_Accessor.reduce">reduce</a></code></li>
 <li><code><a title="vectorbt.generic.accessors.Generic_Accessor.reduce_to_array" href="#vectorbt.generic.accessors.Generic_Accessor.reduce_to_array">reduce_to_array</a></code></li>
+<li><code><a title="vectorbt.generic.accessors.Generic_Accessor.regroup" href="../base/array_wrapper.html#vectorbt.base.array_wrapper.ArrayWrapper.regroup">regroup</a></code></li>
 <li><code><a title="vectorbt.generic.accessors.Generic_Accessor.rename_levels" href="../base/accessors.html#vectorbt.base.accessors.Base_Accessor.rename_levels">rename_levels</a></code></li>
 <li><code><a title="vectorbt.generic.accessors.Generic_Accessor.repeat" href="../base/accessors.html#vectorbt.base.accessors.Base_Accessor.repeat">repeat</a></code></li>
 <li><code><a title="vectorbt.generic.accessors.Generic_Accessor.resample_apply" href="#vectorbt.generic.accessors.Generic_Accessor.resample_apply">resample_apply</a></code></li>
@@ -3078,9 +3106,11 @@ range_end   2020-01-02 2020-01-04 2020-01-02 2020-01-04 2020-01-02 2020-01-04
 <li><code><a title="vectorbt.generic.accessors.Generic_Accessor.rolling_max" href="#vectorbt.generic.accessors.Generic_Accessor.rolling_max">rolling_max</a></code></li>
 <li><code><a title="vectorbt.generic.accessors.Generic_Accessor.rolling_mean" href="#vectorbt.generic.accessors.Generic_Accessor.rolling_mean">rolling_mean</a></code></li>
 <li><code><a title="vectorbt.generic.accessors.Generic_Accessor.rolling_min" href="#vectorbt.generic.accessors.Generic_Accessor.rolling_min">rolling_min</a></code></li>
+<li><code><a title="vectorbt.generic.accessors.Generic_Accessor.rolling_std" href="#vectorbt.generic.accessors.Generic_Accessor.rolling_std">rolling_std</a></code></li>
 <li><code><a title="vectorbt.generic.accessors.Generic_Accessor.scatter" href="#vectorbt.generic.accessors.Generic_Accessor.scatter">scatter</a></code></li>
 <li><code><a title="vectorbt.generic.accessors.Generic_Accessor.select_levels" href="../base/accessors.html#vectorbt.base.accessors.Base_Accessor.select_levels">select_levels</a></code></li>
 <li><code><a title="vectorbt.generic.accessors.Generic_Accessor.shape" href="../base/array_wrapper.html#vectorbt.base.array_wrapper.ArrayWrapper.shape">shape</a></code></li>
+<li><code><a title="vectorbt.generic.accessors.Generic_Accessor.shape_2d" href="../base/array_wrapper.html#vectorbt.base.array_wrapper.ArrayWrapper.shape_2d">shape_2d</a></code></li>
 <li><code><a title="vectorbt.generic.accessors.Generic_Accessor.split_into_ranges" href="#vectorbt.generic.accessors.Generic_Accessor.split_into_ranges">split_into_ranges</a></code></li>
 <li><code><a title="vectorbt.generic.accessors.Generic_Accessor.stack_index" href="../base/accessors.html#vectorbt.base.accessors.Base_Accessor.stack_index">stack_index</a></code></li>
 <li><code><a title="vectorbt.generic.accessors.Generic_Accessor.std" href="#vectorbt.generic.accessors.Generic_Accessor.std">std</a></code></li>
@@ -3093,6 +3123,7 @@ range_end   2020-01-02 2020-01-04 2020-01-02 2020-01-04 2020-01-02 2020-01-04
 <li><code><a title="vectorbt.generic.accessors.Generic_Accessor.unstack_to_df" href="../base/accessors.html#vectorbt.base.accessors.Base_Accessor.unstack_to_df">unstack_to_df</a></code></li>
 <li><code><a title="vectorbt.generic.accessors.Generic_Accessor.wrap" href="../base/array_wrapper.html#vectorbt.base.array_wrapper.ArrayWrapper.wrap">wrap</a></code></li>
 <li><code><a title="vectorbt.generic.accessors.Generic_Accessor.wrap_reduced" href="../base/array_wrapper.html#vectorbt.base.array_wrapper.ArrayWrapper.wrap_reduced">wrap_reduced</a></code></li>
+<li><code><a title="vectorbt.generic.accessors.Generic_Accessor.xs" href="../base/indexing.html#vectorbt.base.indexing.PandasIndexer.xs">xs</a></code></li>
 </ul>
 </li>
 </ul>
@@ -3352,6 +3383,8 @@ range_end   2020-01-02 2020-01-04 2020-01-02 2020-01-04 2020-01-02 2020-01-04
 <li><a title="vectorbt.base.accessors.Base_SRAccessor" href="../base/accessors.html#vectorbt.base.accessors.Base_SRAccessor">Base_SRAccessor</a></li>
 <li><a title="vectorbt.base.accessors.Base_Accessor" href="../base/accessors.html#vectorbt.base.accessors.Base_Accessor">Base_Accessor</a></li>
 <li><a title="vectorbt.base.array_wrapper.ArrayWrapper" href="../base/array_wrapper.html#vectorbt.base.array_wrapper.ArrayWrapper">ArrayWrapper</a></li>
+<li><a title="vectorbt.utils.config.Configured" href="../utils/config.html#vectorbt.utils.config.Configured">Configured</a></li>
+<li><a title="vectorbt.base.indexing.PandasIndexer" href="../base/indexing.html#vectorbt.base.indexing.PandasIndexer">PandasIndexer</a></li>
 </ul>
 <h3 class="section-subtitle">Subclasses</h3>
 <ul class="hlist">
@@ -3655,10 +3688,13 @@ to an axis of the volume. Optionally, pass <code>slider_level</code> to use a le
 <li><code><a title="vectorbt.generic.accessors.Generic_Accessor.box" href="#vectorbt.generic.accessors.Generic_Accessor.box">box</a></code></li>
 <li><code><a title="vectorbt.generic.accessors.Generic_Accessor.broadcast" href="../base/accessors.html#vectorbt.base.accessors.Base_Accessor.broadcast">broadcast</a></code></li>
 <li><code><a title="vectorbt.generic.accessors.Generic_Accessor.broadcast_to" href="../base/accessors.html#vectorbt.base.accessors.Base_Accessor.broadcast_to">broadcast_to</a></code></li>
+<li><code><a title="vectorbt.generic.accessors.Generic_Accessor.column_only_select" href="../base/array_wrapper.html#vectorbt.base.array_wrapper.ArrayWrapper.column_only_select">column_only_select</a></code></li>
 <li><code><a title="vectorbt.generic.accessors.Generic_Accessor.columns" href="../base/array_wrapper.html#vectorbt.base.array_wrapper.ArrayWrapper.columns">columns</a></code></li>
 <li><code><a title="vectorbt.generic.accessors.Generic_Accessor.combine_with" href="../base/accessors.html#vectorbt.base.accessors.Base_Accessor.combine_with">combine_with</a></code></li>
 <li><code><a title="vectorbt.generic.accessors.Generic_Accessor.combine_with_multiple" href="../base/accessors.html#vectorbt.base.accessors.Base_Accessor.combine_with_multiple">combine_with_multiple</a></code></li>
 <li><code><a title="vectorbt.generic.accessors.Generic_Accessor.concat" href="../base/accessors.html#vectorbt.base.accessors.Base_Accessor.concat">concat</a></code></li>
+<li><code><a title="vectorbt.generic.accessors.Generic_Accessor.config" href="../utils/config.html#vectorbt.utils.config.Configured.config">config</a></code></li>
+<li><code><a title="vectorbt.generic.accessors.Generic_Accessor.copy" href="../utils/config.html#vectorbt.utils.config.Configured.copy">copy</a></code></li>
 <li><code><a title="vectorbt.generic.accessors.Generic_Accessor.count" href="#vectorbt.generic.accessors.Generic_Accessor.count">count</a></code></li>
 <li><code><a title="vectorbt.generic.accessors.Generic_Accessor.cumprod" href="#vectorbt.generic.accessors.Generic_Accessor.cumprod">cumprod</a></code></li>
 <li><code><a title="vectorbt.generic.accessors.Generic_Accessor.cumsum" href="#vectorbt.generic.accessors.Generic_Accessor.cumsum">cumsum</a></code></li>
@@ -3671,21 +3707,29 @@ to an axis of the volume. Optionally, pass <code>slider_level</code> to use a le
 <li><code><a title="vectorbt.generic.accessors.Generic_Accessor.drop_redundant_levels" href="../base/accessors.html#vectorbt.base.accessors.Base_Accessor.drop_redundant_levels">drop_redundant_levels</a></code></li>
 <li><code><a title="vectorbt.generic.accessors.Generic_Accessor.empty" href="../base/accessors.html#vectorbt.base.accessors.Base_Accessor.empty">empty</a></code></li>
 <li><code><a title="vectorbt.generic.accessors.Generic_Accessor.empty_like" href="../base/accessors.html#vectorbt.base.accessors.Base_Accessor.empty_like">empty_like</a></code></li>
+<li><code><a title="vectorbt.generic.accessors.Generic_Accessor.ewm_mean" href="#vectorbt.generic.accessors.Generic_Accessor.ewm_mean">ewm_mean</a></code></li>
+<li><code><a title="vectorbt.generic.accessors.Generic_Accessor.ewm_std" href="#vectorbt.generic.accessors.Generic_Accessor.ewm_std">ewm_std</a></code></li>
 <li><code><a title="vectorbt.generic.accessors.Generic_Accessor.expanding_apply" href="#vectorbt.generic.accessors.Generic_Accessor.expanding_apply">expanding_apply</a></code></li>
 <li><code><a title="vectorbt.generic.accessors.Generic_Accessor.expanding_max" href="#vectorbt.generic.accessors.Generic_Accessor.expanding_max">expanding_max</a></code></li>
 <li><code><a title="vectorbt.generic.accessors.Generic_Accessor.expanding_mean" href="#vectorbt.generic.accessors.Generic_Accessor.expanding_mean">expanding_mean</a></code></li>
 <li><code><a title="vectorbt.generic.accessors.Generic_Accessor.expanding_min" href="#vectorbt.generic.accessors.Generic_Accessor.expanding_min">expanding_min</a></code></li>
+<li><code><a title="vectorbt.generic.accessors.Generic_Accessor.expanding_std" href="#vectorbt.generic.accessors.Generic_Accessor.expanding_std">expanding_std</a></code></li>
 <li><code><a title="vectorbt.generic.accessors.Generic_Accessor.ffill" href="#vectorbt.generic.accessors.Generic_Accessor.ffill">ffill</a></code></li>
 <li><code><a title="vectorbt.generic.accessors.Generic_Accessor.fillna" href="#vectorbt.generic.accessors.Generic_Accessor.fillna">fillna</a></code></li>
 <li><code><a title="vectorbt.generic.accessors.Generic_Accessor.filter" href="#vectorbt.generic.accessors.Generic_Accessor.filter">filter</a></code></li>
 <li><code><a title="vectorbt.generic.accessors.Generic_Accessor.freq" href="../base/array_wrapper.html#vectorbt.base.array_wrapper.ArrayWrapper.freq">freq</a></code></li>
 <li><code><a title="vectorbt.generic.accessors.Generic_Accessor.from_obj" href="../base/array_wrapper.html#vectorbt.base.array_wrapper.ArrayWrapper.from_obj">from_obj</a></code></li>
 <li><code><a title="vectorbt.generic.accessors.Generic_Accessor.fshift" href="#vectorbt.generic.accessors.Generic_Accessor.fshift">fshift</a></code></li>
+<li><code><a title="vectorbt.generic.accessors.Generic_Accessor.group_select" href="../base/array_wrapper.html#vectorbt.base.array_wrapper.ArrayWrapper.group_select">group_select</a></code></li>
 <li><code><a title="vectorbt.generic.accessors.Generic_Accessor.groupby_apply" href="#vectorbt.generic.accessors.Generic_Accessor.groupby_apply">groupby_apply</a></code></li>
+<li><code><a title="vectorbt.generic.accessors.Generic_Accessor.grouped_ndim" href="../base/array_wrapper.html#vectorbt.base.array_wrapper.ArrayWrapper.grouped_ndim">grouped_ndim</a></code></li>
+<li><code><a title="vectorbt.generic.accessors.Generic_Accessor.grouper" href="../base/array_wrapper.html#vectorbt.base.array_wrapper.ArrayWrapper.grouper">grouper</a></code></li>
 <li><code><a title="vectorbt.generic.accessors.Generic_Accessor.hist" href="#vectorbt.generic.accessors.Generic_Accessor.hist">hist</a></code></li>
 <li><code><a title="vectorbt.generic.accessors.Generic_Accessor.idxmax" href="#vectorbt.generic.accessors.Generic_Accessor.idxmax">idxmax</a></code></li>
 <li><code><a title="vectorbt.generic.accessors.Generic_Accessor.idxmin" href="#vectorbt.generic.accessors.Generic_Accessor.idxmin">idxmin</a></code></li>
+<li><code><a title="vectorbt.generic.accessors.Generic_Accessor.iloc" href="../base/indexing.html#vectorbt.base.indexing.PandasIndexer.iloc">iloc</a></code></li>
 <li><code><a title="vectorbt.generic.accessors.Generic_Accessor.index" href="../base/array_wrapper.html#vectorbt.base.array_wrapper.ArrayWrapper.index">index</a></code></li>
+<li><code><a title="vectorbt.generic.accessors.Generic_Accessor.loc" href="../base/indexing.html#vectorbt.base.indexing.PandasIndexer.loc">loc</a></code></li>
 <li><code><a title="vectorbt.generic.accessors.Generic_Accessor.make_symmetric" href="../base/accessors.html#vectorbt.base.accessors.Base_Accessor.make_symmetric">make_symmetric</a></code></li>
 <li><code><a title="vectorbt.generic.accessors.Generic_Accessor.max" href="#vectorbt.generic.accessors.Generic_Accessor.max">max</a></code></li>
 <li><code><a title="vectorbt.generic.accessors.Generic_Accessor.mean" href="#vectorbt.generic.accessors.Generic_Accessor.mean">mean</a></code></li>
@@ -3697,6 +3741,7 @@ to an axis of the volume. Optionally, pass <code>slider_level</code> to use a le
 <li><code><a title="vectorbt.generic.accessors.Generic_Accessor.product" href="#vectorbt.generic.accessors.Generic_Accessor.product">product</a></code></li>
 <li><code><a title="vectorbt.generic.accessors.Generic_Accessor.reduce" href="#vectorbt.generic.accessors.Generic_Accessor.reduce">reduce</a></code></li>
 <li><code><a title="vectorbt.generic.accessors.Generic_Accessor.reduce_to_array" href="#vectorbt.generic.accessors.Generic_Accessor.reduce_to_array">reduce_to_array</a></code></li>
+<li><code><a title="vectorbt.generic.accessors.Generic_Accessor.regroup" href="../base/array_wrapper.html#vectorbt.base.array_wrapper.ArrayWrapper.regroup">regroup</a></code></li>
 <li><code><a title="vectorbt.generic.accessors.Generic_Accessor.rename_levels" href="../base/accessors.html#vectorbt.base.accessors.Base_Accessor.rename_levels">rename_levels</a></code></li>
 <li><code><a title="vectorbt.generic.accessors.Generic_Accessor.repeat" href="../base/accessors.html#vectorbt.base.accessors.Base_Accessor.repeat">repeat</a></code></li>
 <li><code><a title="vectorbt.generic.accessors.Generic_Accessor.resample_apply" href="#vectorbt.generic.accessors.Generic_Accessor.resample_apply">resample_apply</a></code></li>
@@ -3704,9 +3749,11 @@ to an axis of the volume. Optionally, pass <code>slider_level</code> to use a le
 <li><code><a title="vectorbt.generic.accessors.Generic_Accessor.rolling_max" href="#vectorbt.generic.accessors.Generic_Accessor.rolling_max">rolling_max</a></code></li>
 <li><code><a title="vectorbt.generic.accessors.Generic_Accessor.rolling_mean" href="#vectorbt.generic.accessors.Generic_Accessor.rolling_mean">rolling_mean</a></code></li>
 <li><code><a title="vectorbt.generic.accessors.Generic_Accessor.rolling_min" href="#vectorbt.generic.accessors.Generic_Accessor.rolling_min">rolling_min</a></code></li>
+<li><code><a title="vectorbt.generic.accessors.Generic_Accessor.rolling_std" href="#vectorbt.generic.accessors.Generic_Accessor.rolling_std">rolling_std</a></code></li>
 <li><code><a title="vectorbt.generic.accessors.Generic_Accessor.scatter" href="#vectorbt.generic.accessors.Generic_Accessor.scatter">scatter</a></code></li>
 <li><code><a title="vectorbt.generic.accessors.Generic_Accessor.select_levels" href="../base/accessors.html#vectorbt.base.accessors.Base_Accessor.select_levels">select_levels</a></code></li>
 <li><code><a title="vectorbt.generic.accessors.Generic_Accessor.shape" href="../base/array_wrapper.html#vectorbt.base.array_wrapper.ArrayWrapper.shape">shape</a></code></li>
+<li><code><a title="vectorbt.generic.accessors.Generic_Accessor.shape_2d" href="../base/array_wrapper.html#vectorbt.base.array_wrapper.ArrayWrapper.shape_2d">shape_2d</a></code></li>
 <li><code><a title="vectorbt.generic.accessors.Generic_Accessor.split_into_ranges" href="#vectorbt.generic.accessors.Generic_Accessor.split_into_ranges">split_into_ranges</a></code></li>
 <li><code><a title="vectorbt.generic.accessors.Generic_Accessor.stack_index" href="../base/accessors.html#vectorbt.base.accessors.Base_Accessor.stack_index">stack_index</a></code></li>
 <li><code><a title="vectorbt.generic.accessors.Generic_Accessor.std" href="#vectorbt.generic.accessors.Generic_Accessor.std">std</a></code></li>
@@ -3719,6 +3766,7 @@ to an axis of the volume. Optionally, pass <code>slider_level</code> to use a le
 <li><code><a title="vectorbt.generic.accessors.Generic_Accessor.unstack_to_df" href="../base/accessors.html#vectorbt.base.accessors.Base_Accessor.unstack_to_df">unstack_to_df</a></code></li>
 <li><code><a title="vectorbt.generic.accessors.Generic_Accessor.wrap" href="../base/array_wrapper.html#vectorbt.base.array_wrapper.ArrayWrapper.wrap">wrap</a></code></li>
 <li><code><a title="vectorbt.generic.accessors.Generic_Accessor.wrap_reduced" href="../base/array_wrapper.html#vectorbt.base.array_wrapper.ArrayWrapper.wrap_reduced">wrap_reduced</a></code></li>
+<li><code><a title="vectorbt.generic.accessors.Generic_Accessor.xs" href="../base/indexing.html#vectorbt.base.indexing.PandasIndexer.xs">xs</a></code></li>
 </ul>
 </li>
 </ul>

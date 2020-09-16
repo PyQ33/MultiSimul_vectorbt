@@ -35,19 +35,26 @@ ga('create', 'UA-142521178-3', 'auto'); ga('send', 'pageview');
 </summary>
 <pre><code class="python">&#34;&#34;&#34;Utilities for configuration.&#34;&#34;&#34;
 
+import numpy as np
+import pandas as pd
+
+from vectorbt.utils import checks
 
 class Config(dict):
     &#34;&#34;&#34;A simple dict with (optionally) frozen keys.&#34;&#34;&#34;
 
-    def __init__(self, *args, frozen=True, **kwargs):
+    def __init__(self, *args, frozen=True, read_only=False, **kwargs):
         super().__init__(*args, **kwargs)
         self.frozen = frozen
+        self.read_only = read_only
         self.default_config = dict(self)
         for key, value in dict.items(self):
             if isinstance(value, dict):
                 dict.__setitem__(self, key, Config(value, frozen=frozen))
 
     def __setitem__(self, key, val):
+        if self.read_only:
+            raise ValueError(&#34;Config is read-only&#34;)
         if self.frozen and key not in self:
             raise KeyError(f&#34;Key {key} is not a valid parameter&#34;)
         dict.__setitem__(self, key, val)
@@ -72,7 +79,62 @@ def merge_kwargs(x, y):
         z[key] = x[key]
     for key in y.keys() - overlapping_keys:
         z[key] = y[key]
-    return z</code></pre>
+    return z
+
+
+class Configured:
+    &#34;&#34;&#34;Class with an initialization config.&#34;&#34;&#34;
+    def __init__(self, **config):
+        self._config = Config(config, read_only=True)
+
+    @property
+    def config(self):
+        &#34;&#34;&#34;Initialization config.&#34;&#34;&#34;
+        return self._config
+
+    def copy(self, **new_config):
+        &#34;&#34;&#34;Create a new instance based on the config.
+
+        !!! warning
+            This &#34;copy&#34; operation won&#39;t return a copy of the instance but a new instance
+            initialized with the same config. If the instance has writable attributes,
+            their values won&#39;t be copied over.&#34;&#34;&#34;
+        return self.__class__(**merge_kwargs(self.config, new_config))
+
+    def __eq__(self, other):
+        &#34;&#34;&#34;Objects are equals if their configs are equal.&#34;&#34;&#34;
+        if type(self) != type(other):
+            return False
+        my_config = self.config
+        other_config = other.config
+        if my_config.keys() != other_config.keys():
+            return False
+        for k, v in my_config.items():
+            other_v = other_config[k]
+            if isinstance(v, pd.Series) or isinstance(other_v, pd.Series):
+                try:
+                    pd.testing.assert_series_equal(v, other_v)
+                except:
+                    return False
+            elif isinstance(v, pd.DataFrame) or isinstance(other_v, pd.DataFrame):
+                try:
+                    pd.testing.assert_frame_equal(v, other_v)
+                except:
+                    return False
+            elif isinstance(v, pd.Index) or isinstance(other_v, pd.Index):
+                try:
+                    pd.testing.assert_index_equal(v, other_v)
+                except:
+                    return False
+            elif isinstance(v, np.ndarray) or isinstance(other_v, np.ndarray):
+                try:
+                    np.testing.assert_array_equal(v, other_v)
+                except:
+                    return False
+            else:
+                if v != other_v:
+                    return False
+        return True</code></pre>
 </details>
 </section>
 <section>
@@ -117,7 +179,7 @@ def merge_kwargs(x, y):
 <dl>
 <dt id="vectorbt.utils.config.Config"><code class="flex name class">
 <span>class <span class="ident parent-fname">Config</span></span>
-<span>(</span><span>*args, frozen=True, **kwargs)</span>
+<span>(</span><span>*args, frozen=True, read_only=False, **kwargs)</span>
 </code></dt>
 <dd>
 <div class="desc"><p>A simple dict with (optionally) frozen keys.</p></div>
@@ -128,15 +190,18 @@ def merge_kwargs(x, y):
 <pre><code class="python">class Config(dict):
     &#34;&#34;&#34;A simple dict with (optionally) frozen keys.&#34;&#34;&#34;
 
-    def __init__(self, *args, frozen=True, **kwargs):
+    def __init__(self, *args, frozen=True, read_only=False, **kwargs):
         super().__init__(*args, **kwargs)
         self.frozen = frozen
+        self.read_only = read_only
         self.default_config = dict(self)
         for key, value in dict.items(self):
             if isinstance(value, dict):
                 dict.__setitem__(self, key, Config(value, frozen=frozen))
 
     def __setitem__(self, key, val):
+        if self.read_only:
+            raise ValueError(&#34;Config is read-only&#34;)
         if self.frozen and key not in self:
             raise KeyError(f&#34;Key {key} is not a valid parameter&#34;)
         dict.__setitem__(self, key, val)
@@ -163,6 +228,131 @@ def merge_kwargs(x, y):
 <pre><code class="python">def reset(self):
     &#34;&#34;&#34;Reset dictionary to the one passed at instantiation.&#34;&#34;&#34;
     self.update(self.default_config)</code></pre>
+</details>
+</dd>
+</dl>
+</dd>
+<dt id="vectorbt.utils.config.Configured"><code class="flex name class">
+<span>class <span class="ident parent-fname">Configured</span></span>
+<span>(</span><span>**config)</span>
+</code></dt>
+<dd>
+<div class="desc"><p>Class with an initialization config.</p></div>
+<details class="source">
+<summary>
+<span>Expand source code</span>
+</summary>
+<pre><code class="python">class Configured:
+    &#34;&#34;&#34;Class with an initialization config.&#34;&#34;&#34;
+    def __init__(self, **config):
+        self._config = Config(config, read_only=True)
+
+    @property
+    def config(self):
+        &#34;&#34;&#34;Initialization config.&#34;&#34;&#34;
+        return self._config
+
+    def copy(self, **new_config):
+        &#34;&#34;&#34;Create a new instance based on the config.
+
+        !!! warning
+            This &#34;copy&#34; operation won&#39;t return a copy of the instance but a new instance
+            initialized with the same config. If the instance has writable attributes,
+            their values won&#39;t be copied over.&#34;&#34;&#34;
+        return self.__class__(**merge_kwargs(self.config, new_config))
+
+    def __eq__(self, other):
+        &#34;&#34;&#34;Objects are equals if their configs are equal.&#34;&#34;&#34;
+        if type(self) != type(other):
+            return False
+        my_config = self.config
+        other_config = other.config
+        if my_config.keys() != other_config.keys():
+            return False
+        for k, v in my_config.items():
+            other_v = other_config[k]
+            if isinstance(v, pd.Series) or isinstance(other_v, pd.Series):
+                try:
+                    pd.testing.assert_series_equal(v, other_v)
+                except:
+                    return False
+            elif isinstance(v, pd.DataFrame) or isinstance(other_v, pd.DataFrame):
+                try:
+                    pd.testing.assert_frame_equal(v, other_v)
+                except:
+                    return False
+            elif isinstance(v, pd.Index) or isinstance(other_v, pd.Index):
+                try:
+                    pd.testing.assert_index_equal(v, other_v)
+                except:
+                    return False
+            elif isinstance(v, np.ndarray) or isinstance(other_v, np.ndarray):
+                try:
+                    np.testing.assert_array_equal(v, other_v)
+                except:
+                    return False
+            else:
+                if v != other_v:
+                    return False
+        return True</code></pre>
+</details>
+<h3 class="section-subtitle">Subclasses</h3>
+<ul class="hlist">
+<li><a title="vectorbt.base.array_wrapper.ArrayWrapper" href="../base/array_wrapper.html#vectorbt.base.array_wrapper.ArrayWrapper">ArrayWrapper</a></li>
+<li><a title="vectorbt.base.column_grouper.ColumnGrouper" href="../base/column_grouper.html#vectorbt.base.column_grouper.ColumnGrouper">ColumnGrouper</a></li>
+<li><a title="vectorbt.indicators.basic.ATR" href="../indicators/basic.html#vectorbt.indicators.basic.ATR">ATR</a></li>
+<li><a title="vectorbt.indicators.basic.BollingerBands" href="../indicators/basic.html#vectorbt.indicators.basic.BollingerBands">BollingerBands</a></li>
+<li><a title="vectorbt.indicators.basic.MA" href="../indicators/basic.html#vectorbt.indicators.basic.MA">MA</a></li>
+<li><a title="vectorbt.indicators.basic.MACD" href="../indicators/basic.html#vectorbt.indicators.basic.MACD">MACD</a></li>
+<li><a title="vectorbt.indicators.basic.MSTD" href="../indicators/basic.html#vectorbt.indicators.basic.MSTD">MSTD</a></li>
+<li><a title="vectorbt.indicators.basic.OBV" href="../indicators/basic.html#vectorbt.indicators.basic.OBV">OBV</a></li>
+<li><a title="vectorbt.indicators.basic.RSI" href="../indicators/basic.html#vectorbt.indicators.basic.RSI">RSI</a></li>
+<li><a title="vectorbt.indicators.basic.Stochastic" href="../indicators/basic.html#vectorbt.indicators.basic.Stochastic">Stochastic</a></li>
+<li><a title="vectorbt.portfolio.base.Portfolio" href="../portfolio/base.html#vectorbt.portfolio.base.Portfolio">Portfolio</a></li>
+<li><a title="vectorbt.records.base.MappedArray" href="../records/base.html#vectorbt.records.base.MappedArray">MappedArray</a></li>
+<li><a title="vectorbt.records.base.Records" href="../records/base.html#vectorbt.records.base.Records">Records</a></li>
+</ul>
+<h3 class="section-subtitle">Instance variables</h3>
+<dl>
+<dt id="vectorbt.utils.config.Configured.config"><code class="name">var <span class="ident fname">config</span></code></dt>
+<dd>
+<div class="desc"><p>Initialization config.</p></div>
+<details class="source">
+<summary>
+<span>Expand source code</span>
+</summary>
+<pre><code class="python">@property
+def config(self):
+    &#34;&#34;&#34;Initialization config.&#34;&#34;&#34;
+    return self._config</code></pre>
+</details>
+</dd>
+</dl>
+<h3 class="section-subtitle">Methods</h3>
+<dl>
+<dt id="vectorbt.utils.config.Configured.copy"><code class="name flex">
+<span>def <span class="ident fname">copy</span></span>(<span>self, **new_config)</span>
+</code></dt>
+<dd>
+<div class="desc"><p>Create a new instance based on the config.</p>
+<div class="admonition warning">
+<p class="admonition-title">Warning</p>
+<p>This "copy" operation won't return a copy of the instance but a new instance
+initialized with the same config. If the instance has writable attributes,
+their values won't be copied over.</p>
+</div></div>
+<details class="source">
+<summary>
+<span>Expand source code</span>
+</summary>
+<pre><code class="python">def copy(self, **new_config):
+    &#34;&#34;&#34;Create a new instance based on the config.
+
+    !!! warning
+        This &#34;copy&#34; operation won&#39;t return a copy of the instance but a new instance
+        initialized with the same config. If the instance has writable attributes,
+        their values won&#39;t be copied over.&#34;&#34;&#34;
+    return self.__class__(**merge_kwargs(self.config, new_config))</code></pre>
 </details>
 </dd>
 </dl>
@@ -206,6 +396,13 @@ title="Search"
 <h4><code><a title="vectorbt.utils.config.Config" href="#vectorbt.utils.config.Config">Config</a></code></h4>
 <ul class="">
 <li><code><a title="vectorbt.utils.config.Config.reset" href="#vectorbt.utils.config.Config.reset">reset</a></code></li>
+</ul>
+</li>
+<li>
+<h4><code><a title="vectorbt.utils.config.Configured" href="#vectorbt.utils.config.Configured">Configured</a></code></h4>
+<ul class="">
+<li><code><a title="vectorbt.utils.config.Configured.config" href="#vectorbt.utils.config.Configured.config">config</a></code></li>
+<li><code><a title="vectorbt.utils.config.Configured.copy" href="#vectorbt.utils.config.Configured.copy">copy</a></code></li>
 </ul>
 </li>
 </ul>

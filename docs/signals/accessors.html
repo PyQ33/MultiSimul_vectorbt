@@ -33,6 +33,7 @@ ga('create', 'UA-142521178-3', 'auto'); ga('send', 'pageview');
 <p class="admonition-title">Note</p>
 <p>The underlying Series/DataFrame must already be a signal series.</p>
 <p>Input arrays must be <code>np.bool</code>.</p>
+<p>Accessors do not utilize caching.</p>
 </div>
 <pre><code class="python-repl">&gt;&gt;&gt; import vectorbt as vbt
 &gt;&gt;&gt; import numpy as np
@@ -69,6 +70,8 @@ ga('create', 'UA-142521178-3', 'auto'); ga('send', 'pageview');
     The underlying Series/DataFrame must already be a signal series.
 
     Input arrays must be `np.bool`.
+
+    Accessors do not utilize caching.
     
 ```python-repl
 &gt;&gt;&gt; import vectorbt as vbt
@@ -106,7 +109,6 @@ from vectorbt.root_accessors import register_dataframe_accessor, register_series
 from vectorbt.utils import checks
 from vectorbt.utils.config import merge_kwargs
 from vectorbt.utils.colors import adjust_lightness
-from vectorbt.utils.decorators import cached_property
 from vectorbt.base import reshape_fns, index_fns
 from vectorbt.base.common import add_nb_methods
 from vectorbt.generic.accessors import Generic_Accessor, Generic_SRAccessor, Generic_DFAccessor
@@ -498,7 +500,8 @@ class Signals_Accessor(Generic_Accessor):
         entries = self._obj
         checks.assert_type(ts, (pd.Series, pd.DataFrame))
 
-        entries, ts = reshape_fns.broadcast(entries, ts, **broadcast_kwargs, writeable=True)
+        broadcast_kwargs = merge_kwargs(dict(require_kwargs=dict(requirements=&#39;W&#39;)), broadcast_kwargs)
+        entries, ts = reshape_fns.broadcast(entries, ts, **broadcast_kwargs)
         stops = reshape_fns.broadcast_to_array_of(stops, entries.vbt.to_2d_array())
 
         # Build column hierarchy
@@ -553,7 +556,8 @@ class Signals_Accessor(Generic_Accessor):
         entries = self._obj
         checks.assert_type(ts, (pd.Series, pd.DataFrame))
 
-        entries, ts = reshape_fns.broadcast(entries, ts, **broadcast_kwargs, writeable=True)
+        broadcast_kwargs = merge_kwargs(dict(require_kwargs=dict(requirements=&#39;W&#39;)), broadcast_kwargs)
+        entries, ts = reshape_fns.broadcast(entries, ts, **broadcast_kwargs)
         stops = reshape_fns.broadcast_to_array_of(stops, entries.vbt.to_2d_array())
 
         # Build column hierarchy
@@ -616,7 +620,7 @@ class Signals_Accessor(Generic_Accessor):
         else:
             # Two input arrays
             obj, other = reshape_fns.broadcast(self._obj, other, **broadcast_kwargs)
-            checks.assert_dtype(other, np.bool_)
+            checks.assert_dtype(other, np.bool)
             result = nb.map_reduce_between_two_nb(
                 self.to_2d_array(), other.vbt.to_2d_array(), map_func_nb, reduce_func_nb, *args)
             return self.wrap_reduced(result)
@@ -646,25 +650,20 @@ class Signals_Accessor(Generic_Accessor):
         result = nb.map_reduce_partitions_nb(self.to_2d_array(), map_func_nb, reduce_func_nb, *args)
         return self.wrap_reduced(result)
 
-    @cached_property
     def num_signals(self):
         &#34;&#34;&#34;Sum up `True` values.&#34;&#34;&#34;
         return self.sum()
 
-    @cached_property
-    def avg_distance(self):
-        &#34;&#34;&#34;Calculate the average distance between `True` values in `self`.
+    def avg_distance(self, to=None, **kwargs):
+        &#34;&#34;&#34;Calculate the average distance between `True` values in `self` and optionally `to`.
 
         See `Signals_Accessor.map_reduce_between`.&#34;&#34;&#34;
         return self.map_reduce_between(
-            other=None, map_func_nb=nb.distance_map_nb, reduce_func_nb=nb.mean_reduce_nb)
-
-    def avg_distance_to(self, other, **kwargs):
-        &#34;&#34;&#34;Calculate the average distance between `True` values in `self` and `other`.
-
-        See `Signals_Accessor.map_reduce_between`.&#34;&#34;&#34;
-        return self.map_reduce_between(
-            other=other, map_func_nb=nb.distance_map_nb, reduce_func_nb=nb.mean_reduce_nb, **kwargs)
+            other=to,
+            map_func_nb=nb.distance_map_nb,
+            reduce_func_nb=nb.mean_reduce_nb,
+            **kwargs
+        )
 
     # ############# Ranking ############# #
 
@@ -880,7 +879,7 @@ class Signals_SRAccessor(Signals_Accessor, Generic_SRAccessor):
 
             ![](/vectorbt/docs/img/signals_plot_as_markers.png)&#34;&#34;&#34;
         checks.assert_type(ts, pd.Series)
-        checks.assert_same_index(self._obj, ts)
+        checks.assert_index_equal(self._obj.index, ts.index)
 
         if fig is None:
             fig = CustomFigureWidget()
@@ -1381,7 +1380,8 @@ class Signals_DFAccessor(Signals_Accessor, Generic_DFAccessor):
         entries = self._obj
         checks.assert_type(ts, (pd.Series, pd.DataFrame))
 
-        entries, ts = reshape_fns.broadcast(entries, ts, **broadcast_kwargs, writeable=True)
+        broadcast_kwargs = merge_kwargs(dict(require_kwargs=dict(requirements=&#39;W&#39;)), broadcast_kwargs)
+        entries, ts = reshape_fns.broadcast(entries, ts, **broadcast_kwargs)
         stops = reshape_fns.broadcast_to_array_of(stops, entries.vbt.to_2d_array())
 
         # Build column hierarchy
@@ -1436,7 +1436,8 @@ class Signals_DFAccessor(Signals_Accessor, Generic_DFAccessor):
         entries = self._obj
         checks.assert_type(ts, (pd.Series, pd.DataFrame))
 
-        entries, ts = reshape_fns.broadcast(entries, ts, **broadcast_kwargs, writeable=True)
+        broadcast_kwargs = merge_kwargs(dict(require_kwargs=dict(requirements=&#39;W&#39;)), broadcast_kwargs)
+        entries, ts = reshape_fns.broadcast(entries, ts, **broadcast_kwargs)
         stops = reshape_fns.broadcast_to_array_of(stops, entries.vbt.to_2d_array())
 
         # Build column hierarchy
@@ -1499,7 +1500,7 @@ class Signals_DFAccessor(Signals_Accessor, Generic_DFAccessor):
         else:
             # Two input arrays
             obj, other = reshape_fns.broadcast(self._obj, other, **broadcast_kwargs)
-            checks.assert_dtype(other, np.bool_)
+            checks.assert_dtype(other, np.bool)
             result = nb.map_reduce_between_two_nb(
                 self.to_2d_array(), other.vbt.to_2d_array(), map_func_nb, reduce_func_nb, *args)
             return self.wrap_reduced(result)
@@ -1529,25 +1530,20 @@ class Signals_DFAccessor(Signals_Accessor, Generic_DFAccessor):
         result = nb.map_reduce_partitions_nb(self.to_2d_array(), map_func_nb, reduce_func_nb, *args)
         return self.wrap_reduced(result)
 
-    @cached_property
     def num_signals(self):
         &#34;&#34;&#34;Sum up `True` values.&#34;&#34;&#34;
         return self.sum()
 
-    @cached_property
-    def avg_distance(self):
-        &#34;&#34;&#34;Calculate the average distance between `True` values in `self`.
+    def avg_distance(self, to=None, **kwargs):
+        &#34;&#34;&#34;Calculate the average distance between `True` values in `self` and optionally `to`.
 
         See `Signals_Accessor.map_reduce_between`.&#34;&#34;&#34;
         return self.map_reduce_between(
-            other=None, map_func_nb=nb.distance_map_nb, reduce_func_nb=nb.mean_reduce_nb)
-
-    def avg_distance_to(self, other, **kwargs):
-        &#34;&#34;&#34;Calculate the average distance between `True` values in `self` and `other`.
-
-        See `Signals_Accessor.map_reduce_between`.&#34;&#34;&#34;
-        return self.map_reduce_between(
-            other=other, map_func_nb=nb.distance_map_nb, reduce_func_nb=nb.mean_reduce_nb, **kwargs)
+            other=to,
+            map_func_nb=nb.distance_map_nb,
+            reduce_func_nb=nb.mean_reduce_nb,
+            **kwargs
+        )
 
     # ############# Ranking ############# #
 
@@ -1690,6 +1686,8 @@ class Signals_DFAccessor(Signals_Accessor, Generic_DFAccessor):
 <li><a title="vectorbt.generic.accessors.Generic_Accessor" href="../generic/accessors.html#vectorbt.generic.accessors.Generic_Accessor">Generic_Accessor</a></li>
 <li><a title="vectorbt.base.accessors.Base_Accessor" href="../base/accessors.html#vectorbt.base.accessors.Base_Accessor">Base_Accessor</a></li>
 <li><a title="vectorbt.base.array_wrapper.ArrayWrapper" href="../base/array_wrapper.html#vectorbt.base.array_wrapper.ArrayWrapper">ArrayWrapper</a></li>
+<li><a title="vectorbt.utils.config.Configured" href="../utils/config.html#vectorbt.utils.config.Configured">Configured</a></li>
+<li><a title="vectorbt.base.indexing.PandasIndexer" href="../base/indexing.html#vectorbt.base.indexing.PandasIndexer">PandasIndexer</a></li>
 </ul>
 <h3 class="section-subtitle">Subclasses</h3>
 <ul class="hlist">
@@ -2177,58 +2175,6 @@ def generate_random_both(cls, shape, n=None, entry_prob=None, exit_prob=None, se
 </details>
 </dd>
 </dl>
-<h3 class="section-subtitle">Instance variables</h3>
-<dl>
-<dt id="vectorbt.signals.accessors.Signals_Accessor.avg_distance"><code class="name">var <span class="ident fname">avg_distance</span></code></dt>
-<dd>
-<div class="desc"><p>Calculate the average distance between <code>True</code> values in <code>self</code>.</p>
-<p>See <code><a title="vectorbt.signals.accessors.Signals_Accessor.map_reduce_between" href="#vectorbt.signals.accessors.Signals_Accessor.map_reduce_between">Signals_Accessor.map_reduce_between()</a></code>.</p></div>
-<details class="source">
-<summary>
-<span>Expand source code</span>
-</summary>
-<pre><code class="python">def __get__(self, instance, owner=None):
-    if instance is None:
-        return self
-    if not defaults.caching or self.disabled:  # you can manually disable cache here
-        return super().__get__(instance, owner=owner)
-    cache = instance.__dict__
-    val = cache.get(self.attrname, _NOT_FOUND)
-    if val is _NOT_FOUND:
-        with self.lock:
-            # check if another thread filled cache while we awaited lock
-            val = cache.get(self.attrname, _NOT_FOUND)
-            if val is _NOT_FOUND:
-                val = self.func(instance)
-                cache[self.attrname] = val
-    return val</code></pre>
-</details>
-</dd>
-<dt id="vectorbt.signals.accessors.Signals_Accessor.num_signals"><code class="name">var <span class="ident fname">num_signals</span></code></dt>
-<dd>
-<div class="desc"><p>Sum up <code>True</code> values.</p></div>
-<details class="source">
-<summary>
-<span>Expand source code</span>
-</summary>
-<pre><code class="python">def __get__(self, instance, owner=None):
-    if instance is None:
-        return self
-    if not defaults.caching or self.disabled:  # you can manually disable cache here
-        return super().__get__(instance, owner=owner)
-    cache = instance.__dict__
-    val = cache.get(self.attrname, _NOT_FOUND)
-    if val is _NOT_FOUND:
-        with self.lock:
-            # check if another thread filled cache while we awaited lock
-            val = cache.get(self.attrname, _NOT_FOUND)
-            if val is _NOT_FOUND:
-                val = self.func(instance)
-                cache[self.attrname] = val
-    return val</code></pre>
-</details>
-</dd>
-</dl>
 <h3 class="section-subtitle">Methods</h3>
 <dl>
 <dt id="vectorbt.signals.accessors.Signals_Accessor.AND"><code class="name flex">
@@ -2310,22 +2256,26 @@ def generate_random_both(cls, shape, n=None, entry_prob=None, exit_prob=None, se
     return self.combine_with_multiple(others, combine_func=np.logical_xor, **kwargs)</code></pre>
 </details>
 </dd>
-<dt id="vectorbt.signals.accessors.Signals_Accessor.avg_distance_to"><code class="name flex">
-<span>def <span class="ident fname">avg_distance_to</span></span>(<span>self, other, **kwargs)</span>
+<dt id="vectorbt.signals.accessors.Signals_Accessor.avg_distance"><code class="name flex">
+<span>def <span class="ident fname">avg_distance</span></span>(<span>self, to=None, **kwargs)</span>
 </code></dt>
 <dd>
-<div class="desc"><p>Calculate the average distance between <code>True</code> values in <code>self</code> and <code>other</code>.</p>
+<div class="desc"><p>Calculate the average distance between <code>True</code> values in <code>self</code> and optionally <code>to</code>.</p>
 <p>See <code><a title="vectorbt.signals.accessors.Signals_Accessor.map_reduce_between" href="#vectorbt.signals.accessors.Signals_Accessor.map_reduce_between">Signals_Accessor.map_reduce_between()</a></code>.</p></div>
 <details class="source">
 <summary>
 <span>Expand source code</span>
 </summary>
-<pre><code class="python">def avg_distance_to(self, other, **kwargs):
-    &#34;&#34;&#34;Calculate the average distance between `True` values in `self` and `other`.
+<pre><code class="python">def avg_distance(self, to=None, **kwargs):
+    &#34;&#34;&#34;Calculate the average distance between `True` values in `self` and optionally `to`.
 
     See `Signals_Accessor.map_reduce_between`.&#34;&#34;&#34;
     return self.map_reduce_between(
-        other=other, map_func_nb=nb.distance_map_nb, reduce_func_nb=nb.mean_reduce_nb, **kwargs)</code></pre>
+        other=to,
+        map_func_nb=nb.distance_map_nb,
+        reduce_func_nb=nb.mean_reduce_nb,
+        **kwargs
+    )</code></pre>
 </details>
 </dd>
 <dt id="vectorbt.signals.accessors.Signals_Accessor.first"><code class="name flex">
@@ -2562,7 +2512,8 @@ trail_stop                  0.1                  0.5
     entries = self._obj
     checks.assert_type(ts, (pd.Series, pd.DataFrame))
 
-    entries, ts = reshape_fns.broadcast(entries, ts, **broadcast_kwargs, writeable=True)
+    broadcast_kwargs = merge_kwargs(dict(require_kwargs=dict(requirements=&#39;W&#39;)), broadcast_kwargs)
+    entries, ts = reshape_fns.broadcast(entries, ts, **broadcast_kwargs)
     stops = reshape_fns.broadcast_to_array_of(stops, entries.vbt.to_2d_array())
 
     # Build column hierarchy
@@ -2645,7 +2596,8 @@ take_profit                  0.1                  0.5
     entries = self._obj
     checks.assert_type(ts, (pd.Series, pd.DataFrame))
 
-    entries, ts = reshape_fns.broadcast(entries, ts, **broadcast_kwargs, writeable=True)
+    broadcast_kwargs = merge_kwargs(dict(require_kwargs=dict(requirements=&#39;W&#39;)), broadcast_kwargs)
+    entries, ts = reshape_fns.broadcast(entries, ts, **broadcast_kwargs)
     stops = reshape_fns.broadcast_to_array_of(stops, entries.vbt.to_2d_array())
 
     # Build column hierarchy
@@ -2732,7 +2684,7 @@ dtype: float64
     else:
         # Two input arrays
         obj, other = reshape_fns.broadcast(self._obj, other, **broadcast_kwargs)
-        checks.assert_dtype(other, np.bool_)
+        checks.assert_dtype(other, np.bool)
         result = nb.map_reduce_between_two_nb(
             self.to_2d_array(), other.vbt.to_2d_array(), map_func_nb, reduce_func_nb, *args)
         return self.wrap_reduced(result)</code></pre>
@@ -2798,6 +2750,20 @@ dtype: float64
 <pre><code class="python">def nst(self, n, **kwargs):
     &#34;&#34;&#34;`vectorbt.signals.nb.rank_nb` == n.&#34;&#34;&#34;
     return self.wrap(self.rank(**kwargs).values == n)</code></pre>
+</details>
+</dd>
+<dt id="vectorbt.signals.accessors.Signals_Accessor.num_signals"><code class="name flex">
+<span>def <span class="ident fname">num_signals</span></span>(<span>self)</span>
+</code></dt>
+<dd>
+<div class="desc"><p>Sum up <code>True</code> values.</p></div>
+<details class="source">
+<summary>
+<span>Expand source code</span>
+</summary>
+<pre><code class="python">def num_signals(self):
+    &#34;&#34;&#34;Sum up `True` values.&#34;&#34;&#34;
+    return self.sum()</code></pre>
 </details>
 </dd>
 <dt id="vectorbt.signals.accessors.Signals_Accessor.rank"><code class="name flex">
@@ -3000,10 +2966,13 @@ dtype: float64
 <li><code><a title="vectorbt.generic.accessors.Generic_Accessor.box" href="../generic/accessors.html#vectorbt.generic.accessors.Generic_Accessor.box">box</a></code></li>
 <li><code><a title="vectorbt.generic.accessors.Generic_Accessor.broadcast" href="../base/accessors.html#vectorbt.base.accessors.Base_Accessor.broadcast">broadcast</a></code></li>
 <li><code><a title="vectorbt.generic.accessors.Generic_Accessor.broadcast_to" href="../base/accessors.html#vectorbt.base.accessors.Base_Accessor.broadcast_to">broadcast_to</a></code></li>
+<li><code><a title="vectorbt.generic.accessors.Generic_Accessor.column_only_select" href="../base/array_wrapper.html#vectorbt.base.array_wrapper.ArrayWrapper.column_only_select">column_only_select</a></code></li>
 <li><code><a title="vectorbt.generic.accessors.Generic_Accessor.columns" href="../base/array_wrapper.html#vectorbt.base.array_wrapper.ArrayWrapper.columns">columns</a></code></li>
 <li><code><a title="vectorbt.generic.accessors.Generic_Accessor.combine_with" href="../base/accessors.html#vectorbt.base.accessors.Base_Accessor.combine_with">combine_with</a></code></li>
 <li><code><a title="vectorbt.generic.accessors.Generic_Accessor.combine_with_multiple" href="../base/accessors.html#vectorbt.base.accessors.Base_Accessor.combine_with_multiple">combine_with_multiple</a></code></li>
 <li><code><a title="vectorbt.generic.accessors.Generic_Accessor.concat" href="../base/accessors.html#vectorbt.base.accessors.Base_Accessor.concat">concat</a></code></li>
+<li><code><a title="vectorbt.generic.accessors.Generic_Accessor.config" href="../utils/config.html#vectorbt.utils.config.Configured.config">config</a></code></li>
+<li><code><a title="vectorbt.generic.accessors.Generic_Accessor.copy" href="../utils/config.html#vectorbt.utils.config.Configured.copy">copy</a></code></li>
 <li><code><a title="vectorbt.generic.accessors.Generic_Accessor.count" href="../generic/accessors.html#vectorbt.generic.accessors.Generic_Accessor.count">count</a></code></li>
 <li><code><a title="vectorbt.generic.accessors.Generic_Accessor.cumprod" href="../generic/accessors.html#vectorbt.generic.accessors.Generic_Accessor.cumprod">cumprod</a></code></li>
 <li><code><a title="vectorbt.generic.accessors.Generic_Accessor.cumsum" href="../generic/accessors.html#vectorbt.generic.accessors.Generic_Accessor.cumsum">cumsum</a></code></li>
@@ -3014,20 +2983,28 @@ dtype: float64
 <li><code><a title="vectorbt.generic.accessors.Generic_Accessor.drop_duplicate_levels" href="../base/accessors.html#vectorbt.base.accessors.Base_Accessor.drop_duplicate_levels">drop_duplicate_levels</a></code></li>
 <li><code><a title="vectorbt.generic.accessors.Generic_Accessor.drop_levels" href="../base/accessors.html#vectorbt.base.accessors.Base_Accessor.drop_levels">drop_levels</a></code></li>
 <li><code><a title="vectorbt.generic.accessors.Generic_Accessor.drop_redundant_levels" href="../base/accessors.html#vectorbt.base.accessors.Base_Accessor.drop_redundant_levels">drop_redundant_levels</a></code></li>
+<li><code><a title="vectorbt.generic.accessors.Generic_Accessor.ewm_mean" href="../generic/accessors.html#vectorbt.generic.accessors.Generic_Accessor.ewm_mean">ewm_mean</a></code></li>
+<li><code><a title="vectorbt.generic.accessors.Generic_Accessor.ewm_std" href="../generic/accessors.html#vectorbt.generic.accessors.Generic_Accessor.ewm_std">ewm_std</a></code></li>
 <li><code><a title="vectorbt.generic.accessors.Generic_Accessor.expanding_apply" href="../generic/accessors.html#vectorbt.generic.accessors.Generic_Accessor.expanding_apply">expanding_apply</a></code></li>
 <li><code><a title="vectorbt.generic.accessors.Generic_Accessor.expanding_max" href="../generic/accessors.html#vectorbt.generic.accessors.Generic_Accessor.expanding_max">expanding_max</a></code></li>
 <li><code><a title="vectorbt.generic.accessors.Generic_Accessor.expanding_mean" href="../generic/accessors.html#vectorbt.generic.accessors.Generic_Accessor.expanding_mean">expanding_mean</a></code></li>
 <li><code><a title="vectorbt.generic.accessors.Generic_Accessor.expanding_min" href="../generic/accessors.html#vectorbt.generic.accessors.Generic_Accessor.expanding_min">expanding_min</a></code></li>
+<li><code><a title="vectorbt.generic.accessors.Generic_Accessor.expanding_std" href="../generic/accessors.html#vectorbt.generic.accessors.Generic_Accessor.expanding_std">expanding_std</a></code></li>
 <li><code><a title="vectorbt.generic.accessors.Generic_Accessor.ffill" href="../generic/accessors.html#vectorbt.generic.accessors.Generic_Accessor.ffill">ffill</a></code></li>
 <li><code><a title="vectorbt.generic.accessors.Generic_Accessor.fillna" href="../generic/accessors.html#vectorbt.generic.accessors.Generic_Accessor.fillna">fillna</a></code></li>
 <li><code><a title="vectorbt.generic.accessors.Generic_Accessor.filter" href="../generic/accessors.html#vectorbt.generic.accessors.Generic_Accessor.filter">filter</a></code></li>
 <li><code><a title="vectorbt.generic.accessors.Generic_Accessor.freq" href="../base/array_wrapper.html#vectorbt.base.array_wrapper.ArrayWrapper.freq">freq</a></code></li>
 <li><code><a title="vectorbt.generic.accessors.Generic_Accessor.from_obj" href="../base/array_wrapper.html#vectorbt.base.array_wrapper.ArrayWrapper.from_obj">from_obj</a></code></li>
+<li><code><a title="vectorbt.generic.accessors.Generic_Accessor.group_select" href="../base/array_wrapper.html#vectorbt.base.array_wrapper.ArrayWrapper.group_select">group_select</a></code></li>
 <li><code><a title="vectorbt.generic.accessors.Generic_Accessor.groupby_apply" href="../generic/accessors.html#vectorbt.generic.accessors.Generic_Accessor.groupby_apply">groupby_apply</a></code></li>
+<li><code><a title="vectorbt.generic.accessors.Generic_Accessor.grouped_ndim" href="../base/array_wrapper.html#vectorbt.base.array_wrapper.ArrayWrapper.grouped_ndim">grouped_ndim</a></code></li>
+<li><code><a title="vectorbt.generic.accessors.Generic_Accessor.grouper" href="../base/array_wrapper.html#vectorbt.base.array_wrapper.ArrayWrapper.grouper">grouper</a></code></li>
 <li><code><a title="vectorbt.generic.accessors.Generic_Accessor.hist" href="../generic/accessors.html#vectorbt.generic.accessors.Generic_Accessor.hist">hist</a></code></li>
 <li><code><a title="vectorbt.generic.accessors.Generic_Accessor.idxmax" href="../generic/accessors.html#vectorbt.generic.accessors.Generic_Accessor.idxmax">idxmax</a></code></li>
 <li><code><a title="vectorbt.generic.accessors.Generic_Accessor.idxmin" href="../generic/accessors.html#vectorbt.generic.accessors.Generic_Accessor.idxmin">idxmin</a></code></li>
+<li><code><a title="vectorbt.generic.accessors.Generic_Accessor.iloc" href="../base/indexing.html#vectorbt.base.indexing.PandasIndexer.iloc">iloc</a></code></li>
 <li><code><a title="vectorbt.generic.accessors.Generic_Accessor.index" href="../base/array_wrapper.html#vectorbt.base.array_wrapper.ArrayWrapper.index">index</a></code></li>
+<li><code><a title="vectorbt.generic.accessors.Generic_Accessor.loc" href="../base/indexing.html#vectorbt.base.indexing.PandasIndexer.loc">loc</a></code></li>
 <li><code><a title="vectorbt.generic.accessors.Generic_Accessor.make_symmetric" href="../base/accessors.html#vectorbt.base.accessors.Base_Accessor.make_symmetric">make_symmetric</a></code></li>
 <li><code><a title="vectorbt.generic.accessors.Generic_Accessor.max" href="../generic/accessors.html#vectorbt.generic.accessors.Generic_Accessor.max">max</a></code></li>
 <li><code><a title="vectorbt.generic.accessors.Generic_Accessor.mean" href="../generic/accessors.html#vectorbt.generic.accessors.Generic_Accessor.mean">mean</a></code></li>
@@ -3039,6 +3016,7 @@ dtype: float64
 <li><code><a title="vectorbt.generic.accessors.Generic_Accessor.product" href="../generic/accessors.html#vectorbt.generic.accessors.Generic_Accessor.product">product</a></code></li>
 <li><code><a title="vectorbt.generic.accessors.Generic_Accessor.reduce" href="../generic/accessors.html#vectorbt.generic.accessors.Generic_Accessor.reduce">reduce</a></code></li>
 <li><code><a title="vectorbt.generic.accessors.Generic_Accessor.reduce_to_array" href="../generic/accessors.html#vectorbt.generic.accessors.Generic_Accessor.reduce_to_array">reduce_to_array</a></code></li>
+<li><code><a title="vectorbt.generic.accessors.Generic_Accessor.regroup" href="../base/array_wrapper.html#vectorbt.base.array_wrapper.ArrayWrapper.regroup">regroup</a></code></li>
 <li><code><a title="vectorbt.generic.accessors.Generic_Accessor.rename_levels" href="../base/accessors.html#vectorbt.base.accessors.Base_Accessor.rename_levels">rename_levels</a></code></li>
 <li><code><a title="vectorbt.generic.accessors.Generic_Accessor.repeat" href="../base/accessors.html#vectorbt.base.accessors.Base_Accessor.repeat">repeat</a></code></li>
 <li><code><a title="vectorbt.generic.accessors.Generic_Accessor.resample_apply" href="../generic/accessors.html#vectorbt.generic.accessors.Generic_Accessor.resample_apply">resample_apply</a></code></li>
@@ -3046,9 +3024,11 @@ dtype: float64
 <li><code><a title="vectorbt.generic.accessors.Generic_Accessor.rolling_max" href="../generic/accessors.html#vectorbt.generic.accessors.Generic_Accessor.rolling_max">rolling_max</a></code></li>
 <li><code><a title="vectorbt.generic.accessors.Generic_Accessor.rolling_mean" href="../generic/accessors.html#vectorbt.generic.accessors.Generic_Accessor.rolling_mean">rolling_mean</a></code></li>
 <li><code><a title="vectorbt.generic.accessors.Generic_Accessor.rolling_min" href="../generic/accessors.html#vectorbt.generic.accessors.Generic_Accessor.rolling_min">rolling_min</a></code></li>
+<li><code><a title="vectorbt.generic.accessors.Generic_Accessor.rolling_std" href="../generic/accessors.html#vectorbt.generic.accessors.Generic_Accessor.rolling_std">rolling_std</a></code></li>
 <li><code><a title="vectorbt.generic.accessors.Generic_Accessor.scatter" href="../generic/accessors.html#vectorbt.generic.accessors.Generic_Accessor.scatter">scatter</a></code></li>
 <li><code><a title="vectorbt.generic.accessors.Generic_Accessor.select_levels" href="../base/accessors.html#vectorbt.base.accessors.Base_Accessor.select_levels">select_levels</a></code></li>
 <li><code><a title="vectorbt.generic.accessors.Generic_Accessor.shape" href="../base/array_wrapper.html#vectorbt.base.array_wrapper.ArrayWrapper.shape">shape</a></code></li>
+<li><code><a title="vectorbt.generic.accessors.Generic_Accessor.shape_2d" href="../base/array_wrapper.html#vectorbt.base.array_wrapper.ArrayWrapper.shape_2d">shape_2d</a></code></li>
 <li><code><a title="vectorbt.generic.accessors.Generic_Accessor.split_into_ranges" href="../generic/accessors.html#vectorbt.generic.accessors.Generic_Accessor.split_into_ranges">split_into_ranges</a></code></li>
 <li><code><a title="vectorbt.generic.accessors.Generic_Accessor.stack_index" href="../base/accessors.html#vectorbt.base.accessors.Base_Accessor.stack_index">stack_index</a></code></li>
 <li><code><a title="vectorbt.generic.accessors.Generic_Accessor.std" href="../generic/accessors.html#vectorbt.generic.accessors.Generic_Accessor.std">std</a></code></li>
@@ -3061,6 +3041,7 @@ dtype: float64
 <li><code><a title="vectorbt.generic.accessors.Generic_Accessor.unstack_to_df" href="../base/accessors.html#vectorbt.base.accessors.Base_Accessor.unstack_to_df">unstack_to_df</a></code></li>
 <li><code><a title="vectorbt.generic.accessors.Generic_Accessor.wrap" href="../base/array_wrapper.html#vectorbt.base.array_wrapper.ArrayWrapper.wrap">wrap</a></code></li>
 <li><code><a title="vectorbt.generic.accessors.Generic_Accessor.wrap_reduced" href="../base/array_wrapper.html#vectorbt.base.array_wrapper.ArrayWrapper.wrap_reduced">wrap_reduced</a></code></li>
+<li><code><a title="vectorbt.generic.accessors.Generic_Accessor.xs" href="../base/indexing.html#vectorbt.base.indexing.PandasIndexer.xs">xs</a></code></li>
 </ul>
 </li>
 </ul>
@@ -3119,6 +3100,8 @@ dtype: float64
 <li><a title="vectorbt.base.accessors.Base_DFAccessor" href="../base/accessors.html#vectorbt.base.accessors.Base_DFAccessor">Base_DFAccessor</a></li>
 <li><a title="vectorbt.base.accessors.Base_Accessor" href="../base/accessors.html#vectorbt.base.accessors.Base_Accessor">Base_Accessor</a></li>
 <li><a title="vectorbt.base.array_wrapper.ArrayWrapper" href="../base/array_wrapper.html#vectorbt.base.array_wrapper.ArrayWrapper">ArrayWrapper</a></li>
+<li><a title="vectorbt.utils.config.Configured" href="../utils/config.html#vectorbt.utils.config.Configured">Configured</a></li>
+<li><a title="vectorbt.base.indexing.PandasIndexer" href="../base/indexing.html#vectorbt.base.indexing.PandasIndexer">PandasIndexer</a></li>
 </ul>
 <h3 class="section-subtitle">Methods</h3>
 <dl>
@@ -3183,15 +3166,17 @@ dtype: float64
 <li><code><a title="vectorbt.signals.accessors.Signals_Accessor.apply_on_index" href="../base/accessors.html#vectorbt.base.accessors.Base_Accessor.apply_on_index">apply_on_index</a></code></li>
 <li><code><a title="vectorbt.signals.accessors.Signals_Accessor.applymap" href="../generic/accessors.html#vectorbt.generic.accessors.Generic_Accessor.applymap">applymap</a></code></li>
 <li><code><a title="vectorbt.signals.accessors.Signals_Accessor.avg_distance" href="#vectorbt.signals.accessors.Signals_Accessor.avg_distance">avg_distance</a></code></li>
-<li><code><a title="vectorbt.signals.accessors.Signals_Accessor.avg_distance_to" href="#vectorbt.signals.accessors.Signals_Accessor.avg_distance_to">avg_distance_to</a></code></li>
 <li><code><a title="vectorbt.signals.accessors.Signals_Accessor.bar" href="../generic/accessors.html#vectorbt.generic.accessors.Generic_Accessor.bar">bar</a></code></li>
 <li><code><a title="vectorbt.signals.accessors.Signals_Accessor.box" href="../generic/accessors.html#vectorbt.generic.accessors.Generic_Accessor.box">box</a></code></li>
 <li><code><a title="vectorbt.signals.accessors.Signals_Accessor.broadcast" href="../base/accessors.html#vectorbt.base.accessors.Base_Accessor.broadcast">broadcast</a></code></li>
 <li><code><a title="vectorbt.signals.accessors.Signals_Accessor.broadcast_to" href="../base/accessors.html#vectorbt.base.accessors.Base_Accessor.broadcast_to">broadcast_to</a></code></li>
+<li><code><a title="vectorbt.signals.accessors.Signals_Accessor.column_only_select" href="../base/array_wrapper.html#vectorbt.base.array_wrapper.ArrayWrapper.column_only_select">column_only_select</a></code></li>
 <li><code><a title="vectorbt.signals.accessors.Signals_Accessor.columns" href="../base/array_wrapper.html#vectorbt.base.array_wrapper.ArrayWrapper.columns">columns</a></code></li>
 <li><code><a title="vectorbt.signals.accessors.Signals_Accessor.combine_with" href="../base/accessors.html#vectorbt.base.accessors.Base_Accessor.combine_with">combine_with</a></code></li>
 <li><code><a title="vectorbt.signals.accessors.Signals_Accessor.combine_with_multiple" href="../base/accessors.html#vectorbt.base.accessors.Base_Accessor.combine_with_multiple">combine_with_multiple</a></code></li>
 <li><code><a title="vectorbt.signals.accessors.Signals_Accessor.concat" href="../base/accessors.html#vectorbt.base.accessors.Base_Accessor.concat">concat</a></code></li>
+<li><code><a title="vectorbt.signals.accessors.Signals_Accessor.config" href="../utils/config.html#vectorbt.utils.config.Configured.config">config</a></code></li>
+<li><code><a title="vectorbt.signals.accessors.Signals_Accessor.copy" href="../utils/config.html#vectorbt.utils.config.Configured.copy">copy</a></code></li>
 <li><code><a title="vectorbt.signals.accessors.Signals_Accessor.count" href="../generic/accessors.html#vectorbt.generic.accessors.Generic_Accessor.count">count</a></code></li>
 <li><code><a title="vectorbt.signals.accessors.Signals_Accessor.cumprod" href="../generic/accessors.html#vectorbt.generic.accessors.Generic_Accessor.cumprod">cumprod</a></code></li>
 <li><code><a title="vectorbt.signals.accessors.Signals_Accessor.cumsum" href="../generic/accessors.html#vectorbt.generic.accessors.Generic_Accessor.cumsum">cumsum</a></code></li>
@@ -3204,10 +3189,13 @@ dtype: float64
 <li><code><a title="vectorbt.signals.accessors.Signals_Accessor.drop_redundant_levels" href="../base/accessors.html#vectorbt.base.accessors.Base_Accessor.drop_redundant_levels">drop_redundant_levels</a></code></li>
 <li><code><a title="vectorbt.signals.accessors.Signals_Accessor.empty" href="#vectorbt.signals.accessors.Signals_Accessor.empty">empty</a></code></li>
 <li><code><a title="vectorbt.signals.accessors.Signals_Accessor.empty_like" href="#vectorbt.signals.accessors.Signals_Accessor.empty_like">empty_like</a></code></li>
+<li><code><a title="vectorbt.signals.accessors.Signals_Accessor.ewm_mean" href="../generic/accessors.html#vectorbt.generic.accessors.Generic_Accessor.ewm_mean">ewm_mean</a></code></li>
+<li><code><a title="vectorbt.signals.accessors.Signals_Accessor.ewm_std" href="../generic/accessors.html#vectorbt.generic.accessors.Generic_Accessor.ewm_std">ewm_std</a></code></li>
 <li><code><a title="vectorbt.signals.accessors.Signals_Accessor.expanding_apply" href="../generic/accessors.html#vectorbt.generic.accessors.Generic_Accessor.expanding_apply">expanding_apply</a></code></li>
 <li><code><a title="vectorbt.signals.accessors.Signals_Accessor.expanding_max" href="../generic/accessors.html#vectorbt.generic.accessors.Generic_Accessor.expanding_max">expanding_max</a></code></li>
 <li><code><a title="vectorbt.signals.accessors.Signals_Accessor.expanding_mean" href="../generic/accessors.html#vectorbt.generic.accessors.Generic_Accessor.expanding_mean">expanding_mean</a></code></li>
 <li><code><a title="vectorbt.signals.accessors.Signals_Accessor.expanding_min" href="../generic/accessors.html#vectorbt.generic.accessors.Generic_Accessor.expanding_min">expanding_min</a></code></li>
+<li><code><a title="vectorbt.signals.accessors.Signals_Accessor.expanding_std" href="../generic/accessors.html#vectorbt.generic.accessors.Generic_Accessor.expanding_std">expanding_std</a></code></li>
 <li><code><a title="vectorbt.signals.accessors.Signals_Accessor.ffill" href="../generic/accessors.html#vectorbt.generic.accessors.Generic_Accessor.ffill">ffill</a></code></li>
 <li><code><a title="vectorbt.signals.accessors.Signals_Accessor.fillna" href="../generic/accessors.html#vectorbt.generic.accessors.Generic_Accessor.fillna">fillna</a></code></li>
 <li><code><a title="vectorbt.signals.accessors.Signals_Accessor.filter" href="../generic/accessors.html#vectorbt.generic.accessors.Generic_Accessor.filter">filter</a></code></li>
@@ -3224,11 +3212,16 @@ dtype: float64
 <li><code><a title="vectorbt.signals.accessors.Signals_Accessor.generate_random_exits" href="#vectorbt.signals.accessors.Signals_Accessor.generate_random_exits">generate_random_exits</a></code></li>
 <li><code><a title="vectorbt.signals.accessors.Signals_Accessor.generate_stop_loss_exits" href="#vectorbt.signals.accessors.Signals_Accessor.generate_stop_loss_exits">generate_stop_loss_exits</a></code></li>
 <li><code><a title="vectorbt.signals.accessors.Signals_Accessor.generate_take_profit_exits" href="#vectorbt.signals.accessors.Signals_Accessor.generate_take_profit_exits">generate_take_profit_exits</a></code></li>
+<li><code><a title="vectorbt.signals.accessors.Signals_Accessor.group_select" href="../base/array_wrapper.html#vectorbt.base.array_wrapper.ArrayWrapper.group_select">group_select</a></code></li>
 <li><code><a title="vectorbt.signals.accessors.Signals_Accessor.groupby_apply" href="../generic/accessors.html#vectorbt.generic.accessors.Generic_Accessor.groupby_apply">groupby_apply</a></code></li>
+<li><code><a title="vectorbt.signals.accessors.Signals_Accessor.grouped_ndim" href="../base/array_wrapper.html#vectorbt.base.array_wrapper.ArrayWrapper.grouped_ndim">grouped_ndim</a></code></li>
+<li><code><a title="vectorbt.signals.accessors.Signals_Accessor.grouper" href="../base/array_wrapper.html#vectorbt.base.array_wrapper.ArrayWrapper.grouper">grouper</a></code></li>
 <li><code><a title="vectorbt.signals.accessors.Signals_Accessor.hist" href="../generic/accessors.html#vectorbt.generic.accessors.Generic_Accessor.hist">hist</a></code></li>
 <li><code><a title="vectorbt.signals.accessors.Signals_Accessor.idxmax" href="../generic/accessors.html#vectorbt.generic.accessors.Generic_Accessor.idxmax">idxmax</a></code></li>
 <li><code><a title="vectorbt.signals.accessors.Signals_Accessor.idxmin" href="../generic/accessors.html#vectorbt.generic.accessors.Generic_Accessor.idxmin">idxmin</a></code></li>
+<li><code><a title="vectorbt.signals.accessors.Signals_Accessor.iloc" href="../base/indexing.html#vectorbt.base.indexing.PandasIndexer.iloc">iloc</a></code></li>
 <li><code><a title="vectorbt.signals.accessors.Signals_Accessor.index" href="../base/array_wrapper.html#vectorbt.base.array_wrapper.ArrayWrapper.index">index</a></code></li>
+<li><code><a title="vectorbt.signals.accessors.Signals_Accessor.loc" href="../base/indexing.html#vectorbt.base.indexing.PandasIndexer.loc">loc</a></code></li>
 <li><code><a title="vectorbt.signals.accessors.Signals_Accessor.make_symmetric" href="../base/accessors.html#vectorbt.base.accessors.Base_Accessor.make_symmetric">make_symmetric</a></code></li>
 <li><code><a title="vectorbt.signals.accessors.Signals_Accessor.map_reduce_between" href="#vectorbt.signals.accessors.Signals_Accessor.map_reduce_between">map_reduce_between</a></code></li>
 <li><code><a title="vectorbt.signals.accessors.Signals_Accessor.map_reduce_partitions" href="#vectorbt.signals.accessors.Signals_Accessor.map_reduce_partitions">map_reduce_partitions</a></code></li>
@@ -3246,6 +3239,7 @@ dtype: float64
 <li><code><a title="vectorbt.signals.accessors.Signals_Accessor.rank_partitions" href="#vectorbt.signals.accessors.Signals_Accessor.rank_partitions">rank_partitions</a></code></li>
 <li><code><a title="vectorbt.signals.accessors.Signals_Accessor.reduce" href="../generic/accessors.html#vectorbt.generic.accessors.Generic_Accessor.reduce">reduce</a></code></li>
 <li><code><a title="vectorbt.signals.accessors.Signals_Accessor.reduce_to_array" href="../generic/accessors.html#vectorbt.generic.accessors.Generic_Accessor.reduce_to_array">reduce_to_array</a></code></li>
+<li><code><a title="vectorbt.signals.accessors.Signals_Accessor.regroup" href="../base/array_wrapper.html#vectorbt.base.array_wrapper.ArrayWrapper.regroup">regroup</a></code></li>
 <li><code><a title="vectorbt.signals.accessors.Signals_Accessor.rename_levels" href="../base/accessors.html#vectorbt.base.accessors.Base_Accessor.rename_levels">rename_levels</a></code></li>
 <li><code><a title="vectorbt.signals.accessors.Signals_Accessor.repeat" href="../base/accessors.html#vectorbt.base.accessors.Base_Accessor.repeat">repeat</a></code></li>
 <li><code><a title="vectorbt.signals.accessors.Signals_Accessor.resample_apply" href="../generic/accessors.html#vectorbt.generic.accessors.Generic_Accessor.resample_apply">resample_apply</a></code></li>
@@ -3253,9 +3247,11 @@ dtype: float64
 <li><code><a title="vectorbt.signals.accessors.Signals_Accessor.rolling_max" href="../generic/accessors.html#vectorbt.generic.accessors.Generic_Accessor.rolling_max">rolling_max</a></code></li>
 <li><code><a title="vectorbt.signals.accessors.Signals_Accessor.rolling_mean" href="../generic/accessors.html#vectorbt.generic.accessors.Generic_Accessor.rolling_mean">rolling_mean</a></code></li>
 <li><code><a title="vectorbt.signals.accessors.Signals_Accessor.rolling_min" href="../generic/accessors.html#vectorbt.generic.accessors.Generic_Accessor.rolling_min">rolling_min</a></code></li>
+<li><code><a title="vectorbt.signals.accessors.Signals_Accessor.rolling_std" href="../generic/accessors.html#vectorbt.generic.accessors.Generic_Accessor.rolling_std">rolling_std</a></code></li>
 <li><code><a title="vectorbt.signals.accessors.Signals_Accessor.scatter" href="../generic/accessors.html#vectorbt.generic.accessors.Generic_Accessor.scatter">scatter</a></code></li>
 <li><code><a title="vectorbt.signals.accessors.Signals_Accessor.select_levels" href="../base/accessors.html#vectorbt.base.accessors.Base_Accessor.select_levels">select_levels</a></code></li>
 <li><code><a title="vectorbt.signals.accessors.Signals_Accessor.shape" href="../base/array_wrapper.html#vectorbt.base.array_wrapper.ArrayWrapper.shape">shape</a></code></li>
+<li><code><a title="vectorbt.signals.accessors.Signals_Accessor.shape_2d" href="../base/array_wrapper.html#vectorbt.base.array_wrapper.ArrayWrapper.shape_2d">shape_2d</a></code></li>
 <li><code><a title="vectorbt.signals.accessors.Signals_Accessor.shuffle" href="#vectorbt.signals.accessors.Signals_Accessor.shuffle">shuffle</a></code></li>
 <li><code><a title="vectorbt.signals.accessors.Signals_Accessor.split_into_ranges" href="../generic/accessors.html#vectorbt.generic.accessors.Generic_Accessor.split_into_ranges">split_into_ranges</a></code></li>
 <li><code><a title="vectorbt.signals.accessors.Signals_Accessor.stack_index" href="../base/accessors.html#vectorbt.base.accessors.Base_Accessor.stack_index">stack_index</a></code></li>
@@ -3269,6 +3265,7 @@ dtype: float64
 <li><code><a title="vectorbt.signals.accessors.Signals_Accessor.unstack_to_df" href="../base/accessors.html#vectorbt.base.accessors.Base_Accessor.unstack_to_df">unstack_to_df</a></code></li>
 <li><code><a title="vectorbt.signals.accessors.Signals_Accessor.wrap" href="../base/array_wrapper.html#vectorbt.base.array_wrapper.ArrayWrapper.wrap">wrap</a></code></li>
 <li><code><a title="vectorbt.signals.accessors.Signals_Accessor.wrap_reduced" href="../base/array_wrapper.html#vectorbt.base.array_wrapper.ArrayWrapper.wrap_reduced">wrap_reduced</a></code></li>
+<li><code><a title="vectorbt.signals.accessors.Signals_Accessor.xs" href="../base/indexing.html#vectorbt.base.indexing.PandasIndexer.xs">xs</a></code></li>
 </ul>
 </li>
 <li><code><b><a title="vectorbt.generic.accessors.Generic_DFAccessor" href="../generic/accessors.html#vectorbt.generic.accessors.Generic_DFAccessor">Generic_DFAccessor</a></b></code>:
@@ -3365,7 +3362,7 @@ dtype: float64
 
             ![](/vectorbt/docs/img/signals_plot_as_markers.png)&#34;&#34;&#34;
         checks.assert_type(ts, pd.Series)
-        checks.assert_same_index(self._obj, ts)
+        checks.assert_index_equal(self._obj.index, ts.index)
 
         if fig is None:
             fig = CustomFigureWidget()
@@ -3436,6 +3433,8 @@ dtype: float64
 <li><a title="vectorbt.base.accessors.Base_SRAccessor" href="../base/accessors.html#vectorbt.base.accessors.Base_SRAccessor">Base_SRAccessor</a></li>
 <li><a title="vectorbt.base.accessors.Base_Accessor" href="../base/accessors.html#vectorbt.base.accessors.Base_Accessor">Base_Accessor</a></li>
 <li><a title="vectorbt.base.array_wrapper.ArrayWrapper" href="../base/array_wrapper.html#vectorbt.base.array_wrapper.ArrayWrapper">ArrayWrapper</a></li>
+<li><a title="vectorbt.utils.config.Configured" href="../utils/config.html#vectorbt.utils.config.Configured">Configured</a></li>
+<li><a title="vectorbt.base.indexing.PandasIndexer" href="../base/indexing.html#vectorbt.base.indexing.PandasIndexer">PandasIndexer</a></li>
 </ul>
 <h3 class="section-subtitle">Methods</h3>
 <dl>
@@ -3619,7 +3618,7 @@ dtype: float64
 
         ![](/vectorbt/docs/img/signals_plot_as_markers.png)&#34;&#34;&#34;
     checks.assert_type(ts, pd.Series)
-    checks.assert_same_index(self._obj, ts)
+    checks.assert_index_equal(self._obj.index, ts.index)
 
     if fig is None:
         fig = CustomFigureWidget()
@@ -3664,15 +3663,17 @@ dtype: float64
 <li><code><a title="vectorbt.signals.accessors.Signals_Accessor.apply_on_index" href="../base/accessors.html#vectorbt.base.accessors.Base_Accessor.apply_on_index">apply_on_index</a></code></li>
 <li><code><a title="vectorbt.signals.accessors.Signals_Accessor.applymap" href="../generic/accessors.html#vectorbt.generic.accessors.Generic_Accessor.applymap">applymap</a></code></li>
 <li><code><a title="vectorbt.signals.accessors.Signals_Accessor.avg_distance" href="#vectorbt.signals.accessors.Signals_Accessor.avg_distance">avg_distance</a></code></li>
-<li><code><a title="vectorbt.signals.accessors.Signals_Accessor.avg_distance_to" href="#vectorbt.signals.accessors.Signals_Accessor.avg_distance_to">avg_distance_to</a></code></li>
 <li><code><a title="vectorbt.signals.accessors.Signals_Accessor.bar" href="../generic/accessors.html#vectorbt.generic.accessors.Generic_Accessor.bar">bar</a></code></li>
 <li><code><a title="vectorbt.signals.accessors.Signals_Accessor.box" href="../generic/accessors.html#vectorbt.generic.accessors.Generic_Accessor.box">box</a></code></li>
 <li><code><a title="vectorbt.signals.accessors.Signals_Accessor.broadcast" href="../base/accessors.html#vectorbt.base.accessors.Base_Accessor.broadcast">broadcast</a></code></li>
 <li><code><a title="vectorbt.signals.accessors.Signals_Accessor.broadcast_to" href="../base/accessors.html#vectorbt.base.accessors.Base_Accessor.broadcast_to">broadcast_to</a></code></li>
+<li><code><a title="vectorbt.signals.accessors.Signals_Accessor.column_only_select" href="../base/array_wrapper.html#vectorbt.base.array_wrapper.ArrayWrapper.column_only_select">column_only_select</a></code></li>
 <li><code><a title="vectorbt.signals.accessors.Signals_Accessor.columns" href="../base/array_wrapper.html#vectorbt.base.array_wrapper.ArrayWrapper.columns">columns</a></code></li>
 <li><code><a title="vectorbt.signals.accessors.Signals_Accessor.combine_with" href="../base/accessors.html#vectorbt.base.accessors.Base_Accessor.combine_with">combine_with</a></code></li>
 <li><code><a title="vectorbt.signals.accessors.Signals_Accessor.combine_with_multiple" href="../base/accessors.html#vectorbt.base.accessors.Base_Accessor.combine_with_multiple">combine_with_multiple</a></code></li>
 <li><code><a title="vectorbt.signals.accessors.Signals_Accessor.concat" href="../base/accessors.html#vectorbt.base.accessors.Base_Accessor.concat">concat</a></code></li>
+<li><code><a title="vectorbt.signals.accessors.Signals_Accessor.config" href="../utils/config.html#vectorbt.utils.config.Configured.config">config</a></code></li>
+<li><code><a title="vectorbt.signals.accessors.Signals_Accessor.copy" href="../utils/config.html#vectorbt.utils.config.Configured.copy">copy</a></code></li>
 <li><code><a title="vectorbt.signals.accessors.Signals_Accessor.count" href="../generic/accessors.html#vectorbt.generic.accessors.Generic_Accessor.count">count</a></code></li>
 <li><code><a title="vectorbt.signals.accessors.Signals_Accessor.cumprod" href="../generic/accessors.html#vectorbt.generic.accessors.Generic_Accessor.cumprod">cumprod</a></code></li>
 <li><code><a title="vectorbt.signals.accessors.Signals_Accessor.cumsum" href="../generic/accessors.html#vectorbt.generic.accessors.Generic_Accessor.cumsum">cumsum</a></code></li>
@@ -3685,10 +3686,13 @@ dtype: float64
 <li><code><a title="vectorbt.signals.accessors.Signals_Accessor.drop_redundant_levels" href="../base/accessors.html#vectorbt.base.accessors.Base_Accessor.drop_redundant_levels">drop_redundant_levels</a></code></li>
 <li><code><a title="vectorbt.signals.accessors.Signals_Accessor.empty" href="#vectorbt.signals.accessors.Signals_Accessor.empty">empty</a></code></li>
 <li><code><a title="vectorbt.signals.accessors.Signals_Accessor.empty_like" href="#vectorbt.signals.accessors.Signals_Accessor.empty_like">empty_like</a></code></li>
+<li><code><a title="vectorbt.signals.accessors.Signals_Accessor.ewm_mean" href="../generic/accessors.html#vectorbt.generic.accessors.Generic_Accessor.ewm_mean">ewm_mean</a></code></li>
+<li><code><a title="vectorbt.signals.accessors.Signals_Accessor.ewm_std" href="../generic/accessors.html#vectorbt.generic.accessors.Generic_Accessor.ewm_std">ewm_std</a></code></li>
 <li><code><a title="vectorbt.signals.accessors.Signals_Accessor.expanding_apply" href="../generic/accessors.html#vectorbt.generic.accessors.Generic_Accessor.expanding_apply">expanding_apply</a></code></li>
 <li><code><a title="vectorbt.signals.accessors.Signals_Accessor.expanding_max" href="../generic/accessors.html#vectorbt.generic.accessors.Generic_Accessor.expanding_max">expanding_max</a></code></li>
 <li><code><a title="vectorbt.signals.accessors.Signals_Accessor.expanding_mean" href="../generic/accessors.html#vectorbt.generic.accessors.Generic_Accessor.expanding_mean">expanding_mean</a></code></li>
 <li><code><a title="vectorbt.signals.accessors.Signals_Accessor.expanding_min" href="../generic/accessors.html#vectorbt.generic.accessors.Generic_Accessor.expanding_min">expanding_min</a></code></li>
+<li><code><a title="vectorbt.signals.accessors.Signals_Accessor.expanding_std" href="../generic/accessors.html#vectorbt.generic.accessors.Generic_Accessor.expanding_std">expanding_std</a></code></li>
 <li><code><a title="vectorbt.signals.accessors.Signals_Accessor.ffill" href="../generic/accessors.html#vectorbt.generic.accessors.Generic_Accessor.ffill">ffill</a></code></li>
 <li><code><a title="vectorbt.signals.accessors.Signals_Accessor.fillna" href="../generic/accessors.html#vectorbt.generic.accessors.Generic_Accessor.fillna">fillna</a></code></li>
 <li><code><a title="vectorbt.signals.accessors.Signals_Accessor.filter" href="../generic/accessors.html#vectorbt.generic.accessors.Generic_Accessor.filter">filter</a></code></li>
@@ -3705,11 +3709,16 @@ dtype: float64
 <li><code><a title="vectorbt.signals.accessors.Signals_Accessor.generate_random_exits" href="#vectorbt.signals.accessors.Signals_Accessor.generate_random_exits">generate_random_exits</a></code></li>
 <li><code><a title="vectorbt.signals.accessors.Signals_Accessor.generate_stop_loss_exits" href="#vectorbt.signals.accessors.Signals_Accessor.generate_stop_loss_exits">generate_stop_loss_exits</a></code></li>
 <li><code><a title="vectorbt.signals.accessors.Signals_Accessor.generate_take_profit_exits" href="#vectorbt.signals.accessors.Signals_Accessor.generate_take_profit_exits">generate_take_profit_exits</a></code></li>
+<li><code><a title="vectorbt.signals.accessors.Signals_Accessor.group_select" href="../base/array_wrapper.html#vectorbt.base.array_wrapper.ArrayWrapper.group_select">group_select</a></code></li>
 <li><code><a title="vectorbt.signals.accessors.Signals_Accessor.groupby_apply" href="../generic/accessors.html#vectorbt.generic.accessors.Generic_Accessor.groupby_apply">groupby_apply</a></code></li>
+<li><code><a title="vectorbt.signals.accessors.Signals_Accessor.grouped_ndim" href="../base/array_wrapper.html#vectorbt.base.array_wrapper.ArrayWrapper.grouped_ndim">grouped_ndim</a></code></li>
+<li><code><a title="vectorbt.signals.accessors.Signals_Accessor.grouper" href="../base/array_wrapper.html#vectorbt.base.array_wrapper.ArrayWrapper.grouper">grouper</a></code></li>
 <li><code><a title="vectorbt.signals.accessors.Signals_Accessor.hist" href="../generic/accessors.html#vectorbt.generic.accessors.Generic_Accessor.hist">hist</a></code></li>
 <li><code><a title="vectorbt.signals.accessors.Signals_Accessor.idxmax" href="../generic/accessors.html#vectorbt.generic.accessors.Generic_Accessor.idxmax">idxmax</a></code></li>
 <li><code><a title="vectorbt.signals.accessors.Signals_Accessor.idxmin" href="../generic/accessors.html#vectorbt.generic.accessors.Generic_Accessor.idxmin">idxmin</a></code></li>
+<li><code><a title="vectorbt.signals.accessors.Signals_Accessor.iloc" href="../base/indexing.html#vectorbt.base.indexing.PandasIndexer.iloc">iloc</a></code></li>
 <li><code><a title="vectorbt.signals.accessors.Signals_Accessor.index" href="../base/array_wrapper.html#vectorbt.base.array_wrapper.ArrayWrapper.index">index</a></code></li>
+<li><code><a title="vectorbt.signals.accessors.Signals_Accessor.loc" href="../base/indexing.html#vectorbt.base.indexing.PandasIndexer.loc">loc</a></code></li>
 <li><code><a title="vectorbt.signals.accessors.Signals_Accessor.make_symmetric" href="../base/accessors.html#vectorbt.base.accessors.Base_Accessor.make_symmetric">make_symmetric</a></code></li>
 <li><code><a title="vectorbt.signals.accessors.Signals_Accessor.map_reduce_between" href="#vectorbt.signals.accessors.Signals_Accessor.map_reduce_between">map_reduce_between</a></code></li>
 <li><code><a title="vectorbt.signals.accessors.Signals_Accessor.map_reduce_partitions" href="#vectorbt.signals.accessors.Signals_Accessor.map_reduce_partitions">map_reduce_partitions</a></code></li>
@@ -3727,6 +3736,7 @@ dtype: float64
 <li><code><a title="vectorbt.signals.accessors.Signals_Accessor.rank_partitions" href="#vectorbt.signals.accessors.Signals_Accessor.rank_partitions">rank_partitions</a></code></li>
 <li><code><a title="vectorbt.signals.accessors.Signals_Accessor.reduce" href="../generic/accessors.html#vectorbt.generic.accessors.Generic_Accessor.reduce">reduce</a></code></li>
 <li><code><a title="vectorbt.signals.accessors.Signals_Accessor.reduce_to_array" href="../generic/accessors.html#vectorbt.generic.accessors.Generic_Accessor.reduce_to_array">reduce_to_array</a></code></li>
+<li><code><a title="vectorbt.signals.accessors.Signals_Accessor.regroup" href="../base/array_wrapper.html#vectorbt.base.array_wrapper.ArrayWrapper.regroup">regroup</a></code></li>
 <li><code><a title="vectorbt.signals.accessors.Signals_Accessor.rename_levels" href="../base/accessors.html#vectorbt.base.accessors.Base_Accessor.rename_levels">rename_levels</a></code></li>
 <li><code><a title="vectorbt.signals.accessors.Signals_Accessor.repeat" href="../base/accessors.html#vectorbt.base.accessors.Base_Accessor.repeat">repeat</a></code></li>
 <li><code><a title="vectorbt.signals.accessors.Signals_Accessor.resample_apply" href="../generic/accessors.html#vectorbt.generic.accessors.Generic_Accessor.resample_apply">resample_apply</a></code></li>
@@ -3734,9 +3744,11 @@ dtype: float64
 <li><code><a title="vectorbt.signals.accessors.Signals_Accessor.rolling_max" href="../generic/accessors.html#vectorbt.generic.accessors.Generic_Accessor.rolling_max">rolling_max</a></code></li>
 <li><code><a title="vectorbt.signals.accessors.Signals_Accessor.rolling_mean" href="../generic/accessors.html#vectorbt.generic.accessors.Generic_Accessor.rolling_mean">rolling_mean</a></code></li>
 <li><code><a title="vectorbt.signals.accessors.Signals_Accessor.rolling_min" href="../generic/accessors.html#vectorbt.generic.accessors.Generic_Accessor.rolling_min">rolling_min</a></code></li>
+<li><code><a title="vectorbt.signals.accessors.Signals_Accessor.rolling_std" href="../generic/accessors.html#vectorbt.generic.accessors.Generic_Accessor.rolling_std">rolling_std</a></code></li>
 <li><code><a title="vectorbt.signals.accessors.Signals_Accessor.scatter" href="../generic/accessors.html#vectorbt.generic.accessors.Generic_Accessor.scatter">scatter</a></code></li>
 <li><code><a title="vectorbt.signals.accessors.Signals_Accessor.select_levels" href="../base/accessors.html#vectorbt.base.accessors.Base_Accessor.select_levels">select_levels</a></code></li>
 <li><code><a title="vectorbt.signals.accessors.Signals_Accessor.shape" href="../base/array_wrapper.html#vectorbt.base.array_wrapper.ArrayWrapper.shape">shape</a></code></li>
+<li><code><a title="vectorbt.signals.accessors.Signals_Accessor.shape_2d" href="../base/array_wrapper.html#vectorbt.base.array_wrapper.ArrayWrapper.shape_2d">shape_2d</a></code></li>
 <li><code><a title="vectorbt.signals.accessors.Signals_Accessor.shuffle" href="#vectorbt.signals.accessors.Signals_Accessor.shuffle">shuffle</a></code></li>
 <li><code><a title="vectorbt.signals.accessors.Signals_Accessor.split_into_ranges" href="../generic/accessors.html#vectorbt.generic.accessors.Generic_Accessor.split_into_ranges">split_into_ranges</a></code></li>
 <li><code><a title="vectorbt.signals.accessors.Signals_Accessor.stack_index" href="../base/accessors.html#vectorbt.base.accessors.Base_Accessor.stack_index">stack_index</a></code></li>
@@ -3750,6 +3762,7 @@ dtype: float64
 <li><code><a title="vectorbt.signals.accessors.Signals_Accessor.unstack_to_df" href="../base/accessors.html#vectorbt.base.accessors.Base_Accessor.unstack_to_df">unstack_to_df</a></code></li>
 <li><code><a title="vectorbt.signals.accessors.Signals_Accessor.wrap" href="../base/array_wrapper.html#vectorbt.base.array_wrapper.ArrayWrapper.wrap">wrap</a></code></li>
 <li><code><a title="vectorbt.signals.accessors.Signals_Accessor.wrap_reduced" href="../base/array_wrapper.html#vectorbt.base.array_wrapper.ArrayWrapper.wrap_reduced">wrap_reduced</a></code></li>
+<li><code><a title="vectorbt.signals.accessors.Signals_Accessor.xs" href="../base/indexing.html#vectorbt.base.indexing.PandasIndexer.xs">xs</a></code></li>
 </ul>
 </li>
 <li><code><b><a title="vectorbt.generic.accessors.Generic_SRAccessor" href="../generic/accessors.html#vectorbt.generic.accessors.Generic_SRAccessor">Generic_SRAccessor</a></b></code>:
@@ -3797,7 +3810,6 @@ title="Search"
 <li><code><a title="vectorbt.signals.accessors.Signals_Accessor.OR" href="#vectorbt.signals.accessors.Signals_Accessor.OR">OR</a></code></li>
 <li><code><a title="vectorbt.signals.accessors.Signals_Accessor.XOR" href="#vectorbt.signals.accessors.Signals_Accessor.XOR">XOR</a></code></li>
 <li><code><a title="vectorbt.signals.accessors.Signals_Accessor.avg_distance" href="#vectorbt.signals.accessors.Signals_Accessor.avg_distance">avg_distance</a></code></li>
-<li><code><a title="vectorbt.signals.accessors.Signals_Accessor.avg_distance_to" href="#vectorbt.signals.accessors.Signals_Accessor.avg_distance_to">avg_distance_to</a></code></li>
 <li><code><a title="vectorbt.signals.accessors.Signals_Accessor.empty" href="#vectorbt.signals.accessors.Signals_Accessor.empty">empty</a></code></li>
 <li><code><a title="vectorbt.signals.accessors.Signals_Accessor.empty_like" href="#vectorbt.signals.accessors.Signals_Accessor.empty_like">empty_like</a></code></li>
 <li><code><a title="vectorbt.signals.accessors.Signals_Accessor.first" href="#vectorbt.signals.accessors.Signals_Accessor.first">first</a></code></li>

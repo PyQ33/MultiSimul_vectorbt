@@ -166,6 +166,12 @@ def broadcast_index(args, to_shape, index_from=None, axis=0, **kwargs):
         **kwargs: Keyword arguments passed to `vectorbt.base.index_fns.stack_indexes`.
 
     For defaults, see `vectorbt.defaults.broadcasting`.
+
+    !!! note
+        Series names are treated as columns with a single element but without a name.
+        If a column level without a name loses its meaning, better to convert Series to DataFrames
+        with one column prior to broadcasting. If the name of a Series is not that important,
+        better to drop it altogether by setting it to `None`.
     &#34;&#34;&#34;
     index_str = &#39;columns&#39; if axis == 1 else &#39;index&#39;
     new_index = None
@@ -248,16 +254,20 @@ def wrap_broadcasted(old_arg, new_arg, is_pd=False, new_index=None, new_columns=
                     new_columns = old_columns
                 else:
                     new_columns = index_fns.repeat_index(old_columns, new_ncols)
-        return array_wrapper.ArrayWrapper(
-            index=new_index,
-            columns=new_columns,
-            ndim=new_arg.ndim
-        ).wrap(new_arg)
+        if new_arg.ndim == 2:
+            return pd.DataFrame(new_arg, index=new_index, columns=new_columns)
+        if new_columns is not None and len(new_columns) == 1:
+            name = new_columns[0]
+            if name == 0:
+                name = None
+        else:
+            name = None
+        return pd.Series(new_arg, index=new_index, name=name)
     return new_arg
 
 
-def broadcast(*args, to_shape=None, to_pd=None, to_2d=None, index_from=&#39;default&#39;, columns_from=&#39;default&#39;,
-              writeable=False, copy_kwargs={}, keep_raw=False, **kwargs):
+def broadcast(*args, to_shape=None, to_pd=None, to_2d=None, index_from=&#39;default&#39;,
+              columns_from=&#39;default&#39;, require_kwargs=None, keep_raw=False, **kwargs):
     &#34;&#34;&#34;Bring any array-like object in `args` to the same shape by using NumPy broadcasting.
 
     See [Broadcasting](https://docs.scipy.org/doc/numpy/user/basics.broadcasting.html).
@@ -272,28 +282,16 @@ def broadcast(*args, to_shape=None, to_pd=None, to_2d=None, index_from=&#39;defa
         to_2d (bool): If `True`, converts all Series to DataFrames.
         index_from (None, int, str or array_like): Broadcasting rule for index.
         columns_from (None, int, str or array_like): Broadcasting rule for columns.
-        writeable (bool): If `True`, makes broadcasted arrays writable, otherwise readonly.
-
-            !!! note
-                Has effect only if broadcasting was needed for that particular array.
-
-                Making arrays writable is possible only through copying them, which is pretty expensive.
-
-                Numba requires arrays to be writable.
-
-        copy_kwargs (dict): Keyword arguments passed to `np.array`. For example, to specify `order`.
-
-            !!! note
-                Has effect on every array, independent from whether broadcasting was needed or not.
-
+        require_kwargs (dict): Keyword arguments passed to `np.require`.
         keep_raw (bool, tuple or list): If `True`, will keep the unbroadcasted version of the array.
+
+            Only makes sure that the array can be broadcast to the target shape.
         **kwargs: Keyword arguments passed to `broadcast_index`.
 
     For defaults, see `vectorbt.defaults.broadcasting`.
 
     Example:
         Without broadcasting index and columns:
-
         ```python-repl
         &gt;&gt;&gt; import numpy as np
         &gt;&gt;&gt; import pandas as pd
@@ -330,7 +328,6 @@ def broadcast(*args, to_shape=None, to_pd=None, to_2d=None, index_from=&#39;defa
         ```
 
         Taking new index and columns from position:
-
         ```python-repl
         &gt;&gt;&gt; for i in broadcast(
         ...     v, a, sr, df,
@@ -356,7 +353,6 @@ def broadcast(*args, to_shape=None, to_pd=None, to_2d=None, index_from=&#39;defa
         ```
 
         Broadcasting index and columns through stacking:
-
         ```python-repl
         &gt;&gt;&gt; for i in broadcast(
         ...     v, a, sr, df,
@@ -382,7 +378,6 @@ def broadcast(*args, to_shape=None, to_pd=None, to_2d=None, index_from=&#39;defa
         ```
 
         Setting index and columns manually:
-
         ```python-repl
         &gt;&gt;&gt; for i in broadcast(
         ...     v, a, sr, df,
@@ -410,6 +405,8 @@ def broadcast(*args, to_shape=None, to_pd=None, to_2d=None, index_from=&#39;defa
     is_pd = False
     is_2d = False
     args = list(args)
+    if require_kwargs is None:
+        require_kwargs = {}
     if isinstance(index_from, str) and index_from == &#39;default&#39;:
         index_from = defaults.broadcasting[&#39;index_from&#39;]
     if isinstance(columns_from, str) and columns_from == &#39;default&#39;:
@@ -461,16 +458,8 @@ def broadcast(*args, to_shape=None, to_pd=None, to_2d=None, index_from=&#39;defa
             continue
         new_args.append(np.broadcast_to(arg, to_shape, subok=True))
 
-    # The problem is that broadcasting creates readonly objects and Numba requires writable ones.
-    # To make them writable we must copy, which is ok for small-sized arrays and not ok for large ones.
-    # Thus check if broadcasting was needed in the first place, and if so, copy
-    for i in range(len(new_args)):
-        if new_args[i].shape == args_2d[i].shape:
-            # Broadcasting was not needed, take old array
-            new_args[i] = np.array(args_2d[i], copy=False, **copy_kwargs)
-        else:
-            # Broadcasting was needed, take new array
-            new_args[i] = np.array(new_args[i], copy=writeable, **copy_kwargs)
+    # Force to match requirements
+    new_args = [np.require(arg, **require_kwargs) for arg in new_args]
 
     if is_pd:
         # Decide on index and columns
@@ -577,18 +566,21 @@ def broadcast_to_array_of(arg1, arg2):
     return np.tile(arg1, (1, *arg2.shape))
 
 
-def broadcast_to_axis_of(arg1, arg2, axis, writeable=False, copy_kwargs={}):
+def broadcast_to_axis_of(arg1, arg2, axis, require_kwargs=None):
     &#34;&#34;&#34;Broadcast `arg1` to an axis of `arg2`.
 
     If `arg2` has less dimensions than requested, will broadcast `arg1` to a single number.
 
     For other keyword arguments, see `broadcast`.&#34;&#34;&#34;
+    if require_kwargs is None:
+        require_kwargs = {}
     if not checks.is_array(arg2):
         arg2 = np.asarray(arg2)
     if arg2.ndim &lt; axis + 1:
         return np.broadcast_to(arg1, (1,))[0]  # to a single number
     arg1 = np.broadcast_to(arg1, (arg2.shape[axis],))
-    return np.array(arg1, copy=writeable, **copy_kwargs)  # to shape of axis
+    arg1 = np.require(arg1, **require_kwargs)
+    return arg1
 
 
 def unstack_to_array(arg, levels=None):
@@ -667,7 +659,7 @@ def make_symmetric(arg):
     if isinstance(arg.index, pd.MultiIndex) or isinstance(arg.columns, pd.MultiIndex):
         checks.assert_type(arg.index, pd.MultiIndex)
         checks.assert_type(arg.columns, pd.MultiIndex)
-        checks.assert_same(arg.index.nlevels, arg.columns.nlevels)
+        checks.assert_array_equal(arg.index.nlevels, arg.columns.nlevels)
         names1, names2 = tuple(arg.index.names), tuple(arg.columns.names)
     else:
         names1, names2 = arg.index.name, arg.columns.name
@@ -751,7 +743,7 @@ def unstack_to_df(arg, index_levels=None, column_levels=None, symmetric=False):
 
 
 @njit(cache=True)
-def flex_choose_i_and_col_nb(a, is_2d=False):
+def flex_choose_i_and_col_nb(a, is_2d):
     &#34;&#34;&#34;Choose selection index and column based on the array&#39;s shape.
 
     Instead of expensive broadcasting, keep original shape and do indexing in a smart way.
@@ -788,19 +780,19 @@ def flex_choose_i_and_col_nb(a, is_2d=False):
 
 
 @njit(cache=True)
-def flex_select_nb(i, col, a, def_i=-1, def_col=-1, is_2d=False):
+def flex_select_nb(i, col, a, flex_i, flex_col, is_2d):
     &#34;&#34;&#34;Select element of `a` as if it has been broadcasted.&#34;&#34;&#34;
-    if def_i == -1:
-        def_i = i
-    if def_col == -1:
-        def_col = col
+    if flex_i == -1:
+        flex_i = i
+    if flex_col == -1:
+        flex_col = col
     if a.ndim == 0:
         return a.item()
     if a.ndim == 1:
         if is_2d:
-            return a[def_col]
-        return a[def_i]
-    return a[def_i, def_col]</code></pre>
+            return a[flex_col]
+        return a[flex_i]
+    return a[flex_i, flex_col]</code></pre>
 </details>
 </section>
 <section>
@@ -811,7 +803,7 @@ def flex_select_nb(i, col, a, def_i=-1, def_col=-1, is_2d=False):
 <h2 class="section-title" id="header-functions">Functions</h2>
 <dl>
 <dt id="vectorbt.base.reshape_fns.broadcast"><code class="name flex">
-<span>def <span class="ident fname">broadcast</span></span>(<span>*args, to_shape=None, to_pd=None, to_2d=None, index_from='default', columns_from='default', writeable=False, copy_kwargs={}, keep_raw=False, **kwargs)</span>
+<span>def <span class="ident fname">broadcast</span></span>(<span>*args, to_shape=None, to_pd=None, to_2d=None, index_from='default', columns_from='default', require_kwargs=None, keep_raw=False, **kwargs)</span>
 </code></dt>
 <dd>
 <div class="desc"><p>Bring any array-like object in <code>args</code> to the same shape by using NumPy broadcasting.</p>
@@ -832,26 +824,13 @@ raw NumPy arrays. If <code>None</code>, converts only if there is at least one p
 <dd>Broadcasting rule for index.</dd>
 <dt><strong><code>columns_from</code></strong> :&ensp;<code>None, int, str</code> or <code>array_like</code></dt>
 <dd>Broadcasting rule for columns.</dd>
-<dt><strong><code>writeable</code></strong> :&ensp;<code>bool</code></dt>
-<dd>
-<p>If <code>True</code>, makes broadcasted arrays writable, otherwise readonly.</p>
-<div class="admonition note">
-<p class="admonition-title">Note</p>
-<p>Has effect only if broadcasting was needed for that particular array.</p>
-<p>Making arrays writable is possible only through copying them, which is pretty expensive.</p>
-<p>Numba requires arrays to be writable.</p>
-</div>
-</dd>
-<dt><strong><code>copy_kwargs</code></strong> :&ensp;<code>dict</code></dt>
-<dd>
-<p>Keyword arguments passed to <code>np.array</code>. For example, to specify <code>order</code>.</p>
-<div class="admonition note">
-<p class="admonition-title">Note</p>
-<p>Has effect on every array, independent from whether broadcasting was needed or not.</p>
-</div>
-</dd>
+<dt><strong><code>require_kwargs</code></strong> :&ensp;<code>dict</code></dt>
+<dd>Keyword arguments passed to <code>np.require</code>.</dd>
 <dt><strong><code>keep_raw</code></strong> :&ensp;<code>bool, tuple</code> or <code>list</code></dt>
-<dd>If <code>True</code>, will keep the unbroadcasted version of the array.</dd>
+<dd>
+<p>If <code>True</code>, will keep the unbroadcasted version of the array.</p>
+<p>Only makes sure that the array can be broadcast to the target shape.</p>
+</dd>
 <dt><strong><code>**kwargs</code></strong></dt>
 <dd>Keyword arguments passed to <code><a title="vectorbt.base.reshape_fns.broadcast_index" href="#vectorbt.base.reshape_fns.broadcast_index">broadcast_index()</a></code>.</dd>
 </dl>
@@ -964,8 +943,8 @@ c  7  8  9
 <summary>
 <span>Expand source code</span>
 </summary>
-<pre><code class="python">def broadcast(*args, to_shape=None, to_pd=None, to_2d=None, index_from=&#39;default&#39;, columns_from=&#39;default&#39;,
-              writeable=False, copy_kwargs={}, keep_raw=False, **kwargs):
+<pre><code class="python">def broadcast(*args, to_shape=None, to_pd=None, to_2d=None, index_from=&#39;default&#39;,
+              columns_from=&#39;default&#39;, require_kwargs=None, keep_raw=False, **kwargs):
     &#34;&#34;&#34;Bring any array-like object in `args` to the same shape by using NumPy broadcasting.
 
     See [Broadcasting](https://docs.scipy.org/doc/numpy/user/basics.broadcasting.html).
@@ -980,28 +959,16 @@ c  7  8  9
         to_2d (bool): If `True`, converts all Series to DataFrames.
         index_from (None, int, str or array_like): Broadcasting rule for index.
         columns_from (None, int, str or array_like): Broadcasting rule for columns.
-        writeable (bool): If `True`, makes broadcasted arrays writable, otherwise readonly.
-
-            !!! note
-                Has effect only if broadcasting was needed for that particular array.
-
-                Making arrays writable is possible only through copying them, which is pretty expensive.
-
-                Numba requires arrays to be writable.
-
-        copy_kwargs (dict): Keyword arguments passed to `np.array`. For example, to specify `order`.
-
-            !!! note
-                Has effect on every array, independent from whether broadcasting was needed or not.
-
+        require_kwargs (dict): Keyword arguments passed to `np.require`.
         keep_raw (bool, tuple or list): If `True`, will keep the unbroadcasted version of the array.
+
+            Only makes sure that the array can be broadcast to the target shape.
         **kwargs: Keyword arguments passed to `broadcast_index`.
 
     For defaults, see `vectorbt.defaults.broadcasting`.
 
     Example:
         Without broadcasting index and columns:
-
         ```python-repl
         &gt;&gt;&gt; import numpy as np
         &gt;&gt;&gt; import pandas as pd
@@ -1038,7 +1005,6 @@ c  7  8  9
         ```
 
         Taking new index and columns from position:
-
         ```python-repl
         &gt;&gt;&gt; for i in broadcast(
         ...     v, a, sr, df,
@@ -1064,7 +1030,6 @@ c  7  8  9
         ```
 
         Broadcasting index and columns through stacking:
-
         ```python-repl
         &gt;&gt;&gt; for i in broadcast(
         ...     v, a, sr, df,
@@ -1090,7 +1055,6 @@ c  7  8  9
         ```
 
         Setting index and columns manually:
-
         ```python-repl
         &gt;&gt;&gt; for i in broadcast(
         ...     v, a, sr, df,
@@ -1118,6 +1082,8 @@ c  7  8  9
     is_pd = False
     is_2d = False
     args = list(args)
+    if require_kwargs is None:
+        require_kwargs = {}
     if isinstance(index_from, str) and index_from == &#39;default&#39;:
         index_from = defaults.broadcasting[&#39;index_from&#39;]
     if isinstance(columns_from, str) and columns_from == &#39;default&#39;:
@@ -1169,16 +1135,8 @@ c  7  8  9
             continue
         new_args.append(np.broadcast_to(arg, to_shape, subok=True))
 
-    # The problem is that broadcasting creates readonly objects and Numba requires writable ones.
-    # To make them writable we must copy, which is ok for small-sized arrays and not ok for large ones.
-    # Thus check if broadcasting was needed in the first place, and if so, copy
-    for i in range(len(new_args)):
-        if new_args[i].shape == args_2d[i].shape:
-            # Broadcasting was not needed, take old array
-            new_args[i] = np.array(args_2d[i], copy=False, **copy_kwargs)
-        else:
-            # Broadcasting was needed, take new array
-            new_args[i] = np.array(new_args[i], copy=writeable, **copy_kwargs)
+    # Force to match requirements
+    new_args = [np.require(arg, **require_kwargs) for arg in new_args]
 
     if is_pd:
         # Decide on index and columns
@@ -1242,7 +1200,14 @@ c  7  8  9
 <dt><strong><code>**kwargs</code></strong></dt>
 <dd>Keyword arguments passed to <code><a title="vectorbt.base.index_fns.stack_indexes" href="index_fns.html#vectorbt.base.index_fns.stack_indexes">stack_indexes()</a></code>.</dd>
 </dl>
-<p>For defaults, see <code><a title="vectorbt.defaults.broadcasting" href="../defaults.html#vectorbt.defaults.broadcasting">broadcasting</a></code>.</p></div>
+<p>For defaults, see <code><a title="vectorbt.defaults.broadcasting" href="../defaults.html#vectorbt.defaults.broadcasting">broadcasting</a></code>.</p>
+<div class="admonition note">
+<p class="admonition-title">Note</p>
+<p>Series names are treated as columns with a single element but without a name.
+If a column level without a name loses its meaning, better to convert Series to DataFrames
+with one column prior to broadcasting. If the name of a Series is not that important,
+better to drop it altogether by setting it to <code>None</code>.</p>
+</div></div>
 <details class="source">
 <summary>
 <span>Expand source code</span>
@@ -1268,6 +1233,12 @@ c  7  8  9
         **kwargs: Keyword arguments passed to `vectorbt.base.index_fns.stack_indexes`.
 
     For defaults, see `vectorbt.defaults.broadcasting`.
+
+    !!! note
+        Series names are treated as columns with a single element but without a name.
+        If a column level without a name loses its meaning, better to convert Series to DataFrames
+        with one column prior to broadcasting. If the name of a Series is not that important,
+        better to drop it altogether by setting it to `None`.
     &#34;&#34;&#34;
     index_str = &#39;columns&#39; if axis == 1 else &#39;index&#39;
     new_index = None
@@ -1451,7 +1422,7 @@ array([4, 5, 6])
 </details>
 </dd>
 <dt id="vectorbt.base.reshape_fns.broadcast_to_axis_of"><code class="name flex">
-<span>def <span class="ident fname">broadcast_to_axis_of</span></span>(<span>arg1, arg2, axis, writeable=False, copy_kwargs={})</span>
+<span>def <span class="ident fname">broadcast_to_axis_of</span></span>(<span>arg1, arg2, axis, require_kwargs=None)</span>
 </code></dt>
 <dd>
 <div class="desc"><p>Broadcast <code>arg1</code> to an axis of <code>arg2</code>.</p>
@@ -1461,22 +1432,25 @@ array([4, 5, 6])
 <summary>
 <span>Expand source code</span>
 </summary>
-<pre><code class="python">def broadcast_to_axis_of(arg1, arg2, axis, writeable=False, copy_kwargs={}):
+<pre><code class="python">def broadcast_to_axis_of(arg1, arg2, axis, require_kwargs=None):
     &#34;&#34;&#34;Broadcast `arg1` to an axis of `arg2`.
 
     If `arg2` has less dimensions than requested, will broadcast `arg1` to a single number.
 
     For other keyword arguments, see `broadcast`.&#34;&#34;&#34;
+    if require_kwargs is None:
+        require_kwargs = {}
     if not checks.is_array(arg2):
         arg2 = np.asarray(arg2)
     if arg2.ndim &lt; axis + 1:
         return np.broadcast_to(arg1, (1,))[0]  # to a single number
     arg1 = np.broadcast_to(arg1, (arg2.shape[axis],))
-    return np.array(arg1, copy=writeable, **copy_kwargs)  # to shape of axis</code></pre>
+    arg1 = np.require(arg1, **require_kwargs)
+    return arg1</code></pre>
 </details>
 </dd>
 <dt id="vectorbt.base.reshape_fns.flex_choose_i_and_col_nb"><code class="name flex">
-<span>def <span class="ident fname">flex_choose_i_and_col_nb</span></span>(<span>a, is_2d=False)</span>
+<span>def <span class="ident fname">flex_choose_i_and_col_nb</span></span>(<span>a, is_2d)</span>
 </code></dt>
 <dd>
 <div class="desc"><p>Choose selection index and column based on the array's shape.</p>
@@ -1489,7 +1463,7 @@ any direction indefinitely.</p>
 <span>Expand source code</span>
 </summary>
 <pre><code class="python">@njit(cache=True)
-def flex_choose_i_and_col_nb(a, is_2d=False):
+def flex_choose_i_and_col_nb(a, is_2d):
     &#34;&#34;&#34;Choose selection index and column based on the array&#39;s shape.
 
     Instead of expensive broadcasting, keep original shape and do indexing in a smart way.
@@ -1526,7 +1500,7 @@ def flex_choose_i_and_col_nb(a, is_2d=False):
 </details>
 </dd>
 <dt id="vectorbt.base.reshape_fns.flex_select_nb"><code class="name flex">
-<span>def <span class="ident fname">flex_select_nb</span></span>(<span>i, col, a, def_i=-1, def_col=-1, is_2d=False)</span>
+<span>def <span class="ident fname">flex_select_nb</span></span>(<span>i, col, a, flex_i, flex_col, is_2d)</span>
 </code></dt>
 <dd>
 <div class="desc"><p>Select element of <code>a</code> as if it has been broadcasted.</p></div>
@@ -1535,19 +1509,19 @@ def flex_choose_i_and_col_nb(a, is_2d=False):
 <span>Expand source code</span>
 </summary>
 <pre><code class="python">@njit(cache=True)
-def flex_select_nb(i, col, a, def_i=-1, def_col=-1, is_2d=False):
+def flex_select_nb(i, col, a, flex_i, flex_col, is_2d):
     &#34;&#34;&#34;Select element of `a` as if it has been broadcasted.&#34;&#34;&#34;
-    if def_i == -1:
-        def_i = i
-    if def_col == -1:
-        def_col = col
+    if flex_i == -1:
+        flex_i = i
+    if flex_col == -1:
+        flex_col = col
     if a.ndim == 0:
         return a.item()
     if a.ndim == 1:
         if is_2d:
-            return a[def_col]
-        return a[def_i]
-    return a[def_i, def_col]</code></pre>
+            return a[flex_col]
+        return a[flex_i]
+    return a[flex_i, flex_col]</code></pre>
 </details>
 </dd>
 <dt id="vectorbt.base.reshape_fns.make_symmetric"><code class="name flex">
@@ -1600,7 +1574,7 @@ d  2.0  4.0  NaN  NaN
     if isinstance(arg.index, pd.MultiIndex) or isinstance(arg.columns, pd.MultiIndex):
         checks.assert_type(arg.index, pd.MultiIndex)
         checks.assert_type(arg.columns, pd.MultiIndex)
-        checks.assert_same(arg.index.nlevels, arg.columns.nlevels)
+        checks.assert_array_equal(arg.index.nlevels, arg.columns.nlevels)
         names1, names2 = tuple(arg.index.names), tuple(arg.columns.names)
     else:
         names1, names2 = arg.index.name, arg.columns.name
@@ -1975,11 +1949,15 @@ and assign it the newly broadcasted index/columns.</p></div>
                     new_columns = old_columns
                 else:
                     new_columns = index_fns.repeat_index(old_columns, new_ncols)
-        return array_wrapper.ArrayWrapper(
-            index=new_index,
-            columns=new_columns,
-            ndim=new_arg.ndim
-        ).wrap(new_arg)
+        if new_arg.ndim == 2:
+            return pd.DataFrame(new_arg, index=new_index, columns=new_columns)
+        if new_columns is not None and len(new_columns) == 1:
+            name = new_columns[0]
+            if name == 0:
+                name = None
+        else:
+            name = None
+        return pd.Series(new_arg, index=new_index, name=name)
     return new_arg</code></pre>
 </details>
 </dd>

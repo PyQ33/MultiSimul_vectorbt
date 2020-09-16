@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1, minimum-scale=1" />
 <meta name="generator" content="pdoc 0.8.1" />
 <title>vectorbt.base.accessors API documentation</title>
-<meta name="description" content="Custom pandas accessors." />
+<meta name="description" content="Custom pandas accessors …" />
 <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/5.12.0-2/css/all.min.css" integrity="sha256-46r060N2LrChLLb5zowXQ72/iKKNiw/lAmygmHExk/o=" crossorigin="anonymous" />
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/docsearch.js@2/dist/cdn/docsearch.min.css" />
 <link href='https://cdnjs.cloudflare.com/ajax/libs/normalize/8.0.0/normalize.min.css' rel='stylesheet'>
@@ -29,11 +29,18 @@ ga('create', 'UA-142521178-3', 'auto'); ga('send', 'pageview');
 </header>
 <section id="section-intro">
 <p>Custom pandas accessors.</p>
+<div class="admonition note">
+<p class="admonition-title">Note</p>
+<p>Accessors do not utilize caching.</p>
+</div>
 <details class="source">
 <summary>
 <span>Expand source code</span>
 </summary>
-<pre><code class="python">&#34;&#34;&#34;Custom pandas accessors.&#34;&#34;&#34;
+<pre><code class="python">&#34;&#34;&#34;Custom pandas accessors.
+
+!!! note
+    Accessors do not utilize caching.&#34;&#34;&#34;
 
 import numpy as np
 import pandas as pd
@@ -41,6 +48,7 @@ from collections.abc import Iterable
 
 from vectorbt.utils import checks
 from vectorbt.utils.decorators import class_or_instancemethod
+from vectorbt.utils.config import merge_kwargs
 from vectorbt.base import combine_fns, index_fns, reshape_fns
 from vectorbt.base.array_wrapper import ArrayWrapper
 from vectorbt.base.common import (
@@ -107,7 +115,7 @@ class Base_Accessor(ArrayWrapper):
 
         Set `axis` to 1 for columns and 0 for index.
         If `inplace` is `True`, modifies the pandas object. Otherwise, returns a copy.&#34;&#34;&#34;
-        checks.assert_value_in(axis, (0, 1))
+        checks.assert_in(axis, (0, 1))
 
         if axis == 1:
             obj_index = self.columns
@@ -215,10 +223,10 @@ class Base_Accessor(ArrayWrapper):
         if keys is not None:
             if axis == 1:
                 new_columns = index_fns.combine_indexes(keys, self.columns)
-                return self.wrap(tiled.values, columns=new_columns)
+                return tiled.vbt.wrap(tiled.values, columns=new_columns)
             else:
                 new_index = index_fns.combine_indexes(keys, self.index)
-                return self.wrap(tiled.values, index=new_index)
+                return tiled.vbt.wrap(tiled.values, index=new_index)
         return tiled
 
     def repeat(self, n, keys=None, axis=1):
@@ -230,10 +238,10 @@ class Base_Accessor(ArrayWrapper):
         if keys is not None:
             if axis == 1:
                 new_columns = index_fns.combine_indexes(self.columns, keys)
-                return self.wrap(repeated.values, columns=new_columns)
+                return repeated.vbt.wrap(repeated.values, columns=new_columns)
             else:
                 new_index = index_fns.combine_indexes(self.index, keys)
-                return self.wrap(repeated.values, index=new_index)
+                return repeated.vbt.wrap(repeated.values, index=new_index)
         return repeated
 
     def align_to(self, other):
@@ -434,7 +442,7 @@ class Base_Accessor(ArrayWrapper):
         checks.assert_not_none(combine_func)
         if checks.is_numba_func(combine_func):
             # Numba requires writable arrays
-            broadcast_kwargs = {**dict(writeable=True), **broadcast_kwargs}
+            broadcast_kwargs = merge_kwargs(dict(require_kwargs=dict(requirements=&#39;W&#39;)), broadcast_kwargs)
         new_obj, new_other = reshape_fns.broadcast(self._obj, other, **broadcast_kwargs)
         # Optionally cast to 2d array
         if pass_2d:
@@ -463,10 +471,9 @@ class Base_Accessor(ArrayWrapper):
         Use `keys` as the outermost level.
 
         !!! note
-            If `combine_func` is Numba-compiled, will broadcast using `writeable=True` and
-            copy using `order=&#39;C&#39;` flags, which can lead to an expensive computation overhead if
-            passed objects are large and have different shape/memory order. You also must ensure 
-            that all objects have the same data type.
+            If `combine_func` is Numba-compiled, will broadcast using `WRITEABLE` and `C_CONTIGUOUS`
+            flags, which can lead to an expensive computation overhead if passed objects are large and
+            have different shape/memory order. You also must ensure that all objects have the same data type.
 
             Also remember to bring each in `*args` to a Numba-compatible format.
 
@@ -495,10 +502,9 @@ class Base_Accessor(ArrayWrapper):
         checks.assert_type(others, Iterable)
         # Broadcast arguments
         if checks.is_numba_func(combine_func):
-            # Numba requires writable arrays
-            broadcast_kwargs = {**dict(writeable=True), **broadcast_kwargs}
+            # Numba requires writeable arrays
             # Plus all of our arrays must be in the same order
-            broadcast_kwargs[&#39;copy_kwargs&#39;] = {**dict(order=&#39;C&#39;), **broadcast_kwargs.get(&#39;copy_kwargs&#39;, {})}
+            broadcast_kwargs = merge_kwargs(dict(require_kwargs=dict(requirements=[&#39;W&#39;, &#39;C&#39;])), broadcast_kwargs)
         new_obj, *new_others = reshape_fns.broadcast(self._obj, *others, **broadcast_kwargs)
         # Optionally cast to 2d array
         if pass_2d:
@@ -509,7 +515,7 @@ class Base_Accessor(ArrayWrapper):
             # Concat the results horizontally
             if checks.is_numba_func(combine_func):
                 for i in range(1, len(bc_arrays)):
-                    checks.assert_same_meta(bc_arrays[i - 1], bc_arrays[i])
+                    checks.assert_meta_equal(bc_arrays[i - 1], bc_arrays[i])
                 result = combine_fns.combine_and_concat_nb(bc_arrays[0], bc_arrays[1:], combine_func, *args, **kwargs)
             else:
                 result = combine_fns.combine_and_concat(bc_arrays[0], bc_arrays[1:], combine_func, *args, **kwargs)
@@ -524,7 +530,7 @@ class Base_Accessor(ArrayWrapper):
             # Combine arguments pairwise into one object
             if checks.is_numba_func(combine_func):
                 for i in range(1, len(bc_arrays)):
-                    checks.assert_same_dtype(bc_arrays[i - 1], bc_arrays[i])
+                    checks.assert_dtype_equal(bc_arrays[i - 1], bc_arrays[i])
                 result = combine_fns.combine_multiple_nb(bc_arrays, combine_func, *args, **kwargs)
             else:
                 result = combine_fns.combine_multiple(bc_arrays, combine_func, *args, **kwargs)
@@ -645,7 +651,7 @@ by using <code><a title="vectorbt.base.accessors.Base_Accessor.wrap" href="array
 
         Set `axis` to 1 for columns and 0 for index.
         If `inplace` is `True`, modifies the pandas object. Otherwise, returns a copy.&#34;&#34;&#34;
-        checks.assert_value_in(axis, (0, 1))
+        checks.assert_in(axis, (0, 1))
 
         if axis == 1:
             obj_index = self.columns
@@ -753,10 +759,10 @@ by using <code><a title="vectorbt.base.accessors.Base_Accessor.wrap" href="array
         if keys is not None:
             if axis == 1:
                 new_columns = index_fns.combine_indexes(keys, self.columns)
-                return self.wrap(tiled.values, columns=new_columns)
+                return tiled.vbt.wrap(tiled.values, columns=new_columns)
             else:
                 new_index = index_fns.combine_indexes(keys, self.index)
-                return self.wrap(tiled.values, index=new_index)
+                return tiled.vbt.wrap(tiled.values, index=new_index)
         return tiled
 
     def repeat(self, n, keys=None, axis=1):
@@ -768,10 +774,10 @@ by using <code><a title="vectorbt.base.accessors.Base_Accessor.wrap" href="array
         if keys is not None:
             if axis == 1:
                 new_columns = index_fns.combine_indexes(self.columns, keys)
-                return self.wrap(repeated.values, columns=new_columns)
+                return repeated.vbt.wrap(repeated.values, columns=new_columns)
             else:
                 new_index = index_fns.combine_indexes(self.index, keys)
-                return self.wrap(repeated.values, index=new_index)
+                return repeated.vbt.wrap(repeated.values, index=new_index)
         return repeated
 
     def align_to(self, other):
@@ -972,7 +978,7 @@ by using <code><a title="vectorbt.base.accessors.Base_Accessor.wrap" href="array
         checks.assert_not_none(combine_func)
         if checks.is_numba_func(combine_func):
             # Numba requires writable arrays
-            broadcast_kwargs = {**dict(writeable=True), **broadcast_kwargs}
+            broadcast_kwargs = merge_kwargs(dict(require_kwargs=dict(requirements=&#39;W&#39;)), broadcast_kwargs)
         new_obj, new_other = reshape_fns.broadcast(self._obj, other, **broadcast_kwargs)
         # Optionally cast to 2d array
         if pass_2d:
@@ -1001,10 +1007,9 @@ by using <code><a title="vectorbt.base.accessors.Base_Accessor.wrap" href="array
         Use `keys` as the outermost level.
 
         !!! note
-            If `combine_func` is Numba-compiled, will broadcast using `writeable=True` and
-            copy using `order=&#39;C&#39;` flags, which can lead to an expensive computation overhead if
-            passed objects are large and have different shape/memory order. You also must ensure 
-            that all objects have the same data type.
+            If `combine_func` is Numba-compiled, will broadcast using `WRITEABLE` and `C_CONTIGUOUS`
+            flags, which can lead to an expensive computation overhead if passed objects are large and
+            have different shape/memory order. You also must ensure that all objects have the same data type.
 
             Also remember to bring each in `*args` to a Numba-compatible format.
 
@@ -1033,10 +1038,9 @@ by using <code><a title="vectorbt.base.accessors.Base_Accessor.wrap" href="array
         checks.assert_type(others, Iterable)
         # Broadcast arguments
         if checks.is_numba_func(combine_func):
-            # Numba requires writable arrays
-            broadcast_kwargs = {**dict(writeable=True), **broadcast_kwargs}
+            # Numba requires writeable arrays
             # Plus all of our arrays must be in the same order
-            broadcast_kwargs[&#39;copy_kwargs&#39;] = {**dict(order=&#39;C&#39;), **broadcast_kwargs.get(&#39;copy_kwargs&#39;, {})}
+            broadcast_kwargs = merge_kwargs(dict(require_kwargs=dict(requirements=[&#39;W&#39;, &#39;C&#39;])), broadcast_kwargs)
         new_obj, *new_others = reshape_fns.broadcast(self._obj, *others, **broadcast_kwargs)
         # Optionally cast to 2d array
         if pass_2d:
@@ -1047,7 +1051,7 @@ by using <code><a title="vectorbt.base.accessors.Base_Accessor.wrap" href="array
             # Concat the results horizontally
             if checks.is_numba_func(combine_func):
                 for i in range(1, len(bc_arrays)):
-                    checks.assert_same_meta(bc_arrays[i - 1], bc_arrays[i])
+                    checks.assert_meta_equal(bc_arrays[i - 1], bc_arrays[i])
                 result = combine_fns.combine_and_concat_nb(bc_arrays[0], bc_arrays[1:], combine_func, *args, **kwargs)
             else:
                 result = combine_fns.combine_and_concat(bc_arrays[0], bc_arrays[1:], combine_func, *args, **kwargs)
@@ -1062,7 +1066,7 @@ by using <code><a title="vectorbt.base.accessors.Base_Accessor.wrap" href="array
             # Combine arguments pairwise into one object
             if checks.is_numba_func(combine_func):
                 for i in range(1, len(bc_arrays)):
-                    checks.assert_same_dtype(bc_arrays[i - 1], bc_arrays[i])
+                    checks.assert_dtype_equal(bc_arrays[i - 1], bc_arrays[i])
                 result = combine_fns.combine_multiple_nb(bc_arrays, combine_func, *args, **kwargs)
             else:
                 result = combine_fns.combine_multiple(bc_arrays, combine_func, *args, **kwargs)
@@ -1071,6 +1075,8 @@ by using <code><a title="vectorbt.base.accessors.Base_Accessor.wrap" href="array
 <h3 class="section-subtitle">Ancestors</h3>
 <ul class="hlist">
 <li><a title="vectorbt.base.array_wrapper.ArrayWrapper" href="array_wrapper.html#vectorbt.base.array_wrapper.ArrayWrapper">ArrayWrapper</a></li>
+<li><a title="vectorbt.utils.config.Configured" href="../utils/config.html#vectorbt.utils.config.Configured">Configured</a></li>
+<li><a title="vectorbt.base.indexing.PandasIndexer" href="indexing.html#vectorbt.base.indexing.PandasIndexer">PandasIndexer</a></li>
 </ul>
 <h3 class="section-subtitle">Subclasses</h3>
 <ul class="hlist">
@@ -1407,7 +1413,7 @@ If <code>inplace</code> is <code>True</code>, modifies the pandas object. Otherw
 
     Set `axis` to 1 for columns and 0 for index.
     If `inplace` is `True`, modifies the pandas object. Otherwise, returns a copy.&#34;&#34;&#34;
-    checks.assert_value_in(axis, (0, 1))
+    checks.assert_in(axis, (0, 1))
 
     if axis == 1:
         obj_index = self.columns
@@ -1502,7 +1508,7 @@ y  7  8
     checks.assert_not_none(combine_func)
     if checks.is_numba_func(combine_func):
         # Numba requires writable arrays
-        broadcast_kwargs = {**dict(writeable=True), **broadcast_kwargs}
+        broadcast_kwargs = merge_kwargs(dict(require_kwargs=dict(requirements=&#39;W&#39;)), broadcast_kwargs)
     new_obj, new_other = reshape_fns.broadcast(self._obj, other, **broadcast_kwargs)
     # Optionally cast to 2d array
     if pass_2d:
@@ -1531,10 +1537,9 @@ If <code>pass_2d</code> is <code>True</code>, 2-dimensional NumPy arrays will be
 Use <code>keys</code> as the outermost level.</p>
 <div class="admonition note">
 <p class="admonition-title">Note</p>
-<p>If <code>combine_func</code> is Numba-compiled, will broadcast using <code>writeable=True</code> and
-copy using <code>order='C'</code> flags, which can lead to an expensive computation overhead if
-passed objects are large and have different shape/memory order. You also must ensure
-that all objects have the same data type.</p>
+<p>If <code>combine_func</code> is Numba-compiled, will broadcast using <code>WRITEABLE</code> and <code>C_CONTIGUOUS</code>
+flags, which can lead to an expensive computation overhead if passed objects are large and
+have different shape/memory order. You also must ensure that all objects have the same data type.</p>
 <p>Also remember to bring each in <code>*args</code> to a Numba-compatible format.</p>
 </div>
 <h2 id="example">Example</h2>
@@ -1577,10 +1582,9 @@ y  7  8  12  14
     Use `keys` as the outermost level.
 
     !!! note
-        If `combine_func` is Numba-compiled, will broadcast using `writeable=True` and
-        copy using `order=&#39;C&#39;` flags, which can lead to an expensive computation overhead if
-        passed objects are large and have different shape/memory order. You also must ensure 
-        that all objects have the same data type.
+        If `combine_func` is Numba-compiled, will broadcast using `WRITEABLE` and `C_CONTIGUOUS`
+        flags, which can lead to an expensive computation overhead if passed objects are large and
+        have different shape/memory order. You also must ensure that all objects have the same data type.
 
         Also remember to bring each in `*args` to a Numba-compatible format.
 
@@ -1609,10 +1613,9 @@ y  7  8  12  14
     checks.assert_type(others, Iterable)
     # Broadcast arguments
     if checks.is_numba_func(combine_func):
-        # Numba requires writable arrays
-        broadcast_kwargs = {**dict(writeable=True), **broadcast_kwargs}
+        # Numba requires writeable arrays
         # Plus all of our arrays must be in the same order
-        broadcast_kwargs[&#39;copy_kwargs&#39;] = {**dict(order=&#39;C&#39;), **broadcast_kwargs.get(&#39;copy_kwargs&#39;, {})}
+        broadcast_kwargs = merge_kwargs(dict(require_kwargs=dict(requirements=[&#39;W&#39;, &#39;C&#39;])), broadcast_kwargs)
     new_obj, *new_others = reshape_fns.broadcast(self._obj, *others, **broadcast_kwargs)
     # Optionally cast to 2d array
     if pass_2d:
@@ -1623,7 +1626,7 @@ y  7  8  12  14
         # Concat the results horizontally
         if checks.is_numba_func(combine_func):
             for i in range(1, len(bc_arrays)):
-                checks.assert_same_meta(bc_arrays[i - 1], bc_arrays[i])
+                checks.assert_meta_equal(bc_arrays[i - 1], bc_arrays[i])
             result = combine_fns.combine_and_concat_nb(bc_arrays[0], bc_arrays[1:], combine_func, *args, **kwargs)
         else:
             result = combine_fns.combine_and_concat(bc_arrays[0], bc_arrays[1:], combine_func, *args, **kwargs)
@@ -1638,7 +1641,7 @@ y  7  8  12  14
         # Combine arguments pairwise into one object
         if checks.is_numba_func(combine_func):
             for i in range(1, len(bc_arrays)):
-                checks.assert_same_dtype(bc_arrays[i - 1], bc_arrays[i])
+                checks.assert_dtype_equal(bc_arrays[i - 1], bc_arrays[i])
             result = combine_fns.combine_multiple_nb(bc_arrays, combine_func, *args, **kwargs)
         else:
             result = combine_fns.combine_multiple(bc_arrays, combine_func, *args, **kwargs)
@@ -1763,10 +1766,10 @@ Use <code>keys</code> as the outermost level.</p></div>
     if keys is not None:
         if axis == 1:
             new_columns = index_fns.combine_indexes(self.columns, keys)
-            return self.wrap(repeated.values, columns=new_columns)
+            return repeated.vbt.wrap(repeated.values, columns=new_columns)
         else:
             new_index = index_fns.combine_indexes(self.index, keys)
-            return self.wrap(repeated.values, index=new_index)
+            return repeated.vbt.wrap(repeated.values, index=new_index)
     return repeated</code></pre>
 </details>
 </dd>
@@ -1837,10 +1840,10 @@ Use <code>keys</code> as the outermost level.</p></div>
     if keys is not None:
         if axis == 1:
             new_columns = index_fns.combine_indexes(keys, self.columns)
-            return self.wrap(tiled.values, columns=new_columns)
+            return tiled.vbt.wrap(tiled.values, columns=new_columns)
         else:
             new_index = index_fns.combine_indexes(keys, self.index)
-            return self.wrap(tiled.values, index=new_index)
+            return tiled.vbt.wrap(tiled.values, index=new_index)
     return tiled</code></pre>
 </details>
 </dd>
@@ -1911,16 +1914,27 @@ Use <code>keys</code> as the outermost level.</p></div>
 <ul class="hlist">
 <li><code><b><a title="vectorbt.base.array_wrapper.ArrayWrapper" href="array_wrapper.html#vectorbt.base.array_wrapper.ArrayWrapper">ArrayWrapper</a></b></code>:
 <ul class="hlist">
+<li><code><a title="vectorbt.base.array_wrapper.ArrayWrapper.column_only_select" href="array_wrapper.html#vectorbt.base.array_wrapper.ArrayWrapper.column_only_select">column_only_select</a></code></li>
 <li><code><a title="vectorbt.base.array_wrapper.ArrayWrapper.columns" href="array_wrapper.html#vectorbt.base.array_wrapper.ArrayWrapper.columns">columns</a></code></li>
+<li><code><a title="vectorbt.base.array_wrapper.ArrayWrapper.config" href="../utils/config.html#vectorbt.utils.config.Configured.config">config</a></code></li>
+<li><code><a title="vectorbt.base.array_wrapper.ArrayWrapper.copy" href="../utils/config.html#vectorbt.utils.config.Configured.copy">copy</a></code></li>
 <li><code><a title="vectorbt.base.array_wrapper.ArrayWrapper.freq" href="array_wrapper.html#vectorbt.base.array_wrapper.ArrayWrapper.freq">freq</a></code></li>
 <li><code><a title="vectorbt.base.array_wrapper.ArrayWrapper.from_obj" href="array_wrapper.html#vectorbt.base.array_wrapper.ArrayWrapper.from_obj">from_obj</a></code></li>
+<li><code><a title="vectorbt.base.array_wrapper.ArrayWrapper.group_select" href="array_wrapper.html#vectorbt.base.array_wrapper.ArrayWrapper.group_select">group_select</a></code></li>
+<li><code><a title="vectorbt.base.array_wrapper.ArrayWrapper.grouped_ndim" href="array_wrapper.html#vectorbt.base.array_wrapper.ArrayWrapper.grouped_ndim">grouped_ndim</a></code></li>
+<li><code><a title="vectorbt.base.array_wrapper.ArrayWrapper.grouper" href="array_wrapper.html#vectorbt.base.array_wrapper.ArrayWrapper.grouper">grouper</a></code></li>
+<li><code><a title="vectorbt.base.array_wrapper.ArrayWrapper.iloc" href="indexing.html#vectorbt.base.indexing.PandasIndexer.iloc">iloc</a></code></li>
 <li><code><a title="vectorbt.base.array_wrapper.ArrayWrapper.index" href="array_wrapper.html#vectorbt.base.array_wrapper.ArrayWrapper.index">index</a></code></li>
+<li><code><a title="vectorbt.base.array_wrapper.ArrayWrapper.loc" href="indexing.html#vectorbt.base.indexing.PandasIndexer.loc">loc</a></code></li>
 <li><code><a title="vectorbt.base.array_wrapper.ArrayWrapper.name" href="array_wrapper.html#vectorbt.base.array_wrapper.ArrayWrapper.name">name</a></code></li>
 <li><code><a title="vectorbt.base.array_wrapper.ArrayWrapper.ndim" href="array_wrapper.html#vectorbt.base.array_wrapper.ArrayWrapper.ndim">ndim</a></code></li>
+<li><code><a title="vectorbt.base.array_wrapper.ArrayWrapper.regroup" href="array_wrapper.html#vectorbt.base.array_wrapper.ArrayWrapper.regroup">regroup</a></code></li>
 <li><code><a title="vectorbt.base.array_wrapper.ArrayWrapper.shape" href="array_wrapper.html#vectorbt.base.array_wrapper.ArrayWrapper.shape">shape</a></code></li>
+<li><code><a title="vectorbt.base.array_wrapper.ArrayWrapper.shape_2d" href="array_wrapper.html#vectorbt.base.array_wrapper.ArrayWrapper.shape_2d">shape_2d</a></code></li>
 <li><code><a title="vectorbt.base.array_wrapper.ArrayWrapper.to_time_units" href="array_wrapper.html#vectorbt.base.array_wrapper.ArrayWrapper.to_time_units">to_time_units</a></code></li>
 <li><code><a title="vectorbt.base.array_wrapper.ArrayWrapper.wrap" href="array_wrapper.html#vectorbt.base.array_wrapper.ArrayWrapper.wrap">wrap</a></code></li>
 <li><code><a title="vectorbt.base.array_wrapper.ArrayWrapper.wrap_reduced" href="array_wrapper.html#vectorbt.base.array_wrapper.ArrayWrapper.wrap_reduced">wrap_reduced</a></code></li>
+<li><code><a title="vectorbt.base.array_wrapper.ArrayWrapper.xs" href="indexing.html#vectorbt.base.indexing.PandasIndexer.xs">xs</a></code></li>
 </ul>
 </li>
 </ul>
@@ -1960,6 +1974,8 @@ Use <code>keys</code> as the outermost level.</p></div>
 <ul class="hlist">
 <li><a title="vectorbt.base.accessors.Base_Accessor" href="#vectorbt.base.accessors.Base_Accessor">Base_Accessor</a></li>
 <li><a title="vectorbt.base.array_wrapper.ArrayWrapper" href="array_wrapper.html#vectorbt.base.array_wrapper.ArrayWrapper">ArrayWrapper</a></li>
+<li><a title="vectorbt.utils.config.Configured" href="../utils/config.html#vectorbt.utils.config.Configured">Configured</a></li>
+<li><a title="vectorbt.base.indexing.PandasIndexer" href="indexing.html#vectorbt.base.indexing.PandasIndexer">PandasIndexer</a></li>
 </ul>
 <h3 class="section-subtitle">Subclasses</h3>
 <ul class="hlist">
@@ -2006,10 +2022,13 @@ def is_series(self_or_cls):
 <li><code><a title="vectorbt.base.accessors.Base_Accessor.apply_on_index" href="#vectorbt.base.accessors.Base_Accessor.apply_on_index">apply_on_index</a></code></li>
 <li><code><a title="vectorbt.base.accessors.Base_Accessor.broadcast" href="#vectorbt.base.accessors.Base_Accessor.broadcast">broadcast</a></code></li>
 <li><code><a title="vectorbt.base.accessors.Base_Accessor.broadcast_to" href="#vectorbt.base.accessors.Base_Accessor.broadcast_to">broadcast_to</a></code></li>
+<li><code><a title="vectorbt.base.accessors.Base_Accessor.column_only_select" href="array_wrapper.html#vectorbt.base.array_wrapper.ArrayWrapper.column_only_select">column_only_select</a></code></li>
 <li><code><a title="vectorbt.base.accessors.Base_Accessor.columns" href="array_wrapper.html#vectorbt.base.array_wrapper.ArrayWrapper.columns">columns</a></code></li>
 <li><code><a title="vectorbt.base.accessors.Base_Accessor.combine_with" href="#vectorbt.base.accessors.Base_Accessor.combine_with">combine_with</a></code></li>
 <li><code><a title="vectorbt.base.accessors.Base_Accessor.combine_with_multiple" href="#vectorbt.base.accessors.Base_Accessor.combine_with_multiple">combine_with_multiple</a></code></li>
 <li><code><a title="vectorbt.base.accessors.Base_Accessor.concat" href="#vectorbt.base.accessors.Base_Accessor.concat">concat</a></code></li>
+<li><code><a title="vectorbt.base.accessors.Base_Accessor.config" href="../utils/config.html#vectorbt.utils.config.Configured.config">config</a></code></li>
+<li><code><a title="vectorbt.base.accessors.Base_Accessor.copy" href="../utils/config.html#vectorbt.utils.config.Configured.copy">copy</a></code></li>
 <li><code><a title="vectorbt.base.accessors.Base_Accessor.drop_duplicate_levels" href="#vectorbt.base.accessors.Base_Accessor.drop_duplicate_levels">drop_duplicate_levels</a></code></li>
 <li><code><a title="vectorbt.base.accessors.Base_Accessor.drop_levels" href="#vectorbt.base.accessors.Base_Accessor.drop_levels">drop_levels</a></code></li>
 <li><code><a title="vectorbt.base.accessors.Base_Accessor.drop_redundant_levels" href="#vectorbt.base.accessors.Base_Accessor.drop_redundant_levels">drop_redundant_levels</a></code></li>
@@ -2017,14 +2036,21 @@ def is_series(self_or_cls):
 <li><code><a title="vectorbt.base.accessors.Base_Accessor.empty_like" href="#vectorbt.base.accessors.Base_Accessor.empty_like">empty_like</a></code></li>
 <li><code><a title="vectorbt.base.accessors.Base_Accessor.freq" href="array_wrapper.html#vectorbt.base.array_wrapper.ArrayWrapper.freq">freq</a></code></li>
 <li><code><a title="vectorbt.base.accessors.Base_Accessor.from_obj" href="array_wrapper.html#vectorbt.base.array_wrapper.ArrayWrapper.from_obj">from_obj</a></code></li>
+<li><code><a title="vectorbt.base.accessors.Base_Accessor.group_select" href="array_wrapper.html#vectorbt.base.array_wrapper.ArrayWrapper.group_select">group_select</a></code></li>
+<li><code><a title="vectorbt.base.accessors.Base_Accessor.grouped_ndim" href="array_wrapper.html#vectorbt.base.array_wrapper.ArrayWrapper.grouped_ndim">grouped_ndim</a></code></li>
+<li><code><a title="vectorbt.base.accessors.Base_Accessor.grouper" href="array_wrapper.html#vectorbt.base.array_wrapper.ArrayWrapper.grouper">grouper</a></code></li>
+<li><code><a title="vectorbt.base.accessors.Base_Accessor.iloc" href="indexing.html#vectorbt.base.indexing.PandasIndexer.iloc">iloc</a></code></li>
 <li><code><a title="vectorbt.base.accessors.Base_Accessor.index" href="array_wrapper.html#vectorbt.base.array_wrapper.ArrayWrapper.index">index</a></code></li>
+<li><code><a title="vectorbt.base.accessors.Base_Accessor.loc" href="indexing.html#vectorbt.base.indexing.PandasIndexer.loc">loc</a></code></li>
 <li><code><a title="vectorbt.base.accessors.Base_Accessor.make_symmetric" href="#vectorbt.base.accessors.Base_Accessor.make_symmetric">make_symmetric</a></code></li>
 <li><code><a title="vectorbt.base.accessors.Base_Accessor.name" href="array_wrapper.html#vectorbt.base.array_wrapper.ArrayWrapper.name">name</a></code></li>
 <li><code><a title="vectorbt.base.accessors.Base_Accessor.ndim" href="array_wrapper.html#vectorbt.base.array_wrapper.ArrayWrapper.ndim">ndim</a></code></li>
+<li><code><a title="vectorbt.base.accessors.Base_Accessor.regroup" href="array_wrapper.html#vectorbt.base.array_wrapper.ArrayWrapper.regroup">regroup</a></code></li>
 <li><code><a title="vectorbt.base.accessors.Base_Accessor.rename_levels" href="#vectorbt.base.accessors.Base_Accessor.rename_levels">rename_levels</a></code></li>
 <li><code><a title="vectorbt.base.accessors.Base_Accessor.repeat" href="#vectorbt.base.accessors.Base_Accessor.repeat">repeat</a></code></li>
 <li><code><a title="vectorbt.base.accessors.Base_Accessor.select_levels" href="#vectorbt.base.accessors.Base_Accessor.select_levels">select_levels</a></code></li>
 <li><code><a title="vectorbt.base.accessors.Base_Accessor.shape" href="array_wrapper.html#vectorbt.base.array_wrapper.ArrayWrapper.shape">shape</a></code></li>
+<li><code><a title="vectorbt.base.accessors.Base_Accessor.shape_2d" href="array_wrapper.html#vectorbt.base.array_wrapper.ArrayWrapper.shape_2d">shape_2d</a></code></li>
 <li><code><a title="vectorbt.base.accessors.Base_Accessor.stack_index" href="#vectorbt.base.accessors.Base_Accessor.stack_index">stack_index</a></code></li>
 <li><code><a title="vectorbt.base.accessors.Base_Accessor.tile" href="#vectorbt.base.accessors.Base_Accessor.tile">tile</a></code></li>
 <li><code><a title="vectorbt.base.accessors.Base_Accessor.to_1d_array" href="#vectorbt.base.accessors.Base_Accessor.to_1d_array">to_1d_array</a></code></li>
@@ -2034,6 +2060,7 @@ def is_series(self_or_cls):
 <li><code><a title="vectorbt.base.accessors.Base_Accessor.unstack_to_df" href="#vectorbt.base.accessors.Base_Accessor.unstack_to_df">unstack_to_df</a></code></li>
 <li><code><a title="vectorbt.base.accessors.Base_Accessor.wrap" href="array_wrapper.html#vectorbt.base.array_wrapper.ArrayWrapper.wrap">wrap</a></code></li>
 <li><code><a title="vectorbt.base.accessors.Base_Accessor.wrap_reduced" href="array_wrapper.html#vectorbt.base.array_wrapper.ArrayWrapper.wrap_reduced">wrap_reduced</a></code></li>
+<li><code><a title="vectorbt.base.accessors.Base_Accessor.xs" href="indexing.html#vectorbt.base.indexing.PandasIndexer.xs">xs</a></code></li>
 </ul>
 </li>
 </ul>
@@ -2073,6 +2100,8 @@ def is_series(self_or_cls):
 <ul class="hlist">
 <li><a title="vectorbt.base.accessors.Base_Accessor" href="#vectorbt.base.accessors.Base_Accessor">Base_Accessor</a></li>
 <li><a title="vectorbt.base.array_wrapper.ArrayWrapper" href="array_wrapper.html#vectorbt.base.array_wrapper.ArrayWrapper">ArrayWrapper</a></li>
+<li><a title="vectorbt.utils.config.Configured" href="../utils/config.html#vectorbt.utils.config.Configured">Configured</a></li>
+<li><a title="vectorbt.base.indexing.PandasIndexer" href="indexing.html#vectorbt.base.indexing.PandasIndexer">PandasIndexer</a></li>
 </ul>
 <h3 class="section-subtitle">Subclasses</h3>
 <ul class="hlist">
@@ -2119,10 +2148,13 @@ def is_series(self_or_cls):
 <li><code><a title="vectorbt.base.accessors.Base_Accessor.apply_on_index" href="#vectorbt.base.accessors.Base_Accessor.apply_on_index">apply_on_index</a></code></li>
 <li><code><a title="vectorbt.base.accessors.Base_Accessor.broadcast" href="#vectorbt.base.accessors.Base_Accessor.broadcast">broadcast</a></code></li>
 <li><code><a title="vectorbt.base.accessors.Base_Accessor.broadcast_to" href="#vectorbt.base.accessors.Base_Accessor.broadcast_to">broadcast_to</a></code></li>
+<li><code><a title="vectorbt.base.accessors.Base_Accessor.column_only_select" href="array_wrapper.html#vectorbt.base.array_wrapper.ArrayWrapper.column_only_select">column_only_select</a></code></li>
 <li><code><a title="vectorbt.base.accessors.Base_Accessor.columns" href="array_wrapper.html#vectorbt.base.array_wrapper.ArrayWrapper.columns">columns</a></code></li>
 <li><code><a title="vectorbt.base.accessors.Base_Accessor.combine_with" href="#vectorbt.base.accessors.Base_Accessor.combine_with">combine_with</a></code></li>
 <li><code><a title="vectorbt.base.accessors.Base_Accessor.combine_with_multiple" href="#vectorbt.base.accessors.Base_Accessor.combine_with_multiple">combine_with_multiple</a></code></li>
 <li><code><a title="vectorbt.base.accessors.Base_Accessor.concat" href="#vectorbt.base.accessors.Base_Accessor.concat">concat</a></code></li>
+<li><code><a title="vectorbt.base.accessors.Base_Accessor.config" href="../utils/config.html#vectorbt.utils.config.Configured.config">config</a></code></li>
+<li><code><a title="vectorbt.base.accessors.Base_Accessor.copy" href="../utils/config.html#vectorbt.utils.config.Configured.copy">copy</a></code></li>
 <li><code><a title="vectorbt.base.accessors.Base_Accessor.drop_duplicate_levels" href="#vectorbt.base.accessors.Base_Accessor.drop_duplicate_levels">drop_duplicate_levels</a></code></li>
 <li><code><a title="vectorbt.base.accessors.Base_Accessor.drop_levels" href="#vectorbt.base.accessors.Base_Accessor.drop_levels">drop_levels</a></code></li>
 <li><code><a title="vectorbt.base.accessors.Base_Accessor.drop_redundant_levels" href="#vectorbt.base.accessors.Base_Accessor.drop_redundant_levels">drop_redundant_levels</a></code></li>
@@ -2130,14 +2162,21 @@ def is_series(self_or_cls):
 <li><code><a title="vectorbt.base.accessors.Base_Accessor.empty_like" href="#vectorbt.base.accessors.Base_Accessor.empty_like">empty_like</a></code></li>
 <li><code><a title="vectorbt.base.accessors.Base_Accessor.freq" href="array_wrapper.html#vectorbt.base.array_wrapper.ArrayWrapper.freq">freq</a></code></li>
 <li><code><a title="vectorbt.base.accessors.Base_Accessor.from_obj" href="array_wrapper.html#vectorbt.base.array_wrapper.ArrayWrapper.from_obj">from_obj</a></code></li>
+<li><code><a title="vectorbt.base.accessors.Base_Accessor.group_select" href="array_wrapper.html#vectorbt.base.array_wrapper.ArrayWrapper.group_select">group_select</a></code></li>
+<li><code><a title="vectorbt.base.accessors.Base_Accessor.grouped_ndim" href="array_wrapper.html#vectorbt.base.array_wrapper.ArrayWrapper.grouped_ndim">grouped_ndim</a></code></li>
+<li><code><a title="vectorbt.base.accessors.Base_Accessor.grouper" href="array_wrapper.html#vectorbt.base.array_wrapper.ArrayWrapper.grouper">grouper</a></code></li>
+<li><code><a title="vectorbt.base.accessors.Base_Accessor.iloc" href="indexing.html#vectorbt.base.indexing.PandasIndexer.iloc">iloc</a></code></li>
 <li><code><a title="vectorbt.base.accessors.Base_Accessor.index" href="array_wrapper.html#vectorbt.base.array_wrapper.ArrayWrapper.index">index</a></code></li>
+<li><code><a title="vectorbt.base.accessors.Base_Accessor.loc" href="indexing.html#vectorbt.base.indexing.PandasIndexer.loc">loc</a></code></li>
 <li><code><a title="vectorbt.base.accessors.Base_Accessor.make_symmetric" href="#vectorbt.base.accessors.Base_Accessor.make_symmetric">make_symmetric</a></code></li>
 <li><code><a title="vectorbt.base.accessors.Base_Accessor.name" href="array_wrapper.html#vectorbt.base.array_wrapper.ArrayWrapper.name">name</a></code></li>
 <li><code><a title="vectorbt.base.accessors.Base_Accessor.ndim" href="array_wrapper.html#vectorbt.base.array_wrapper.ArrayWrapper.ndim">ndim</a></code></li>
+<li><code><a title="vectorbt.base.accessors.Base_Accessor.regroup" href="array_wrapper.html#vectorbt.base.array_wrapper.ArrayWrapper.regroup">regroup</a></code></li>
 <li><code><a title="vectorbt.base.accessors.Base_Accessor.rename_levels" href="#vectorbt.base.accessors.Base_Accessor.rename_levels">rename_levels</a></code></li>
 <li><code><a title="vectorbt.base.accessors.Base_Accessor.repeat" href="#vectorbt.base.accessors.Base_Accessor.repeat">repeat</a></code></li>
 <li><code><a title="vectorbt.base.accessors.Base_Accessor.select_levels" href="#vectorbt.base.accessors.Base_Accessor.select_levels">select_levels</a></code></li>
 <li><code><a title="vectorbt.base.accessors.Base_Accessor.shape" href="array_wrapper.html#vectorbt.base.array_wrapper.ArrayWrapper.shape">shape</a></code></li>
+<li><code><a title="vectorbt.base.accessors.Base_Accessor.shape_2d" href="array_wrapper.html#vectorbt.base.array_wrapper.ArrayWrapper.shape_2d">shape_2d</a></code></li>
 <li><code><a title="vectorbt.base.accessors.Base_Accessor.stack_index" href="#vectorbt.base.accessors.Base_Accessor.stack_index">stack_index</a></code></li>
 <li><code><a title="vectorbt.base.accessors.Base_Accessor.tile" href="#vectorbt.base.accessors.Base_Accessor.tile">tile</a></code></li>
 <li><code><a title="vectorbt.base.accessors.Base_Accessor.to_1d_array" href="#vectorbt.base.accessors.Base_Accessor.to_1d_array">to_1d_array</a></code></li>
@@ -2147,6 +2186,7 @@ def is_series(self_or_cls):
 <li><code><a title="vectorbt.base.accessors.Base_Accessor.unstack_to_df" href="#vectorbt.base.accessors.Base_Accessor.unstack_to_df">unstack_to_df</a></code></li>
 <li><code><a title="vectorbt.base.accessors.Base_Accessor.wrap" href="array_wrapper.html#vectorbt.base.array_wrapper.ArrayWrapper.wrap">wrap</a></code></li>
 <li><code><a title="vectorbt.base.accessors.Base_Accessor.wrap_reduced" href="array_wrapper.html#vectorbt.base.array_wrapper.ArrayWrapper.wrap_reduced">wrap_reduced</a></code></li>
+<li><code><a title="vectorbt.base.accessors.Base_Accessor.xs" href="indexing.html#vectorbt.base.indexing.PandasIndexer.xs">xs</a></code></li>
 </ul>
 </li>
 </ul>

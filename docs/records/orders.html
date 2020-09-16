@@ -42,26 +42,26 @@ import plotly.graph_objects as go
 from vectorbt.defaults import contrast_color_schema
 from vectorbt.utils.decorators import cached_property
 from vectorbt.utils.colors import adjust_lightness
+from vectorbt.utils.config import Configured
 from vectorbt.base.indexing import PandasIndexer
-from vectorbt.base.array_wrapper import ArrayWrapper
-from vectorbt.records.base import Records, indexing_on_records
+from vectorbt.records.base import Records, indexing_on_records_meta
 from vectorbt.records.enums import OrderSide, order_dt
 
 
-def _indexing_func(obj, pd_indexing_func):
+def indexing_on_orders_meta(obj, pd_indexing_func):
     &#34;&#34;&#34;Perform indexing on `BaseOrders`.&#34;&#34;&#34;
-    new_cols, new_records, _ = indexing_on_records(obj, pd_indexing_func)
-    if obj.grouper.group_by is not None:
-        new_group_by = obj.grouper.group_by[new_cols]
-    else:
-        new_group_by = None
-    return obj.__class__(
-        new_records,
-        pd_indexing_func(obj.main_price),
-        freq=obj.wrapper.freq,
-        idx_field=obj.idx_field,
-        group_by=new_group_by
-    )
+    new_wrapper, new_records_arr, group_idxs, col_idxs = indexing_on_records_meta(obj, pd_indexing_func)
+    new_ref_price = new_wrapper.wrap(obj.close.values[:, col_idxs], group_by=False)
+    return obj.copy(
+        wrapper=new_wrapper,
+        records_arr=new_records_arr,
+        close=new_ref_price
+    ), group_idxs, col_idxs
+
+
+def _indexing_func(obj, pd_indexing_func):
+    &#34;&#34;&#34;See `indexing_on_orders`.&#34;&#34;&#34;
+    return indexing_on_orders_meta(obj, pd_indexing_func)[0]
 
 
 class BaseOrders(Records):
@@ -73,10 +73,10 @@ class BaseOrders(Records):
         &gt;&gt;&gt; import vectorbt as vbt
         &gt;&gt;&gt; import pandas as pd
 
-        &gt;&gt;&gt; price = pd.Series([1, 2, 3, 2, 1])
-        &gt;&gt;&gt; orders = pd.Series([1, 1, 1, 1, -1])
+        &gt;&gt;&gt; price = pd.Series([1., 2., 3., 2., 1.])
+        &gt;&gt;&gt; orders = pd.Series([1., 1., 1., 1., -1.])
         &gt;&gt;&gt; portfolio = vbt.Portfolio.from_orders(price, orders,
-        ...      init_capital=100, freq=&#39;1D&#39;)
+        ...      init_cash=100., freq=&#39;1D&#39;)
 
         &gt;&gt;&gt; portfolio.orders.buy.count()
         4
@@ -84,45 +84,39 @@ class BaseOrders(Records):
         1
         ```&#34;&#34;&#34;
 
-    def __init__(self, records_arr, main_price, freq=None, idx_field=&#39;idx&#39;, group_by=None):
+    def __init__(self, wrapper, records_arr, close, idx_field=&#39;idx&#39;):
         Records.__init__(
             self,
+            wrapper,
             records_arr,
-            ArrayWrapper.from_obj(main_price, freq=freq),
-            idx_field=idx_field,
-            group_by=group_by
+            idx_field=idx_field
         )
-        PandasIndexer.__init__(self, _indexing_func)
+        Configured.__init__(
+            self,
+            wrapper=wrapper,
+            records_arr=records_arr,
+            close=close,
+            idx_field=idx_field
+        )
+        self.close = close
 
         if not all(field in records_arr.dtype.names for field in order_dt.names):
             raise ValueError(&#34;Records array must have all fields defined in order_dt&#34;)
 
-        self.main_price = main_price
-
-    def filter_by_mask(self, mask, idx_field=None, group_by=None):
-        &#34;&#34;&#34;Return a new class instance, filtered by mask.&#34;&#34;&#34;
-        if idx_field is None:
-            idx_field = self.idx_field
-        if group_by is None:
-            group_by = self.grouper.group_by
-        return self.__class__(
-            self.records_arr[mask],
-            self.main_price,
-            freq=self.wrapper.freq,
-            idx_field=idx_field,
-            group_by=group_by
-        )
+        PandasIndexer.__init__(self, _indexing_func)
 
     def plot(self,
-             main_price_trace_kwargs={},
-             buy_trace_kwargs={},
-             sell_trace_kwargs={},
+             column=None,
+             ref_price_trace_kwargs=None,
+             buy_trace_kwargs=None,
+             sell_trace_kwargs=None,
              fig=None,
              **layout_kwargs):  # pragma: no cover
         &#34;&#34;&#34;Plot orders.
 
         Args:
-            main_price_trace_kwargs (dict): Keyword arguments passed to `plotly.graph_objects.Scatter` for main price.
+            column (str): Name of the column to plot.
+            ref_price_trace_kwargs (dict): Keyword arguments passed to `plotly.graph_objects.Scatter` for main price.
             buy_trace_kwargs (dict): Keyword arguments passed to `plotly.graph_objects.Scatter` for &#34;Buy&#34; markers.
             sell_trace_kwargs (dict): Keyword arguments passed to `plotly.graph_objects.Scatter` for &#34;Sell&#34; markers.
             fig (plotly.graph_objects.Figure): Figure to add traces to.
@@ -133,24 +127,38 @@ class BaseOrders(Records):
             ```
 
             ![](/vectorbt/docs/img/orders.png)&#34;&#34;&#34;
-        if self.wrapper.ndim &gt; 1:
-            raise TypeError(&#34;You must select a column first&#34;)
+        if column is not None:
+            if self.wrapper.grouper.group_by is None:
+                self_col = self[column]
+            else:
+                self_col = self.copy(wrapper=self.wrapper.copy(group_by=None))[column]
+        else:
+            self_col = self
+        if self_col.wrapper.ndim &gt; 1:
+            raise TypeError(&#34;Select a column first. Use indexing or column argument.&#34;)
+
+        if ref_price_trace_kwargs is None:
+            ref_price_trace_kwargs = {}
+        if buy_trace_kwargs is None:
+            buy_trace_kwargs = {}
+        if sell_trace_kwargs is None:
+            sell_trace_kwargs = {}
 
         # Plot main price
-        fig = self.main_price.vbt.plot(trace_kwargs=main_price_trace_kwargs, fig=fig, **layout_kwargs)
+        fig = self_col.close.vbt.plot(trace_kwargs=ref_price_trace_kwargs, fig=fig, **layout_kwargs)
 
         # Extract information
-        idx = self.records_arr[&#39;idx&#39;]
-        size = self.records_arr[&#39;size&#39;]
-        price = self.records_arr[&#39;price&#39;]
-        fees = self.records_arr[&#39;fees&#39;]
-        side = self.records_arr[&#39;side&#39;]
+        idx = self_col.records_arr[&#39;idx&#39;]
+        size = self_col.records_arr[&#39;size&#39;]
+        price = self_col.records_arr[&#39;price&#39;]
+        fees = self_col.records_arr[&#39;fees&#39;]
+        side = self_col.records_arr[&#39;side&#39;]
 
         # Plot Buy markers
         buy_mask = side == OrderSide.Buy
         buy_customdata = np.stack((size[buy_mask], fees[buy_mask]), axis=1)
         buy_scatter = go.Scatter(
-            x=self.wrapper.index[idx[buy_mask]],
+            x=self_col.wrapper.index[idx[buy_mask]],
             y=price[buy_mask],
             mode=&#39;markers&#39;,
             marker=dict(
@@ -173,7 +181,7 @@ class BaseOrders(Records):
         sell_mask = side == OrderSide.Sell
         sell_customdata = np.stack((size[sell_mask], fees[sell_mask]), axis=1)
         sell_scatter = go.Scatter(
-            x=self.wrapper.index[idx[sell_mask]],
+            x=self_col.wrapper.index[idx[sell_mask]],
             y=price[sell_mask],
             mode=&#39;markers&#39;,
             marker=dict(
@@ -225,11 +233,10 @@ class Orders(BaseOrders):
         &#34;&#34;&#34;Buy operations of type `BaseOrders`.&#34;&#34;&#34;
         filter_mask = self.records_arr[&#39;side&#39;] == OrderSide.Buy
         return BaseOrders(
+            self.wrapper,
             self.records_arr[filter_mask],
-            self.main_price,
-            freq=self.wrapper.freq,
-            idx_field=self.idx_field,
-            group_by=self.grouper.group_by
+            self.close,
+            idx_field=self.idx_field
         )
 
     @cached_property
@@ -237,11 +244,10 @@ class Orders(BaseOrders):
         &#34;&#34;&#34;Sell operations of type `BaseOrders`.&#34;&#34;&#34;
         filter_mask = self.records_arr[&#39;side&#39;] == OrderSide.Sell
         return BaseOrders(
+            self.wrapper,
             self.records_arr[filter_mask],
-            self.main_price,
-            freq=self.wrapper.freq,
-            idx_field=self.idx_field,
-            group_by=self.grouper.group_by
+            self.close,
+            idx_field=self.idx_field
         )</code></pre>
 </details>
 </section>
@@ -250,13 +256,36 @@ class Orders(BaseOrders):
 <section>
 </section>
 <section>
+<h2 class="section-title" id="header-functions">Functions</h2>
+<dl>
+<dt id="vectorbt.records.orders.indexing_on_orders_meta"><code class="name flex">
+<span>def <span class="ident fname">indexing_on_orders_meta</span></span>(<span>obj, pd_indexing_func)</span>
+</code></dt>
+<dd>
+<div class="desc"><p>Perform indexing on <code><a title="vectorbt.records.orders.BaseOrders" href="#vectorbt.records.orders.BaseOrders">BaseOrders</a></code>.</p></div>
+<details class="source">
+<summary>
+<span>Expand source code</span>
+</summary>
+<pre><code class="python">def indexing_on_orders_meta(obj, pd_indexing_func):
+    &#34;&#34;&#34;Perform indexing on `BaseOrders`.&#34;&#34;&#34;
+    new_wrapper, new_records_arr, group_idxs, col_idxs = indexing_on_records_meta(obj, pd_indexing_func)
+    new_ref_price = new_wrapper.wrap(obj.close.values[:, col_idxs], group_by=False)
+    return obj.copy(
+        wrapper=new_wrapper,
+        records_arr=new_records_arr,
+        close=new_ref_price
+    ), group_idxs, col_idxs</code></pre>
+</details>
+</dd>
+</dl>
 </section>
 <section>
 <h2 class="section-title" id="header-classes">Classes</h2>
 <dl>
 <dt id="vectorbt.records.orders.BaseOrders"><code class="flex name class">
 <span>class <span class="ident parent-fname">BaseOrders</span></span>
-<span>(</span><span>records_arr, main_price, freq=None, idx_field='idx', group_by=None)</span>
+<span>(</span><span>wrapper, records_arr, close, idx_field='idx')</span>
 </code></dt>
 <dd>
 <div class="desc"><p>Extends <code>Records</code> for working with order records.</p>
@@ -265,10 +294,10 @@ class Orders(BaseOrders):
 <pre><code class="python-repl">&gt;&gt;&gt; import vectorbt as vbt
 &gt;&gt;&gt; import pandas as pd
 
-&gt;&gt;&gt; price = pd.Series([1, 2, 3, 2, 1])
-&gt;&gt;&gt; orders = pd.Series([1, 1, 1, 1, -1])
+&gt;&gt;&gt; price = pd.Series([1., 2., 3., 2., 1.])
+&gt;&gt;&gt; orders = pd.Series([1., 1., 1., 1., -1.])
 &gt;&gt;&gt; portfolio = vbt.Portfolio.from_orders(price, orders,
-...      init_capital=100, freq='1D')
+...      init_cash=100., freq='1D')
 
 &gt;&gt;&gt; portfolio.orders.buy.count()
 4
@@ -288,10 +317,10 @@ class Orders(BaseOrders):
         &gt;&gt;&gt; import vectorbt as vbt
         &gt;&gt;&gt; import pandas as pd
 
-        &gt;&gt;&gt; price = pd.Series([1, 2, 3, 2, 1])
-        &gt;&gt;&gt; orders = pd.Series([1, 1, 1, 1, -1])
+        &gt;&gt;&gt; price = pd.Series([1., 2., 3., 2., 1.])
+        &gt;&gt;&gt; orders = pd.Series([1., 1., 1., 1., -1.])
         &gt;&gt;&gt; portfolio = vbt.Portfolio.from_orders(price, orders,
-        ...      init_capital=100, freq=&#39;1D&#39;)
+        ...      init_cash=100., freq=&#39;1D&#39;)
 
         &gt;&gt;&gt; portfolio.orders.buy.count()
         4
@@ -299,45 +328,39 @@ class Orders(BaseOrders):
         1
         ```&#34;&#34;&#34;
 
-    def __init__(self, records_arr, main_price, freq=None, idx_field=&#39;idx&#39;, group_by=None):
+    def __init__(self, wrapper, records_arr, close, idx_field=&#39;idx&#39;):
         Records.__init__(
             self,
+            wrapper,
             records_arr,
-            ArrayWrapper.from_obj(main_price, freq=freq),
-            idx_field=idx_field,
-            group_by=group_by
+            idx_field=idx_field
         )
-        PandasIndexer.__init__(self, _indexing_func)
+        Configured.__init__(
+            self,
+            wrapper=wrapper,
+            records_arr=records_arr,
+            close=close,
+            idx_field=idx_field
+        )
+        self.close = close
 
         if not all(field in records_arr.dtype.names for field in order_dt.names):
             raise ValueError(&#34;Records array must have all fields defined in order_dt&#34;)
 
-        self.main_price = main_price
-
-    def filter_by_mask(self, mask, idx_field=None, group_by=None):
-        &#34;&#34;&#34;Return a new class instance, filtered by mask.&#34;&#34;&#34;
-        if idx_field is None:
-            idx_field = self.idx_field
-        if group_by is None:
-            group_by = self.grouper.group_by
-        return self.__class__(
-            self.records_arr[mask],
-            self.main_price,
-            freq=self.wrapper.freq,
-            idx_field=idx_field,
-            group_by=group_by
-        )
+        PandasIndexer.__init__(self, _indexing_func)
 
     def plot(self,
-             main_price_trace_kwargs={},
-             buy_trace_kwargs={},
-             sell_trace_kwargs={},
+             column=None,
+             ref_price_trace_kwargs=None,
+             buy_trace_kwargs=None,
+             sell_trace_kwargs=None,
              fig=None,
              **layout_kwargs):  # pragma: no cover
         &#34;&#34;&#34;Plot orders.
 
         Args:
-            main_price_trace_kwargs (dict): Keyword arguments passed to `plotly.graph_objects.Scatter` for main price.
+            column (str): Name of the column to plot.
+            ref_price_trace_kwargs (dict): Keyword arguments passed to `plotly.graph_objects.Scatter` for main price.
             buy_trace_kwargs (dict): Keyword arguments passed to `plotly.graph_objects.Scatter` for &#34;Buy&#34; markers.
             sell_trace_kwargs (dict): Keyword arguments passed to `plotly.graph_objects.Scatter` for &#34;Sell&#34; markers.
             fig (plotly.graph_objects.Figure): Figure to add traces to.
@@ -348,24 +371,38 @@ class Orders(BaseOrders):
             ```
 
             ![](/vectorbt/docs/img/orders.png)&#34;&#34;&#34;
-        if self.wrapper.ndim &gt; 1:
-            raise TypeError(&#34;You must select a column first&#34;)
+        if column is not None:
+            if self.wrapper.grouper.group_by is None:
+                self_col = self[column]
+            else:
+                self_col = self.copy(wrapper=self.wrapper.copy(group_by=None))[column]
+        else:
+            self_col = self
+        if self_col.wrapper.ndim &gt; 1:
+            raise TypeError(&#34;Select a column first. Use indexing or column argument.&#34;)
+
+        if ref_price_trace_kwargs is None:
+            ref_price_trace_kwargs = {}
+        if buy_trace_kwargs is None:
+            buy_trace_kwargs = {}
+        if sell_trace_kwargs is None:
+            sell_trace_kwargs = {}
 
         # Plot main price
-        fig = self.main_price.vbt.plot(trace_kwargs=main_price_trace_kwargs, fig=fig, **layout_kwargs)
+        fig = self_col.close.vbt.plot(trace_kwargs=ref_price_trace_kwargs, fig=fig, **layout_kwargs)
 
         # Extract information
-        idx = self.records_arr[&#39;idx&#39;]
-        size = self.records_arr[&#39;size&#39;]
-        price = self.records_arr[&#39;price&#39;]
-        fees = self.records_arr[&#39;fees&#39;]
-        side = self.records_arr[&#39;side&#39;]
+        idx = self_col.records_arr[&#39;idx&#39;]
+        size = self_col.records_arr[&#39;size&#39;]
+        price = self_col.records_arr[&#39;price&#39;]
+        fees = self_col.records_arr[&#39;fees&#39;]
+        side = self_col.records_arr[&#39;side&#39;]
 
         # Plot Buy markers
         buy_mask = side == OrderSide.Buy
         buy_customdata = np.stack((size[buy_mask], fees[buy_mask]), axis=1)
         buy_scatter = go.Scatter(
-            x=self.wrapper.index[idx[buy_mask]],
+            x=self_col.wrapper.index[idx[buy_mask]],
             y=price[buy_mask],
             mode=&#39;markers&#39;,
             marker=dict(
@@ -388,7 +425,7 @@ class Orders(BaseOrders):
         sell_mask = side == OrderSide.Sell
         sell_customdata = np.stack((size[sell_mask], fees[sell_mask]), axis=1)
         sell_scatter = go.Scatter(
-            x=self.wrapper.index[idx[sell_mask]],
+            x=self_col.wrapper.index[idx[sell_mask]],
             y=price[sell_mask],
             mode=&#39;markers&#39;,
             marker=dict(
@@ -427,6 +464,7 @@ class Orders(BaseOrders):
 <h3 class="section-subtitle">Ancestors</h3>
 <ul class="hlist">
 <li><a title="vectorbt.records.base.Records" href="base.html#vectorbt.records.base.Records">Records</a></li>
+<li><a title="vectorbt.utils.config.Configured" href="../utils/config.html#vectorbt.utils.config.Configured">Configured</a></li>
 <li><a title="vectorbt.base.indexing.PandasIndexer" href="../base/indexing.html#vectorbt.base.indexing.PandasIndexer">PandasIndexer</a></li>
 </ul>
 <h3 class="section-subtitle">Subclasses</h3>
@@ -511,13 +549,15 @@ class Orders(BaseOrders):
 <h3 class="section-subtitle">Methods</h3>
 <dl>
 <dt id="vectorbt.records.orders.BaseOrders.plot"><code class="name flex">
-<span>def <span class="ident fname">plot</span></span>(<span>self, main_price_trace_kwargs={}, buy_trace_kwargs={}, sell_trace_kwargs={}, fig=None, **layout_kwargs)</span>
+<span>def <span class="ident fname">plot</span></span>(<span>self, column=None, ref_price_trace_kwargs=None, buy_trace_kwargs=None, sell_trace_kwargs=None, fig=None, **layout_kwargs)</span>
 </code></dt>
 <dd>
 <div class="desc"><p>Plot orders.</p>
 <h2 id="args">Args</h2>
 <dl>
-<dt><strong><code>main_price_trace_kwargs</code></strong> :&ensp;<code>dict</code></dt>
+<dt><strong><code>column</code></strong> :&ensp;<code>str</code></dt>
+<dd>Name of the column to plot.</dd>
+<dt><strong><code>ref_price_trace_kwargs</code></strong> :&ensp;<code>dict</code></dt>
 <dd>Keyword arguments passed to <code>plotly.graph_objects.Scatter</code> for main price.</dd>
 <dt><strong><code>buy_trace_kwargs</code></strong> :&ensp;<code>dict</code></dt>
 <dd>Keyword arguments passed to <code>plotly.graph_objects.Scatter</code> for "Buy" markers.</dd>
@@ -537,15 +577,17 @@ class Orders(BaseOrders):
 <span>Expand source code</span>
 </summary>
 <pre><code class="python">def plot(self,
-         main_price_trace_kwargs={},
-         buy_trace_kwargs={},
-         sell_trace_kwargs={},
+         column=None,
+         ref_price_trace_kwargs=None,
+         buy_trace_kwargs=None,
+         sell_trace_kwargs=None,
          fig=None,
          **layout_kwargs):  # pragma: no cover
     &#34;&#34;&#34;Plot orders.
 
     Args:
-        main_price_trace_kwargs (dict): Keyword arguments passed to `plotly.graph_objects.Scatter` for main price.
+        column (str): Name of the column to plot.
+        ref_price_trace_kwargs (dict): Keyword arguments passed to `plotly.graph_objects.Scatter` for main price.
         buy_trace_kwargs (dict): Keyword arguments passed to `plotly.graph_objects.Scatter` for &#34;Buy&#34; markers.
         sell_trace_kwargs (dict): Keyword arguments passed to `plotly.graph_objects.Scatter` for &#34;Sell&#34; markers.
         fig (plotly.graph_objects.Figure): Figure to add traces to.
@@ -556,24 +598,38 @@ class Orders(BaseOrders):
         ```
 
         ![](/vectorbt/docs/img/orders.png)&#34;&#34;&#34;
-    if self.wrapper.ndim &gt; 1:
-        raise TypeError(&#34;You must select a column first&#34;)
+    if column is not None:
+        if self.wrapper.grouper.group_by is None:
+            self_col = self[column]
+        else:
+            self_col = self.copy(wrapper=self.wrapper.copy(group_by=None))[column]
+    else:
+        self_col = self
+    if self_col.wrapper.ndim &gt; 1:
+        raise TypeError(&#34;Select a column first. Use indexing or column argument.&#34;)
+
+    if ref_price_trace_kwargs is None:
+        ref_price_trace_kwargs = {}
+    if buy_trace_kwargs is None:
+        buy_trace_kwargs = {}
+    if sell_trace_kwargs is None:
+        sell_trace_kwargs = {}
 
     # Plot main price
-    fig = self.main_price.vbt.plot(trace_kwargs=main_price_trace_kwargs, fig=fig, **layout_kwargs)
+    fig = self_col.close.vbt.plot(trace_kwargs=ref_price_trace_kwargs, fig=fig, **layout_kwargs)
 
     # Extract information
-    idx = self.records_arr[&#39;idx&#39;]
-    size = self.records_arr[&#39;size&#39;]
-    price = self.records_arr[&#39;price&#39;]
-    fees = self.records_arr[&#39;fees&#39;]
-    side = self.records_arr[&#39;side&#39;]
+    idx = self_col.records_arr[&#39;idx&#39;]
+    size = self_col.records_arr[&#39;size&#39;]
+    price = self_col.records_arr[&#39;price&#39;]
+    fees = self_col.records_arr[&#39;fees&#39;]
+    side = self_col.records_arr[&#39;side&#39;]
 
     # Plot Buy markers
     buy_mask = side == OrderSide.Buy
     buy_customdata = np.stack((size[buy_mask], fees[buy_mask]), axis=1)
     buy_scatter = go.Scatter(
-        x=self.wrapper.index[idx[buy_mask]],
+        x=self_col.wrapper.index[idx[buy_mask]],
         y=price[buy_mask],
         mode=&#39;markers&#39;,
         marker=dict(
@@ -596,7 +652,7 @@ class Orders(BaseOrders):
     sell_mask = side == OrderSide.Sell
     sell_customdata = np.stack((size[sell_mask], fees[sell_mask]), axis=1)
     sell_scatter = go.Scatter(
-        x=self.wrapper.index[idx[sell_mask]],
+        x=self_col.wrapper.index[idx[sell_mask]],
         y=price[sell_mask],
         mode=&#39;markers&#39;,
         marker=dict(
@@ -624,14 +680,20 @@ class Orders(BaseOrders):
 <li><code><b><a title="vectorbt.records.base.Records" href="base.html#vectorbt.records.base.Records">Records</a></b></code>:
 <ul class="hlist">
 <li><code><a title="vectorbt.records.base.Records.col_index" href="base.html#vectorbt.records.base.Records.col_index">col_index</a></code></li>
+<li><code><a title="vectorbt.records.base.Records.config" href="../utils/config.html#vectorbt.utils.config.Configured.config">config</a></code></li>
+<li><code><a title="vectorbt.records.base.Records.copy" href="../utils/config.html#vectorbt.utils.config.Configured.copy">copy</a></code></li>
 <li><code><a title="vectorbt.records.base.Records.count" href="base.html#vectorbt.records.base.Records.count">count</a></code></li>
 <li><code><a title="vectorbt.records.base.Records.filter_by_mask" href="base.html#vectorbt.records.base.Records.filter_by_mask">filter_by_mask</a></code></li>
+<li><code><a title="vectorbt.records.base.Records.idx_field" href="base.html#vectorbt.records.base.Records.idx_field">idx_field</a></code></li>
 <li><code><a title="vectorbt.records.base.Records.iloc" href="../base/indexing.html#vectorbt.base.indexing.PandasIndexer.iloc">iloc</a></code></li>
 <li><code><a title="vectorbt.records.base.Records.loc" href="../base/indexing.html#vectorbt.base.indexing.PandasIndexer.loc">loc</a></code></li>
 <li><code><a title="vectorbt.records.base.Records.map" href="base.html#vectorbt.records.base.Records.map">map</a></code></li>
 <li><code><a title="vectorbt.records.base.Records.map_array" href="base.html#vectorbt.records.base.Records.map_array">map_array</a></code></li>
 <li><code><a title="vectorbt.records.base.Records.map_field" href="base.html#vectorbt.records.base.Records.map_field">map_field</a></code></li>
 <li><code><a title="vectorbt.records.base.Records.records" href="base.html#vectorbt.records.base.Records.records">records</a></code></li>
+<li><code><a title="vectorbt.records.base.Records.records_arr" href="base.html#vectorbt.records.base.Records.records_arr">records_arr</a></code></li>
+<li><code><a title="vectorbt.records.base.Records.regroup" href="base.html#vectorbt.records.base.Records.regroup">regroup</a></code></li>
+<li><code><a title="vectorbt.records.base.Records.wrapper" href="base.html#vectorbt.records.base.Records.wrapper">wrapper</a></code></li>
 <li><code><a title="vectorbt.records.base.Records.xs" href="../base/indexing.html#vectorbt.base.indexing.PandasIndexer.xs">xs</a></code></li>
 </ul>
 </li>
@@ -639,7 +701,7 @@ class Orders(BaseOrders):
 </dd>
 <dt id="vectorbt.records.orders.Orders"><code class="flex name class">
 <span>class <span class="ident parent-fname">Orders</span></span>
-<span>(</span><span>records_arr, main_price, freq=None, idx_field='idx', group_by=None)</span>
+<span>(</span><span>wrapper, records_arr, close, idx_field='idx')</span>
 </code></dt>
 <dd>
 <div class="desc"><p>Extends <code><a title="vectorbt.records.orders.BaseOrders" href="#vectorbt.records.orders.BaseOrders">BaseOrders</a></code> by further dividing orders into buy and sell orders.</p></div>
@@ -662,11 +724,10 @@ class Orders(BaseOrders):
         &#34;&#34;&#34;Buy operations of type `BaseOrders`.&#34;&#34;&#34;
         filter_mask = self.records_arr[&#39;side&#39;] == OrderSide.Buy
         return BaseOrders(
+            self.wrapper,
             self.records_arr[filter_mask],
-            self.main_price,
-            freq=self.wrapper.freq,
-            idx_field=self.idx_field,
-            group_by=self.grouper.group_by
+            self.close,
+            idx_field=self.idx_field
         )
 
     @cached_property
@@ -674,17 +735,17 @@ class Orders(BaseOrders):
         &#34;&#34;&#34;Sell operations of type `BaseOrders`.&#34;&#34;&#34;
         filter_mask = self.records_arr[&#39;side&#39;] == OrderSide.Sell
         return BaseOrders(
+            self.wrapper,
             self.records_arr[filter_mask],
-            self.main_price,
-            freq=self.wrapper.freq,
-            idx_field=self.idx_field,
-            group_by=self.grouper.group_by
+            self.close,
+            idx_field=self.idx_field
         )</code></pre>
 </details>
 <h3 class="section-subtitle">Ancestors</h3>
 <ul class="hlist">
 <li><a title="vectorbt.records.orders.BaseOrders" href="#vectorbt.records.orders.BaseOrders">BaseOrders</a></li>
 <li><a title="vectorbt.records.base.Records" href="base.html#vectorbt.records.base.Records">Records</a></li>
+<li><a title="vectorbt.utils.config.Configured" href="../utils/config.html#vectorbt.utils.config.Configured">Configured</a></li>
 <li><a title="vectorbt.base.indexing.PandasIndexer" href="../base/indexing.html#vectorbt.base.indexing.PandasIndexer">PandasIndexer</a></li>
 </ul>
 <h3 class="section-subtitle">Instance variables</h3>
@@ -768,9 +829,12 @@ class Orders(BaseOrders):
 <li><code><b><a title="vectorbt.records.orders.BaseOrders" href="#vectorbt.records.orders.BaseOrders">BaseOrders</a></b></code>:
 <ul class="hlist">
 <li><code><a title="vectorbt.records.orders.BaseOrders.col_index" href="base.html#vectorbt.records.base.Records.col_index">col_index</a></code></li>
+<li><code><a title="vectorbt.records.orders.BaseOrders.config" href="../utils/config.html#vectorbt.utils.config.Configured.config">config</a></code></li>
+<li><code><a title="vectorbt.records.orders.BaseOrders.copy" href="../utils/config.html#vectorbt.utils.config.Configured.copy">copy</a></code></li>
 <li><code><a title="vectorbt.records.orders.BaseOrders.count" href="base.html#vectorbt.records.base.Records.count">count</a></code></li>
 <li><code><a title="vectorbt.records.orders.BaseOrders.fees" href="#vectorbt.records.orders.BaseOrders.fees">fees</a></code></li>
 <li><code><a title="vectorbt.records.orders.BaseOrders.filter_by_mask" href="base.html#vectorbt.records.base.Records.filter_by_mask">filter_by_mask</a></code></li>
+<li><code><a title="vectorbt.records.orders.BaseOrders.idx_field" href="base.html#vectorbt.records.base.Records.idx_field">idx_field</a></code></li>
 <li><code><a title="vectorbt.records.orders.BaseOrders.iloc" href="../base/indexing.html#vectorbt.base.indexing.PandasIndexer.iloc">iloc</a></code></li>
 <li><code><a title="vectorbt.records.orders.BaseOrders.loc" href="../base/indexing.html#vectorbt.base.indexing.PandasIndexer.loc">loc</a></code></li>
 <li><code><a title="vectorbt.records.orders.BaseOrders.map" href="base.html#vectorbt.records.base.Records.map">map</a></code></li>
@@ -779,7 +843,10 @@ class Orders(BaseOrders):
 <li><code><a title="vectorbt.records.orders.BaseOrders.plot" href="#vectorbt.records.orders.BaseOrders.plot">plot</a></code></li>
 <li><code><a title="vectorbt.records.orders.BaseOrders.price" href="#vectorbt.records.orders.BaseOrders.price">price</a></code></li>
 <li><code><a title="vectorbt.records.orders.BaseOrders.records" href="base.html#vectorbt.records.base.Records.records">records</a></code></li>
+<li><code><a title="vectorbt.records.orders.BaseOrders.records_arr" href="base.html#vectorbt.records.base.Records.records_arr">records_arr</a></code></li>
+<li><code><a title="vectorbt.records.orders.BaseOrders.regroup" href="base.html#vectorbt.records.base.Records.regroup">regroup</a></code></li>
 <li><code><a title="vectorbt.records.orders.BaseOrders.size" href="#vectorbt.records.orders.BaseOrders.size">size</a></code></li>
+<li><code><a title="vectorbt.records.orders.BaseOrders.wrapper" href="base.html#vectorbt.records.base.Records.wrapper">wrapper</a></code></li>
 <li><code><a title="vectorbt.records.orders.BaseOrders.xs" href="../base/indexing.html#vectorbt.base.indexing.PandasIndexer.xs">xs</a></code></li>
 </ul>
 </li>
@@ -811,6 +878,11 @@ title="Search"
 <li><h3>Super-module</h3>
 <ul>
 <li><code><a title="vectorbt.records" href="index.html">vectorbt.records</a></code></li>
+</ul>
+</li>
+<li><h3><a href="#header-functions">Functions</a></h3>
+<ul class="">
+<li><code><a title="vectorbt.records.orders.indexing_on_orders_meta" href="#vectorbt.records.orders.indexing_on_orders_meta">indexing_on_orders_meta</a></code></li>
 </ul>
 </li>
 <li><h3><a href="#header-classes">Classes</a></h3>

@@ -4,8 +4,8 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, minimum-scale=1" />
 <meta name="generator" content="pdoc 0.8.1" />
-<title>vectorbt.utils.array API documentation</title>
-<meta name="description" content="Numba-compiled utility functions for working with arrays." />
+<title>vectorbt.returns.metrics API documentation</title>
+<meta name="description" content="" />
 <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/5.12.0-2/css/all.min.css" integrity="sha256-46r060N2LrChLLb5zowXQ72/iKKNiw/lAmygmHExk/o=" crossorigin="anonymous" />
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/docsearch.js@2/dist/cdn/docsearch.min.css" />
 <link href='https://cdnjs.cloudflare.com/ajax/libs/normalize/8.0.0/normalize.min.css' rel='stylesheet'>
@@ -25,68 +25,31 @@ ga('create', 'UA-142521178-3', 'auto'); ga('send', 'pageview');
 <main>
 <article id="content">
 <header>
-<h1 class="title">Module <code>vectorbt.utils.array</code></h1>
+<h1 class="title">Module <code>vectorbt.returns.metrics</code></h1>
 </header>
 <section id="section-intro">
-<p>Numba-compiled utility functions for working with arrays.</p>
 <details class="source">
 <summary>
 <span>Expand source code</span>
 </summary>
-<pre><code class="python">&#34;&#34;&#34;Numba-compiled utility functions for working with arrays.&#34;&#34;&#34;
-
-import numpy as np
-from numba import njit
+<pre><code class="python">import numpy as np
+from scipy.stats import norm
 
 
-def is_sorted(a):
-    &#34;&#34;&#34;Checks if array is sorted.&#34;&#34;&#34;
-    return np.all(a[:-1] &lt;= a[1:])
+def approx_exp_max_sharpe(mean_sharpe, var_sharpe, nb_trials):
+    &#34;&#34;&#34;Expected Maximum Sharpe Ratio.&#34;&#34;&#34;
+    return mean_sharpe + np.sqrt(var_sharpe) * \
+        ((1 - np.euler_gamma) * norm.ppf(1 - 1 / nb_trials) + np.euler_gamma * norm.ppf(1 - 1 / (nb_trials * np.e)))
 
 
-@njit(cache=True)
-def is_sorted_nb(a):
-    &#34;&#34;&#34;Numba-compiled version of `is_sorted`.&#34;&#34;&#34;
-    for i in range(a.size-1):
-        if a[i+1] &lt; a[i]:
-            return False
-    return True
+def deflated_sharpe_ratio(*, est_sharpe, var_sharpe, nb_trials, backtest_horizon, skew, kurtosis):
+    &#34;&#34;&#34;Deflated Sharpe Ratio (DSR).
 
+    See https://gmarti.gitlab.io/qfin/2018/05/30/deflated-sharpe-ratio.html.&#34;&#34;&#34;
+    SR0 = approx_exp_max_sharpe(0, var_sharpe, nb_trials)
 
-@njit(cache=True)
-def insert_argsort_nb(A, I):
-    &#34;&#34;&#34;Perform argsort using insertion sort.
-
-    In-memory and without recursion -&gt; very fast for smaller arrays.&#34;&#34;&#34;
-    for j in range(1, len(A)):
-        key = A[j]
-        key2 = I[j]
-        i = j - 1
-        while (i &gt;= 0) &amp; (A[i] &gt; key):
-            A[i + 1] = A[i]
-            I[i + 1] = I[i]
-            i = i - 1
-        A[i + 1] = key
-        I[i + 1] = key2
-
-
-def get_ranges_arr(starts, ends):
-    &#34;&#34;&#34;Build array from start and end indices.
-
-    Based on https://stackoverflow.com/a/37626057&#34;&#34;&#34;
-    starts = np.asarray(starts)
-    if starts.ndim == 0:
-        starts = np.array([starts])
-    ends = np.asarray(ends)
-    if ends.ndim == 0:
-        ends = np.array([ends])
-    starts, end = np.broadcast_arrays(starts, ends)
-    counts = ends - starts
-    counts_csum = counts.cumsum()
-    id_arr = np.ones(counts_csum[-1], dtype=int)
-    id_arr[0] = starts[0]
-    id_arr[counts_csum[:-1]] = starts[1:] - ends[:-1] + 1
-    return id_arr.cumsum()</code></pre>
+    return norm.cdf(((est_sharpe - SR0) * np.sqrt(backtest_horizon - 1)) /
+                    np.sqrt(1 - skew * est_sharpe + ((kurtosis - 1) / 4) * est_sharpe ** 2))</code></pre>
 </details>
 </section>
 <section>
@@ -96,92 +59,39 @@ def get_ranges_arr(starts, ends):
 <section>
 <h2 class="section-title" id="header-functions">Functions</h2>
 <dl>
-<dt id="vectorbt.utils.array.get_ranges_arr"><code class="name flex">
-<span>def <span class="ident fname">get_ranges_arr</span></span>(<span>starts, ends)</span>
+<dt id="vectorbt.returns.metrics.approx_exp_max_sharpe"><code class="name flex">
+<span>def <span class="ident fname">approx_exp_max_sharpe</span></span>(<span>mean_sharpe, var_sharpe, nb_trials)</span>
 </code></dt>
 <dd>
-<div class="desc"><p>Build array from start and end indices.</p>
-<p>Based on <a href="https://stackoverflow.com/a/37626057">https://stackoverflow.com/a/37626057</a></p></div>
+<div class="desc"><p>Expected Maximum Sharpe Ratio.</p></div>
 <details class="source">
 <summary>
 <span>Expand source code</span>
 </summary>
-<pre><code class="python">def get_ranges_arr(starts, ends):
-    &#34;&#34;&#34;Build array from start and end indices.
+<pre><code class="python">def approx_exp_max_sharpe(mean_sharpe, var_sharpe, nb_trials):
+    &#34;&#34;&#34;Expected Maximum Sharpe Ratio.&#34;&#34;&#34;
+    return mean_sharpe + np.sqrt(var_sharpe) * \
+        ((1 - np.euler_gamma) * norm.ppf(1 - 1 / nb_trials) + np.euler_gamma * norm.ppf(1 - 1 / (nb_trials * np.e)))</code></pre>
+</details>
+</dd>
+<dt id="vectorbt.returns.metrics.deflated_sharpe_ratio"><code class="name flex">
+<span>def <span class="ident fname">deflated_sharpe_ratio</span></span>(<span>*, est_sharpe, var_sharpe, nb_trials, backtest_horizon, skew, kurtosis)</span>
+</code></dt>
+<dd>
+<div class="desc"><p>Deflated Sharpe Ratio (DSR).</p>
+<p>See <a href="https://gmarti.gitlab.io/qfin/2018/05/30/deflated-sharpe-ratio.html.">https://gmarti.gitlab.io/qfin/2018/05/30/deflated-sharpe-ratio.html.</a></p></div>
+<details class="source">
+<summary>
+<span>Expand source code</span>
+</summary>
+<pre><code class="python">def deflated_sharpe_ratio(*, est_sharpe, var_sharpe, nb_trials, backtest_horizon, skew, kurtosis):
+    &#34;&#34;&#34;Deflated Sharpe Ratio (DSR).
 
-    Based on https://stackoverflow.com/a/37626057&#34;&#34;&#34;
-    starts = np.asarray(starts)
-    if starts.ndim == 0:
-        starts = np.array([starts])
-    ends = np.asarray(ends)
-    if ends.ndim == 0:
-        ends = np.array([ends])
-    starts, end = np.broadcast_arrays(starts, ends)
-    counts = ends - starts
-    counts_csum = counts.cumsum()
-    id_arr = np.ones(counts_csum[-1], dtype=int)
-    id_arr[0] = starts[0]
-    id_arr[counts_csum[:-1]] = starts[1:] - ends[:-1] + 1
-    return id_arr.cumsum()</code></pre>
-</details>
-</dd>
-<dt id="vectorbt.utils.array.insert_argsort_nb"><code class="name flex">
-<span>def <span class="ident fname">insert_argsort_nb</span></span>(<span>A, I)</span>
-</code></dt>
-<dd>
-<div class="desc"><p>Perform argsort using insertion sort.</p>
-<p>In-memory and without recursion -&gt; very fast for smaller arrays.</p></div>
-<details class="source">
-<summary>
-<span>Expand source code</span>
-</summary>
-<pre><code class="python">@njit(cache=True)
-def insert_argsort_nb(A, I):
-    &#34;&#34;&#34;Perform argsort using insertion sort.
+    See https://gmarti.gitlab.io/qfin/2018/05/30/deflated-sharpe-ratio.html.&#34;&#34;&#34;
+    SR0 = approx_exp_max_sharpe(0, var_sharpe, nb_trials)
 
-    In-memory and without recursion -&gt; very fast for smaller arrays.&#34;&#34;&#34;
-    for j in range(1, len(A)):
-        key = A[j]
-        key2 = I[j]
-        i = j - 1
-        while (i &gt;= 0) &amp; (A[i] &gt; key):
-            A[i + 1] = A[i]
-            I[i + 1] = I[i]
-            i = i - 1
-        A[i + 1] = key
-        I[i + 1] = key2</code></pre>
-</details>
-</dd>
-<dt id="vectorbt.utils.array.is_sorted"><code class="name flex">
-<span>def <span class="ident fname">is_sorted</span></span>(<span>a)</span>
-</code></dt>
-<dd>
-<div class="desc"><p>Checks if array is sorted.</p></div>
-<details class="source">
-<summary>
-<span>Expand source code</span>
-</summary>
-<pre><code class="python">def is_sorted(a):
-    &#34;&#34;&#34;Checks if array is sorted.&#34;&#34;&#34;
-    return np.all(a[:-1] &lt;= a[1:])</code></pre>
-</details>
-</dd>
-<dt id="vectorbt.utils.array.is_sorted_nb"><code class="name flex">
-<span>def <span class="ident fname">is_sorted_nb</span></span>(<span>a)</span>
-</code></dt>
-<dd>
-<div class="desc"><p>Numba-compiled version of <code><a title="vectorbt.utils.array.is_sorted" href="#vectorbt.utils.array.is_sorted">is_sorted()</a></code>.</p></div>
-<details class="source">
-<summary>
-<span>Expand source code</span>
-</summary>
-<pre><code class="python">@njit(cache=True)
-def is_sorted_nb(a):
-    &#34;&#34;&#34;Numba-compiled version of `is_sorted`.&#34;&#34;&#34;
-    for i in range(a.size-1):
-        if a[i+1] &lt; a[i]:
-            return False
-    return True</code></pre>
+    return norm.cdf(((est_sharpe - SR0) * np.sqrt(backtest_horizon - 1)) /
+                    np.sqrt(1 - skew * est_sharpe + ((kurtosis - 1) / 4) * est_sharpe ** 2))</code></pre>
 </details>
 </dd>
 </dl>
@@ -211,15 +121,13 @@ title="Search"
 <ul id="index">
 <li><h3>Super-module</h3>
 <ul>
-<li><code><a title="vectorbt.utils" href="index.html">vectorbt.utils</a></code></li>
+<li><code><a title="vectorbt.returns" href="index.html">vectorbt.returns</a></code></li>
 </ul>
 </li>
 <li><h3><a href="#header-functions">Functions</a></h3>
 <ul class="">
-<li><code><a title="vectorbt.utils.array.get_ranges_arr" href="#vectorbt.utils.array.get_ranges_arr">get_ranges_arr</a></code></li>
-<li><code><a title="vectorbt.utils.array.insert_argsort_nb" href="#vectorbt.utils.array.insert_argsort_nb">insert_argsort_nb</a></code></li>
-<li><code><a title="vectorbt.utils.array.is_sorted" href="#vectorbt.utils.array.is_sorted">is_sorted</a></code></li>
-<li><code><a title="vectorbt.utils.array.is_sorted_nb" href="#vectorbt.utils.array.is_sorted_nb">is_sorted_nb</a></code></li>
+<li><code><a title="vectorbt.returns.metrics.approx_exp_max_sharpe" href="#vectorbt.returns.metrics.approx_exp_max_sharpe">approx_exp_max_sharpe</a></code></li>
+<li><code><a title="vectorbt.returns.metrics.deflated_sharpe_ratio" href="#vectorbt.returns.metrics.deflated_sharpe_ratio">deflated_sharpe_ratio</a></code></li>
 </ul>
 </li>
 </ul>
