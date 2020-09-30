@@ -1562,25 +1562,24 @@ def cash_flow_grouped_nb(cash_flow_ungrouped, group_counts):
 
 
 @njit(cache=True)
-def cash_ungrouped_nb(cash_flow_ungrouped, group_counts, init_cash, cash_sharing, call_seq, in_sim_order):
-    &#34;&#34;&#34;Get cash series per column.&#34;&#34;&#34;
+def cash_ungrouped_nb(cash_flow_ungrouped, group_counts, init_cash, call_seq, in_sim_order):
+    &#34;&#34;&#34;Get cash series per column.
+
+    `init_cash` should be grouped if `in_sim_order` is `True`, and ungrouped otherwise.&#34;&#34;&#34;
     check_group_counts(group_counts, cash_flow_ungrouped.shape[1])
-    check_group_init_cash(group_counts, cash_flow_ungrouped.shape[1], init_cash, cash_sharing)
 
     out = np.empty_like(cash_flow_ungrouped)
     from_col = 0
     for group in range(len(group_counts)):
         to_col = from_col + group_counts[group]
         group_len = to_col - from_col
-        if cash_sharing and in_sim_order:
+        if in_sim_order:
             cash_now = init_cash[group]
         for i in range(cash_flow_ungrouped.shape[0]):
             for k in range(group_len):
                 col = from_col + call_seq[i, from_col + k]
-                if not cash_sharing:
+                if not in_sim_order:
                     cash_now = init_cash[col] if i == 0 else out[i - 1, col]
-                elif not in_sim_order:
-                    cash_now = init_cash[group] if i == 0 else out[i - 1, col]
                 flow_value = cash_flow_ungrouped[i, col]
                 if flow_value &lt; 0 and is_close_or_less_nb(cash_now, -flow_value):
                     cash_now = 0.  # numerical stability
@@ -1678,8 +1677,8 @@ def value_nb(cash, holding_value):
 
 
 @njit
-def final_value_ungrouped_nb(target_shape, close, order_records, init_cash_ungrouped):
-    &#34;&#34;&#34;Get final portfolio value per column.
+def total_profit_ungrouped_nb(target_shape, close, order_records, init_cash_ungrouped):
+    &#34;&#34;&#34;Get total profit per column.
 
     A much faster version than the one based on `value_nb`.&#34;&#34;&#34;
     shares = np.full(target_shape[1], 0., dtype=np.float_)
@@ -1716,36 +1715,33 @@ def final_value_ungrouped_nb(target_shape, close, order_records, init_cash_ungro
         else:
             cash[col] += record[&#39;size&#39;] * record[&#39;price&#39;] - record[&#39;fees&#39;]
 
-    return cash + shares * close[-1, :]
+    return cash + shares * close[-1, :] - init_cash_ungrouped
 
 
 @njit
-def final_value_grouped_nb(final_value_ungrouped, init_cash, group_counts, cash_sharing):
-    &#34;&#34;&#34;Get final portfolio value per group.&#34;&#34;&#34;
-    check_group_counts(group_counts, final_value_ungrouped.shape[0])
-    check_group_init_cash(group_counts, final_value_ungrouped.shape[0], init_cash, cash_sharing)
+def total_profit_grouped_nb(total_profit_ungrouped, group_counts):
+    &#34;&#34;&#34;Get total profit per group.&#34;&#34;&#34;
+    check_group_counts(group_counts, total_profit_ungrouped.shape[0])
 
     out = np.empty((len(group_counts),), dtype=np.float_)
     from_col = 0
     for group in range(len(group_counts)):
         to_col = from_col + group_counts[group]
-        out[group] = np.sum(final_value_ungrouped[from_col:to_col])
-        if cash_sharing:
-            out[group] = out[group] - init_cash[group] * (group_counts[group] - 1)
+        out[group] = np.sum(total_profit_ungrouped[from_col:to_col])
         from_col = to_col
     return out
 
 
 @njit(cache=True)
-def total_profit_nb(init_cash_regrouped, final_value):
+def final_value_nb(total_profit, init_cash_regrouped):
     &#34;&#34;&#34;Get total profit per column/group.&#34;&#34;&#34;
-    return final_value - init_cash_regrouped
+    return total_profit + init_cash_regrouped
 
 
 @njit(cache=True)
-def total_return_nb(init_cash_regrouped, final_value):
+def total_return_nb(total_profit, init_cash_regrouped):
     &#34;&#34;&#34;Get total return per column/group.&#34;&#34;&#34;
-    return (final_value - init_cash_regrouped) / init_cash_regrouped
+    return total_profit / init_cash_regrouped
 
 
 @njit(cache=True)
@@ -1777,7 +1773,7 @@ def returns_nb(value, init_cash_regrouped):
 
 
 @njit(cache=True)
-def returns_in_sim_order_nb(value_iso, group_counts, init_cash, call_seq):
+def returns_in_sim_order_nb(value_iso, group_counts, init_cash_grouped, call_seq):
     &#34;&#34;&#34;Get portfolio return series in simulation order.&#34;&#34;&#34;
     check_group_counts(group_counts, value_iso.shape[1])
 
@@ -1786,7 +1782,7 @@ def returns_in_sim_order_nb(value_iso, group_counts, init_cash, call_seq):
     for group in range(len(group_counts)):
         to_col = from_col + group_counts[group]
         group_len = to_col - from_col
-        input_value = init_cash[group]
+        input_value = init_cash_grouped[group]
         for j in range(value_iso.shape[0] * group_len):
             i = j // group_len
             col = from_col + call_seq[i, from_col + j % group_len]
@@ -2123,34 +2119,34 @@ def cash_grouped_nb(target_shape, cash_flow_grouped, group_counts, init_cash_gro
 </details>
 </dd>
 <dt id="vectorbt.portfolio.nb.cash_ungrouped_nb"><code class="name flex">
-<span>def <span class="ident fname">cash_ungrouped_nb</span></span>(<span>cash_flow_ungrouped, group_counts, init_cash, cash_sharing, call_seq, in_sim_order)</span>
+<span>def <span class="ident fname">cash_ungrouped_nb</span></span>(<span>cash_flow_ungrouped, group_counts, init_cash, call_seq, in_sim_order)</span>
 </code></dt>
 <dd>
-<div class="desc"><p>Get cash series per column.</p></div>
+<div class="desc"><p>Get cash series per column.</p>
+<p><code>init_cash</code> should be grouped if <code>in_sim_order</code> is <code>True</code>, and ungrouped otherwise.</p></div>
 <details class="source">
 <summary>
 <span>Expand source code</span>
 </summary>
 <pre><code class="python">@njit(cache=True)
-def cash_ungrouped_nb(cash_flow_ungrouped, group_counts, init_cash, cash_sharing, call_seq, in_sim_order):
-    &#34;&#34;&#34;Get cash series per column.&#34;&#34;&#34;
+def cash_ungrouped_nb(cash_flow_ungrouped, group_counts, init_cash, call_seq, in_sim_order):
+    &#34;&#34;&#34;Get cash series per column.
+
+    `init_cash` should be grouped if `in_sim_order` is `True`, and ungrouped otherwise.&#34;&#34;&#34;
     check_group_counts(group_counts, cash_flow_ungrouped.shape[1])
-    check_group_init_cash(group_counts, cash_flow_ungrouped.shape[1], init_cash, cash_sharing)
 
     out = np.empty_like(cash_flow_ungrouped)
     from_col = 0
     for group in range(len(group_counts)):
         to_col = from_col + group_counts[group]
         group_len = to_col - from_col
-        if cash_sharing and in_sim_order:
+        if in_sim_order:
             cash_now = init_cash[group]
         for i in range(cash_flow_ungrouped.shape[0]):
             for k in range(group_len):
                 col = from_col + call_seq[i, from_col + k]
-                if not cash_sharing:
+                if not in_sim_order:
                     cash_now = init_cash[col] if i == 0 else out[i - 1, col]
-                elif not in_sim_order:
-                    cash_now = init_cash[group] if i == 0 else out[i - 1, col]
                 flow_value = cash_flow_ungrouped[i, col]
                 if flow_value &lt; 0 and is_close_or_less_nb(cash_now, -flow_value):
                     cash_now = 0.  # numerical stability
@@ -2212,82 +2208,19 @@ def empty_prep_nb(*args):
     return ()</code></pre>
 </details>
 </dd>
-<dt id="vectorbt.portfolio.nb.final_value_grouped_nb"><code class="name flex">
-<span>def <span class="ident fname">final_value_grouped_nb</span></span>(<span>final_value_ungrouped, init_cash, group_counts, cash_sharing)</span>
+<dt id="vectorbt.portfolio.nb.final_value_nb"><code class="name flex">
+<span>def <span class="ident fname">final_value_nb</span></span>(<span>total_profit, init_cash_regrouped)</span>
 </code></dt>
 <dd>
-<div class="desc"><p>Get final portfolio value per group.</p></div>
+<div class="desc"><p>Get total profit per column/group.</p></div>
 <details class="source">
 <summary>
 <span>Expand source code</span>
 </summary>
-<pre><code class="python">@njit
-def final_value_grouped_nb(final_value_ungrouped, init_cash, group_counts, cash_sharing):
-    &#34;&#34;&#34;Get final portfolio value per group.&#34;&#34;&#34;
-    check_group_counts(group_counts, final_value_ungrouped.shape[0])
-    check_group_init_cash(group_counts, final_value_ungrouped.shape[0], init_cash, cash_sharing)
-
-    out = np.empty((len(group_counts),), dtype=np.float_)
-    from_col = 0
-    for group in range(len(group_counts)):
-        to_col = from_col + group_counts[group]
-        out[group] = np.sum(final_value_ungrouped[from_col:to_col])
-        if cash_sharing:
-            out[group] = out[group] - init_cash[group] * (group_counts[group] - 1)
-        from_col = to_col
-    return out</code></pre>
-</details>
-</dd>
-<dt id="vectorbt.portfolio.nb.final_value_ungrouped_nb"><code class="name flex">
-<span>def <span class="ident fname">final_value_ungrouped_nb</span></span>(<span>target_shape, close, order_records, init_cash_ungrouped)</span>
-</code></dt>
-<dd>
-<div class="desc"><p>Get final portfolio value per column.</p>
-<p>A much faster version than the one based on <code><a title="vectorbt.portfolio.nb.value_nb" href="#vectorbt.portfolio.nb.value_nb">value_nb()</a></code>.</p></div>
-<details class="source">
-<summary>
-<span>Expand source code</span>
-</summary>
-<pre><code class="python">@njit
-def final_value_ungrouped_nb(target_shape, close, order_records, init_cash_ungrouped):
-    &#34;&#34;&#34;Get final portfolio value per column.
-
-    A much faster version than the one based on `value_nb`.&#34;&#34;&#34;
-    shares = np.full(target_shape[1], 0., dtype=np.float_)
-    cash = init_cash_ungrouped.copy()
-
-    prev_col = -1
-    prev_i = -1
-    for r in range(order_records.shape[0]):
-        record = order_records[r]
-        col = record[&#39;col&#39;]
-        i = record[&#39;idx&#39;]
-
-        if col &lt; prev_col:
-            raise ValueError(&#34;Order records must be sorted&#34;)
-        if col != prev_col:
-            prev_i = -1
-        if i &lt; prev_i:
-            raise ValueError(&#34;Order records must be sorted&#34;)
-
-        if record[&#39;side&#39;] == OrderSide.Buy:
-            shares[col] += record[&#39;size&#39;]
-        else:
-            order_size = record[&#39;size&#39;]
-            if is_close_or_less_nb(shares[col], order_size):
-                shares[col] = 0.  # numerical stability
-            else:
-                shares[col] -= order_size
-        if record[&#39;side&#39;] == OrderSide.Buy:
-            order_cash = record[&#39;size&#39;] * record[&#39;price&#39;] + record[&#39;fees&#39;]
-            if is_close_or_less_nb(cash[col], order_cash):
-                cash[col] = 0.  # numerical stability
-            else:
-                cash[col] -= order_cash
-        else:
-            cash[col] += record[&#39;size&#39;] * record[&#39;price&#39;] - record[&#39;fees&#39;]
-
-    return cash + shares * close[-1, :]</code></pre>
+<pre><code class="python">@njit(cache=True)
+def final_value_nb(total_profit, init_cash_regrouped):
+    &#34;&#34;&#34;Get total profit per column/group.&#34;&#34;&#34;
+    return total_profit + init_cash_regrouped</code></pre>
 </details>
 </dd>
 <dt id="vectorbt.portfolio.nb.get_group_value_ctx_nb"><code class="name flex">
@@ -2611,7 +2544,7 @@ def process_order_nb(cash_now, shares_now, order, min_size):
 </details>
 </dd>
 <dt id="vectorbt.portfolio.nb.returns_in_sim_order_nb"><code class="name flex">
-<span>def <span class="ident fname">returns_in_sim_order_nb</span></span>(<span>value_iso, group_counts, init_cash, call_seq)</span>
+<span>def <span class="ident fname">returns_in_sim_order_nb</span></span>(<span>value_iso, group_counts, init_cash_grouped, call_seq)</span>
 </code></dt>
 <dd>
 <div class="desc"><p>Get portfolio return series in simulation order.</p></div>
@@ -2620,7 +2553,7 @@ def process_order_nb(cash_now, shares_now, order, min_size):
 <span>Expand source code</span>
 </summary>
 <pre><code class="python">@njit(cache=True)
-def returns_in_sim_order_nb(value_iso, group_counts, init_cash, call_seq):
+def returns_in_sim_order_nb(value_iso, group_counts, init_cash_grouped, call_seq):
     &#34;&#34;&#34;Get portfolio return series in simulation order.&#34;&#34;&#34;
     check_group_counts(group_counts, value_iso.shape[1])
 
@@ -2629,7 +2562,7 @@ def returns_in_sim_order_nb(value_iso, group_counts, init_cash, call_seq):
     for group in range(len(group_counts)):
         to_col = from_col + group_counts[group]
         group_len = to_col - from_col
-        input_value = init_cash[group]
+        input_value = init_cash_grouped[group]
         for j in range(value_iso.shape[0] * group_len):
             i = j // group_len
             col = from_col + call_seq[i, from_col + j % group_len]
@@ -4117,23 +4050,83 @@ def simulate_row_wise_nb(target_shape, close, group_counts, init_cash, cash_shar
     return order_records[record_mask]</code></pre>
 </details>
 </dd>
-<dt id="vectorbt.portfolio.nb.total_profit_nb"><code class="name flex">
-<span>def <span class="ident fname">total_profit_nb</span></span>(<span>init_cash_regrouped, final_value)</span>
+<dt id="vectorbt.portfolio.nb.total_profit_grouped_nb"><code class="name flex">
+<span>def <span class="ident fname">total_profit_grouped_nb</span></span>(<span>total_profit_ungrouped, group_counts)</span>
 </code></dt>
 <dd>
-<div class="desc"><p>Get total profit per column/group.</p></div>
+<div class="desc"><p>Get total profit per group.</p></div>
 <details class="source">
 <summary>
 <span>Expand source code</span>
 </summary>
-<pre><code class="python">@njit(cache=True)
-def total_profit_nb(init_cash_regrouped, final_value):
-    &#34;&#34;&#34;Get total profit per column/group.&#34;&#34;&#34;
-    return final_value - init_cash_regrouped</code></pre>
+<pre><code class="python">@njit
+def total_profit_grouped_nb(total_profit_ungrouped, group_counts):
+    &#34;&#34;&#34;Get total profit per group.&#34;&#34;&#34;
+    check_group_counts(group_counts, total_profit_ungrouped.shape[0])
+
+    out = np.empty((len(group_counts),), dtype=np.float_)
+    from_col = 0
+    for group in range(len(group_counts)):
+        to_col = from_col + group_counts[group]
+        out[group] = np.sum(total_profit_ungrouped[from_col:to_col])
+        from_col = to_col
+    return out</code></pre>
+</details>
+</dd>
+<dt id="vectorbt.portfolio.nb.total_profit_ungrouped_nb"><code class="name flex">
+<span>def <span class="ident fname">total_profit_ungrouped_nb</span></span>(<span>target_shape, close, order_records, init_cash_ungrouped)</span>
+</code></dt>
+<dd>
+<div class="desc"><p>Get total profit per column.</p>
+<p>A much faster version than the one based on <code><a title="vectorbt.portfolio.nb.value_nb" href="#vectorbt.portfolio.nb.value_nb">value_nb()</a></code>.</p></div>
+<details class="source">
+<summary>
+<span>Expand source code</span>
+</summary>
+<pre><code class="python">@njit
+def total_profit_ungrouped_nb(target_shape, close, order_records, init_cash_ungrouped):
+    &#34;&#34;&#34;Get total profit per column.
+
+    A much faster version than the one based on `value_nb`.&#34;&#34;&#34;
+    shares = np.full(target_shape[1], 0., dtype=np.float_)
+    cash = init_cash_ungrouped.copy()
+
+    prev_col = -1
+    prev_i = -1
+    for r in range(order_records.shape[0]):
+        record = order_records[r]
+        col = record[&#39;col&#39;]
+        i = record[&#39;idx&#39;]
+
+        if col &lt; prev_col:
+            raise ValueError(&#34;Order records must be sorted&#34;)
+        if col != prev_col:
+            prev_i = -1
+        if i &lt; prev_i:
+            raise ValueError(&#34;Order records must be sorted&#34;)
+
+        if record[&#39;side&#39;] == OrderSide.Buy:
+            shares[col] += record[&#39;size&#39;]
+        else:
+            order_size = record[&#39;size&#39;]
+            if is_close_or_less_nb(shares[col], order_size):
+                shares[col] = 0.  # numerical stability
+            else:
+                shares[col] -= order_size
+        if record[&#39;side&#39;] == OrderSide.Buy:
+            order_cash = record[&#39;size&#39;] * record[&#39;price&#39;] + record[&#39;fees&#39;]
+            if is_close_or_less_nb(cash[col], order_cash):
+                cash[col] = 0.  # numerical stability
+            else:
+                cash[col] -= order_cash
+        else:
+            cash[col] += record[&#39;size&#39;] * record[&#39;price&#39;] - record[&#39;fees&#39;]
+
+    return cash + shares * close[-1, :] - init_cash_ungrouped</code></pre>
 </details>
 </dd>
 <dt id="vectorbt.portfolio.nb.total_return_nb"><code class="name flex">
-<span>def <span class="ident fname">total_return_nb</span></span>(<span>init_cash_regrouped, final_value)</span>
+<span>def <span class="ident fname">total_return_nb</span></span>(<span>total_profit, init_cash_regrouped)</span>
 </code></dt>
 <dd>
 <div class="desc"><p>Get total return per column/group.</p></div>
@@ -4142,9 +4135,9 @@ def total_profit_nb(init_cash_regrouped, final_value):
 <span>Expand source code</span>
 </summary>
 <pre><code class="python">@njit(cache=True)
-def total_return_nb(init_cash_regrouped, final_value):
+def total_return_nb(total_profit, init_cash_regrouped):
     &#34;&#34;&#34;Get total return per column/group.&#34;&#34;&#34;
-    return (final_value - init_cash_regrouped) / init_cash_regrouped</code></pre>
+    return total_profit / init_cash_regrouped</code></pre>
 </details>
 </dd>
 <dt id="vectorbt.portfolio.nb.value_in_sim_order_nb"><code class="name flex">
@@ -4253,8 +4246,7 @@ title="Search"
 <li><code><a title="vectorbt.portfolio.nb.check_group_counts" href="#vectorbt.portfolio.nb.check_group_counts">check_group_counts</a></code></li>
 <li><code><a title="vectorbt.portfolio.nb.check_group_init_cash" href="#vectorbt.portfolio.nb.check_group_init_cash">check_group_init_cash</a></code></li>
 <li><code><a title="vectorbt.portfolio.nb.empty_prep_nb" href="#vectorbt.portfolio.nb.empty_prep_nb">empty_prep_nb</a></code></li>
-<li><code><a title="vectorbt.portfolio.nb.final_value_grouped_nb" href="#vectorbt.portfolio.nb.final_value_grouped_nb">final_value_grouped_nb</a></code></li>
-<li><code><a title="vectorbt.portfolio.nb.final_value_ungrouped_nb" href="#vectorbt.portfolio.nb.final_value_ungrouped_nb">final_value_ungrouped_nb</a></code></li>
+<li><code><a title="vectorbt.portfolio.nb.final_value_nb" href="#vectorbt.portfolio.nb.final_value_nb">final_value_nb</a></code></li>
 <li><code><a title="vectorbt.portfolio.nb.get_group_value_ctx_nb" href="#vectorbt.portfolio.nb.get_group_value_ctx_nb">get_group_value_ctx_nb</a></code></li>
 <li><code><a title="vectorbt.portfolio.nb.get_group_value_nb" href="#vectorbt.portfolio.nb.get_group_value_nb">get_group_value_nb</a></code></li>
 <li><code><a title="vectorbt.portfolio.nb.get_order_value_nb" href="#vectorbt.portfolio.nb.get_order_value_nb">get_order_value_nb</a></code></li>
@@ -4278,7 +4270,8 @@ title="Search"
 <li><code><a title="vectorbt.portfolio.nb.simulate_from_signals_nb" href="#vectorbt.portfolio.nb.simulate_from_signals_nb">simulate_from_signals_nb</a></code></li>
 <li><code><a title="vectorbt.portfolio.nb.simulate_nb" href="#vectorbt.portfolio.nb.simulate_nb">simulate_nb</a></code></li>
 <li><code><a title="vectorbt.portfolio.nb.simulate_row_wise_nb" href="#vectorbt.portfolio.nb.simulate_row_wise_nb">simulate_row_wise_nb</a></code></li>
-<li><code><a title="vectorbt.portfolio.nb.total_profit_nb" href="#vectorbt.portfolio.nb.total_profit_nb">total_profit_nb</a></code></li>
+<li><code><a title="vectorbt.portfolio.nb.total_profit_grouped_nb" href="#vectorbt.portfolio.nb.total_profit_grouped_nb">total_profit_grouped_nb</a></code></li>
+<li><code><a title="vectorbt.portfolio.nb.total_profit_ungrouped_nb" href="#vectorbt.portfolio.nb.total_profit_ungrouped_nb">total_profit_ungrouped_nb</a></code></li>
 <li><code><a title="vectorbt.portfolio.nb.total_return_nb" href="#vectorbt.portfolio.nb.total_return_nb">total_return_nb</a></code></li>
 <li><code><a title="vectorbt.portfolio.nb.value_in_sim_order_nb" href="#vectorbt.portfolio.nb.value_in_sim_order_nb">value_in_sim_order_nb</a></code></li>
 <li><code><a title="vectorbt.portfolio.nb.value_nb" href="#vectorbt.portfolio.nb.value_nb">value_nb</a></code></li>
