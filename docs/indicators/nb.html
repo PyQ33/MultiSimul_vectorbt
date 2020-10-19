@@ -72,10 +72,10 @@ def mstd_nb(a, window, ewm):
 
 
 @njit(cache=True)
-def ma_caching_nb(ts, windows, ewms):
+def ma_cache_nb(ts, windows, ewms):
     &#34;&#34;&#34;Caching function for `vectorbt.indicators.basic.MA`.&#34;&#34;&#34;
     cache_dict = dict()
-    for i in range(windows.shape[0]):
+    for i in range(len(windows)):
         h = hash((windows[i], ewms[i]))
         if h not in cache_dict:
             cache_dict[h] = ma_nb(ts, windows[i], ewms[i])
@@ -90,10 +90,10 @@ def ma_apply_nb(ts, window, ewm, cache_dict):
 
 
 @njit(cache=True)
-def mstd_caching_nb(ts, windows, ewms):
+def mstd_cache_nb(ts, windows, ewms):
     &#34;&#34;&#34;Caching function for `vectorbt.indicators.basic.MSTD`.&#34;&#34;&#34;
     cache_dict = dict()
-    for i in range(windows.shape[0]):
+    for i in range(len(windows)):
         h = hash((windows[i], ewms[i]))
         if h not in cache_dict:
             cache_dict[h] = mstd_nb(ts, windows[i], ewms[i])
@@ -108,16 +108,16 @@ def mstd_apply_nb(ts, window, ewm, cache_dict):
 
 
 @njit(cache=True)
-def bb_caching_nb(ts, windows, ewms, alphas):
-    &#34;&#34;&#34;Caching function for `vectorbt.indicators.basic.BollingerBands`.&#34;&#34;&#34;
-    ma_cache_dict = ma_caching_nb(ts, windows, ewms)
-    mstd_cache_dict = mstd_caching_nb(ts, windows, ewms)
+def bb_cache_nb(ts, windows, ewms, alphas):
+    &#34;&#34;&#34;Caching function for `vectorbt.indicators.basic.BBANDS`.&#34;&#34;&#34;
+    ma_cache_dict = ma_cache_nb(ts, windows, ewms)
+    mstd_cache_dict = mstd_cache_nb(ts, windows, ewms)
     return ma_cache_dict, mstd_cache_dict
 
 
 @njit(cache=True)
 def bb_apply_nb(ts, window, ewm, alpha, ma_cache_dict, mstd_cache_dict):
-    &#34;&#34;&#34;Apply function for `vectorbt.indicators.basic.BollingerBands`.&#34;&#34;&#34;
+    &#34;&#34;&#34;Apply function for `vectorbt.indicators.basic.BBANDS`.&#34;&#34;&#34;
     # Calculate lower, middle and upper bands
     h = hash((window, ewm))
     ma = np.copy(ma_cache_dict[h])
@@ -127,7 +127,7 @@ def bb_apply_nb(ts, window, ewm, alpha, ma_cache_dict, mstd_cache_dict):
 
 
 @njit(cache=True)
-def rsi_caching_nb(ts, windows, ewms):
+def rsi_cache_nb(ts, windows, ewms):
     &#34;&#34;&#34;Caching function for `vectorbt.indicators.basic.RSI`.&#34;&#34;&#34;
     delta = generic_nb.diff_nb(ts)  # otherwise ewma will be all NaN
     up, down = delta.copy(), delta.copy()
@@ -135,7 +135,7 @@ def rsi_caching_nb(ts, windows, ewms):
     down = np.abs(generic_nb.set_by_mask_nb(down, down &gt; 0, 0))
     # Cache
     cache_dict = dict()
-    for i in range(windows.shape[0]):
+    for i in range(len(windows)):
         h = hash((windows[i], ewms[i]))
         if h not in cache_dict:
             roll_up = ma_nb(up, windows[i], ewms[i])
@@ -154,10 +154,10 @@ def rsi_apply_nb(ts, window, ewm, cache_dict):
 
 
 @njit(cache=True)
-def stoch_caching_nb(high_ts, low_ts, close_ts, k_windows, d_windows, d_ewms):
-    &#34;&#34;&#34;Caching function for `vectorbt.indicators.basic.Stochastic`.&#34;&#34;&#34;
+def stoch_cache_nb(high_ts, low_ts, close_ts, k_windows, d_windows, d_ewms):
+    &#34;&#34;&#34;Caching function for `vectorbt.indicators.basic.STOCH`.&#34;&#34;&#34;
     cache_dict = dict()
-    for i in range(k_windows.shape[0]):
+    for i in range(len(k_windows)):
         h = hash(k_windows[i])
         if h not in cache_dict:
             roll_min = generic_nb.rolling_min_nb(low_ts, k_windows[i])
@@ -168,7 +168,7 @@ def stoch_caching_nb(high_ts, low_ts, close_ts, k_windows, d_windows, d_ewms):
 
 @njit(cache=True)
 def stoch_apply_nb(high_ts, low_ts, close_ts, k_window, d_window, d_ewm, cache_dict):
-    &#34;&#34;&#34;Apply function for `vectorbt.indicators.basic.Stochastic`.&#34;&#34;&#34;
+    &#34;&#34;&#34;Apply function for `vectorbt.indicators.basic.STOCH`.&#34;&#34;&#34;
     h = hash(k_window)
     roll_min, roll_max = cache_dict[h]
     percent_k = 100 * (close_ts - roll_min) / (roll_max - roll_min)
@@ -177,9 +177,9 @@ def stoch_apply_nb(high_ts, low_ts, close_ts, k_window, d_window, d_ewm, cache_d
 
 
 @njit(cache=True)
-def macd_caching_nb(ts, fast_windows, slow_windows, signal_windows, macd_ewms, signal_ewms):
+def macd_cache_nb(ts, fast_windows, slow_windows, signal_windows, macd_ewms, signal_ewms):
     &#34;&#34;&#34;Caching function for `vectorbt.indicators.basic.MACD`.&#34;&#34;&#34;
-    return ma_caching_nb(ts, np.concatenate((fast_windows, slow_windows)), np.concatenate((macd_ewms, macd_ewms)))
+    return ma_cache_nb(ts, fast_windows + slow_windows, macd_ewms + macd_ewms)
 
 
 @njit(cache=True)
@@ -216,13 +216,13 @@ def true_range(high_ts, low_ts, close_ts):
 
 
 @njit(cache=True)
-def atr_caching_nb(high_ts, low_ts, close_ts, windows, ewms):
+def atr_cache_nb(high_ts, low_ts, close_ts, windows, ewms):
     &#34;&#34;&#34;Caching function for `vectorbt.indicators.basic.ATR`.&#34;&#34;&#34;
     # Calculate TR here instead of re-calculating it for each param in atr_apply_nb
     tr = true_range(high_ts, low_ts, close_ts)
 
     cache_dict = dict()
-    for i in range(windows.shape[0]):
+    for i in range(len(windows)):
         h = hash((windows[i], ewms[i]))
         if h not in cache_dict:
             cache_dict[h] = ma_nb(tr, windows[i], ewms[i])
@@ -237,7 +237,7 @@ def atr_apply_nb(high_ts, low_ts, close_ts, window, ewm, tr, cache_dict):
 
 
 @njit(cache=True)
-def obv_custom_func_nb(close_ts, volume_ts):
+def obv_custom_nb(close_ts, volume_ts):
     &#34;&#34;&#34;Custom calculation function for `vectorbt.indicators.basic.OBV`.&#34;&#34;&#34;
     obv = generic_nb.set_by_mask_mult_nb(volume_ts, close_ts &lt; generic_nb.fshift_nb(close_ts, 1), -volume_ts)
     obv = generic_nb.cumsum_nb(obv)
@@ -267,8 +267,8 @@ def atr_apply_nb(high_ts, low_ts, close_ts, window, ewm, tr, cache_dict):
     return tr, cache_dict[h]</code></pre>
 </details>
 </dd>
-<dt id="vectorbt.indicators.nb.atr_caching_nb"><code class="name flex">
-<span>def <span class="ident fname">atr_caching_nb</span></span>(<span>high_ts, low_ts, close_ts, windows, ewms)</span>
+<dt id="vectorbt.indicators.nb.atr_cache_nb"><code class="name flex">
+<span>def <span class="ident fname">atr_cache_nb</span></span>(<span>high_ts, low_ts, close_ts, windows, ewms)</span>
 </code></dt>
 <dd>
 <div class="desc"><p>Caching function for <code><a title="vectorbt.indicators.basic.ATR" href="basic.html#vectorbt.indicators.basic.ATR">ATR</a></code>.</p></div>
@@ -277,13 +277,13 @@ def atr_apply_nb(high_ts, low_ts, close_ts, window, ewm, tr, cache_dict):
 <span>Expand source code</span>
 </summary>
 <pre><code class="python">@njit(cache=True)
-def atr_caching_nb(high_ts, low_ts, close_ts, windows, ewms):
+def atr_cache_nb(high_ts, low_ts, close_ts, windows, ewms):
     &#34;&#34;&#34;Caching function for `vectorbt.indicators.basic.ATR`.&#34;&#34;&#34;
     # Calculate TR here instead of re-calculating it for each param in atr_apply_nb
     tr = true_range(high_ts, low_ts, close_ts)
 
     cache_dict = dict()
-    for i in range(windows.shape[0]):
+    for i in range(len(windows)):
         h = hash((windows[i], ewms[i]))
         if h not in cache_dict:
             cache_dict[h] = ma_nb(tr, windows[i], ewms[i])
@@ -294,14 +294,14 @@ def atr_caching_nb(high_ts, low_ts, close_ts, windows, ewms):
 <span>def <span class="ident fname">bb_apply_nb</span></span>(<span>ts, window, ewm, alpha, ma_cache_dict, mstd_cache_dict)</span>
 </code></dt>
 <dd>
-<div class="desc"><p>Apply function for <code><a title="vectorbt.indicators.basic.BollingerBands" href="basic.html#vectorbt.indicators.basic.BollingerBands">BollingerBands</a></code>.</p></div>
+<div class="desc"><p>Apply function for <code><a title="vectorbt.indicators.basic.BBANDS" href="basic.html#vectorbt.indicators.basic.BBANDS">BBANDS</a></code>.</p></div>
 <details class="source">
 <summary>
 <span>Expand source code</span>
 </summary>
 <pre><code class="python">@njit(cache=True)
 def bb_apply_nb(ts, window, ewm, alpha, ma_cache_dict, mstd_cache_dict):
-    &#34;&#34;&#34;Apply function for `vectorbt.indicators.basic.BollingerBands`.&#34;&#34;&#34;
+    &#34;&#34;&#34;Apply function for `vectorbt.indicators.basic.BBANDS`.&#34;&#34;&#34;
     # Calculate lower, middle and upper bands
     h = hash((window, ewm))
     ma = np.copy(ma_cache_dict[h])
@@ -310,20 +310,20 @@ def bb_apply_nb(ts, window, ewm, alpha, ma_cache_dict, mstd_cache_dict):
     return ma, ma + alpha * mstd, ma - alpha * mstd</code></pre>
 </details>
 </dd>
-<dt id="vectorbt.indicators.nb.bb_caching_nb"><code class="name flex">
-<span>def <span class="ident fname">bb_caching_nb</span></span>(<span>ts, windows, ewms, alphas)</span>
+<dt id="vectorbt.indicators.nb.bb_cache_nb"><code class="name flex">
+<span>def <span class="ident fname">bb_cache_nb</span></span>(<span>ts, windows, ewms, alphas)</span>
 </code></dt>
 <dd>
-<div class="desc"><p>Caching function for <code><a title="vectorbt.indicators.basic.BollingerBands" href="basic.html#vectorbt.indicators.basic.BollingerBands">BollingerBands</a></code>.</p></div>
+<div class="desc"><p>Caching function for <code><a title="vectorbt.indicators.basic.BBANDS" href="basic.html#vectorbt.indicators.basic.BBANDS">BBANDS</a></code>.</p></div>
 <details class="source">
 <summary>
 <span>Expand source code</span>
 </summary>
 <pre><code class="python">@njit(cache=True)
-def bb_caching_nb(ts, windows, ewms, alphas):
-    &#34;&#34;&#34;Caching function for `vectorbt.indicators.basic.BollingerBands`.&#34;&#34;&#34;
-    ma_cache_dict = ma_caching_nb(ts, windows, ewms)
-    mstd_cache_dict = mstd_caching_nb(ts, windows, ewms)
+def bb_cache_nb(ts, windows, ewms, alphas):
+    &#34;&#34;&#34;Caching function for `vectorbt.indicators.basic.BBANDS`.&#34;&#34;&#34;
+    ma_cache_dict = ma_cache_nb(ts, windows, ewms)
+    mstd_cache_dict = mstd_cache_nb(ts, windows, ewms)
     return ma_cache_dict, mstd_cache_dict</code></pre>
 </details>
 </dd>
@@ -343,8 +343,8 @@ def ma_apply_nb(ts, window, ewm, cache_dict):
     return cache_dict[h]</code></pre>
 </details>
 </dd>
-<dt id="vectorbt.indicators.nb.ma_caching_nb"><code class="name flex">
-<span>def <span class="ident fname">ma_caching_nb</span></span>(<span>ts, windows, ewms)</span>
+<dt id="vectorbt.indicators.nb.ma_cache_nb"><code class="name flex">
+<span>def <span class="ident fname">ma_cache_nb</span></span>(<span>ts, windows, ewms)</span>
 </code></dt>
 <dd>
 <div class="desc"><p>Caching function for <code><a title="vectorbt.indicators.basic.MA" href="basic.html#vectorbt.indicators.basic.MA">MA</a></code>.</p></div>
@@ -353,10 +353,10 @@ def ma_apply_nb(ts, window, ewm, cache_dict):
 <span>Expand source code</span>
 </summary>
 <pre><code class="python">@njit(cache=True)
-def ma_caching_nb(ts, windows, ewms):
+def ma_cache_nb(ts, windows, ewms):
     &#34;&#34;&#34;Caching function for `vectorbt.indicators.basic.MA`.&#34;&#34;&#34;
     cache_dict = dict()
-    for i in range(windows.shape[0]):
+    for i in range(len(windows)):
         h = hash((windows[i], ewms[i]))
         if h not in cache_dict:
             cache_dict[h] = ma_nb(ts, windows[i], ewms[i])
@@ -401,8 +401,8 @@ def macd_apply_nb(ts, fast_window, slow_window, signal_window, macd_ewm, signal_
     return macd_ts, signal_ts</code></pre>
 </details>
 </dd>
-<dt id="vectorbt.indicators.nb.macd_caching_nb"><code class="name flex">
-<span>def <span class="ident fname">macd_caching_nb</span></span>(<span>ts, fast_windows, slow_windows, signal_windows, macd_ewms, signal_ewms)</span>
+<dt id="vectorbt.indicators.nb.macd_cache_nb"><code class="name flex">
+<span>def <span class="ident fname">macd_cache_nb</span></span>(<span>ts, fast_windows, slow_windows, signal_windows, macd_ewms, signal_ewms)</span>
 </code></dt>
 <dd>
 <div class="desc"><p>Caching function for <code><a title="vectorbt.indicators.basic.MACD" href="basic.html#vectorbt.indicators.basic.MACD">MACD</a></code>.</p></div>
@@ -411,9 +411,9 @@ def macd_apply_nb(ts, fast_window, slow_window, signal_window, macd_ewm, signal_
 <span>Expand source code</span>
 </summary>
 <pre><code class="python">@njit(cache=True)
-def macd_caching_nb(ts, fast_windows, slow_windows, signal_windows, macd_ewms, signal_ewms):
+def macd_cache_nb(ts, fast_windows, slow_windows, signal_windows, macd_ewms, signal_ewms):
     &#34;&#34;&#34;Caching function for `vectorbt.indicators.basic.MACD`.&#34;&#34;&#34;
-    return ma_caching_nb(ts, np.concatenate((fast_windows, slow_windows)), np.concatenate((macd_ewms, macd_ewms)))</code></pre>
+    return ma_cache_nb(ts, fast_windows + slow_windows, macd_ewms + macd_ewms)</code></pre>
 </details>
 </dd>
 <dt id="vectorbt.indicators.nb.mstd_apply_nb"><code class="name flex">
@@ -432,8 +432,8 @@ def mstd_apply_nb(ts, window, ewm, cache_dict):
     return cache_dict[h]</code></pre>
 </details>
 </dd>
-<dt id="vectorbt.indicators.nb.mstd_caching_nb"><code class="name flex">
-<span>def <span class="ident fname">mstd_caching_nb</span></span>(<span>ts, windows, ewms)</span>
+<dt id="vectorbt.indicators.nb.mstd_cache_nb"><code class="name flex">
+<span>def <span class="ident fname">mstd_cache_nb</span></span>(<span>ts, windows, ewms)</span>
 </code></dt>
 <dd>
 <div class="desc"><p>Caching function for <code><a title="vectorbt.indicators.basic.MSTD" href="basic.html#vectorbt.indicators.basic.MSTD">MSTD</a></code>.</p></div>
@@ -442,10 +442,10 @@ def mstd_apply_nb(ts, window, ewm, cache_dict):
 <span>Expand source code</span>
 </summary>
 <pre><code class="python">@njit(cache=True)
-def mstd_caching_nb(ts, windows, ewms):
+def mstd_cache_nb(ts, windows, ewms):
     &#34;&#34;&#34;Caching function for `vectorbt.indicators.basic.MSTD`.&#34;&#34;&#34;
     cache_dict = dict()
-    for i in range(windows.shape[0]):
+    for i in range(len(windows)):
         h = hash((windows[i], ewms[i]))
         if h not in cache_dict:
             cache_dict[h] = mstd_nb(ts, windows[i], ewms[i])
@@ -488,8 +488,8 @@ def nanmax_cube_nb(a):
     return out</code></pre>
 </details>
 </dd>
-<dt id="vectorbt.indicators.nb.obv_custom_func_nb"><code class="name flex">
-<span>def <span class="ident fname">obv_custom_func_nb</span></span>(<span>close_ts, volume_ts)</span>
+<dt id="vectorbt.indicators.nb.obv_custom_nb"><code class="name flex">
+<span>def <span class="ident fname">obv_custom_nb</span></span>(<span>close_ts, volume_ts)</span>
 </code></dt>
 <dd>
 <div class="desc"><p>Custom calculation function for <code><a title="vectorbt.indicators.basic.OBV" href="basic.html#vectorbt.indicators.basic.OBV">OBV</a></code>.</p></div>
@@ -498,7 +498,7 @@ def nanmax_cube_nb(a):
 <span>Expand source code</span>
 </summary>
 <pre><code class="python">@njit(cache=True)
-def obv_custom_func_nb(close_ts, volume_ts):
+def obv_custom_nb(close_ts, volume_ts):
     &#34;&#34;&#34;Custom calculation function for `vectorbt.indicators.basic.OBV`.&#34;&#34;&#34;
     obv = generic_nb.set_by_mask_mult_nb(volume_ts, close_ts &lt; generic_nb.fshift_nb(close_ts, 1), -volume_ts)
     obv = generic_nb.cumsum_nb(obv)
@@ -523,8 +523,8 @@ def rsi_apply_nb(ts, window, ewm, cache_dict):
     return 100 - 100 / (1 + rs)</code></pre>
 </details>
 </dd>
-<dt id="vectorbt.indicators.nb.rsi_caching_nb"><code class="name flex">
-<span>def <span class="ident fname">rsi_caching_nb</span></span>(<span>ts, windows, ewms)</span>
+<dt id="vectorbt.indicators.nb.rsi_cache_nb"><code class="name flex">
+<span>def <span class="ident fname">rsi_cache_nb</span></span>(<span>ts, windows, ewms)</span>
 </code></dt>
 <dd>
 <div class="desc"><p>Caching function for <code><a title="vectorbt.indicators.basic.RSI" href="basic.html#vectorbt.indicators.basic.RSI">RSI</a></code>.</p></div>
@@ -533,7 +533,7 @@ def rsi_apply_nb(ts, window, ewm, cache_dict):
 <span>Expand source code</span>
 </summary>
 <pre><code class="python">@njit(cache=True)
-def rsi_caching_nb(ts, windows, ewms):
+def rsi_cache_nb(ts, windows, ewms):
     &#34;&#34;&#34;Caching function for `vectorbt.indicators.basic.RSI`.&#34;&#34;&#34;
     delta = generic_nb.diff_nb(ts)  # otherwise ewma will be all NaN
     up, down = delta.copy(), delta.copy()
@@ -541,7 +541,7 @@ def rsi_caching_nb(ts, windows, ewms):
     down = np.abs(generic_nb.set_by_mask_nb(down, down &gt; 0, 0))
     # Cache
     cache_dict = dict()
-    for i in range(windows.shape[0]):
+    for i in range(len(windows)):
         h = hash((windows[i], ewms[i]))
         if h not in cache_dict:
             roll_up = ma_nb(up, windows[i], ewms[i])
@@ -554,14 +554,14 @@ def rsi_caching_nb(ts, windows, ewms):
 <span>def <span class="ident fname">stoch_apply_nb</span></span>(<span>high_ts, low_ts, close_ts, k_window, d_window, d_ewm, cache_dict)</span>
 </code></dt>
 <dd>
-<div class="desc"><p>Apply function for <code><a title="vectorbt.indicators.basic.Stochastic" href="basic.html#vectorbt.indicators.basic.Stochastic">Stochastic</a></code>.</p></div>
+<div class="desc"><p>Apply function for <code><a title="vectorbt.indicators.basic.STOCH" href="basic.html#vectorbt.indicators.basic.STOCH">STOCH</a></code>.</p></div>
 <details class="source">
 <summary>
 <span>Expand source code</span>
 </summary>
 <pre><code class="python">@njit(cache=True)
 def stoch_apply_nb(high_ts, low_ts, close_ts, k_window, d_window, d_ewm, cache_dict):
-    &#34;&#34;&#34;Apply function for `vectorbt.indicators.basic.Stochastic`.&#34;&#34;&#34;
+    &#34;&#34;&#34;Apply function for `vectorbt.indicators.basic.STOCH`.&#34;&#34;&#34;
     h = hash(k_window)
     roll_min, roll_max = cache_dict[h]
     percent_k = 100 * (close_ts - roll_min) / (roll_max - roll_min)
@@ -569,20 +569,20 @@ def stoch_apply_nb(high_ts, low_ts, close_ts, k_window, d_window, d_ewm, cache_d
     return percent_k, percent_d</code></pre>
 </details>
 </dd>
-<dt id="vectorbt.indicators.nb.stoch_caching_nb"><code class="name flex">
-<span>def <span class="ident fname">stoch_caching_nb</span></span>(<span>high_ts, low_ts, close_ts, k_windows, d_windows, d_ewms)</span>
+<dt id="vectorbt.indicators.nb.stoch_cache_nb"><code class="name flex">
+<span>def <span class="ident fname">stoch_cache_nb</span></span>(<span>high_ts, low_ts, close_ts, k_windows, d_windows, d_ewms)</span>
 </code></dt>
 <dd>
-<div class="desc"><p>Caching function for <code><a title="vectorbt.indicators.basic.Stochastic" href="basic.html#vectorbt.indicators.basic.Stochastic">Stochastic</a></code>.</p></div>
+<div class="desc"><p>Caching function for <code><a title="vectorbt.indicators.basic.STOCH" href="basic.html#vectorbt.indicators.basic.STOCH">STOCH</a></code>.</p></div>
 <details class="source">
 <summary>
 <span>Expand source code</span>
 </summary>
 <pre><code class="python">@njit(cache=True)
-def stoch_caching_nb(high_ts, low_ts, close_ts, k_windows, d_windows, d_ewms):
-    &#34;&#34;&#34;Caching function for `vectorbt.indicators.basic.Stochastic`.&#34;&#34;&#34;
+def stoch_cache_nb(high_ts, low_ts, close_ts, k_windows, d_windows, d_ewms):
+    &#34;&#34;&#34;Caching function for `vectorbt.indicators.basic.STOCH`.&#34;&#34;&#34;
     cache_dict = dict()
-    for i in range(k_windows.shape[0]):
+    for i in range(len(k_windows)):
         h = hash(k_windows[i])
         if h not in cache_dict:
             roll_min = generic_nb.rolling_min_nb(low_ts, k_windows[i])
@@ -644,23 +644,23 @@ title="Search"
 <li><h3><a href="#header-functions">Functions</a></h3>
 <ul class="two-column">
 <li><code><a title="vectorbt.indicators.nb.atr_apply_nb" href="#vectorbt.indicators.nb.atr_apply_nb">atr_apply_nb</a></code></li>
-<li><code><a title="vectorbt.indicators.nb.atr_caching_nb" href="#vectorbt.indicators.nb.atr_caching_nb">atr_caching_nb</a></code></li>
+<li><code><a title="vectorbt.indicators.nb.atr_cache_nb" href="#vectorbt.indicators.nb.atr_cache_nb">atr_cache_nb</a></code></li>
 <li><code><a title="vectorbt.indicators.nb.bb_apply_nb" href="#vectorbt.indicators.nb.bb_apply_nb">bb_apply_nb</a></code></li>
-<li><code><a title="vectorbt.indicators.nb.bb_caching_nb" href="#vectorbt.indicators.nb.bb_caching_nb">bb_caching_nb</a></code></li>
+<li><code><a title="vectorbt.indicators.nb.bb_cache_nb" href="#vectorbt.indicators.nb.bb_cache_nb">bb_cache_nb</a></code></li>
 <li><code><a title="vectorbt.indicators.nb.ma_apply_nb" href="#vectorbt.indicators.nb.ma_apply_nb">ma_apply_nb</a></code></li>
-<li><code><a title="vectorbt.indicators.nb.ma_caching_nb" href="#vectorbt.indicators.nb.ma_caching_nb">ma_caching_nb</a></code></li>
+<li><code><a title="vectorbt.indicators.nb.ma_cache_nb" href="#vectorbt.indicators.nb.ma_cache_nb">ma_cache_nb</a></code></li>
 <li><code><a title="vectorbt.indicators.nb.ma_nb" href="#vectorbt.indicators.nb.ma_nb">ma_nb</a></code></li>
 <li><code><a title="vectorbt.indicators.nb.macd_apply_nb" href="#vectorbt.indicators.nb.macd_apply_nb">macd_apply_nb</a></code></li>
-<li><code><a title="vectorbt.indicators.nb.macd_caching_nb" href="#vectorbt.indicators.nb.macd_caching_nb">macd_caching_nb</a></code></li>
+<li><code><a title="vectorbt.indicators.nb.macd_cache_nb" href="#vectorbt.indicators.nb.macd_cache_nb">macd_cache_nb</a></code></li>
 <li><code><a title="vectorbt.indicators.nb.mstd_apply_nb" href="#vectorbt.indicators.nb.mstd_apply_nb">mstd_apply_nb</a></code></li>
-<li><code><a title="vectorbt.indicators.nb.mstd_caching_nb" href="#vectorbt.indicators.nb.mstd_caching_nb">mstd_caching_nb</a></code></li>
+<li><code><a title="vectorbt.indicators.nb.mstd_cache_nb" href="#vectorbt.indicators.nb.mstd_cache_nb">mstd_cache_nb</a></code></li>
 <li><code><a title="vectorbt.indicators.nb.mstd_nb" href="#vectorbt.indicators.nb.mstd_nb">mstd_nb</a></code></li>
 <li><code><a title="vectorbt.indicators.nb.nanmax_cube_nb" href="#vectorbt.indicators.nb.nanmax_cube_nb">nanmax_cube_nb</a></code></li>
-<li><code><a title="vectorbt.indicators.nb.obv_custom_func_nb" href="#vectorbt.indicators.nb.obv_custom_func_nb">obv_custom_func_nb</a></code></li>
+<li><code><a title="vectorbt.indicators.nb.obv_custom_nb" href="#vectorbt.indicators.nb.obv_custom_nb">obv_custom_nb</a></code></li>
 <li><code><a title="vectorbt.indicators.nb.rsi_apply_nb" href="#vectorbt.indicators.nb.rsi_apply_nb">rsi_apply_nb</a></code></li>
-<li><code><a title="vectorbt.indicators.nb.rsi_caching_nb" href="#vectorbt.indicators.nb.rsi_caching_nb">rsi_caching_nb</a></code></li>
+<li><code><a title="vectorbt.indicators.nb.rsi_cache_nb" href="#vectorbt.indicators.nb.rsi_cache_nb">rsi_cache_nb</a></code></li>
 <li><code><a title="vectorbt.indicators.nb.stoch_apply_nb" href="#vectorbt.indicators.nb.stoch_apply_nb">stoch_apply_nb</a></code></li>
-<li><code><a title="vectorbt.indicators.nb.stoch_caching_nb" href="#vectorbt.indicators.nb.stoch_caching_nb">stoch_caching_nb</a></code></li>
+<li><code><a title="vectorbt.indicators.nb.stoch_cache_nb" href="#vectorbt.indicators.nb.stoch_cache_nb">stoch_cache_nb</a></code></li>
 <li><code><a title="vectorbt.indicators.nb.true_range" href="#vectorbt.indicators.nb.true_range">true_range</a></code></li>
 </ul>
 </li>

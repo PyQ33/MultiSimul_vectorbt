@@ -72,7 +72,7 @@ from vectorbt.records.enums import (
 )
 
 
-def indexing_on_orders_meta(obj, pd_indexing_func):
+def indexing_on_events_meta(obj, pd_indexing_func):
     &#34;&#34;&#34;Perform indexing on `BaseEvents` and also return metadata.&#34;&#34;&#34;
     new_wrapper, new_records_arr, group_idxs, col_idxs = indexing_on_records_meta(obj, pd_indexing_func)
     new_ref_price = new_wrapper.wrap(obj.close.values[:, col_idxs], group_by=False)
@@ -85,7 +85,10 @@ def indexing_on_orders_meta(obj, pd_indexing_func):
 
 def _indexing_func(obj, pd_indexing_func):
     &#34;&#34;&#34;Perform indexing on `BaseEvents`.&#34;&#34;&#34;
-    return indexing_on_orders_meta(obj, pd_indexing_func)[0]
+    return indexing_on_events_meta(obj, pd_indexing_func)[0]
+
+
+# ############# Events ############# #
 
 
 class BaseEvents(Records):
@@ -111,6 +114,27 @@ class BaseEvents(Records):
             raise ValueError(&#34;Records array must have all fields defined in event_dt&#34;)
 
         PandasIndexer.__init__(self, _indexing_func)
+
+    @property  # no need for cached
+    def records_readable(self):
+        &#34;&#34;&#34;Records in readable format.&#34;&#34;&#34;
+        records_df = self.records
+        out = pd.DataFrame(columns=[
+            &#39;Column&#39;, &#39;Size&#39;, &#39;Entry Date&#39;, &#39;Entry Price&#39;, &#39;Entry Fees&#39;, &#39;Exit Date&#39;,
+            &#39;Exit Price&#39;, &#39;Exit Fees&#39;, &#39;P&amp;L&#39;, &#39;Return&#39;, &#39;Status&#39;
+        ])
+        out[&#39;Column&#39;] = records_df[&#39;col&#39;].map(lambda x: self.wrapper.columns[x])
+        out[&#39;Size&#39;] = records_df[&#39;size&#39;]
+        out[&#39;Entry Date&#39;] = records_df[&#39;entry_idx&#39;].map(lambda x: self.wrapper.index[x])
+        out[&#39;Entry Price&#39;] = records_df[&#39;entry_price&#39;]
+        out[&#39;Entry Fees&#39;] = records_df[&#39;entry_fees&#39;]
+        out[&#39;Exit Date&#39;] = records_df[&#39;exit_idx&#39;].map(lambda x: self.wrapper.index[x])
+        out[&#39;Exit Price&#39;] = records_df[&#39;exit_price&#39;]
+        out[&#39;Exit Fees&#39;] = records_df[&#39;exit_fees&#39;]
+        out[&#39;P&amp;L&#39;] = records_df[&#39;pnl&#39;]
+        out[&#39;Return&#39;] = records_df[&#39;return&#39;]
+        out[&#39;Status&#39;] = records_df[&#39;status&#39;].map(lambda x: EventStatus._fields[x])
+        return out
 
     def plot(self,
              column=None,
@@ -139,15 +163,15 @@ class BaseEvents(Records):
             fig (plotly.graph_objects.Figure): Figure to add traces to.
             **layout_kwargs: Keyword arguments for layout.
         Example:
-            ```py
-            import vectorbt as vbt
-            import pandas as pd
+            ```python-repl
+            &gt;&gt;&gt; import vectorbt as vbt
+            &gt;&gt;&gt; import pandas as pd
 
-            price = pd.Series([1, 2, 3, 2, 1])
-            orders = pd.Series([1, -1, 1, -1, 0])
-            portfolio = vbt.Portfolio.from_orders(price, orders, freq=&#39;1D&#39;)
+            &gt;&gt;&gt; price = pd.Series([1, 2, 3, 2, 1])
+            &gt;&gt;&gt; orders = pd.Series([1, -1, 1, -1, 0])
+            &gt;&gt;&gt; portfolio = vbt.Portfolio.from_orders(price, orders, freq=&#39;1D&#39;)
 
-            portfolio.trades.plot()
+            &gt;&gt;&gt; portfolio.trades.plot()
             ```
 
             ![](/vectorbt/docs/img/events.png)&#34;&#34;&#34;
@@ -353,12 +377,13 @@ class BaseEvents(Records):
 
 class BaseEventsByResult(BaseEvents):
     &#34;&#34;&#34;Extends `BaseEvents` by further dividing events into winning and losing events.&#34;&#34;&#34;
+    BaseEvents = BaseEvents
 
     @cached_property
     def winning(self):
         &#34;&#34;&#34;Winning events of type `BaseEvents`.&#34;&#34;&#34;
         filter_mask = self.records_arr[&#39;pnl&#39;] &gt; 0.
-        return BaseEvents(
+        return self.BaseEvents(
             self.wrapper,
             self.records_arr[filter_mask],
             self.close,
@@ -369,7 +394,7 @@ class BaseEventsByResult(BaseEvents):
     def losing(self):
         &#34;&#34;&#34;Losing events of type `BaseEvents`.&#34;&#34;&#34;
         filter_mask = self.records_arr[&#39;pnl&#39;] &lt; 0.
-        return BaseEvents(
+        return self.BaseEvents(
             self.wrapper,
             self.records_arr[filter_mask],
             self.close,
@@ -424,6 +449,7 @@ class BaseEventsByResult(BaseEvents):
 
 class Events(BaseEventsByResult):
     &#34;&#34;&#34;Extends `BaseEventsByResult` by further dividing events by status.&#34;&#34;&#34;
+    BaseEventsByResult = BaseEventsByResult
 
     @cached_property
     def status(self):
@@ -441,7 +467,7 @@ class Events(BaseEventsByResult):
     def open(self):
         &#34;&#34;&#34;Open events of type `BaseEventsByResult`.&#34;&#34;&#34;
         filter_mask = self.records_arr[&#39;status&#39;] == EventStatus.Open
-        return BaseEventsByResult(
+        return self.BaseEventsByResult(
             self.wrapper,
             self.records_arr[filter_mask],
             self.close,
@@ -452,7 +478,7 @@ class Events(BaseEventsByResult):
     def closed(self):
         &#34;&#34;&#34;Closed events of type `BaseEventsByResult`.&#34;&#34;&#34;
         filter_mask = self.records_arr[&#39;status&#39;] == EventStatus.Closed
-        return BaseEventsByResult(
+        return self.BaseEventsByResult(
             self.wrapper,
             self.records_arr[filter_mask],
             self.close,
@@ -460,7 +486,26 @@ class Events(BaseEventsByResult):
         )
 
 
-class Trades(Events):
+# ############# Trades ############# #
+
+
+class BaseTrades(BaseEvents):
+    &#34;&#34;&#34;`BaseEvents` adapted for trades.&#34;&#34;&#34;
+    @property  # no need for cached
+    def records_readable(self):
+        &#34;&#34;&#34;Records in readable format.&#34;&#34;&#34;
+        records_df = self.records
+        out = super().records_readable.copy()
+        out[&#39;Position&#39;] = records_df[&#39;position_idx&#39;]
+        return out
+
+
+class BaseTradesByResult(BaseEventsByResult, BaseTrades):
+    &#34;&#34;&#34;`BaseEventsByResult` adapted for trades.&#34;&#34;&#34;
+    BaseEvents = BaseTrades
+
+
+class Trades(Events, BaseTradesByResult):
     &#34;&#34;&#34;Extends `Events` for working with trade records.
 
     Such records can be created by using `vectorbt.records.nb.trade_records_nb`.
@@ -552,6 +597,7 @@ class Trades(Events):
         &gt;&gt;&gt; trades_filtered.pnl.sum()
         -3.0
         ```&#34;&#34;&#34;
+    BaseEventsByResult = BaseTradesByResult
 
     def __init__(self, wrapper, records_arr, *args, **kwargs):
         Events.__init__(self, wrapper, records_arr, *args, **kwargs)
@@ -571,7 +617,20 @@ class Trades(Events):
         return self.map_field(&#39;position_idx&#39;)
 
 
-class Positions(Events):
+# ############# Positions ############# #
+
+
+class BasePositions(BaseEvents):
+    &#34;&#34;&#34;`BaseEvents` adapted for positions.&#34;&#34;&#34;
+    pass
+
+
+class BasePositionsByResult(BaseEventsByResult, BasePositions):
+    &#34;&#34;&#34;`BaseEventsByResult` adapted for positions.&#34;&#34;&#34;
+    BaseEvents = BasePositions
+
+
+class Positions(Events, BasePositionsByResult):
     &#34;&#34;&#34;Extends `Events` for working with position records.
 
     Such records can be created by using `vectorbt.records.nb.position_records_nb`.
@@ -656,6 +715,7 @@ class Positions(Events):
         &gt;&gt;&gt; positions_filtered.pnl.sum()
         -2.0
         ```&#34;&#34;&#34;
+    BaseEventsByResult = BasePositionsByResult
 
     def __init__(self, wrapper, records_arr, *args, **kwargs):
         Events.__init__(self, wrapper, records_arr, *args, **kwargs)
@@ -677,8 +737,8 @@ class Positions(Events):
 <section>
 <h2 class="section-title" id="header-functions">Functions</h2>
 <dl>
-<dt id="vectorbt.records.events.indexing_on_orders_meta"><code class="name flex">
-<span>def <span class="ident fname">indexing_on_orders_meta</span></span>(<span>obj, pd_indexing_func)</span>
+<dt id="vectorbt.records.events.indexing_on_events_meta"><code class="name flex">
+<span>def <span class="ident fname">indexing_on_events_meta</span></span>(<span>obj, pd_indexing_func)</span>
 </code></dt>
 <dd>
 <div class="desc"><p>Perform indexing on <code><a title="vectorbt.records.events.BaseEvents" href="#vectorbt.records.events.BaseEvents">BaseEvents</a></code> and also return metadata.</p></div>
@@ -686,7 +746,7 @@ class Positions(Events):
 <summary>
 <span>Expand source code</span>
 </summary>
-<pre><code class="python">def indexing_on_orders_meta(obj, pd_indexing_func):
+<pre><code class="python">def indexing_on_events_meta(obj, pd_indexing_func):
     &#34;&#34;&#34;Perform indexing on `BaseEvents` and also return metadata.&#34;&#34;&#34;
     new_wrapper, new_records_arr, group_idxs, col_idxs = indexing_on_records_meta(obj, pd_indexing_func)
     new_ref_price = new_wrapper.wrap(obj.close.values[:, col_idxs], group_by=False)
@@ -736,6 +796,27 @@ class Positions(Events):
 
         PandasIndexer.__init__(self, _indexing_func)
 
+    @property  # no need for cached
+    def records_readable(self):
+        &#34;&#34;&#34;Records in readable format.&#34;&#34;&#34;
+        records_df = self.records
+        out = pd.DataFrame(columns=[
+            &#39;Column&#39;, &#39;Size&#39;, &#39;Entry Date&#39;, &#39;Entry Price&#39;, &#39;Entry Fees&#39;, &#39;Exit Date&#39;,
+            &#39;Exit Price&#39;, &#39;Exit Fees&#39;, &#39;P&amp;L&#39;, &#39;Return&#39;, &#39;Status&#39;
+        ])
+        out[&#39;Column&#39;] = records_df[&#39;col&#39;].map(lambda x: self.wrapper.columns[x])
+        out[&#39;Size&#39;] = records_df[&#39;size&#39;]
+        out[&#39;Entry Date&#39;] = records_df[&#39;entry_idx&#39;].map(lambda x: self.wrapper.index[x])
+        out[&#39;Entry Price&#39;] = records_df[&#39;entry_price&#39;]
+        out[&#39;Entry Fees&#39;] = records_df[&#39;entry_fees&#39;]
+        out[&#39;Exit Date&#39;] = records_df[&#39;exit_idx&#39;].map(lambda x: self.wrapper.index[x])
+        out[&#39;Exit Price&#39;] = records_df[&#39;exit_price&#39;]
+        out[&#39;Exit Fees&#39;] = records_df[&#39;exit_fees&#39;]
+        out[&#39;P&amp;L&#39;] = records_df[&#39;pnl&#39;]
+        out[&#39;Return&#39;] = records_df[&#39;return&#39;]
+        out[&#39;Status&#39;] = records_df[&#39;status&#39;].map(lambda x: EventStatus._fields[x])
+        return out
+
     def plot(self,
              column=None,
              ref_price_trace_kwargs=None,
@@ -763,15 +844,15 @@ class Positions(Events):
             fig (plotly.graph_objects.Figure): Figure to add traces to.
             **layout_kwargs: Keyword arguments for layout.
         Example:
-            ```py
-            import vectorbt as vbt
-            import pandas as pd
+            ```python-repl
+            &gt;&gt;&gt; import vectorbt as vbt
+            &gt;&gt;&gt; import pandas as pd
 
-            price = pd.Series([1, 2, 3, 2, 1])
-            orders = pd.Series([1, -1, 1, -1, 0])
-            portfolio = vbt.Portfolio.from_orders(price, orders, freq=&#39;1D&#39;)
+            &gt;&gt;&gt; price = pd.Series([1, 2, 3, 2, 1])
+            &gt;&gt;&gt; orders = pd.Series([1, -1, 1, -1, 0])
+            &gt;&gt;&gt; portfolio = vbt.Portfolio.from_orders(price, orders, freq=&#39;1D&#39;)
 
-            portfolio.trades.plot()
+            &gt;&gt;&gt; portfolio.trades.plot()
             ```
 
             ![](/vectorbt/docs/img/events.png)&#34;&#34;&#34;
@@ -983,6 +1064,8 @@ class Positions(Events):
 <h3 class="section-subtitle">Subclasses</h3>
 <ul class="hlist">
 <li><a title="vectorbt.records.events.BaseEventsByResult" href="#vectorbt.records.events.BaseEventsByResult">BaseEventsByResult</a></li>
+<li><a title="vectorbt.records.events.BasePositions" href="#vectorbt.records.events.BasePositions">BasePositions</a></li>
+<li><a title="vectorbt.records.events.BaseTrades" href="#vectorbt.records.events.BaseTrades">BaseTrades</a></li>
 </ul>
 <h3 class="section-subtitle">Instance variables</h3>
 <dl>
@@ -1032,6 +1115,35 @@ class Positions(Events):
                 val = self.func(instance)
                 cache[self.attrname] = val
     return val</code></pre>
+</details>
+</dd>
+<dt id="vectorbt.records.events.BaseEvents.records_readable"><code class="name">var <span class="ident fname">records_readable</span></code></dt>
+<dd>
+<div class="desc"><p>Records in readable format.</p></div>
+<details class="source">
+<summary>
+<span>Expand source code</span>
+</summary>
+<pre><code class="python">@property  # no need for cached
+def records_readable(self):
+    &#34;&#34;&#34;Records in readable format.&#34;&#34;&#34;
+    records_df = self.records
+    out = pd.DataFrame(columns=[
+        &#39;Column&#39;, &#39;Size&#39;, &#39;Entry Date&#39;, &#39;Entry Price&#39;, &#39;Entry Fees&#39;, &#39;Exit Date&#39;,
+        &#39;Exit Price&#39;, &#39;Exit Fees&#39;, &#39;P&amp;L&#39;, &#39;Return&#39;, &#39;Status&#39;
+    ])
+    out[&#39;Column&#39;] = records_df[&#39;col&#39;].map(lambda x: self.wrapper.columns[x])
+    out[&#39;Size&#39;] = records_df[&#39;size&#39;]
+    out[&#39;Entry Date&#39;] = records_df[&#39;entry_idx&#39;].map(lambda x: self.wrapper.index[x])
+    out[&#39;Entry Price&#39;] = records_df[&#39;entry_price&#39;]
+    out[&#39;Entry Fees&#39;] = records_df[&#39;entry_fees&#39;]
+    out[&#39;Exit Date&#39;] = records_df[&#39;exit_idx&#39;].map(lambda x: self.wrapper.index[x])
+    out[&#39;Exit Price&#39;] = records_df[&#39;exit_price&#39;]
+    out[&#39;Exit Fees&#39;] = records_df[&#39;exit_fees&#39;]
+    out[&#39;P&amp;L&#39;] = records_df[&#39;pnl&#39;]
+    out[&#39;Return&#39;] = records_df[&#39;return&#39;]
+    out[&#39;Status&#39;] = records_df[&#39;status&#39;].map(lambda x: EventStatus._fields[x])
+    return out</code></pre>
 </details>
 </dd>
 <dt id="vectorbt.records.events.BaseEvents.returns"><code class="name">var <span class="ident fname">returns</span></code></dt>
@@ -1109,14 +1221,14 @@ def coverage(self, group_by=None, **kwargs):
 <dd>Keyword arguments for layout.</dd>
 </dl>
 <h2 id="example">Example</h2>
-<pre><code class="py">import vectorbt as vbt
-import pandas as pd
+<pre><code class="language-python-repl">&gt;&gt;&gt; import vectorbt as vbt
+&gt;&gt;&gt; import pandas as pd
 
-price = pd.Series([1, 2, 3, 2, 1])
-orders = pd.Series([1, -1, 1, -1, 0])
-portfolio = vbt.Portfolio.from_orders(price, orders, freq='1D')
+&gt;&gt;&gt; price = pd.Series([1, 2, 3, 2, 1])
+&gt;&gt;&gt; orders = pd.Series([1, -1, 1, -1, 0])
+&gt;&gt;&gt; portfolio = vbt.Portfolio.from_orders(price, orders, freq='1D')
 
-portfolio.trades.plot()
+&gt;&gt;&gt; portfolio.trades.plot()
 </code></pre>
 <p><img alt="" src="/vectorbt/docs/img/events.png"></p></div>
 <details class="source">
@@ -1150,15 +1262,15 @@ portfolio.trades.plot()
         fig (plotly.graph_objects.Figure): Figure to add traces to.
         **layout_kwargs: Keyword arguments for layout.
     Example:
-        ```py
-        import vectorbt as vbt
-        import pandas as pd
+        ```python-repl
+        &gt;&gt;&gt; import vectorbt as vbt
+        &gt;&gt;&gt; import pandas as pd
 
-        price = pd.Series([1, 2, 3, 2, 1])
-        orders = pd.Series([1, -1, 1, -1, 0])
-        portfolio = vbt.Portfolio.from_orders(price, orders, freq=&#39;1D&#39;)
+        &gt;&gt;&gt; price = pd.Series([1, 2, 3, 2, 1])
+        &gt;&gt;&gt; orders = pd.Series([1, -1, 1, -1, 0])
+        &gt;&gt;&gt; portfolio = vbt.Portfolio.from_orders(price, orders, freq=&#39;1D&#39;)
 
-        portfolio.trades.plot()
+        &gt;&gt;&gt; portfolio.trades.plot()
         ```
 
         ![](/vectorbt/docs/img/events.png)&#34;&#34;&#34;
@@ -1377,12 +1489,13 @@ portfolio.trades.plot()
 </summary>
 <pre><code class="python">class BaseEventsByResult(BaseEvents):
     &#34;&#34;&#34;Extends `BaseEvents` by further dividing events into winning and losing events.&#34;&#34;&#34;
+    BaseEvents = BaseEvents
 
     @cached_property
     def winning(self):
         &#34;&#34;&#34;Winning events of type `BaseEvents`.&#34;&#34;&#34;
         filter_mask = self.records_arr[&#39;pnl&#39;] &gt; 0.
-        return BaseEvents(
+        return self.BaseEvents(
             self.wrapper,
             self.records_arr[filter_mask],
             self.close,
@@ -1393,7 +1506,7 @@ portfolio.trades.plot()
     def losing(self):
         &#34;&#34;&#34;Losing events of type `BaseEvents`.&#34;&#34;&#34;
         filter_mask = self.records_arr[&#39;pnl&#39;] &lt; 0.
-        return BaseEvents(
+        return self.BaseEvents(
             self.wrapper,
             self.records_arr[filter_mask],
             self.close,
@@ -1454,8 +1567,17 @@ portfolio.trades.plot()
 </ul>
 <h3 class="section-subtitle">Subclasses</h3>
 <ul class="hlist">
+<li><a title="vectorbt.records.events.BasePositionsByResult" href="#vectorbt.records.events.BasePositionsByResult">BasePositionsByResult</a></li>
+<li><a title="vectorbt.records.events.BaseTradesByResult" href="#vectorbt.records.events.BaseTradesByResult">BaseTradesByResult</a></li>
 <li><a title="vectorbt.records.events.Events" href="#vectorbt.records.events.Events">Events</a></li>
 </ul>
+<h3 class="section-subtitle">Class variables</h3>
+<dl>
+<dt id="vectorbt.records.events.BaseEventsByResult.BaseEvents"><code class="name">var <span class="ident fname">BaseEvents</span></code></dt>
+<dd>
+<div class="desc"><p>Extends <code>Records</code> for working with event records.</p></div>
+</dd>
+</dl>
 <h3 class="section-subtitle">Instance variables</h3>
 <dl>
 <dt id="vectorbt.records.events.BaseEventsByResult.losing"><code class="name">var <span class="ident fname">losing</span></code></dt>
@@ -1616,10 +1738,255 @@ def win_rate(self, group_by=None, **kwargs):
 <li><code><a title="vectorbt.records.events.BaseEvents.pnl" href="#vectorbt.records.events.BaseEvents.pnl">pnl</a></code></li>
 <li><code><a title="vectorbt.records.events.BaseEvents.records" href="base.html#vectorbt.records.base.Records.records">records</a></code></li>
 <li><code><a title="vectorbt.records.events.BaseEvents.records_arr" href="base.html#vectorbt.records.base.Records.records_arr">records_arr</a></code></li>
+<li><code><a title="vectorbt.records.events.BaseEvents.records_readable" href="#vectorbt.records.events.BaseEvents.records_readable">records_readable</a></code></li>
 <li><code><a title="vectorbt.records.events.BaseEvents.regroup" href="base.html#vectorbt.records.base.Records.regroup">regroup</a></code></li>
 <li><code><a title="vectorbt.records.events.BaseEvents.returns" href="#vectorbt.records.events.BaseEvents.returns">returns</a></code></li>
 <li><code><a title="vectorbt.records.events.BaseEvents.wrapper" href="base.html#vectorbt.records.base.Records.wrapper">wrapper</a></code></li>
 <li><code><a title="vectorbt.records.events.BaseEvents.xs" href="../base/indexing.html#vectorbt.base.indexing.PandasIndexer.xs">xs</a></code></li>
+</ul>
+</li>
+</ul>
+</dd>
+<dt id="vectorbt.records.events.BasePositions"><code class="flex name class">
+<span>class <span class="ident parent-fname">BasePositions</span></span>
+<span>(</span><span>wrapper, records_arr, close, idx_field='exit_idx')</span>
+</code></dt>
+<dd>
+<div class="desc"><p><code><a title="vectorbt.records.events.BaseEvents" href="#vectorbt.records.events.BaseEvents">BaseEvents</a></code> adapted for positions.</p></div>
+<details class="source">
+<summary>
+<span>Expand source code</span>
+</summary>
+<pre><code class="python">class BasePositions(BaseEvents):
+    &#34;&#34;&#34;`BaseEvents` adapted for positions.&#34;&#34;&#34;
+    pass</code></pre>
+</details>
+<h3 class="section-subtitle">Ancestors</h3>
+<ul class="hlist">
+<li><a title="vectorbt.records.events.BaseEvents" href="#vectorbt.records.events.BaseEvents">BaseEvents</a></li>
+<li><a title="vectorbt.records.base.Records" href="base.html#vectorbt.records.base.Records">Records</a></li>
+<li><a title="vectorbt.utils.config.Configured" href="../utils/config.html#vectorbt.utils.config.Configured">Configured</a></li>
+<li><a title="vectorbt.base.indexing.PandasIndexer" href="../base/indexing.html#vectorbt.base.indexing.PandasIndexer">PandasIndexer</a></li>
+</ul>
+<h3 class="section-subtitle">Subclasses</h3>
+<ul class="hlist">
+<li><a title="vectorbt.records.events.BasePositionsByResult" href="#vectorbt.records.events.BasePositionsByResult">BasePositionsByResult</a></li>
+</ul>
+<h3 class="section-subtitle">Inherited members</h3>
+<ul class="hlist">
+<li><code><b><a title="vectorbt.records.events.BaseEvents" href="#vectorbt.records.events.BaseEvents">BaseEvents</a></b></code>:
+<ul class="hlist">
+<li><code><a title="vectorbt.records.events.BaseEvents.col_index" href="base.html#vectorbt.records.base.Records.col_index">col_index</a></code></li>
+<li><code><a title="vectorbt.records.events.BaseEvents.config" href="../utils/config.html#vectorbt.utils.config.Configured.config">config</a></code></li>
+<li><code><a title="vectorbt.records.events.BaseEvents.copy" href="../utils/config.html#vectorbt.utils.config.Configured.copy">copy</a></code></li>
+<li><code><a title="vectorbt.records.events.BaseEvents.count" href="base.html#vectorbt.records.base.Records.count">count</a></code></li>
+<li><code><a title="vectorbt.records.events.BaseEvents.coverage" href="#vectorbt.records.events.BaseEvents.coverage">coverage</a></code></li>
+<li><code><a title="vectorbt.records.events.BaseEvents.duration" href="#vectorbt.records.events.BaseEvents.duration">duration</a></code></li>
+<li><code><a title="vectorbt.records.events.BaseEvents.filter_by_mask" href="base.html#vectorbt.records.base.Records.filter_by_mask">filter_by_mask</a></code></li>
+<li><code><a title="vectorbt.records.events.BaseEvents.idx_field" href="base.html#vectorbt.records.base.Records.idx_field">idx_field</a></code></li>
+<li><code><a title="vectorbt.records.events.BaseEvents.iloc" href="../base/indexing.html#vectorbt.base.indexing.PandasIndexer.iloc">iloc</a></code></li>
+<li><code><a title="vectorbt.records.events.BaseEvents.loc" href="../base/indexing.html#vectorbt.base.indexing.PandasIndexer.loc">loc</a></code></li>
+<li><code><a title="vectorbt.records.events.BaseEvents.map" href="base.html#vectorbt.records.base.Records.map">map</a></code></li>
+<li><code><a title="vectorbt.records.events.BaseEvents.map_array" href="base.html#vectorbt.records.base.Records.map_array">map_array</a></code></li>
+<li><code><a title="vectorbt.records.events.BaseEvents.map_field" href="base.html#vectorbt.records.base.Records.map_field">map_field</a></code></li>
+<li><code><a title="vectorbt.records.events.BaseEvents.plot" href="#vectorbt.records.events.BaseEvents.plot">plot</a></code></li>
+<li><code><a title="vectorbt.records.events.BaseEvents.pnl" href="#vectorbt.records.events.BaseEvents.pnl">pnl</a></code></li>
+<li><code><a title="vectorbt.records.events.BaseEvents.records" href="base.html#vectorbt.records.base.Records.records">records</a></code></li>
+<li><code><a title="vectorbt.records.events.BaseEvents.records_arr" href="base.html#vectorbt.records.base.Records.records_arr">records_arr</a></code></li>
+<li><code><a title="vectorbt.records.events.BaseEvents.records_readable" href="#vectorbt.records.events.BaseEvents.records_readable">records_readable</a></code></li>
+<li><code><a title="vectorbt.records.events.BaseEvents.regroup" href="base.html#vectorbt.records.base.Records.regroup">regroup</a></code></li>
+<li><code><a title="vectorbt.records.events.BaseEvents.returns" href="#vectorbt.records.events.BaseEvents.returns">returns</a></code></li>
+<li><code><a title="vectorbt.records.events.BaseEvents.wrapper" href="base.html#vectorbt.records.base.Records.wrapper">wrapper</a></code></li>
+<li><code><a title="vectorbt.records.events.BaseEvents.xs" href="../base/indexing.html#vectorbt.base.indexing.PandasIndexer.xs">xs</a></code></li>
+</ul>
+</li>
+</ul>
+</dd>
+<dt id="vectorbt.records.events.BasePositionsByResult"><code class="flex name class">
+<span>class <span class="ident parent-fname">BasePositionsByResult</span></span>
+<span>(</span><span>wrapper, records_arr, close, idx_field='exit_idx')</span>
+</code></dt>
+<dd>
+<div class="desc"><p><code><a title="vectorbt.records.events.BaseEventsByResult" href="#vectorbt.records.events.BaseEventsByResult">BaseEventsByResult</a></code> adapted for positions.</p></div>
+<details class="source">
+<summary>
+<span>Expand source code</span>
+</summary>
+<pre><code class="python">class BasePositionsByResult(BaseEventsByResult, BasePositions):
+    &#34;&#34;&#34;`BaseEventsByResult` adapted for positions.&#34;&#34;&#34;
+    BaseEvents = BasePositions</code></pre>
+</details>
+<h3 class="section-subtitle">Ancestors</h3>
+<ul class="hlist">
+<li><a title="vectorbt.records.events.BaseEventsByResult" href="#vectorbt.records.events.BaseEventsByResult">BaseEventsByResult</a></li>
+<li><a title="vectorbt.records.events.BasePositions" href="#vectorbt.records.events.BasePositions">BasePositions</a></li>
+<li><a title="vectorbt.records.events.BaseEvents" href="#vectorbt.records.events.BaseEvents">BaseEvents</a></li>
+<li><a title="vectorbt.records.base.Records" href="base.html#vectorbt.records.base.Records">Records</a></li>
+<li><a title="vectorbt.utils.config.Configured" href="../utils/config.html#vectorbt.utils.config.Configured">Configured</a></li>
+<li><a title="vectorbt.base.indexing.PandasIndexer" href="../base/indexing.html#vectorbt.base.indexing.PandasIndexer">PandasIndexer</a></li>
+</ul>
+<h3 class="section-subtitle">Subclasses</h3>
+<ul class="hlist">
+<li><a title="vectorbt.records.events.Positions" href="#vectorbt.records.events.Positions">Positions</a></li>
+</ul>
+<h3 class="section-subtitle">Inherited members</h3>
+<ul class="hlist">
+<li><code><b><a title="vectorbt.records.events.BaseEventsByResult" href="#vectorbt.records.events.BaseEventsByResult">BaseEventsByResult</a></b></code>:
+<ul class="hlist">
+<li><code><a title="vectorbt.records.events.BaseEventsByResult.BaseEvents" href="#vectorbt.records.events.BaseEventsByResult.BaseEvents">BaseEvents</a></code></li>
+<li><code><a title="vectorbt.records.events.BaseEventsByResult.col_index" href="base.html#vectorbt.records.base.Records.col_index">col_index</a></code></li>
+<li><code><a title="vectorbt.records.events.BaseEventsByResult.config" href="../utils/config.html#vectorbt.utils.config.Configured.config">config</a></code></li>
+<li><code><a title="vectorbt.records.events.BaseEventsByResult.copy" href="../utils/config.html#vectorbt.utils.config.Configured.copy">copy</a></code></li>
+<li><code><a title="vectorbt.records.events.BaseEventsByResult.count" href="base.html#vectorbt.records.base.Records.count">count</a></code></li>
+<li><code><a title="vectorbt.records.events.BaseEventsByResult.coverage" href="#vectorbt.records.events.BaseEvents.coverage">coverage</a></code></li>
+<li><code><a title="vectorbt.records.events.BaseEventsByResult.duration" href="#vectorbt.records.events.BaseEvents.duration">duration</a></code></li>
+<li><code><a title="vectorbt.records.events.BaseEventsByResult.expectancy" href="#vectorbt.records.events.BaseEventsByResult.expectancy">expectancy</a></code></li>
+<li><code><a title="vectorbt.records.events.BaseEventsByResult.filter_by_mask" href="base.html#vectorbt.records.base.Records.filter_by_mask">filter_by_mask</a></code></li>
+<li><code><a title="vectorbt.records.events.BaseEventsByResult.idx_field" href="base.html#vectorbt.records.base.Records.idx_field">idx_field</a></code></li>
+<li><code><a title="vectorbt.records.events.BaseEventsByResult.iloc" href="../base/indexing.html#vectorbt.base.indexing.PandasIndexer.iloc">iloc</a></code></li>
+<li><code><a title="vectorbt.records.events.BaseEventsByResult.loc" href="../base/indexing.html#vectorbt.base.indexing.PandasIndexer.loc">loc</a></code></li>
+<li><code><a title="vectorbt.records.events.BaseEventsByResult.losing" href="#vectorbt.records.events.BaseEventsByResult.losing">losing</a></code></li>
+<li><code><a title="vectorbt.records.events.BaseEventsByResult.map" href="base.html#vectorbt.records.base.Records.map">map</a></code></li>
+<li><code><a title="vectorbt.records.events.BaseEventsByResult.map_array" href="base.html#vectorbt.records.base.Records.map_array">map_array</a></code></li>
+<li><code><a title="vectorbt.records.events.BaseEventsByResult.map_field" href="base.html#vectorbt.records.base.Records.map_field">map_field</a></code></li>
+<li><code><a title="vectorbt.records.events.BaseEventsByResult.plot" href="#vectorbt.records.events.BaseEvents.plot">plot</a></code></li>
+<li><code><a title="vectorbt.records.events.BaseEventsByResult.pnl" href="#vectorbt.records.events.BaseEvents.pnl">pnl</a></code></li>
+<li><code><a title="vectorbt.records.events.BaseEventsByResult.profit_factor" href="#vectorbt.records.events.BaseEventsByResult.profit_factor">profit_factor</a></code></li>
+<li><code><a title="vectorbt.records.events.BaseEventsByResult.records" href="base.html#vectorbt.records.base.Records.records">records</a></code></li>
+<li><code><a title="vectorbt.records.events.BaseEventsByResult.records_arr" href="base.html#vectorbt.records.base.Records.records_arr">records_arr</a></code></li>
+<li><code><a title="vectorbt.records.events.BaseEventsByResult.records_readable" href="#vectorbt.records.events.BaseEvents.records_readable">records_readable</a></code></li>
+<li><code><a title="vectorbt.records.events.BaseEventsByResult.regroup" href="base.html#vectorbt.records.base.Records.regroup">regroup</a></code></li>
+<li><code><a title="vectorbt.records.events.BaseEventsByResult.returns" href="#vectorbt.records.events.BaseEvents.returns">returns</a></code></li>
+<li><code><a title="vectorbt.records.events.BaseEventsByResult.sqn" href="#vectorbt.records.events.BaseEventsByResult.sqn">sqn</a></code></li>
+<li><code><a title="vectorbt.records.events.BaseEventsByResult.win_rate" href="#vectorbt.records.events.BaseEventsByResult.win_rate">win_rate</a></code></li>
+<li><code><a title="vectorbt.records.events.BaseEventsByResult.winning" href="#vectorbt.records.events.BaseEventsByResult.winning">winning</a></code></li>
+<li><code><a title="vectorbt.records.events.BaseEventsByResult.wrapper" href="base.html#vectorbt.records.base.Records.wrapper">wrapper</a></code></li>
+<li><code><a title="vectorbt.records.events.BaseEventsByResult.xs" href="../base/indexing.html#vectorbt.base.indexing.PandasIndexer.xs">xs</a></code></li>
+</ul>
+</li>
+</ul>
+</dd>
+<dt id="vectorbt.records.events.BaseTrades"><code class="flex name class">
+<span>class <span class="ident parent-fname">BaseTrades</span></span>
+<span>(</span><span>wrapper, records_arr, close, idx_field='exit_idx')</span>
+</code></dt>
+<dd>
+<div class="desc"><p><code><a title="vectorbt.records.events.BaseEvents" href="#vectorbt.records.events.BaseEvents">BaseEvents</a></code> adapted for trades.</p></div>
+<details class="source">
+<summary>
+<span>Expand source code</span>
+</summary>
+<pre><code class="python">class BaseTrades(BaseEvents):
+    &#34;&#34;&#34;`BaseEvents` adapted for trades.&#34;&#34;&#34;
+    @property  # no need for cached
+    def records_readable(self):
+        &#34;&#34;&#34;Records in readable format.&#34;&#34;&#34;
+        records_df = self.records
+        out = super().records_readable.copy()
+        out[&#39;Position&#39;] = records_df[&#39;position_idx&#39;]
+        return out</code></pre>
+</details>
+<h3 class="section-subtitle">Ancestors</h3>
+<ul class="hlist">
+<li><a title="vectorbt.records.events.BaseEvents" href="#vectorbt.records.events.BaseEvents">BaseEvents</a></li>
+<li><a title="vectorbt.records.base.Records" href="base.html#vectorbt.records.base.Records">Records</a></li>
+<li><a title="vectorbt.utils.config.Configured" href="../utils/config.html#vectorbt.utils.config.Configured">Configured</a></li>
+<li><a title="vectorbt.base.indexing.PandasIndexer" href="../base/indexing.html#vectorbt.base.indexing.PandasIndexer">PandasIndexer</a></li>
+</ul>
+<h3 class="section-subtitle">Subclasses</h3>
+<ul class="hlist">
+<li><a title="vectorbt.records.events.BaseTradesByResult" href="#vectorbt.records.events.BaseTradesByResult">BaseTradesByResult</a></li>
+</ul>
+<h3 class="section-subtitle">Inherited members</h3>
+<ul class="hlist">
+<li><code><b><a title="vectorbt.records.events.BaseEvents" href="#vectorbt.records.events.BaseEvents">BaseEvents</a></b></code>:
+<ul class="hlist">
+<li><code><a title="vectorbt.records.events.BaseEvents.col_index" href="base.html#vectorbt.records.base.Records.col_index">col_index</a></code></li>
+<li><code><a title="vectorbt.records.events.BaseEvents.config" href="../utils/config.html#vectorbt.utils.config.Configured.config">config</a></code></li>
+<li><code><a title="vectorbt.records.events.BaseEvents.copy" href="../utils/config.html#vectorbt.utils.config.Configured.copy">copy</a></code></li>
+<li><code><a title="vectorbt.records.events.BaseEvents.count" href="base.html#vectorbt.records.base.Records.count">count</a></code></li>
+<li><code><a title="vectorbt.records.events.BaseEvents.coverage" href="#vectorbt.records.events.BaseEvents.coverage">coverage</a></code></li>
+<li><code><a title="vectorbt.records.events.BaseEvents.duration" href="#vectorbt.records.events.BaseEvents.duration">duration</a></code></li>
+<li><code><a title="vectorbt.records.events.BaseEvents.filter_by_mask" href="base.html#vectorbt.records.base.Records.filter_by_mask">filter_by_mask</a></code></li>
+<li><code><a title="vectorbt.records.events.BaseEvents.idx_field" href="base.html#vectorbt.records.base.Records.idx_field">idx_field</a></code></li>
+<li><code><a title="vectorbt.records.events.BaseEvents.iloc" href="../base/indexing.html#vectorbt.base.indexing.PandasIndexer.iloc">iloc</a></code></li>
+<li><code><a title="vectorbt.records.events.BaseEvents.loc" href="../base/indexing.html#vectorbt.base.indexing.PandasIndexer.loc">loc</a></code></li>
+<li><code><a title="vectorbt.records.events.BaseEvents.map" href="base.html#vectorbt.records.base.Records.map">map</a></code></li>
+<li><code><a title="vectorbt.records.events.BaseEvents.map_array" href="base.html#vectorbt.records.base.Records.map_array">map_array</a></code></li>
+<li><code><a title="vectorbt.records.events.BaseEvents.map_field" href="base.html#vectorbt.records.base.Records.map_field">map_field</a></code></li>
+<li><code><a title="vectorbt.records.events.BaseEvents.plot" href="#vectorbt.records.events.BaseEvents.plot">plot</a></code></li>
+<li><code><a title="vectorbt.records.events.BaseEvents.pnl" href="#vectorbt.records.events.BaseEvents.pnl">pnl</a></code></li>
+<li><code><a title="vectorbt.records.events.BaseEvents.records" href="base.html#vectorbt.records.base.Records.records">records</a></code></li>
+<li><code><a title="vectorbt.records.events.BaseEvents.records_arr" href="base.html#vectorbt.records.base.Records.records_arr">records_arr</a></code></li>
+<li><code><a title="vectorbt.records.events.BaseEvents.records_readable" href="#vectorbt.records.events.BaseEvents.records_readable">records_readable</a></code></li>
+<li><code><a title="vectorbt.records.events.BaseEvents.regroup" href="base.html#vectorbt.records.base.Records.regroup">regroup</a></code></li>
+<li><code><a title="vectorbt.records.events.BaseEvents.returns" href="#vectorbt.records.events.BaseEvents.returns">returns</a></code></li>
+<li><code><a title="vectorbt.records.events.BaseEvents.wrapper" href="base.html#vectorbt.records.base.Records.wrapper">wrapper</a></code></li>
+<li><code><a title="vectorbt.records.events.BaseEvents.xs" href="../base/indexing.html#vectorbt.base.indexing.PandasIndexer.xs">xs</a></code></li>
+</ul>
+</li>
+</ul>
+</dd>
+<dt id="vectorbt.records.events.BaseTradesByResult"><code class="flex name class">
+<span>class <span class="ident parent-fname">BaseTradesByResult</span></span>
+<span>(</span><span>wrapper, records_arr, close, idx_field='exit_idx')</span>
+</code></dt>
+<dd>
+<div class="desc"><p><code><a title="vectorbt.records.events.BaseEventsByResult" href="#vectorbt.records.events.BaseEventsByResult">BaseEventsByResult</a></code> adapted for trades.</p></div>
+<details class="source">
+<summary>
+<span>Expand source code</span>
+</summary>
+<pre><code class="python">class BaseTradesByResult(BaseEventsByResult, BaseTrades):
+    &#34;&#34;&#34;`BaseEventsByResult` adapted for trades.&#34;&#34;&#34;
+    BaseEvents = BaseTrades</code></pre>
+</details>
+<h3 class="section-subtitle">Ancestors</h3>
+<ul class="hlist">
+<li><a title="vectorbt.records.events.BaseEventsByResult" href="#vectorbt.records.events.BaseEventsByResult">BaseEventsByResult</a></li>
+<li><a title="vectorbt.records.events.BaseTrades" href="#vectorbt.records.events.BaseTrades">BaseTrades</a></li>
+<li><a title="vectorbt.records.events.BaseEvents" href="#vectorbt.records.events.BaseEvents">BaseEvents</a></li>
+<li><a title="vectorbt.records.base.Records" href="base.html#vectorbt.records.base.Records">Records</a></li>
+<li><a title="vectorbt.utils.config.Configured" href="../utils/config.html#vectorbt.utils.config.Configured">Configured</a></li>
+<li><a title="vectorbt.base.indexing.PandasIndexer" href="../base/indexing.html#vectorbt.base.indexing.PandasIndexer">PandasIndexer</a></li>
+</ul>
+<h3 class="section-subtitle">Subclasses</h3>
+<ul class="hlist">
+<li><a title="vectorbt.records.events.Trades" href="#vectorbt.records.events.Trades">Trades</a></li>
+</ul>
+<h3 class="section-subtitle">Inherited members</h3>
+<ul class="hlist">
+<li><code><b><a title="vectorbt.records.events.BaseEventsByResult" href="#vectorbt.records.events.BaseEventsByResult">BaseEventsByResult</a></b></code>:
+<ul class="hlist">
+<li><code><a title="vectorbt.records.events.BaseEventsByResult.BaseEvents" href="#vectorbt.records.events.BaseEventsByResult.BaseEvents">BaseEvents</a></code></li>
+<li><code><a title="vectorbt.records.events.BaseEventsByResult.col_index" href="base.html#vectorbt.records.base.Records.col_index">col_index</a></code></li>
+<li><code><a title="vectorbt.records.events.BaseEventsByResult.config" href="../utils/config.html#vectorbt.utils.config.Configured.config">config</a></code></li>
+<li><code><a title="vectorbt.records.events.BaseEventsByResult.copy" href="../utils/config.html#vectorbt.utils.config.Configured.copy">copy</a></code></li>
+<li><code><a title="vectorbt.records.events.BaseEventsByResult.count" href="base.html#vectorbt.records.base.Records.count">count</a></code></li>
+<li><code><a title="vectorbt.records.events.BaseEventsByResult.coverage" href="#vectorbt.records.events.BaseEvents.coverage">coverage</a></code></li>
+<li><code><a title="vectorbt.records.events.BaseEventsByResult.duration" href="#vectorbt.records.events.BaseEvents.duration">duration</a></code></li>
+<li><code><a title="vectorbt.records.events.BaseEventsByResult.expectancy" href="#vectorbt.records.events.BaseEventsByResult.expectancy">expectancy</a></code></li>
+<li><code><a title="vectorbt.records.events.BaseEventsByResult.filter_by_mask" href="base.html#vectorbt.records.base.Records.filter_by_mask">filter_by_mask</a></code></li>
+<li><code><a title="vectorbt.records.events.BaseEventsByResult.idx_field" href="base.html#vectorbt.records.base.Records.idx_field">idx_field</a></code></li>
+<li><code><a title="vectorbt.records.events.BaseEventsByResult.iloc" href="../base/indexing.html#vectorbt.base.indexing.PandasIndexer.iloc">iloc</a></code></li>
+<li><code><a title="vectorbt.records.events.BaseEventsByResult.loc" href="../base/indexing.html#vectorbt.base.indexing.PandasIndexer.loc">loc</a></code></li>
+<li><code><a title="vectorbt.records.events.BaseEventsByResult.losing" href="#vectorbt.records.events.BaseEventsByResult.losing">losing</a></code></li>
+<li><code><a title="vectorbt.records.events.BaseEventsByResult.map" href="base.html#vectorbt.records.base.Records.map">map</a></code></li>
+<li><code><a title="vectorbt.records.events.BaseEventsByResult.map_array" href="base.html#vectorbt.records.base.Records.map_array">map_array</a></code></li>
+<li><code><a title="vectorbt.records.events.BaseEventsByResult.map_field" href="base.html#vectorbt.records.base.Records.map_field">map_field</a></code></li>
+<li><code><a title="vectorbt.records.events.BaseEventsByResult.plot" href="#vectorbt.records.events.BaseEvents.plot">plot</a></code></li>
+<li><code><a title="vectorbt.records.events.BaseEventsByResult.pnl" href="#vectorbt.records.events.BaseEvents.pnl">pnl</a></code></li>
+<li><code><a title="vectorbt.records.events.BaseEventsByResult.profit_factor" href="#vectorbt.records.events.BaseEventsByResult.profit_factor">profit_factor</a></code></li>
+<li><code><a title="vectorbt.records.events.BaseEventsByResult.records" href="base.html#vectorbt.records.base.Records.records">records</a></code></li>
+<li><code><a title="vectorbt.records.events.BaseEventsByResult.records_arr" href="base.html#vectorbt.records.base.Records.records_arr">records_arr</a></code></li>
+<li><code><a title="vectorbt.records.events.BaseEventsByResult.records_readable" href="#vectorbt.records.events.BaseEvents.records_readable">records_readable</a></code></li>
+<li><code><a title="vectorbt.records.events.BaseEventsByResult.regroup" href="base.html#vectorbt.records.base.Records.regroup">regroup</a></code></li>
+<li><code><a title="vectorbt.records.events.BaseEventsByResult.returns" href="#vectorbt.records.events.BaseEvents.returns">returns</a></code></li>
+<li><code><a title="vectorbt.records.events.BaseEventsByResult.sqn" href="#vectorbt.records.events.BaseEventsByResult.sqn">sqn</a></code></li>
+<li><code><a title="vectorbt.records.events.BaseEventsByResult.win_rate" href="#vectorbt.records.events.BaseEventsByResult.win_rate">win_rate</a></code></li>
+<li><code><a title="vectorbt.records.events.BaseEventsByResult.winning" href="#vectorbt.records.events.BaseEventsByResult.winning">winning</a></code></li>
+<li><code><a title="vectorbt.records.events.BaseEventsByResult.wrapper" href="base.html#vectorbt.records.base.Records.wrapper">wrapper</a></code></li>
+<li><code><a title="vectorbt.records.events.BaseEventsByResult.xs" href="../base/indexing.html#vectorbt.base.indexing.PandasIndexer.xs">xs</a></code></li>
 </ul>
 </li>
 </ul>
@@ -1636,6 +2003,7 @@ def win_rate(self, group_by=None, **kwargs):
 </summary>
 <pre><code class="python">class Events(BaseEventsByResult):
     &#34;&#34;&#34;Extends `BaseEventsByResult` by further dividing events by status.&#34;&#34;&#34;
+    BaseEventsByResult = BaseEventsByResult
 
     @cached_property
     def status(self):
@@ -1653,7 +2021,7 @@ def win_rate(self, group_by=None, **kwargs):
     def open(self):
         &#34;&#34;&#34;Open events of type `BaseEventsByResult`.&#34;&#34;&#34;
         filter_mask = self.records_arr[&#39;status&#39;] == EventStatus.Open
-        return BaseEventsByResult(
+        return self.BaseEventsByResult(
             self.wrapper,
             self.records_arr[filter_mask],
             self.close,
@@ -1664,7 +2032,7 @@ def win_rate(self, group_by=None, **kwargs):
     def closed(self):
         &#34;&#34;&#34;Closed events of type `BaseEventsByResult`.&#34;&#34;&#34;
         filter_mask = self.records_arr[&#39;status&#39;] == EventStatus.Closed
-        return BaseEventsByResult(
+        return self.BaseEventsByResult(
             self.wrapper,
             self.records_arr[filter_mask],
             self.close,
@@ -1684,6 +2052,13 @@ def win_rate(self, group_by=None, **kwargs):
 <li><a title="vectorbt.records.events.Positions" href="#vectorbt.records.events.Positions">Positions</a></li>
 <li><a title="vectorbt.records.events.Trades" href="#vectorbt.records.events.Trades">Trades</a></li>
 </ul>
+<h3 class="section-subtitle">Class variables</h3>
+<dl>
+<dt id="vectorbt.records.events.Events.BaseEventsByResult"><code class="name">var <span class="ident fname">BaseEventsByResult</span></code></dt>
+<dd>
+<div class="desc"><p>Extends <code><a title="vectorbt.records.events.BaseEvents" href="#vectorbt.records.events.BaseEvents">BaseEvents</a></code> by further dividing events into winning and losing events.</p></div>
+</dd>
+</dl>
 <h3 class="section-subtitle">Instance variables</h3>
 <dl>
 <dt id="vectorbt.records.events.Events.closed"><code class="name">var <span class="ident fname">closed</span></code></dt>
@@ -1783,6 +2158,7 @@ def closed_rate(self, group_by=None, **kwargs):
 <ul class="hlist">
 <li><code><b><a title="vectorbt.records.events.BaseEventsByResult" href="#vectorbt.records.events.BaseEventsByResult">BaseEventsByResult</a></b></code>:
 <ul class="hlist">
+<li><code><a title="vectorbt.records.events.BaseEventsByResult.BaseEvents" href="#vectorbt.records.events.BaseEventsByResult.BaseEvents">BaseEvents</a></code></li>
 <li><code><a title="vectorbt.records.events.BaseEventsByResult.col_index" href="base.html#vectorbt.records.base.Records.col_index">col_index</a></code></li>
 <li><code><a title="vectorbt.records.events.BaseEventsByResult.config" href="../utils/config.html#vectorbt.utils.config.Configured.config">config</a></code></li>
 <li><code><a title="vectorbt.records.events.BaseEventsByResult.copy" href="../utils/config.html#vectorbt.utils.config.Configured.copy">copy</a></code></li>
@@ -1803,6 +2179,7 @@ def closed_rate(self, group_by=None, **kwargs):
 <li><code><a title="vectorbt.records.events.BaseEventsByResult.profit_factor" href="#vectorbt.records.events.BaseEventsByResult.profit_factor">profit_factor</a></code></li>
 <li><code><a title="vectorbt.records.events.BaseEventsByResult.records" href="base.html#vectorbt.records.base.Records.records">records</a></code></li>
 <li><code><a title="vectorbt.records.events.BaseEventsByResult.records_arr" href="base.html#vectorbt.records.base.Records.records_arr">records_arr</a></code></li>
+<li><code><a title="vectorbt.records.events.BaseEventsByResult.records_readable" href="#vectorbt.records.events.BaseEvents.records_readable">records_readable</a></code></li>
 <li><code><a title="vectorbt.records.events.BaseEventsByResult.regroup" href="base.html#vectorbt.records.base.Records.regroup">regroup</a></code></li>
 <li><code><a title="vectorbt.records.events.BaseEventsByResult.returns" href="#vectorbt.records.events.BaseEvents.returns">returns</a></code></li>
 <li><code><a title="vectorbt.records.events.BaseEventsByResult.sqn" href="#vectorbt.records.events.BaseEventsByResult.sqn">sqn</a></code></li>
@@ -1827,7 +2204,7 @@ A position opens with first buy operation and closes with last sell operation th
 in no security holdings.</p>
 <h2 id="example">Example</h2>
 <p>Increasing position:</p>
-<pre><code class="python-repl">&gt;&gt;&gt; import vectorbt as vbt
+<pre><code class="language-python-repl">&gt;&gt;&gt; import vectorbt as vbt
 &gt;&gt;&gt; import pandas as pd
 
 &gt;&gt;&gt; vbt.Portfolio.from_orders(
@@ -1842,7 +2219,7 @@ in no security holdings.</p>
 0        1.0  5.0  0.357143       1
 </code></pre>
 <p>Decreasing position:</p>
-<pre><code class="python-repl">&gt;&gt;&gt; vbt.Portfolio.from_orders(
+<pre><code class="language-python-repl">&gt;&gt;&gt; vbt.Portfolio.from_orders(
 ...     pd.Series([1., 2., 3., 4., 5.]),
 ...     pd.Series([4., -1., -1., -1., -1.]),
 ...     fixed_fees=1., freq='1D'
@@ -1854,7 +2231,7 @@ in no security holdings.</p>
 0        4.0  5.0     1.0       1
 </code></pre>
 <p>Multiple positions:</p>
-<pre><code class="python-repl">&gt;&gt;&gt; vbt.Portfolio.from_orders(
+<pre><code class="language-python-repl">&gt;&gt;&gt; vbt.Portfolio.from_orders(
 ...     pd.Series([1., 2., 3., 4., 5.]),
 ...     pd.Series([1., 1., -2., 1., -1.]),
 ...     fixed_fees=1., freq='1D'
@@ -1868,7 +2245,7 @@ in no security holdings.</p>
 1        1.0 -1.0    -0.2       1
 </code></pre>
 <p>Get count and P&amp;L of positions:</p>
-<pre><code class="python-repl">&gt;&gt;&gt; price = pd.Series([1., 2., 3., 4., 3., 2., 1.])
+<pre><code class="language-python-repl">&gt;&gt;&gt; price = pd.Series([1., 2., 3., 4., 3., 2., 1.])
 &gt;&gt;&gt; orders = pd.Series([1., -0.5, -0.5, 1., -1., 2., -1.])
 &gt;&gt;&gt; portfolio = vbt.Portfolio.from_orders(price, orders,
 ...      init_cash=100., freq='1D')
@@ -1884,7 +2261,7 @@ in no security holdings.</p>
 0.5
 </code></pre>
 <p>Get count and P&amp;L of positions with size of more than 1 share:</p>
-<pre><code class="python-repl">&gt;&gt;&gt; mask = positions.records['size'] &gt; 1
+<pre><code class="language-python-repl">&gt;&gt;&gt; mask = positions.records['size'] &gt; 1
 &gt;&gt;&gt; positions_filtered = positions.filter_by_mask(mask)
 &gt;&gt;&gt; positions_filtered.count()
 1
@@ -1895,7 +2272,7 @@ in no security holdings.</p>
 <summary>
 <span>Expand source code</span>
 </summary>
-<pre><code class="python">class Positions(Events):
+<pre><code class="python">class Positions(Events, BasePositionsByResult):
     &#34;&#34;&#34;Extends `Events` for working with position records.
 
     Such records can be created by using `vectorbt.records.nb.position_records_nb`.
@@ -1980,6 +2357,7 @@ in no security holdings.</p>
         &gt;&gt;&gt; positions_filtered.pnl.sum()
         -2.0
         ```&#34;&#34;&#34;
+    BaseEventsByResult = BasePositionsByResult
 
     def __init__(self, wrapper, records_arr, *args, **kwargs):
         Events.__init__(self, wrapper, records_arr, *args, **kwargs)
@@ -1996,7 +2374,9 @@ in no security holdings.</p>
 <h3 class="section-subtitle">Ancestors</h3>
 <ul class="hlist">
 <li><a title="vectorbt.records.events.Events" href="#vectorbt.records.events.Events">Events</a></li>
+<li><a title="vectorbt.records.events.BasePositionsByResult" href="#vectorbt.records.events.BasePositionsByResult">BasePositionsByResult</a></li>
 <li><a title="vectorbt.records.events.BaseEventsByResult" href="#vectorbt.records.events.BaseEventsByResult">BaseEventsByResult</a></li>
+<li><a title="vectorbt.records.events.BasePositions" href="#vectorbt.records.events.BasePositions">BasePositions</a></li>
 <li><a title="vectorbt.records.events.BaseEvents" href="#vectorbt.records.events.BaseEvents">BaseEvents</a></li>
 <li><a title="vectorbt.records.base.Records" href="base.html#vectorbt.records.base.Records">Records</a></li>
 <li><a title="vectorbt.utils.config.Configured" href="../utils/config.html#vectorbt.utils.config.Configured">Configured</a></li>
@@ -2025,6 +2405,8 @@ def from_orders(cls, orders, **kwargs):
 <ul class="hlist">
 <li><code><b><a title="vectorbt.records.events.Events" href="#vectorbt.records.events.Events">Events</a></b></code>:
 <ul class="hlist">
+<li><code><a title="vectorbt.records.events.Events.BaseEvents" href="#vectorbt.records.events.BaseEventsByResult.BaseEvents">BaseEvents</a></code></li>
+<li><code><a title="vectorbt.records.events.Events.BaseEventsByResult" href="#vectorbt.records.events.Events.BaseEventsByResult">BaseEventsByResult</a></code></li>
 <li><code><a title="vectorbt.records.events.Events.closed" href="#vectorbt.records.events.Events.closed">closed</a></code></li>
 <li><code><a title="vectorbt.records.events.Events.closed_rate" href="#vectorbt.records.events.Events.closed_rate">closed_rate</a></code></li>
 <li><code><a title="vectorbt.records.events.Events.col_index" href="base.html#vectorbt.records.base.Records.col_index">col_index</a></code></li>
@@ -2048,6 +2430,7 @@ def from_orders(cls, orders, **kwargs):
 <li><code><a title="vectorbt.records.events.Events.profit_factor" href="#vectorbt.records.events.BaseEventsByResult.profit_factor">profit_factor</a></code></li>
 <li><code><a title="vectorbt.records.events.Events.records" href="base.html#vectorbt.records.base.Records.records">records</a></code></li>
 <li><code><a title="vectorbt.records.events.Events.records_arr" href="base.html#vectorbt.records.base.Records.records_arr">records_arr</a></code></li>
+<li><code><a title="vectorbt.records.events.Events.records_readable" href="#vectorbt.records.events.BaseEvents.records_readable">records_readable</a></code></li>
 <li><code><a title="vectorbt.records.events.Events.regroup" href="base.html#vectorbt.records.base.Records.regroup">regroup</a></code></li>
 <li><code><a title="vectorbt.records.events.Events.returns" href="#vectorbt.records.events.BaseEvents.returns">returns</a></code></li>
 <li><code><a title="vectorbt.records.events.Events.sqn" href="#vectorbt.records.events.BaseEventsByResult.sqn">sqn</a></code></li>
@@ -2074,7 +2457,7 @@ sell operation will generate a single trade with buy price being a size-weighted
 purchase prices, and opening size and fees being the sum over all sizes and fees.</p>
 <h2 id="example">Example</h2>
 <p>Increasing position:</p>
-<pre><code class="python-repl">&gt;&gt;&gt; import vectorbt as vbt
+<pre><code class="language-python-repl">&gt;&gt;&gt; import vectorbt as vbt
 &gt;&gt;&gt; import pandas as pd
 
 &gt;&gt;&gt; vbt.Portfolio.from_orders(
@@ -2089,7 +2472,7 @@ purchase prices, and opening size and fees being the sum over all sizes and fees
 0        1.0  5.0  0.357143       1             0
 </code></pre>
 <p>Decreasing position:</p>
-<pre><code class="python-repl">&gt;&gt;&gt; vbt.Portfolio.from_orders(
+<pre><code class="language-python-repl">&gt;&gt;&gt; vbt.Portfolio.from_orders(
 ...     pd.Series([1., 2., 3., 4., 5.]),
 ...     pd.Series([4., -1., -1., -1., -1.]),
 ...     fixed_fees=1., freq='1D'
@@ -2106,7 +2489,7 @@ purchase prices, and opening size and fees being the sum over all sizes and fees
 3        1.0  2.75     2.2       1             0
 </code></pre>
 <p>Multiple positions:</p>
-<pre><code class="python-repl">&gt;&gt;&gt; vbt.Portfolio.from_orders(
+<pre><code class="language-python-repl">&gt;&gt;&gt; vbt.Portfolio.from_orders(
 ...     pd.Series([1., 2., 3., 4., 5.]),
 ...     pd.Series([1., 1., -2., 1., -1.]),
 ...     fixed_fees=1., freq='1D'
@@ -2120,7 +2503,7 @@ purchase prices, and opening size and fees being the sum over all sizes and fees
 1        1.0 -1.0    -0.2       1             1
 </code></pre>
 <p>Get count and P&amp;L of trades:</p>
-<pre><code class="python-repl">&gt;&gt;&gt; price = pd.Series([1., 2., 3., 4., 3., 2., 1.])
+<pre><code class="language-python-repl">&gt;&gt;&gt; price = pd.Series([1., 2., 3., 4., 3., 2., 1.])
 &gt;&gt;&gt; orders = pd.Series([1., -0.5, -0.5, 2., -0.5, -0.5, -0.5])
 &gt;&gt;&gt; portfolio = vbt.Portfolio.from_orders(price, orders,
 ...      init_cash=100., freq='1D')
@@ -2136,7 +2519,7 @@ purchase prices, and opening size and fees being the sum over all sizes and fees
 1.5
 </code></pre>
 <p>Get count and P&amp;L of trades with duration of more than 2 days:</p>
-<pre><code class="python-repl">&gt;&gt;&gt; mask = (trades.records['exit_idx'] - trades.records['entry_idx']) &gt; 2
+<pre><code class="language-python-repl">&gt;&gt;&gt; mask = (trades.records['exit_idx'] - trades.records['entry_idx']) &gt; 2
 &gt;&gt;&gt; trades_filtered = trades.filter_by_mask(mask)
 &gt;&gt;&gt; trades_filtered.count()
 2
@@ -2147,7 +2530,7 @@ purchase prices, and opening size and fees being the sum over all sizes and fees
 <summary>
 <span>Expand source code</span>
 </summary>
-<pre><code class="python">class Trades(Events):
+<pre><code class="python">class Trades(Events, BaseTradesByResult):
     &#34;&#34;&#34;Extends `Events` for working with trade records.
 
     Such records can be created by using `vectorbt.records.nb.trade_records_nb`.
@@ -2239,6 +2622,7 @@ purchase prices, and opening size and fees being the sum over all sizes and fees
         &gt;&gt;&gt; trades_filtered.pnl.sum()
         -3.0
         ```&#34;&#34;&#34;
+    BaseEventsByResult = BaseTradesByResult
 
     def __init__(self, wrapper, records_arr, *args, **kwargs):
         Events.__init__(self, wrapper, records_arr, *args, **kwargs)
@@ -2260,7 +2644,9 @@ purchase prices, and opening size and fees being the sum over all sizes and fees
 <h3 class="section-subtitle">Ancestors</h3>
 <ul class="hlist">
 <li><a title="vectorbt.records.events.Events" href="#vectorbt.records.events.Events">Events</a></li>
+<li><a title="vectorbt.records.events.BaseTradesByResult" href="#vectorbt.records.events.BaseTradesByResult">BaseTradesByResult</a></li>
 <li><a title="vectorbt.records.events.BaseEventsByResult" href="#vectorbt.records.events.BaseEventsByResult">BaseEventsByResult</a></li>
+<li><a title="vectorbt.records.events.BaseTrades" href="#vectorbt.records.events.BaseTrades">BaseTrades</a></li>
 <li><a title="vectorbt.records.events.BaseEvents" href="#vectorbt.records.events.BaseEvents">BaseEvents</a></li>
 <li><a title="vectorbt.records.base.Records" href="base.html#vectorbt.records.base.Records">Records</a></li>
 <li><a title="vectorbt.utils.config.Configured" href="../utils/config.html#vectorbt.utils.config.Configured">Configured</a></li>
@@ -2316,6 +2702,8 @@ def from_orders(cls, orders, **kwargs):
 <ul class="hlist">
 <li><code><b><a title="vectorbt.records.events.Events" href="#vectorbt.records.events.Events">Events</a></b></code>:
 <ul class="hlist">
+<li><code><a title="vectorbt.records.events.Events.BaseEvents" href="#vectorbt.records.events.BaseEventsByResult.BaseEvents">BaseEvents</a></code></li>
+<li><code><a title="vectorbt.records.events.Events.BaseEventsByResult" href="#vectorbt.records.events.Events.BaseEventsByResult">BaseEventsByResult</a></code></li>
 <li><code><a title="vectorbt.records.events.Events.closed" href="#vectorbt.records.events.Events.closed">closed</a></code></li>
 <li><code><a title="vectorbt.records.events.Events.closed_rate" href="#vectorbt.records.events.Events.closed_rate">closed_rate</a></code></li>
 <li><code><a title="vectorbt.records.events.Events.col_index" href="base.html#vectorbt.records.base.Records.col_index">col_index</a></code></li>
@@ -2339,6 +2727,7 @@ def from_orders(cls, orders, **kwargs):
 <li><code><a title="vectorbt.records.events.Events.profit_factor" href="#vectorbt.records.events.BaseEventsByResult.profit_factor">profit_factor</a></code></li>
 <li><code><a title="vectorbt.records.events.Events.records" href="base.html#vectorbt.records.base.Records.records">records</a></code></li>
 <li><code><a title="vectorbt.records.events.Events.records_arr" href="base.html#vectorbt.records.base.Records.records_arr">records_arr</a></code></li>
+<li><code><a title="vectorbt.records.events.Events.records_readable" href="#vectorbt.records.events.BaseEvents.records_readable">records_readable</a></code></li>
 <li><code><a title="vectorbt.records.events.Events.regroup" href="base.html#vectorbt.records.base.Records.regroup">regroup</a></code></li>
 <li><code><a title="vectorbt.records.events.Events.returns" href="#vectorbt.records.events.BaseEvents.returns">returns</a></code></li>
 <li><code><a title="vectorbt.records.events.Events.sqn" href="#vectorbt.records.events.BaseEventsByResult.sqn">sqn</a></code></li>
@@ -2381,24 +2770,26 @@ title="Search"
 </li>
 <li><h3><a href="#header-functions">Functions</a></h3>
 <ul class="">
-<li><code><a title="vectorbt.records.events.indexing_on_orders_meta" href="#vectorbt.records.events.indexing_on_orders_meta">indexing_on_orders_meta</a></code></li>
+<li><code><a title="vectorbt.records.events.indexing_on_events_meta" href="#vectorbt.records.events.indexing_on_events_meta">indexing_on_events_meta</a></code></li>
 </ul>
 </li>
 <li><h3><a href="#header-classes">Classes</a></h3>
 <ul>
 <li>
 <h4><code><a title="vectorbt.records.events.BaseEvents" href="#vectorbt.records.events.BaseEvents">BaseEvents</a></code></h4>
-<ul class="">
+<ul class="two-column">
 <li><code><a title="vectorbt.records.events.BaseEvents.coverage" href="#vectorbt.records.events.BaseEvents.coverage">coverage</a></code></li>
 <li><code><a title="vectorbt.records.events.BaseEvents.duration" href="#vectorbt.records.events.BaseEvents.duration">duration</a></code></li>
 <li><code><a title="vectorbt.records.events.BaseEvents.plot" href="#vectorbt.records.events.BaseEvents.plot">plot</a></code></li>
 <li><code><a title="vectorbt.records.events.BaseEvents.pnl" href="#vectorbt.records.events.BaseEvents.pnl">pnl</a></code></li>
+<li><code><a title="vectorbt.records.events.BaseEvents.records_readable" href="#vectorbt.records.events.BaseEvents.records_readable">records_readable</a></code></li>
 <li><code><a title="vectorbt.records.events.BaseEvents.returns" href="#vectorbt.records.events.BaseEvents.returns">returns</a></code></li>
 </ul>
 </li>
 <li>
 <h4><code><a title="vectorbt.records.events.BaseEventsByResult" href="#vectorbt.records.events.BaseEventsByResult">BaseEventsByResult</a></code></h4>
 <ul class="two-column">
+<li><code><a title="vectorbt.records.events.BaseEventsByResult.BaseEvents" href="#vectorbt.records.events.BaseEventsByResult.BaseEvents">BaseEvents</a></code></li>
 <li><code><a title="vectorbt.records.events.BaseEventsByResult.expectancy" href="#vectorbt.records.events.BaseEventsByResult.expectancy">expectancy</a></code></li>
 <li><code><a title="vectorbt.records.events.BaseEventsByResult.losing" href="#vectorbt.records.events.BaseEventsByResult.losing">losing</a></code></li>
 <li><code><a title="vectorbt.records.events.BaseEventsByResult.profit_factor" href="#vectorbt.records.events.BaseEventsByResult.profit_factor">profit_factor</a></code></li>
@@ -2408,8 +2799,21 @@ title="Search"
 </ul>
 </li>
 <li>
+<h4><code><a title="vectorbt.records.events.BasePositions" href="#vectorbt.records.events.BasePositions">BasePositions</a></code></h4>
+</li>
+<li>
+<h4><code><a title="vectorbt.records.events.BasePositionsByResult" href="#vectorbt.records.events.BasePositionsByResult">BasePositionsByResult</a></code></h4>
+</li>
+<li>
+<h4><code><a title="vectorbt.records.events.BaseTrades" href="#vectorbt.records.events.BaseTrades">BaseTrades</a></code></h4>
+</li>
+<li>
+<h4><code><a title="vectorbt.records.events.BaseTradesByResult" href="#vectorbt.records.events.BaseTradesByResult">BaseTradesByResult</a></code></h4>
+</li>
+<li>
 <h4><code><a title="vectorbt.records.events.Events" href="#vectorbt.records.events.Events">Events</a></code></h4>
 <ul class="">
+<li><code><a title="vectorbt.records.events.Events.BaseEventsByResult" href="#vectorbt.records.events.Events.BaseEventsByResult">BaseEventsByResult</a></code></li>
 <li><code><a title="vectorbt.records.events.Events.closed" href="#vectorbt.records.events.Events.closed">closed</a></code></li>
 <li><code><a title="vectorbt.records.events.Events.closed_rate" href="#vectorbt.records.events.Events.closed_rate">closed_rate</a></code></li>
 <li><code><a title="vectorbt.records.events.Events.open" href="#vectorbt.records.events.Events.open">open</a></code></li>

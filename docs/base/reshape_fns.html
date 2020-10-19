@@ -65,7 +65,7 @@ def soft_to_ndim(arg, ndim):
 def to_1d(arg, raw=False):
     &#34;&#34;&#34;Reshape argument to one dimension. 
 
-    If `raw` is `True`, returns NumPy array.
+    If `raw` is True, returns NumPy array.
     If 2-dim, will collapse along axis 1 (i.e., DataFrame with one column to Series).&#34;&#34;&#34;
     if raw or not checks.is_array(arg):
         arg = np.asarray(arg)
@@ -84,7 +84,7 @@ def to_1d(arg, raw=False):
 def to_2d(arg, raw=False, expand_axis=1):
     &#34;&#34;&#34;Reshape argument to two dimensions. 
 
-    If `raw` is `True`, returns NumPy array.
+    If `raw` is True, returns NumPy array.
     If 1-dim, will expand along axis 1 (i.e., Series to DataFrame with one column).&#34;&#34;&#34;
     if raw or not checks.is_array(arg):
         arg = np.asarray(arg)
@@ -146,7 +146,7 @@ def tile(arg, n, axis=1):
 
 
 def broadcast_index(args, to_shape, index_from=None, axis=0, **kwargs):
-    &#34;&#34;&#34;Produce a broadcasted index/columns.
+    &#34;&#34;&#34;Produce a broadcast index/columns.
 
     Args:
         *args (array_like): Array-like objects.
@@ -156,7 +156,7 @@ def broadcast_index(args, to_shape, index_from=None, axis=0, **kwargs):
             Accepts the following values:
 
             * `&#39;default&#39;` - take the value from `vectorbt.defaults.broadcasting`
-            * `None` - use the original index/columns of the objects in `args`
+            * None - use the original index/columns of the objects in `args`
             * `int` - use the index/columns of the i-nth object in `args`
             * `&#39;strict&#39;` - ensure that all pandas objects have the same index/columns
             * `&#39;stack&#39;` - stack different indexes/columns using `vectorbt.base.index_fns.stack_indexes`
@@ -171,7 +171,7 @@ def broadcast_index(args, to_shape, index_from=None, axis=0, **kwargs):
         Series names are treated as columns with a single element but without a name.
         If a column level without a name loses its meaning, better to convert Series to DataFrames
         with one column prior to broadcasting. If the name of a Series is not that important,
-        better to drop it altogether by setting it to `None`.
+        better to drop it altogether by setting it to None.
     &#34;&#34;&#34;
     index_str = &#39;columns&#39; if axis == 1 else &#39;index&#39;
     new_index = None
@@ -236,7 +236,7 @@ def broadcast_index(args, to_shape, index_from=None, axis=0, **kwargs):
 
 def wrap_broadcasted(old_arg, new_arg, is_pd=False, new_index=None, new_columns=None):
     &#34;&#34;&#34;If the newly brodcasted array was originally a pandas object, make it pandas object again 
-    and assign it the newly broadcasted index/columns.&#34;&#34;&#34;
+    and assign it the newly broadcast index/columns.&#34;&#34;&#34;
     if is_pd:
         if checks.is_pandas(old_arg):
             if new_index is None:
@@ -266,8 +266,9 @@ def wrap_broadcasted(old_arg, new_arg, is_pd=False, new_index=None, new_columns=
     return new_arg
 
 
-def broadcast(*args, to_shape=None, to_pd=None, to_2d=None, index_from=&#39;default&#39;,
-              columns_from=&#39;default&#39;, require_kwargs=None, keep_raw=False, **kwargs):
+def broadcast(*args, to_shape=None, to_pd=None, to_frame=None, align_index=None, align_columns=None,
+              index_from=&#39;default&#39;, columns_from=&#39;default&#39;, require_kwargs=None, keep_raw=False,
+              return_meta=False, **kwargs):
     &#34;&#34;&#34;Bring any array-like object in `args` to the same shape by using NumPy broadcasting.
 
     See [Broadcasting](https://docs.scipy.org/doc/numpy/user/basics.broadcasting.html).
@@ -277,15 +278,18 @@ def broadcast(*args, to_shape=None, to_pd=None, to_2d=None, index_from=&#39;defa
     Args:
         *args (array_like): Array-like objects.
         to_shape (tuple): Target shape. If set, will broadcast every element in `args` to `to_shape`.
-        to_pd (bool, tuple or list): If `True`, converts all output arrays to pandas, otherwise returns
-            raw NumPy arrays. If `None`, converts only if there is at least one pandas object among them.
-        to_2d (bool): If `True`, converts all Series to DataFrames.
-        index_from (None, int, str or array_like): Broadcasting rule for index.
-        columns_from (None, int, str or array_like): Broadcasting rule for columns.
-        require_kwargs (dict): Keyword arguments passed to `np.require`.
-        keep_raw (bool, tuple or list): If `True`, will keep the unbroadcasted version of the array.
+        to_pd (bool, tuple or list): Whether to convert all output arrays to pandas, otherwise returns
+            raw NumPy arrays. If None, converts only if there is at least one pandas object among them.
+        to_frame (bool): Whether to convert all Series to DataFrames.
+        align_index (bool): Whether to align index of pandas objects using multi-index.
+        align_columns (bool): Whether to align columns of pandas objects using multi-index.
+        index_from (any): Broadcasting rule for index.
+        columns_from (any): Broadcasting rule for columns.
+        require_kwargs (dict or list of dict): Keyword arguments passed to `np.require`.
+        keep_raw (bool, tuple or list): Whether to keep the unbroadcasted version of the array.
 
             Only makes sure that the array can be broadcast to the target shape.
+        return_meta (bool): If True, will also return new shape, index and columns.
         **kwargs: Keyword arguments passed to `broadcast_index`.
 
     For defaults, see `vectorbt.defaults.broadcasting`.
@@ -407,6 +411,10 @@ def broadcast(*args, to_shape=None, to_pd=None, to_2d=None, index_from=&#39;defa
     args = list(args)
     if require_kwargs is None:
         require_kwargs = {}
+    if align_index is None:
+        align_index = defaults.broadcasting[&#39;align_index&#39;]
+    if align_columns is None:
+        align_columns = defaults.broadcasting[&#39;align_columns&#39;]
     if isinstance(index_from, str) and index_from == &#39;default&#39;:
         index_from = defaults.broadcasting[&#39;index_from&#39;]
     if isinstance(columns_from, str) and columns_from == &#39;default&#39;:
@@ -424,20 +432,48 @@ def broadcast(*args, to_shape=None, to_pd=None, to_2d=None, index_from=&#39;defa
 
     # If target shape specified, check again if we work on 2-dim data
     if to_shape is not None:
+        if isinstance(to_shape, int):
+            to_shape = (to_shape,)
         checks.assert_type(to_shape, tuple)
         if len(to_shape) &gt; 1:
             is_2d = True
 
-    if to_2d is not None:
+    if to_frame is not None:
         # force either keeping Series or converting them to DataFrames
-        is_2d = to_2d
+        is_2d = to_frame
 
     if to_pd is not None:
         # force either raw or pandas
         if isinstance(to_pd, (tuple, list)):
-            is_pd = np.array(to_pd).any()
+            is_pd = any(to_pd)
         else:
             is_pd = to_pd
+
+    # Align pandas objects
+    if align_index:
+        index_to_align = []
+        for i in range(len(args)):
+            if checks.is_pandas(args[i]) and len(args[i].index) &gt; 1:
+                index_to_align.append(i)
+        if len(index_to_align) &gt; 1:
+            indexes = [args[i].index for i in index_to_align]
+            if len(set(map(len, indexes))) &gt; 1:
+                index_indices = index_fns.align_indexes(*indexes)
+                for i in range(len(args)):
+                    if i in index_to_align:
+                        args[i] = args[i].iloc[index_indices[index_to_align.index(i)]]
+    if align_columns:
+        cols_to_align = []
+        for i in range(len(args)):
+            if checks.is_frame(args[i]) and len(args[i].columns) &gt; 1:
+                cols_to_align.append(i)
+        if len(cols_to_align) &gt; 1:
+            indexes = [args[i].columns for i in cols_to_align]
+            if len(set(map(len, indexes))) &gt; 1:
+                col_indices = index_fns.align_indexes(*indexes)
+                for i in range(len(args)):
+                    if i in cols_to_align:
+                        args[i] = args[i].iloc[:, col_indices[cols_to_align.index(i)]]
 
     # Convert all pd.Series objects to pd.DataFrame if we work on 2-dim data
     args_2d = [arg.to_frame() if is_2d and checks.is_series(arg) else arg for arg in args]
@@ -453,13 +489,19 @@ def broadcast(*args, to_shape=None, to_pd=None, to_2d=None, index_from=&#39;defa
             _keep_raw = keep_raw[i]
         else:
             _keep_raw = keep_raw
+        bc_arg = np.broadcast_to(arg, to_shape)
         if _keep_raw:
             new_args.append(arg)
             continue
-        new_args.append(np.broadcast_to(arg, to_shape, subok=True))
+        new_args.append(bc_arg)
 
     # Force to match requirements
-    new_args = [np.require(arg, **require_kwargs) for arg in new_args]
+    for i in range(len(new_args)):
+        if isinstance(require_kwargs, (tuple, list)):
+            _require_kwargs = require_kwargs[i]
+        else:
+            _require_kwargs = require_kwargs
+        new_args[i] = np.require(new_args[i], **_require_kwargs)
 
     if is_pd:
         # Decide on index and columns
@@ -490,7 +532,11 @@ def broadcast(*args, to_shape=None, to_pd=None, to_2d=None, index_from=&#39;defa
         )
 
     if len(new_args) &gt; 1:
+        if return_meta:
+            return tuple(new_args), to_shape, new_index, new_columns
         return tuple(new_args)
+    if return_meta:
+        return new_args[0], to_shape, new_index, new_columns
     return new_args[0]
 
 
@@ -691,7 +737,7 @@ def unstack_to_df(arg, index_levels=None, column_levels=None, symmetric=False):
     &#34;&#34;&#34;Reshape `arg` based on its multi-index into a DataFrame.
 
     Use `index_levels` to specify what index levels will form new index, and `column_levels` 
-    for new columns. Set `symmetric` to `True` to make DataFrame symmetric.
+    for new columns. Set `symmetric` to True to make DataFrame symmetric.
 
     Example:
         ```python-repl
@@ -743,45 +789,41 @@ def unstack_to_df(arg, index_levels=None, column_levels=None, symmetric=False):
 
 
 @njit(cache=True)
-def flex_choose_i_and_col_nb(a, is_2d):
+def flex_choose_i_and_col_nb(a, flex_2d):
     &#34;&#34;&#34;Choose selection index and column based on the array&#39;s shape.
 
     Instead of expensive broadcasting, keep original shape and do indexing in a smart way.
     A nice feature of this is that it has almost no memory footprint and can broadcast in
     any direction indefinitely.
 
-    Call it once before using `flex_select_nb`.&#34;&#34;&#34;
+    Call it once before using `flex_select_nb`.
+
+    if `flex_2d` is True, 1-dim array will correspond to columns, otherwise to rows.&#34;&#34;&#34;
     i = -1
     col = -1
-    if is_2d:
-        if a.ndim == 0:
-            i = 0
-            col = 0
-        elif a.ndim == 1:
+    if a.ndim == 0:
+        i = 0
+        col = 0
+    elif a.ndim == 1:
+        if flex_2d:
             i = 0
             if a.shape[0] == 1:
                 col = 0
-        elif a.ndim == 2:
-            if a.shape[0] == 1:
-                i = 0
-            if a.shape[1] == 1:
-                col = 0
-    else:
-        if a.ndim == 0:
-            i = 0
-            col = 0
-        elif a.ndim == 1:
-            col = 0
-            if a.shape[0] == 1:
-                i = 0
         else:
-            raise ValueError(&#34;Two-dimensional array in one-dimensional mode&#34;)
+            col = 0
+            if a.shape[0] == 1:
+                i = 0
+    else:
+        if a.shape[0] == 1:
+            i = 0
+        if a.shape[1] == 1:
+            col = 0
     return i, col
 
 
 @njit(cache=True)
-def flex_select_nb(i, col, a, flex_i, flex_col, is_2d):
-    &#34;&#34;&#34;Select element of `a` as if it has been broadcasted.&#34;&#34;&#34;
+def flex_select_nb(i, col, a, flex_i, flex_col, flex_2d):
+    &#34;&#34;&#34;Select element of `a` as if it has been broadcast.&#34;&#34;&#34;
     if flex_i == -1:
         flex_i = i
     if flex_col == -1:
@@ -789,10 +831,20 @@ def flex_select_nb(i, col, a, flex_i, flex_col, is_2d):
     if a.ndim == 0:
         return a.item()
     if a.ndim == 1:
-        if is_2d:
+        if flex_2d:
             return a[flex_col]
         return a[flex_i]
-    return a[flex_i, flex_col]</code></pre>
+    return a[flex_i, flex_col]
+
+
+@njit(cache=True)
+def flex_select_auto_nb(i, col, a, flex_2d):
+    &#34;&#34;&#34;Combines `flex_choose_i_and_col_nb` and `flex_select_nb`.
+
+    !!! note
+        Slower since it must call `flex_choose_i_and_col_nb` each time.&#34;&#34;&#34;
+    flex_i, flex_col = flex_choose_i_and_col_nb(a, flex_2d)
+    return flex_select_nb(i, col, a, flex_i, flex_col, flex_2d)</code></pre>
 </details>
 </section>
 <section>
@@ -803,7 +855,7 @@ def flex_select_nb(i, col, a, flex_i, flex_col, is_2d):
 <h2 class="section-title" id="header-functions">Functions</h2>
 <dl>
 <dt id="vectorbt.base.reshape_fns.broadcast"><code class="name flex">
-<span>def <span class="ident fname">broadcast</span></span>(<span>*args, to_shape=None, to_pd=None, to_2d=None, index_from='default', columns_from='default', require_kwargs=None, keep_raw=False, **kwargs)</span>
+<span>def <span class="ident fname">broadcast</span></span>(<span>*args, to_shape=None, to_pd=None, to_frame=None, align_index=None, align_columns=None, index_from='default', columns_from='default', require_kwargs=None, keep_raw=False, return_meta=False, **kwargs)</span>
 </code></dt>
 <dd>
 <div class="desc"><p>Bring any array-like object in <code>args</code> to the same shape by using NumPy broadcasting.</p>
@@ -816,28 +868,34 @@ def flex_select_nb(i, col, a, flex_i, flex_col, is_2d):
 <dt><strong><code>to_shape</code></strong> :&ensp;<code>tuple</code></dt>
 <dd>Target shape. If set, will broadcast every element in <code>args</code> to <code>to_shape</code>.</dd>
 <dt><strong><code>to_pd</code></strong> :&ensp;<code>bool, tuple</code> or <code>list</code></dt>
-<dd>If <code>True</code>, converts all output arrays to pandas, otherwise returns
-raw NumPy arrays. If <code>None</code>, converts only if there is at least one pandas object among them.</dd>
-<dt><strong><code>to_2d</code></strong> :&ensp;<code>bool</code></dt>
-<dd>If <code>True</code>, converts all Series to DataFrames.</dd>
-<dt><strong><code>index_from</code></strong> :&ensp;<code>None, int, str</code> or <code>array_like</code></dt>
+<dd>Whether to convert all output arrays to pandas, otherwise returns
+raw NumPy arrays. If None, converts only if there is at least one pandas object among them.</dd>
+<dt><strong><code>to_frame</code></strong> :&ensp;<code>bool</code></dt>
+<dd>Whether to convert all Series to DataFrames.</dd>
+<dt><strong><code>align_index</code></strong> :&ensp;<code>bool</code></dt>
+<dd>Whether to align index of pandas objects using multi-index.</dd>
+<dt><strong><code>align_columns</code></strong> :&ensp;<code>bool</code></dt>
+<dd>Whether to align columns of pandas objects using multi-index.</dd>
+<dt><strong><code>index_from</code></strong> :&ensp;<code>any</code></dt>
 <dd>Broadcasting rule for index.</dd>
-<dt><strong><code>columns_from</code></strong> :&ensp;<code>None, int, str</code> or <code>array_like</code></dt>
+<dt><strong><code>columns_from</code></strong> :&ensp;<code>any</code></dt>
 <dd>Broadcasting rule for columns.</dd>
-<dt><strong><code>require_kwargs</code></strong> :&ensp;<code>dict</code></dt>
+<dt><strong><code>require_kwargs</code></strong> :&ensp;<code>dict</code> or <code>list</code> of <code>dict</code></dt>
 <dd>Keyword arguments passed to <code>np.require</code>.</dd>
 <dt><strong><code>keep_raw</code></strong> :&ensp;<code>bool, tuple</code> or <code>list</code></dt>
 <dd>
-<p>If <code>True</code>, will keep the unbroadcasted version of the array.</p>
+<p>Whether to keep the unbroadcasted version of the array.</p>
 <p>Only makes sure that the array can be broadcast to the target shape.</p>
 </dd>
+<dt><strong><code>return_meta</code></strong> :&ensp;<code>bool</code></dt>
+<dd>If True, will also return new shape, index and columns.</dd>
 <dt><strong><code>**kwargs</code></strong></dt>
 <dd>Keyword arguments passed to <code><a title="vectorbt.base.reshape_fns.broadcast_index" href="#vectorbt.base.reshape_fns.broadcast_index">broadcast_index()</a></code>.</dd>
 </dl>
 <p>For defaults, see <code><a title="vectorbt.defaults.broadcasting" href="../defaults.html#vectorbt.defaults.broadcasting">broadcasting</a></code>.</p>
 <h2 id="example">Example</h2>
 <p>Without broadcasting index and columns:</p>
-<pre><code class="python-repl">&gt;&gt;&gt; import numpy as np
+<pre><code class="language-python-repl">&gt;&gt;&gt; import numpy as np
 &gt;&gt;&gt; import pandas as pd
 &gt;&gt;&gt; from vectorbt.base.reshape_fns import broadcast
 
@@ -871,7 +929,7 @@ y2   4   5   6
 z2   7   8   9
 </code></pre>
 <p>Taking new index and columns from position:</p>
-<pre><code class="python-repl">&gt;&gt;&gt; for i in broadcast(
+<pre><code class="language-python-repl">&gt;&gt;&gt; for i in broadcast(
 ...     v, a, sr, df,
 ...     index_from=2,
 ...     columns_from=3
@@ -894,7 +952,7 @@ y   4   5   6
 z   7   8   9
 </code></pre>
 <p>Broadcasting index and columns through stacking:</p>
-<pre><code class="python-repl">&gt;&gt;&gt; for i in broadcast(
+<pre><code class="language-python-repl">&gt;&gt;&gt; for i in broadcast(
 ...     v, a, sr, df,
 ...     index_from='stack',
 ...     columns_from='stack'
@@ -917,7 +975,7 @@ y y2   4   5   6
 z z2   7   8   9
 </code></pre>
 <p>Setting index and columns manually:</p>
-<pre><code class="python-repl">&gt;&gt;&gt; for i in broadcast(
+<pre><code class="language-python-repl">&gt;&gt;&gt; for i in broadcast(
 ...     v, a, sr, df,
 ...     index_from=['a', 'b', 'c'],
 ...     columns_from=['d', 'e', 'f']
@@ -943,8 +1001,9 @@ c  7  8  9
 <summary>
 <span>Expand source code</span>
 </summary>
-<pre><code class="python">def broadcast(*args, to_shape=None, to_pd=None, to_2d=None, index_from=&#39;default&#39;,
-              columns_from=&#39;default&#39;, require_kwargs=None, keep_raw=False, **kwargs):
+<pre><code class="python">def broadcast(*args, to_shape=None, to_pd=None, to_frame=None, align_index=None, align_columns=None,
+              index_from=&#39;default&#39;, columns_from=&#39;default&#39;, require_kwargs=None, keep_raw=False,
+              return_meta=False, **kwargs):
     &#34;&#34;&#34;Bring any array-like object in `args` to the same shape by using NumPy broadcasting.
 
     See [Broadcasting](https://docs.scipy.org/doc/numpy/user/basics.broadcasting.html).
@@ -954,15 +1013,18 @@ c  7  8  9
     Args:
         *args (array_like): Array-like objects.
         to_shape (tuple): Target shape. If set, will broadcast every element in `args` to `to_shape`.
-        to_pd (bool, tuple or list): If `True`, converts all output arrays to pandas, otherwise returns
-            raw NumPy arrays. If `None`, converts only if there is at least one pandas object among them.
-        to_2d (bool): If `True`, converts all Series to DataFrames.
-        index_from (None, int, str or array_like): Broadcasting rule for index.
-        columns_from (None, int, str or array_like): Broadcasting rule for columns.
-        require_kwargs (dict): Keyword arguments passed to `np.require`.
-        keep_raw (bool, tuple or list): If `True`, will keep the unbroadcasted version of the array.
+        to_pd (bool, tuple or list): Whether to convert all output arrays to pandas, otherwise returns
+            raw NumPy arrays. If None, converts only if there is at least one pandas object among them.
+        to_frame (bool): Whether to convert all Series to DataFrames.
+        align_index (bool): Whether to align index of pandas objects using multi-index.
+        align_columns (bool): Whether to align columns of pandas objects using multi-index.
+        index_from (any): Broadcasting rule for index.
+        columns_from (any): Broadcasting rule for columns.
+        require_kwargs (dict or list of dict): Keyword arguments passed to `np.require`.
+        keep_raw (bool, tuple or list): Whether to keep the unbroadcasted version of the array.
 
             Only makes sure that the array can be broadcast to the target shape.
+        return_meta (bool): If True, will also return new shape, index and columns.
         **kwargs: Keyword arguments passed to `broadcast_index`.
 
     For defaults, see `vectorbt.defaults.broadcasting`.
@@ -1084,6 +1146,10 @@ c  7  8  9
     args = list(args)
     if require_kwargs is None:
         require_kwargs = {}
+    if align_index is None:
+        align_index = defaults.broadcasting[&#39;align_index&#39;]
+    if align_columns is None:
+        align_columns = defaults.broadcasting[&#39;align_columns&#39;]
     if isinstance(index_from, str) and index_from == &#39;default&#39;:
         index_from = defaults.broadcasting[&#39;index_from&#39;]
     if isinstance(columns_from, str) and columns_from == &#39;default&#39;:
@@ -1101,20 +1167,48 @@ c  7  8  9
 
     # If target shape specified, check again if we work on 2-dim data
     if to_shape is not None:
+        if isinstance(to_shape, int):
+            to_shape = (to_shape,)
         checks.assert_type(to_shape, tuple)
         if len(to_shape) &gt; 1:
             is_2d = True
 
-    if to_2d is not None:
+    if to_frame is not None:
         # force either keeping Series or converting them to DataFrames
-        is_2d = to_2d
+        is_2d = to_frame
 
     if to_pd is not None:
         # force either raw or pandas
         if isinstance(to_pd, (tuple, list)):
-            is_pd = np.array(to_pd).any()
+            is_pd = any(to_pd)
         else:
             is_pd = to_pd
+
+    # Align pandas objects
+    if align_index:
+        index_to_align = []
+        for i in range(len(args)):
+            if checks.is_pandas(args[i]) and len(args[i].index) &gt; 1:
+                index_to_align.append(i)
+        if len(index_to_align) &gt; 1:
+            indexes = [args[i].index for i in index_to_align]
+            if len(set(map(len, indexes))) &gt; 1:
+                index_indices = index_fns.align_indexes(*indexes)
+                for i in range(len(args)):
+                    if i in index_to_align:
+                        args[i] = args[i].iloc[index_indices[index_to_align.index(i)]]
+    if align_columns:
+        cols_to_align = []
+        for i in range(len(args)):
+            if checks.is_frame(args[i]) and len(args[i].columns) &gt; 1:
+                cols_to_align.append(i)
+        if len(cols_to_align) &gt; 1:
+            indexes = [args[i].columns for i in cols_to_align]
+            if len(set(map(len, indexes))) &gt; 1:
+                col_indices = index_fns.align_indexes(*indexes)
+                for i in range(len(args)):
+                    if i in cols_to_align:
+                        args[i] = args[i].iloc[:, col_indices[cols_to_align.index(i)]]
 
     # Convert all pd.Series objects to pd.DataFrame if we work on 2-dim data
     args_2d = [arg.to_frame() if is_2d and checks.is_series(arg) else arg for arg in args]
@@ -1130,13 +1224,19 @@ c  7  8  9
             _keep_raw = keep_raw[i]
         else:
             _keep_raw = keep_raw
+        bc_arg = np.broadcast_to(arg, to_shape)
         if _keep_raw:
             new_args.append(arg)
             continue
-        new_args.append(np.broadcast_to(arg, to_shape, subok=True))
+        new_args.append(bc_arg)
 
     # Force to match requirements
-    new_args = [np.require(arg, **require_kwargs) for arg in new_args]
+    for i in range(len(new_args)):
+        if isinstance(require_kwargs, (tuple, list)):
+            _require_kwargs = require_kwargs[i]
+        else:
+            _require_kwargs = require_kwargs
+        new_args[i] = np.require(new_args[i], **_require_kwargs)
 
     if is_pd:
         # Decide on index and columns
@@ -1167,7 +1267,11 @@ c  7  8  9
         )
 
     if len(new_args) &gt; 1:
+        if return_meta:
+            return tuple(new_args), to_shape, new_index, new_columns
         return tuple(new_args)
+    if return_meta:
+        return new_args[0], to_shape, new_index, new_columns
     return new_args[0]</code></pre>
 </details>
 </dd>
@@ -1175,7 +1279,7 @@ c  7  8  9
 <span>def <span class="ident fname">broadcast_index</span></span>(<span>args, to_shape, index_from=None, axis=0, **kwargs)</span>
 </code></dt>
 <dd>
-<div class="desc"><p>Produce a broadcasted index/columns.</p>
+<div class="desc"><p>Produce a broadcast index/columns.</p>
 <h2 id="args">Args</h2>
 <dl>
 <dt><strong><code>*args</code></strong> :&ensp;<code>array_like</code></dt>
@@ -1188,7 +1292,7 @@ c  7  8  9
 <p>Accepts the following values:</p>
 <ul>
 <li><code>'default'</code> - take the value from <code><a title="vectorbt.defaults.broadcasting" href="../defaults.html#vectorbt.defaults.broadcasting">broadcasting</a></code></li>
-<li><code>None</code> - use the original index/columns of the objects in <code>args</code></li>
+<li>None - use the original index/columns of the objects in <code>args</code></li>
 <li><code>int</code> - use the index/columns of the i-nth object in <code>args</code></li>
 <li><code>'strict'</code> - ensure that all pandas objects have the same index/columns</li>
 <li><code>'stack'</code> - stack different indexes/columns using <code><a title="vectorbt.base.index_fns.stack_indexes" href="index_fns.html#vectorbt.base.index_fns.stack_indexes">stack_indexes()</a></code></li>
@@ -1206,14 +1310,14 @@ c  7  8  9
 <p>Series names are treated as columns with a single element but without a name.
 If a column level without a name loses its meaning, better to convert Series to DataFrames
 with one column prior to broadcasting. If the name of a Series is not that important,
-better to drop it altogether by setting it to <code>None</code>.</p>
+better to drop it altogether by setting it to None.</p>
 </div></div>
 <details class="source">
 <summary>
 <span>Expand source code</span>
 </summary>
 <pre><code class="python">def broadcast_index(args, to_shape, index_from=None, axis=0, **kwargs):
-    &#34;&#34;&#34;Produce a broadcasted index/columns.
+    &#34;&#34;&#34;Produce a broadcast index/columns.
 
     Args:
         *args (array_like): Array-like objects.
@@ -1223,7 +1327,7 @@ better to drop it altogether by setting it to <code>None</code>.</p>
             Accepts the following values:
 
             * `&#39;default&#39;` - take the value from `vectorbt.defaults.broadcasting`
-            * `None` - use the original index/columns of the objects in `args`
+            * None - use the original index/columns of the objects in `args`
             * `int` - use the index/columns of the i-nth object in `args`
             * `&#39;strict&#39;` - ensure that all pandas objects have the same index/columns
             * `&#39;stack&#39;` - stack different indexes/columns using `vectorbt.base.index_fns.stack_indexes`
@@ -1238,7 +1342,7 @@ better to drop it altogether by setting it to <code>None</code>.</p>
         Series names are treated as columns with a single element but without a name.
         If a column level without a name loses its meaning, better to convert Series to DataFrames
         with one column prior to broadcasting. If the name of a Series is not that important,
-        better to drop it altogether by setting it to `None`.
+        better to drop it altogether by setting it to None.
     &#34;&#34;&#34;
     index_str = &#39;columns&#39; if axis == 1 else &#39;index&#39;
     new_index = None
@@ -1308,7 +1412,7 @@ better to drop it altogether by setting it to <code>None</code>.</p>
 <div class="desc"><p>Broadcast <code>arg1</code> to <code>arg2</code>.</p>
 <p>Keyword arguments <code>**kwargs</code> are passed to <code><a title="vectorbt.base.reshape_fns.broadcast" href="#vectorbt.base.reshape_fns.broadcast">broadcast()</a></code>.</p>
 <h2 id="example">Example</h2>
-<pre><code class="python-repl">&gt;&gt;&gt; import numpy as np
+<pre><code class="language-python-repl">&gt;&gt;&gt; import numpy as np
 &gt;&gt;&gt; import pandas as pd
 &gt;&gt;&gt; from vectorbt.base.reshape_fns import broadcast_to
 
@@ -1373,7 +1477,7 @@ array([4, 5, 6])
 <div class="desc"><p>Broadcast <code>arg1</code> to the shape <code>(1, *arg2.shape)</code>.</p>
 <p><code>arg1</code> must be either a scalar, a 1-dim array, or have 1 dimension more than <code>arg2</code>.</p>
 <h2 id="example">Example</h2>
-<pre><code class="python-repl">&gt;&gt;&gt; import numpy as np
+<pre><code class="language-python-repl">&gt;&gt;&gt; import numpy as np
 &gt;&gt;&gt; from vectorbt.base.reshape_fns import broadcast_to_array_of
 
 &gt;&gt;&gt; broadcast_to_array_of([0.1, 0.2], np.empty((2, 2)))
@@ -1450,67 +1554,87 @@ array([4, 5, 6])
 </details>
 </dd>
 <dt id="vectorbt.base.reshape_fns.flex_choose_i_and_col_nb"><code class="name flex">
-<span>def <span class="ident fname">flex_choose_i_and_col_nb</span></span>(<span>a, is_2d)</span>
+<span>def <span class="ident fname">flex_choose_i_and_col_nb</span></span>(<span>a, flex_2d)</span>
 </code></dt>
 <dd>
 <div class="desc"><p>Choose selection index and column based on the array's shape.</p>
 <p>Instead of expensive broadcasting, keep original shape and do indexing in a smart way.
 A nice feature of this is that it has almost no memory footprint and can broadcast in
 any direction indefinitely.</p>
-<p>Call it once before using <code><a title="vectorbt.base.reshape_fns.flex_select_nb" href="#vectorbt.base.reshape_fns.flex_select_nb">flex_select_nb()</a></code>.</p></div>
+<p>Call it once before using <code><a title="vectorbt.base.reshape_fns.flex_select_nb" href="#vectorbt.base.reshape_fns.flex_select_nb">flex_select_nb()</a></code>.</p>
+<p>if <code>flex_2d</code> is True, 1-dim array will correspond to columns, otherwise to rows.</p></div>
 <details class="source">
 <summary>
 <span>Expand source code</span>
 </summary>
 <pre><code class="python">@njit(cache=True)
-def flex_choose_i_and_col_nb(a, is_2d):
+def flex_choose_i_and_col_nb(a, flex_2d):
     &#34;&#34;&#34;Choose selection index and column based on the array&#39;s shape.
 
     Instead of expensive broadcasting, keep original shape and do indexing in a smart way.
     A nice feature of this is that it has almost no memory footprint and can broadcast in
     any direction indefinitely.
 
-    Call it once before using `flex_select_nb`.&#34;&#34;&#34;
+    Call it once before using `flex_select_nb`.
+
+    if `flex_2d` is True, 1-dim array will correspond to columns, otherwise to rows.&#34;&#34;&#34;
     i = -1
     col = -1
-    if is_2d:
-        if a.ndim == 0:
-            i = 0
-            col = 0
-        elif a.ndim == 1:
+    if a.ndim == 0:
+        i = 0
+        col = 0
+    elif a.ndim == 1:
+        if flex_2d:
             i = 0
             if a.shape[0] == 1:
                 col = 0
-        elif a.ndim == 2:
-            if a.shape[0] == 1:
-                i = 0
-            if a.shape[1] == 1:
-                col = 0
-    else:
-        if a.ndim == 0:
-            i = 0
-            col = 0
-        elif a.ndim == 1:
-            col = 0
-            if a.shape[0] == 1:
-                i = 0
         else:
-            raise ValueError(&#34;Two-dimensional array in one-dimensional mode&#34;)
+            col = 0
+            if a.shape[0] == 1:
+                i = 0
+    else:
+        if a.shape[0] == 1:
+            i = 0
+        if a.shape[1] == 1:
+            col = 0
     return i, col</code></pre>
 </details>
 </dd>
-<dt id="vectorbt.base.reshape_fns.flex_select_nb"><code class="name flex">
-<span>def <span class="ident fname">flex_select_nb</span></span>(<span>i, col, a, flex_i, flex_col, is_2d)</span>
+<dt id="vectorbt.base.reshape_fns.flex_select_auto_nb"><code class="name flex">
+<span>def <span class="ident fname">flex_select_auto_nb</span></span>(<span>i, col, a, flex_2d)</span>
 </code></dt>
 <dd>
-<div class="desc"><p>Select element of <code>a</code> as if it has been broadcasted.</p></div>
+<div class="desc"><p>Combines <code><a title="vectorbt.base.reshape_fns.flex_choose_i_and_col_nb" href="#vectorbt.base.reshape_fns.flex_choose_i_and_col_nb">flex_choose_i_and_col_nb()</a></code> and <code><a title="vectorbt.base.reshape_fns.flex_select_nb" href="#vectorbt.base.reshape_fns.flex_select_nb">flex_select_nb()</a></code>.</p>
+<div class="admonition note">
+<p class="admonition-title">Note</p>
+<p>Slower since it must call <code><a title="vectorbt.base.reshape_fns.flex_choose_i_and_col_nb" href="#vectorbt.base.reshape_fns.flex_choose_i_and_col_nb">flex_choose_i_and_col_nb()</a></code> each time.</p>
+</div></div>
 <details class="source">
 <summary>
 <span>Expand source code</span>
 </summary>
 <pre><code class="python">@njit(cache=True)
-def flex_select_nb(i, col, a, flex_i, flex_col, is_2d):
-    &#34;&#34;&#34;Select element of `a` as if it has been broadcasted.&#34;&#34;&#34;
+def flex_select_auto_nb(i, col, a, flex_2d):
+    &#34;&#34;&#34;Combines `flex_choose_i_and_col_nb` and `flex_select_nb`.
+
+    !!! note
+        Slower since it must call `flex_choose_i_and_col_nb` each time.&#34;&#34;&#34;
+    flex_i, flex_col = flex_choose_i_and_col_nb(a, flex_2d)
+    return flex_select_nb(i, col, a, flex_i, flex_col, flex_2d)</code></pre>
+</details>
+</dd>
+<dt id="vectorbt.base.reshape_fns.flex_select_nb"><code class="name flex">
+<span>def <span class="ident fname">flex_select_nb</span></span>(<span>i, col, a, flex_i, flex_col, flex_2d)</span>
+</code></dt>
+<dd>
+<div class="desc"><p>Select element of <code>a</code> as if it has been broadcast.</p></div>
+<details class="source">
+<summary>
+<span>Expand source code</span>
+</summary>
+<pre><code class="python">@njit(cache=True)
+def flex_select_nb(i, col, a, flex_i, flex_col, flex_2d):
+    &#34;&#34;&#34;Select element of `a` as if it has been broadcast.&#34;&#34;&#34;
     if flex_i == -1:
         flex_i = i
     if flex_col == -1:
@@ -1518,7 +1642,7 @@ def flex_select_nb(i, col, a, flex_i, flex_col, is_2d):
     if a.ndim == 0:
         return a.item()
     if a.ndim == 1:
-        if is_2d:
+        if flex_2d:
             return a[flex_col]
         return a[flex_i]
     return a[flex_i, flex_col]</code></pre>
@@ -1532,7 +1656,7 @@ def flex_select_nb(i, col, a, flex_i, flex_col, is_2d):
 <p>The index and columns of the resulting DataFrame will be identical.</p>
 <p>Requires the index and columns to have the same number of levels.</p>
 <h2 id="example">Example</h2>
-<pre><code class="python-repl">&gt;&gt;&gt; import pandas as pd
+<pre><code class="language-python-repl">&gt;&gt;&gt; import pandas as pd
 &gt;&gt;&gt; from vectorbt.base.reshape_fns import make_symmetric
 
 &gt;&gt;&gt; df = pd.DataFrame([[1, 2], [3, 4]], index=['a', 'b'], columns=['c', 'd'])
@@ -1695,7 +1819,7 @@ d  2.0  4.0  NaN  NaN
 </code></dt>
 <dd>
 <div class="desc"><p>Reshape argument to one dimension. </p>
-<p>If <code>raw</code> is <code>True</code>, returns NumPy array.
+<p>If <code>raw</code> is True, returns NumPy array.
 If 2-dim, will collapse along axis 1 (i.e., DataFrame with one column to Series).</p></div>
 <details class="source">
 <summary>
@@ -1704,7 +1828,7 @@ If 2-dim, will collapse along axis 1 (i.e., DataFrame with one column to Series)
 <pre><code class="python">def to_1d(arg, raw=False):
     &#34;&#34;&#34;Reshape argument to one dimension. 
 
-    If `raw` is `True`, returns NumPy array.
+    If `raw` is True, returns NumPy array.
     If 2-dim, will collapse along axis 1 (i.e., DataFrame with one column to Series).&#34;&#34;&#34;
     if raw or not checks.is_array(arg):
         arg = np.asarray(arg)
@@ -1725,7 +1849,7 @@ If 2-dim, will collapse along axis 1 (i.e., DataFrame with one column to Series)
 </code></dt>
 <dd>
 <div class="desc"><p>Reshape argument to two dimensions. </p>
-<p>If <code>raw</code> is <code>True</code>, returns NumPy array.
+<p>If <code>raw</code> is True, returns NumPy array.
 If 1-dim, will expand along axis 1 (i.e., Series to DataFrame with one column).</p></div>
 <details class="source">
 <summary>
@@ -1734,7 +1858,7 @@ If 1-dim, will expand along axis 1 (i.e., Series to DataFrame with one column).<
 <pre><code class="python">def to_2d(arg, raw=False, expand_axis=1):
     &#34;&#34;&#34;Reshape argument to two dimensions. 
 
-    If `raw` is `True`, returns NumPy array.
+    If `raw` is True, returns NumPy array.
     If 1-dim, will expand along axis 1 (i.e., Series to DataFrame with one column).&#34;&#34;&#34;
     if raw or not checks.is_array(arg):
         arg = np.asarray(arg)
@@ -1759,7 +1883,7 @@ If 1-dim, will expand along axis 1 (i.e., Series to DataFrame with one column).<
 <div class="desc"><p>Reshape <code>arg</code> based on its multi-index into a multi-dimensional array.</p>
 <p>Use <code>levels</code> to specify what index levels to unstack and in which order.</p>
 <h2 id="example">Example</h2>
-<pre><code class="python-repl">&gt;&gt;&gt; import pandas as pd
+<pre><code class="language-python-repl">&gt;&gt;&gt; import pandas as pd
 &gt;&gt;&gt; from vectorbt.base.reshape_fns import unstack_to_array
 
 &gt;&gt;&gt; index = pd.MultiIndex.from_arrays(
@@ -1842,9 +1966,9 @@ If 1-dim, will expand along axis 1 (i.e., Series to DataFrame with one column).<
 <dd>
 <div class="desc"><p>Reshape <code>arg</code> based on its multi-index into a DataFrame.</p>
 <p>Use <code>index_levels</code> to specify what index levels will form new index, and <code>column_levels</code>
-for new columns. Set <code>symmetric</code> to <code>True</code> to make DataFrame symmetric.</p>
+for new columns. Set <code>symmetric</code> to True to make DataFrame symmetric.</p>
 <h2 id="example">Example</h2>
-<pre><code class="python-repl">&gt;&gt;&gt; import pandas as pd
+<pre><code class="language-python-repl">&gt;&gt;&gt; import pandas as pd
 &gt;&gt;&gt; from vectorbt.base.reshape_fns import unstack_to_df
 
 &gt;&gt;&gt; index = pd.MultiIndex.from_arrays(
@@ -1868,7 +1992,7 @@ x y
     &#34;&#34;&#34;Reshape `arg` based on its multi-index into a DataFrame.
 
     Use `index_levels` to specify what index levels will form new index, and `column_levels` 
-    for new columns. Set `symmetric` to `True` to make DataFrame symmetric.
+    for new columns. Set `symmetric` to True to make DataFrame symmetric.
 
     Example:
         ```python-repl
@@ -1924,14 +2048,14 @@ x y
 </code></dt>
 <dd>
 <div class="desc"><p>If the newly brodcasted array was originally a pandas object, make it pandas object again
-and assign it the newly broadcasted index/columns.</p></div>
+and assign it the newly broadcast index/columns.</p></div>
 <details class="source">
 <summary>
 <span>Expand source code</span>
 </summary>
 <pre><code class="python">def wrap_broadcasted(old_arg, new_arg, is_pd=False, new_index=None, new_columns=None):
     &#34;&#34;&#34;If the newly brodcasted array was originally a pandas object, make it pandas object again 
-    and assign it the newly broadcasted index/columns.&#34;&#34;&#34;
+    and assign it the newly broadcast index/columns.&#34;&#34;&#34;
     if is_pd:
         if checks.is_pandas(old_arg):
             if new_index is None:
@@ -1999,6 +2123,7 @@ title="Search"
 <li><code><a title="vectorbt.base.reshape_fns.broadcast_to_array_of" href="#vectorbt.base.reshape_fns.broadcast_to_array_of">broadcast_to_array_of</a></code></li>
 <li><code><a title="vectorbt.base.reshape_fns.broadcast_to_axis_of" href="#vectorbt.base.reshape_fns.broadcast_to_axis_of">broadcast_to_axis_of</a></code></li>
 <li><code><a title="vectorbt.base.reshape_fns.flex_choose_i_and_col_nb" href="#vectorbt.base.reshape_fns.flex_choose_i_and_col_nb">flex_choose_i_and_col_nb</a></code></li>
+<li><code><a title="vectorbt.base.reshape_fns.flex_select_auto_nb" href="#vectorbt.base.reshape_fns.flex_select_auto_nb">flex_select_auto_nb</a></code></li>
 <li><code><a title="vectorbt.base.reshape_fns.flex_select_nb" href="#vectorbt.base.reshape_fns.flex_select_nb">flex_select_nb</a></code></li>
 <li><code><a title="vectorbt.base.reshape_fns.make_symmetric" href="#vectorbt.base.reshape_fns.make_symmetric">make_symmetric</a></code></li>
 <li><code><a title="vectorbt.base.reshape_fns.repeat" href="#vectorbt.base.reshape_fns.repeat">repeat</a></code></li>
