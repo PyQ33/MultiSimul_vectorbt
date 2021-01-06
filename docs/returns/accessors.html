@@ -38,7 +38,6 @@ ga('create', 'UA-142521178-3', 'auto'); ga('send', 'pageview');
 <div class="admonition note">
 <p class="admonition-title">Note</p>
 <p>The underlying Series/DataFrame must already be a return series.</p>
-<p>Accessors do not utilize caching.</p>
 </div>
 <details class="source">
 <summary>
@@ -48,8 +47,6 @@ ga('create', 'UA-142521178-3', 'auto'); ga('send', 'pageview');
 
 !!! note
     The underlying Series/DataFrame must already be a return series.
-
-    Accessors do not utilize caching.
 &#34;&#34;&#34;
 
 import numpy as np
@@ -60,6 +57,7 @@ from vectorbt.root_accessors import register_dataframe_accessor, register_series
 from vectorbt.utils import checks
 from vectorbt.utils.config import merge_dicts
 from vectorbt.utils.widgets import CustomFigureWidget
+from vectorbt.utils.decorators import cached_property, cached_method
 from vectorbt.base import reshape_fns
 from vectorbt.generic.accessors import (
     Generic_Accessor,
@@ -325,13 +323,19 @@ class Returns_Accessor(Generic_Accessor):
         &#34;&#34;&#34;Total maximum drawdown (MDD).&#34;&#34;&#34;
         return self.wrapper.wrap_reduced(nb.max_drawdown_nb(self.to_2d_array()))
 
-    def drawdowns(self, group_by=None, **kwargs):
+    @cached_property
+    def drawdowns(self):
+        &#34;&#34;&#34;`Returns_Accessor.get_drawdowns` with default arguments.&#34;&#34;&#34;
+        return self.get_drawdowns()
+
+    @cached_method
+    def get_drawdowns(self, group_by=None, **kwargs):
         &#34;&#34;&#34;Generate drawdown records of cumulative returns.
 
         See `vectorbt.generic.drawdowns.Drawdowns`.&#34;&#34;&#34;
         if group_by is None:
             group_by = self.wrapper.grouper.group_by
-        return self.cumulative(start_value=1.).vbt(freq=self.wrapper.freq, group_by=group_by).drawdowns(**kwargs)
+        return self.cumulative(start_value=1.).vbt(freq=self.wrapper.freq, group_by=group_by).get_drawdowns(**kwargs)
 
     def stats(self, benchmark_rets, levy_alpha=2.0, risk_free=0., required_return=0.):
         &#34;&#34;&#34;Compute various statistics on these returns.
@@ -812,13 +816,19 @@ class Returns_DFAccessor(Returns_Accessor, Generic_DFAccessor):
         &#34;&#34;&#34;Total maximum drawdown (MDD).&#34;&#34;&#34;
         return self.wrapper.wrap_reduced(nb.max_drawdown_nb(self.to_2d_array()))
 
-    def drawdowns(self, group_by=None, **kwargs):
+    @cached_property
+    def drawdowns(self):
+        &#34;&#34;&#34;`Returns_Accessor.get_drawdowns` with default arguments.&#34;&#34;&#34;
+        return self.get_drawdowns()
+
+    @cached_method
+    def get_drawdowns(self, group_by=None, **kwargs):
         &#34;&#34;&#34;Generate drawdown records of cumulative returns.
 
         See `vectorbt.generic.drawdowns.Drawdowns`.&#34;&#34;&#34;
         if group_by is None:
             group_by = self.wrapper.grouper.group_by
-        return self.cumulative(start_value=1.).vbt(freq=self.wrapper.freq, group_by=group_by).drawdowns(**kwargs)
+        return self.cumulative(start_value=1.).vbt(freq=self.wrapper.freq, group_by=group_by).get_drawdowns(**kwargs)
 
     def stats(self, benchmark_rets, levy_alpha=2.0, risk_free=0., required_return=0.):
         &#34;&#34;&#34;Compute various statistics on these returns.
@@ -940,6 +950,30 @@ def ann_factor(self):
     if self.wrapper.freq is None:
         raise ValueError(&#34;Couldn&#39;t parse the frequency of index. You must set `freq`.&#34;)
     return self.year_freq / self.wrapper.freq</code></pre>
+</details>
+</dd>
+<dt id="vectorbt.returns.accessors.Returns_Accessor.drawdowns"><code class="name">var <span class="ident fname">drawdowns</span></code></dt>
+<dd>
+<div class="desc"><p><code><a title="vectorbt.returns.accessors.Returns_Accessor.get_drawdowns" href="#vectorbt.returns.accessors.Returns_Accessor.get_drawdowns">Returns_Accessor.get_drawdowns()</a></code> with default arguments.</p></div>
+<details class="source">
+<summary>
+<span>Expand source code</span>
+</summary>
+<pre><code class="python">def __get__(self, instance, owner=None):
+    if instance is None:
+        return self
+    if not is_caching_enabled(self.name, instance, **self.kwargs):
+        return super().__get__(instance, owner=owner)
+    cache = instance.__dict__
+    val = cache.get(self.attrname, _NOT_FOUND)
+    if val is _NOT_FOUND:
+        with self.lock:
+            # check if another thread filled cache while we awaited lock
+            val = cache.get(self.attrname, _NOT_FOUND)
+            if val is _NOT_FOUND:
+                val = self.func(instance)
+                cache[self.attrname] = val
+    return val</code></pre>
 </details>
 </dd>
 <dt id="vectorbt.returns.accessors.Returns_Accessor.year_freq"><code class="name">var <span class="ident fname">year_freq</span></code></dt>
@@ -1311,8 +1345,8 @@ Will broadcast per column.</dd>
     return self.wrapper.wrap(nb.drawdown_nb(self.to_2d_array()))</code></pre>
 </details>
 </dd>
-<dt id="vectorbt.returns.accessors.Returns_Accessor.drawdowns"><code class="name flex">
-<span>def <span class="ident fname">drawdowns</span></span>(<span>self, group_by=None, **kwargs)</span>
+<dt id="vectorbt.returns.accessors.Returns_Accessor.get_drawdowns"><code class="name flex">
+<span>def <span class="ident fname">get_drawdowns</span></span>(<span>self, group_by=None, **kwargs)</span>
 </code></dt>
 <dd>
 <div class="desc"><p>Generate drawdown records of cumulative returns.</p>
@@ -1321,13 +1355,14 @@ Will broadcast per column.</dd>
 <summary>
 <span>Expand source code</span>
 </summary>
-<pre><code class="python">def drawdowns(self, group_by=None, **kwargs):
+<pre><code class="python">@cached_method
+def get_drawdowns(self, group_by=None, **kwargs):
     &#34;&#34;&#34;Generate drawdown records of cumulative returns.
 
     See `vectorbt.generic.drawdowns.Drawdowns`.&#34;&#34;&#34;
     if group_by is None:
         group_by = self.wrapper.grouper.group_by
-    return self.cumulative(start_value=1.).vbt(freq=self.wrapper.freq, group_by=group_by).drawdowns(**kwargs)</code></pre>
+    return self.cumulative(start_value=1.).vbt(freq=self.wrapper.freq, group_by=group_by).get_drawdowns(**kwargs)</code></pre>
 </details>
 </dd>
 <dt id="vectorbt.returns.accessors.Returns_Accessor.information_ratio"><code class="name flex">
@@ -1836,6 +1871,7 @@ bottom percentile of returns. Will broadcast per column.</dd>
 <li><code><a title="vectorbt.returns.accessors.Returns_Accessor.flatten_grouped" href="../generic/accessors.html#vectorbt.generic.accessors.Generic_Accessor.flatten_grouped">flatten_grouped</a></code></li>
 <li><code><a title="vectorbt.returns.accessors.Returns_Accessor.from_price" href="#vectorbt.returns.accessors.Returns_Accessor.from_price">from_price</a></code></li>
 <li><code><a title="vectorbt.returns.accessors.Returns_Accessor.fshift" href="../generic/accessors.html#vectorbt.generic.accessors.Generic_Accessor.fshift">fshift</a></code></li>
+<li><code><a title="vectorbt.returns.accessors.Returns_Accessor.get_drawdowns" href="#vectorbt.returns.accessors.Returns_Accessor.get_drawdowns">get_drawdowns</a></code></li>
 <li><code><a title="vectorbt.returns.accessors.Returns_Accessor.groupby_apply" href="../generic/accessors.html#vectorbt.generic.accessors.Generic_Accessor.groupby_apply">groupby_apply</a></code></li>
 <li><code><a title="vectorbt.returns.accessors.Returns_Accessor.hist" href="../generic/accessors.html#vectorbt.generic.accessors.Generic_Accessor.hist">hist</a></code></li>
 <li><code><a title="vectorbt.returns.accessors.Returns_Accessor.idxmax" href="../generic/accessors.html#vectorbt.generic.accessors.Generic_Accessor.idxmax">idxmax</a></code></li>
@@ -2227,6 +2263,7 @@ Will broadcast per element.</dd>
 <li><code><a title="vectorbt.returns.accessors.Returns_Accessor.flatten_grouped" href="../generic/accessors.html#vectorbt.generic.accessors.Generic_Accessor.flatten_grouped">flatten_grouped</a></code></li>
 <li><code><a title="vectorbt.returns.accessors.Returns_Accessor.from_price" href="#vectorbt.returns.accessors.Returns_Accessor.from_price">from_price</a></code></li>
 <li><code><a title="vectorbt.returns.accessors.Returns_Accessor.fshift" href="../generic/accessors.html#vectorbt.generic.accessors.Generic_Accessor.fshift">fshift</a></code></li>
+<li><code><a title="vectorbt.returns.accessors.Returns_Accessor.get_drawdowns" href="#vectorbt.returns.accessors.Returns_Accessor.get_drawdowns">get_drawdowns</a></code></li>
 <li><code><a title="vectorbt.returns.accessors.Returns_Accessor.groupby_apply" href="../generic/accessors.html#vectorbt.generic.accessors.Generic_Accessor.groupby_apply">groupby_apply</a></code></li>
 <li><code><a title="vectorbt.returns.accessors.Returns_Accessor.hist" href="../generic/accessors.html#vectorbt.generic.accessors.Generic_Accessor.hist">hist</a></code></li>
 <li><code><a title="vectorbt.returns.accessors.Returns_Accessor.idxmax" href="../generic/accessors.html#vectorbt.generic.accessors.Generic_Accessor.idxmax">idxmax</a></code></li>
@@ -2336,6 +2373,7 @@ title="Search"
 <li><code><a title="vectorbt.returns.accessors.Returns_Accessor.drawdown" href="#vectorbt.returns.accessors.Returns_Accessor.drawdown">drawdown</a></code></li>
 <li><code><a title="vectorbt.returns.accessors.Returns_Accessor.drawdowns" href="#vectorbt.returns.accessors.Returns_Accessor.drawdowns">drawdowns</a></code></li>
 <li><code><a title="vectorbt.returns.accessors.Returns_Accessor.from_price" href="#vectorbt.returns.accessors.Returns_Accessor.from_price">from_price</a></code></li>
+<li><code><a title="vectorbt.returns.accessors.Returns_Accessor.get_drawdowns" href="#vectorbt.returns.accessors.Returns_Accessor.get_drawdowns">get_drawdowns</a></code></li>
 <li><code><a title="vectorbt.returns.accessors.Returns_Accessor.information_ratio" href="#vectorbt.returns.accessors.Returns_Accessor.information_ratio">information_ratio</a></code></li>
 <li><code><a title="vectorbt.returns.accessors.Returns_Accessor.max_drawdown" href="#vectorbt.returns.accessors.Returns_Accessor.max_drawdown">max_drawdown</a></code></li>
 <li><code><a title="vectorbt.returns.accessors.Returns_Accessor.omega_ratio" href="#vectorbt.returns.accessors.Returns_Accessor.omega_ratio">omega_ratio</a></code></li>

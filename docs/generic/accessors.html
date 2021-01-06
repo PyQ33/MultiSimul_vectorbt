@@ -38,7 +38,6 @@ ga('create', 'UA-142521178-3', 'auto'); ga('send', 'pageview');
 <div class="admonition note">
 <p class="admonition-title">Note</p>
 <p>Input arrays can be of any type, but most output arrays are <code>np.float64</code>.</p>
-<p>Accessors do not utilize caching.</p>
 <p>Grouping is only supported by the methods that accept the <code>group_by</code> argument.</p>
 </div>
 <pre><code class="language-python-repl">&gt;&gt;&gt; import vectorbt as vbt
@@ -74,8 +73,6 @@ ga('create', 'UA-142521178-3', 'auto'); ga('send', 'pageview');
 
 !!! note
     Input arrays can be of any type, but most output arrays are `np.float64`.
-
-    Accessors do not utilize caching.
 
     Grouping is only supported by the methods that accept the `group_by` argument.
     
@@ -115,6 +112,7 @@ import warnings
 from vectorbt.utils import checks
 from vectorbt.utils.config import merge_dicts
 from vectorbt.utils.widgets import CustomFigureWidget
+from vectorbt.utils.decorators import cached_property, cached_method
 from vectorbt.base import index_fns, reshape_fns
 from vectorbt.base.accessors import Base_Accessor, Base_DFAccessor, Base_SRAccessor
 from vectorbt.base.class_helpers import add_nb_methods
@@ -848,7 +846,13 @@ class Generic_Accessor(Base_Accessor):
         &#34;&#34;&#34;Drawdown series.&#34;&#34;&#34;
         return self.wrapper.wrap(self.to_2d_array() / nb.expanding_max_nb(self.to_2d_array()) - 1)
 
-    def drawdowns(self, group_by=None, **kwargs):
+    @cached_property
+    def drawdowns(self):
+        &#34;&#34;&#34;`Generic_Accessor.get_drawdowns` with default arguments.&#34;&#34;&#34;
+        return self.get_drawdowns()
+
+    @cached_method
+    def get_drawdowns(self, group_by=None, **kwargs):
         &#34;&#34;&#34;Generate drawdown records.
 
         See `vectorbt.generic.drawdowns.Drawdowns`.&#34;&#34;&#34;
@@ -2185,7 +2189,13 @@ class Generic_DFAccessor(Generic_Accessor, Base_DFAccessor):
         &#34;&#34;&#34;Drawdown series.&#34;&#34;&#34;
         return self.wrapper.wrap(self.to_2d_array() / nb.expanding_max_nb(self.to_2d_array()) - 1)
 
-    def drawdowns(self, group_by=None, **kwargs):
+    @cached_property
+    def drawdowns(self):
+        &#34;&#34;&#34;`Generic_Accessor.get_drawdowns` with default arguments.&#34;&#34;&#34;
+        return self.get_drawdowns()
+
+    @cached_method
+    def get_drawdowns(self, group_by=None, **kwargs):
         &#34;&#34;&#34;Generate drawdown records.
 
         See `vectorbt.generic.drawdowns.Drawdowns`.&#34;&#34;&#34;
@@ -2314,6 +2324,33 @@ class Generic_DFAccessor(Generic_Accessor, Base_DFAccessor):
 <li><a title="vectorbt.returns.accessors.Returns_Accessor" href="../returns/accessors.html#vectorbt.returns.accessors.Returns_Accessor">Returns_Accessor</a></li>
 <li><a title="vectorbt.signals.accessors.Signals_Accessor" href="../signals/accessors.html#vectorbt.signals.accessors.Signals_Accessor">Signals_Accessor</a></li>
 </ul>
+<h3 class="section-subtitle">Instance variables</h3>
+<dl>
+<dt id="vectorbt.generic.accessors.Generic_Accessor.drawdowns"><code class="name">var <span class="ident fname">drawdowns</span></code></dt>
+<dd>
+<div class="desc"><p><code><a title="vectorbt.generic.accessors.Generic_Accessor.get_drawdowns" href="#vectorbt.generic.accessors.Generic_Accessor.get_drawdowns">Generic_Accessor.get_drawdowns()</a></code> with default arguments.</p></div>
+<details class="source">
+<summary>
+<span>Expand source code</span>
+</summary>
+<pre><code class="python">def __get__(self, instance, owner=None):
+    if instance is None:
+        return self
+    if not is_caching_enabled(self.name, instance, **self.kwargs):
+        return super().__get__(instance, owner=owner)
+    cache = instance.__dict__
+    val = cache.get(self.attrname, _NOT_FOUND)
+    if val is _NOT_FOUND:
+        with self.lock:
+            # check if another thread filled cache while we awaited lock
+            val = cache.get(self.attrname, _NOT_FOUND)
+            if val is _NOT_FOUND:
+                val = self.func(instance)
+                cache[self.attrname] = val
+    return val</code></pre>
+</details>
+</dd>
+</dl>
 <h3 class="section-subtitle">Methods</h3>
 <dl>
 <dt id="vectorbt.generic.accessors.Generic_Accessor.apply_and_reduce"><code class="name flex">
@@ -2645,25 +2682,6 @@ max    5.000000  5.000000  3.00000
 <pre><code class="python">def drawdown(self):
     &#34;&#34;&#34;Drawdown series.&#34;&#34;&#34;
     return self.wrapper.wrap(self.to_2d_array() / nb.expanding_max_nb(self.to_2d_array()) - 1)</code></pre>
-</details>
-</dd>
-<dt id="vectorbt.generic.accessors.Generic_Accessor.drawdowns"><code class="name flex">
-<span>def <span class="ident fname">drawdowns</span></span>(<span>self, group_by=None, **kwargs)</span>
-</code></dt>
-<dd>
-<div class="desc"><p>Generate drawdown records.</p>
-<p>See <code><a title="vectorbt.generic.drawdowns.Drawdowns" href="drawdowns.html#vectorbt.generic.drawdowns.Drawdowns">Drawdowns</a></code>.</p></div>
-<details class="source">
-<summary>
-<span>Expand source code</span>
-</summary>
-<pre><code class="python">def drawdowns(self, group_by=None, **kwargs):
-    &#34;&#34;&#34;Generate drawdown records.
-
-    See `vectorbt.generic.drawdowns.Drawdowns`.&#34;&#34;&#34;
-    if group_by is None:
-        group_by = self.wrapper.grouper.group_by
-    return Drawdowns.from_ts(self._obj, freq=self.wrapper.freq, group_by=group_by, **kwargs)</code></pre>
 </details>
 </dd>
 <dt id="vectorbt.generic.accessors.Generic_Accessor.ewm_mean"><code class="name flex">
@@ -3055,6 +3073,26 @@ group       first  second
         if np.asarray(a).ndim == 0 or a.ndim == 1 or len(self.wrapper.index) != a.shape[0]:
             return self.wrapper.wrap_reduced(a)
         return self.wrapper.wrap(a)</code></pre>
+</details>
+</dd>
+<dt id="vectorbt.generic.accessors.Generic_Accessor.get_drawdowns"><code class="name flex">
+<span>def <span class="ident fname">get_drawdowns</span></span>(<span>self, group_by=None, **kwargs)</span>
+</code></dt>
+<dd>
+<div class="desc"><p>Generate drawdown records.</p>
+<p>See <code><a title="vectorbt.generic.drawdowns.Drawdowns" href="drawdowns.html#vectorbt.generic.drawdowns.Drawdowns">Drawdowns</a></code>.</p></div>
+<details class="source">
+<summary>
+<span>Expand source code</span>
+</summary>
+<pre><code class="python">@cached_method
+def get_drawdowns(self, group_by=None, **kwargs):
+    &#34;&#34;&#34;Generate drawdown records.
+
+    See `vectorbt.generic.drawdowns.Drawdowns`.&#34;&#34;&#34;
+    if group_by is None:
+        group_by = self.wrapper.grouper.group_by
+    return Drawdowns.from_ts(self._obj, freq=self.wrapper.freq, group_by=group_by, **kwargs)</code></pre>
 </details>
 </dd>
 <dt id="vectorbt.generic.accessors.Generic_Accessor.groupby_apply"><code class="name flex">
@@ -4334,6 +4372,7 @@ group       first  second
 <li><code><a title="vectorbt.generic.accessors.Generic_Accessor.filter" href="#vectorbt.generic.accessors.Generic_Accessor.filter">filter</a></code></li>
 <li><code><a title="vectorbt.generic.accessors.Generic_Accessor.flatten_grouped" href="#vectorbt.generic.accessors.Generic_Accessor.flatten_grouped">flatten_grouped</a></code></li>
 <li><code><a title="vectorbt.generic.accessors.Generic_Accessor.fshift" href="#vectorbt.generic.accessors.Generic_Accessor.fshift">fshift</a></code></li>
+<li><code><a title="vectorbt.generic.accessors.Generic_Accessor.get_drawdowns" href="#vectorbt.generic.accessors.Generic_Accessor.get_drawdowns">get_drawdowns</a></code></li>
 <li><code><a title="vectorbt.generic.accessors.Generic_Accessor.groupby_apply" href="#vectorbt.generic.accessors.Generic_Accessor.groupby_apply">groupby_apply</a></code></li>
 <li><code><a title="vectorbt.generic.accessors.Generic_Accessor.hist" href="#vectorbt.generic.accessors.Generic_Accessor.hist">hist</a></code></li>
 <li><code><a title="vectorbt.generic.accessors.Generic_Accessor.idxmax" href="#vectorbt.generic.accessors.Generic_Accessor.idxmax">idxmax</a></code></li>
@@ -5469,6 +5508,7 @@ dtype: int64
 <li><code><a title="vectorbt.generic.accessors.Generic_Accessor.filter" href="#vectorbt.generic.accessors.Generic_Accessor.filter">filter</a></code></li>
 <li><code><a title="vectorbt.generic.accessors.Generic_Accessor.flatten_grouped" href="#vectorbt.generic.accessors.Generic_Accessor.flatten_grouped">flatten_grouped</a></code></li>
 <li><code><a title="vectorbt.generic.accessors.Generic_Accessor.fshift" href="#vectorbt.generic.accessors.Generic_Accessor.fshift">fshift</a></code></li>
+<li><code><a title="vectorbt.generic.accessors.Generic_Accessor.get_drawdowns" href="#vectorbt.generic.accessors.Generic_Accessor.get_drawdowns">get_drawdowns</a></code></li>
 <li><code><a title="vectorbt.generic.accessors.Generic_Accessor.groupby_apply" href="#vectorbt.generic.accessors.Generic_Accessor.groupby_apply">groupby_apply</a></code></li>
 <li><code><a title="vectorbt.generic.accessors.Generic_Accessor.hist" href="#vectorbt.generic.accessors.Generic_Accessor.hist">hist</a></code></li>
 <li><code><a title="vectorbt.generic.accessors.Generic_Accessor.idxmax" href="#vectorbt.generic.accessors.Generic_Accessor.idxmax">idxmax</a></code></li>
@@ -5564,6 +5604,7 @@ title="Search"
 <li><code><a title="vectorbt.generic.accessors.Generic_Accessor.filter" href="#vectorbt.generic.accessors.Generic_Accessor.filter">filter</a></code></li>
 <li><code><a title="vectorbt.generic.accessors.Generic_Accessor.flatten_grouped" href="#vectorbt.generic.accessors.Generic_Accessor.flatten_grouped">flatten_grouped</a></code></li>
 <li><code><a title="vectorbt.generic.accessors.Generic_Accessor.fshift" href="#vectorbt.generic.accessors.Generic_Accessor.fshift">fshift</a></code></li>
+<li><code><a title="vectorbt.generic.accessors.Generic_Accessor.get_drawdowns" href="#vectorbt.generic.accessors.Generic_Accessor.get_drawdowns">get_drawdowns</a></code></li>
 <li><code><a title="vectorbt.generic.accessors.Generic_Accessor.groupby_apply" href="#vectorbt.generic.accessors.Generic_Accessor.groupby_apply">groupby_apply</a></code></li>
 <li><code><a title="vectorbt.generic.accessors.Generic_Accessor.hist" href="#vectorbt.generic.accessors.Generic_Accessor.hist">hist</a></code></li>
 <li><code><a title="vectorbt.generic.accessors.Generic_Accessor.idxmax" href="#vectorbt.generic.accessors.Generic_Accessor.idxmax">idxmax</a></code></li>

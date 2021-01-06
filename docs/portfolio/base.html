@@ -194,7 +194,7 @@ simulation from the beginning to the end, you can turn on logging.</p>
 ...     init_cash='autoalign', fees=0.001, slippage=0.001, log=True
 ... )
 
-&gt;&gt;&gt; portfolio.logs().records
+&gt;&gt;&gt; portfolio.logs.records
         id  idx  col  group  cash_now  shares_now  val_price_now  value_now  \
 0        0    0    0      0       inf    0.000000        7294.44        inf
 ...    ...  ...  ...    ...       ...         ...            ...        ...
@@ -215,7 +215,7 @@ simulation from the beginning to the end, you can turn on logging.</p>
 <p>Just as orders, logs are also records and thus can be easily analyzed:</p>
 <pre><code class="language-python-repl">&gt;&gt;&gt; from vectorbt.portfolio.enums import OrderStatus
 
-&gt;&gt;&gt; portfolio.logs().map_field('res_status', value_map=OrderStatus).value_counts()
+&gt;&gt;&gt; portfolio.logs.map_field('res_status', value_map=OrderStatus).value_counts()
          BTC-USD  ETH-USD  XRP-USD  BNB-USD  BCH-USD  LTC-USD
 Ignored       59       76       73       74       68       65
 Filled       186      169      172      171      177      180
@@ -259,7 +259,7 @@ methods such as <code><a title="vectorbt.portfolio.base.Portfolio.cash_flow" hre
 <div class="admonition note">
 <p class="admonition-title">Note</p>
 <p>Note that the above approach doesn't work for cached properties.
-Use tuples of the instance and the property name instead, such as <code>(portfolio, '_orders')</code>.</p>
+Use tuples of the instance and the property name instead, such as <code>(portfolio, 'orders')</code>.</p>
 </div>
 <p>To reset caching:</p>
 <pre><code class="language-python-repl">&gt;&gt;&gt; vbt.settings.caching.reset()
@@ -459,7 +459,7 @@ simulation from the beginning to the end, you can turn on logging.
 ...     init_cash=&#39;autoalign&#39;, fees=0.001, slippage=0.001, log=True
 ... )
 
-&gt;&gt;&gt; portfolio.logs().records
+&gt;&gt;&gt; portfolio.logs.records
         id  idx  col  group  cash_now  shares_now  val_price_now  value_now  \\
 0        0    0    0      0       inf    0.000000        7294.44        inf
 ...    ...  ...  ...    ...       ...         ...            ...        ...
@@ -483,7 +483,7 @@ Just as orders, logs are also records and thus can be easily analyzed:
 ```python-repl
 &gt;&gt;&gt; from vectorbt.portfolio.enums import OrderStatus
 
-&gt;&gt;&gt; portfolio.logs().map_field(&#39;res_status&#39;, value_map=OrderStatus).value_counts()
+&gt;&gt;&gt; portfolio.logs.map_field(&#39;res_status&#39;, value_map=OrderStatus).value_counts()
          BTC-USD  ETH-USD  XRP-USD  BNB-USD  BCH-USD  LTC-USD
 Ignored       59       76       73       74       68       65
 Filled       186      169      172      171      177      180
@@ -535,7 +535,7 @@ Define rules for one instance of `Portfolio`:
 
 !!! note
     Note that the above approach doesn&#39;t work for cached properties.
-    Use tuples of the instance and the property name instead, such as `(portfolio, &#39;_orders&#39;)`.
+    Use tuples of the instance and the property name instead, such as `(portfolio, &#39;orders&#39;)`.
 
 To reset caching:
 
@@ -655,12 +655,18 @@ class Portfolio(Wrapping):
         wrapper (ArrayWrapper): Array wrapper.
 
             See `vectorbt.base.array_wrapper.ArrayWrapper`.
+        close (array_like): Reference price, such as close.
         order_records (array_like): A structured NumPy array of order records.
         log_records (array_like): A structured NumPy array of log records.
         init_cash (InitCashMode, float or array_like of float): Initial capital.
         cash_sharing (bool): Whether to share cash within the same group.
         call_seq (array_like of int): Sequence of calls per row and group.
         incl_unrealized (bool): Whether to include unrealized P&amp;L in statistics.
+        use_filled_close (bool): Whether to forward-backward fill NaN values in `close`.
+
+            Doesn&#39;t affect simulation and only used for total profit and market value.
+
+            See `Portfolio.fill_close`.
 
     !!! note
         Use class methods with `from_` prefix to build a portfolio.
@@ -670,7 +676,7 @@ class Portfolio(Wrapping):
         This class is meant to be immutable. To change any attribute, use `Portfolio.copy`.&#34;&#34;&#34;
 
     def __init__(self, wrapper, close, order_records, log_records, init_cash,
-                 cash_sharing, call_seq, incl_unrealized=None):
+                 cash_sharing, call_seq, incl_unrealized=None, use_filled_close=None):
         Wrapping.__init__(
             self,
             wrapper,
@@ -680,13 +686,16 @@ class Portfolio(Wrapping):
             init_cash=init_cash,
             cash_sharing=cash_sharing,
             call_seq=call_seq,
-            incl_unrealized=incl_unrealized
+            incl_unrealized=incl_unrealized,
+            use_filled_close=use_filled_close
         )
         # Get defaults
         from vectorbt import settings
 
         if incl_unrealized is None:
             incl_unrealized = settings.portfolio[&#39;incl_unrealized&#39;]
+        if use_filled_close is None:
+            use_filled_close = settings.portfolio[&#39;use_filled_close&#39;]
 
         # Store passed arguments
         self._close = broadcast_to(close, wrapper.dummy(group_by=False))
@@ -696,14 +705,15 @@ class Portfolio(Wrapping):
         self._cash_sharing = cash_sharing
         self._call_seq = call_seq
         self._incl_unrealized = incl_unrealized
+        self._use_filled_close = use_filled_close
 
     def _indexing_func(self, pd_indexing_func):
         &#34;&#34;&#34;Perform indexing on `Portfolio`.&#34;&#34;&#34;
         new_wrapper, _, group_idxs, col_idxs = \
             self.wrapper._indexing_func_meta(pd_indexing_func, column_only_select=True)
         new_close = new_wrapper.wrap(to_2d(self.close, raw=True)[:, col_idxs], group_by=False)
-        new_order_records = self._orders._col_idxs_records(col_idxs)
-        new_log_records = self._logs._col_idxs_records(col_idxs)
+        new_order_records = self.orders._col_idxs_records(col_idxs)
+        new_log_records = self.logs._col_idxs_records(col_idxs)
         if isinstance(self._init_cash, int):
             new_init_cash = self._init_cash
         else:
@@ -782,7 +792,7 @@ class Portfolio(Wrapping):
             close_first (bool or array_like): Whether to close the position first before reversal.
                 Will broadcast.
 
-                See `close_first` in `Portfolio.from_order_func`.
+                See `close_first` in `Portfolio.from_orders`.
             allow_partial (bool or array_like): Whether to allow partial fills.
                 Will broadcast.
 
@@ -1435,7 +1445,7 @@ class Portfolio(Wrapping):
                         init_cash=None, cash_sharing=None, call_seq=None, active_mask=None,
                         prep_func_nb=None, prep_args=None, group_prep_func_nb=None, group_prep_args=None,
                         row_prep_func_nb=None, row_prep_args=None, segment_prep_func_nb=None,
-                        segment_prep_args=None, row_wise=None, log=None, max_orders=None, max_logs=None,
+                        segment_prep_args=None, row_wise=None, max_orders=None, max_logs=None,
                         seed=None, group_by=None, broadcast_kwargs=None, wrapper_kwargs=None, freq=None, **kwargs):
         &#34;&#34;&#34;Build portfolio from a custom order function.
 
@@ -1448,11 +1458,6 @@ class Portfolio(Wrapping):
                 Will broadcast to `target_shape`.
 
                 Will be used for calculating unrealized P&amp;L and portfolio value.
-
-                !!! note
-                    In contrast to other methods, the valuation price is previous `close`
-                    instead of order price, since the price of an order is unknown before call.
-                    You can still set valuation price explicitly in `segment_prep_func_nb`.
             order_func_nb (callable): Order generation function.
             *order_args: Arguments passed to `order_func_nb`.
             target_shape (tuple): Target shape to iterate over. Defaults to `close.shape`.
@@ -1533,6 +1538,11 @@ class Portfolio(Wrapping):
             as their purpose is unknown. You should broadcast manually or use flexible indexing.
 
             Also see notes on `Portfolio.from_orders`.
+
+        !!! note
+            In contrast to other methods, the valuation price is previous `close`
+            instead of order price, since the price of an order is unknown before call.
+            You can still set valuation price explicitly in `segment_prep_func_nb`.
 
         ## Example
 
@@ -1858,64 +1868,10 @@ class Portfolio(Wrapping):
         &#34;&#34;&#34;Whether to include unrealized trade P&amp;L in statistics.&#34;&#34;&#34;
         return self._incl_unrealized
 
-    # ############# Records ############# #
-
     @property
-    def order_records(self):
-        &#34;&#34;&#34;A structured NumPy array of order records.&#34;&#34;&#34;
-        return self._order_records
-
-    @cached_property
-    def _orders(self):
-        return Orders(self.wrapper, self.order_records, self.close)
-
-    def orders(self, group_by=None):
-        &#34;&#34;&#34;Get order records.
-
-        See `vectorbt.portfolio.orders.Orders`.&#34;&#34;&#34;
-        return self._orders.regroup(group_by=group_by)
-
-    @property
-    def log_records(self):
-        &#34;&#34;&#34;A structured NumPy array of log records.&#34;&#34;&#34;
-        return self._log_records
-
-    @cached_property
-    def _logs(self):
-        return Logs(self.wrapper, self.log_records)
-
-    def logs(self, group_by=None):
-        &#34;&#34;&#34;Get log records.
-
-        See `vectorbt.portfolio.logs.Logs`.&#34;&#34;&#34;
-        return self._logs.regroup(group_by=group_by)
-
-    @cached_property
-    def _trades(self):
-        return Trades.from_orders(self._orders)
-
-    def trades(self, group_by=None):
-        &#34;&#34;&#34;Get trade records.
-
-        See `vectorbt.portfolio.trades.Trades`.&#34;&#34;&#34;
-        return self._trades.regroup(group_by=group_by)
-
-    @cached_property
-    def _positions(self):
-        return Positions.from_trades(self._trades)
-
-    def positions(self, group_by=None):
-        &#34;&#34;&#34;Get position records.
-
-        See `vectorbt.portfolio.trades.Positions`.&#34;&#34;&#34;
-        return self._positions.regroup(group_by=group_by)
-
-    @cached_method
-    def drawdowns(self, **kwargs):
-        &#34;&#34;&#34;Get drawdown records from `Portfolio.value`.
-
-        See `vectorbt.generic.drawdowns.Drawdowns`.&#34;&#34;&#34;
-        return Drawdowns.from_ts(self.value(**kwargs), freq=self.wrapper.freq)
+    def use_filled_close(self):
+        &#34;&#34;&#34;Whether to forward-backward fill NaN values in `Portfolio.close`.&#34;&#34;&#34;
+        return self._use_filled_close
 
     # ############# Reference price ############# #
 
@@ -1927,7 +1883,6 @@ class Portfolio(Wrapping):
     @cached_method
     def fill_close(self, ffill=True, bfill=True):
         &#34;&#34;&#34;Fill NaN values of `Portfolio.close`.
-
         Use `ffill` and `bfill` to fill forwards and backwards respectively.&#34;&#34;&#34;
         close = to_2d(self.close, raw=True)
         if ffill and np.any(np.isnan(close[-1, :])):
@@ -1935,6 +1890,76 @@ class Portfolio(Wrapping):
         if bfill and np.any(np.isnan(close[0, :])):
             close = generic_nb.ffill_nb(close[::-1, :])[::-1, :]
         return self.wrapper.wrap(close, group_by=False)
+
+    # ############# Records ############# #
+
+    @property
+    def order_records(self):
+        &#34;&#34;&#34;A structured NumPy array of order records.&#34;&#34;&#34;
+        return self._order_records
+
+    @cached_property
+    def orders(self):
+        &#34;&#34;&#34;`Portfolio.get_orders` with default arguments.&#34;&#34;&#34;
+        return Orders(self.wrapper, self.order_records, self.close)
+
+    def get_orders(self, group_by=None):
+        &#34;&#34;&#34;Get order records.
+
+        See `vectorbt.portfolio.orders.Orders`.&#34;&#34;&#34;
+        return self.orders.regroup(group_by=group_by)
+
+    @property
+    def log_records(self):
+        &#34;&#34;&#34;A structured NumPy array of log records.&#34;&#34;&#34;
+        return self._log_records
+
+    @cached_property
+    def logs(self):
+        &#34;&#34;&#34;`Portfolio.get_logs` with default arguments.&#34;&#34;&#34;
+        return Logs(self.wrapper, self.log_records)
+
+    def get_logs(self, group_by=None):
+        &#34;&#34;&#34;Get log records.
+
+        See `vectorbt.portfolio.logs.Logs`.&#34;&#34;&#34;
+        return self.logs.regroup(group_by=group_by)
+
+    @cached_property
+    def trades(self):
+        &#34;&#34;&#34;`Portfolio.get_trades` with default arguments.&#34;&#34;&#34;
+        return Trades.from_orders(self.orders)
+
+    def get_trades(self, group_by=None):
+        &#34;&#34;&#34;Get trade records.
+
+        See `vectorbt.portfolio.trades.Trades`.&#34;&#34;&#34;
+        return self.trades.regroup(group_by=group_by)
+
+    @cached_property
+    def positions(self):
+        &#34;&#34;&#34;`Portfolio.get_positions` with default arguments.&#34;&#34;&#34;
+        return Positions.from_trades(self.trades)
+
+    def get_positions(self, group_by=None):
+        &#34;&#34;&#34;Get position records.
+
+        See `vectorbt.portfolio.trades.Positions`.&#34;&#34;&#34;
+        return self.positions.regroup(group_by=group_by)
+
+    @cached_property
+    def drawdowns(self):
+        &#34;&#34;&#34;`Portfolio.get_drawdowns` with default arguments.&#34;&#34;&#34;
+        return self.get_drawdowns()
+
+    @cached_method
+    def get_drawdowns(self, **kwargs):
+        &#34;&#34;&#34;Get drawdown records from `Portfolio.value`.
+
+        See `vectorbt.generic.drawdowns.Drawdowns`.
+
+        `**kwargs` are passed to `Portfolio.value`.&#34;&#34;&#34;
+        return Drawdowns.from_ts(self.value(**kwargs), freq=self.wrapper.freq)
 
     # ############# Shares ############# #
 
@@ -1944,8 +1969,8 @@ class Portfolio(Wrapping):
         direction = convert_str_enum_value(Direction, direction)
         share_flow = nb.share_flow_nb(
             self.wrapper.shape_2d,
-            self._orders.values,
-            self._orders.col_mapper.col_map,
+            self.orders.values,
+            self.orders.col_mapper.col_map,
             direction
         )
         return self.wrapper.wrap(share_flow, group_by=False)
@@ -2003,15 +2028,20 @@ class Portfolio(Wrapping):
         else:
             cash_flow = nb.cash_flow_nb(
                 self.wrapper.shape_2d,
-                self._orders.values,
-                self._orders.col_mapper.col_map,
+                self.orders.values,
+                self.orders.col_mapper.col_map,
                 short_cash
             )
         return self.wrapper.wrap(cash_flow, group_by=group_by)
 
+    @cached_property
+    def init_cash(self):
+        &#34;&#34;&#34;`Portfolio.get_init_cash` with default arguments.&#34;&#34;&#34;
+        return self.get_init_cash()
+
     @cached_method
-    def init_cash(self, group_by=None):
-        &#34;&#34;&#34;Get initial amount of cash per column/group.
+    def get_init_cash(self, group_by=None):
+        &#34;&#34;&#34;Initial amount of cash per column/group with default arguments.
 
         !!! note
             If initial cash is found automatically and no own cash is used throughout simulation
@@ -2042,7 +2072,7 @@ class Portfolio(Wrapping):
         cash_flow = to_2d(self.cash_flow(group_by=group_by, short_cash=short_cash), raw=True)
         if self.wrapper.grouper.is_grouped(group_by=group_by):
             group_lens = self.wrapper.grouper.get_group_lens(group_by=group_by)
-            init_cash = to_1d(self.init_cash(group_by=group_by), raw=True)
+            init_cash = to_1d(self.get_init_cash(group_by=group_by), raw=True)
             cash = nb.cash_grouped_nb(
                 self.wrapper.shape_2d,
                 cash_flow,
@@ -2052,11 +2082,11 @@ class Portfolio(Wrapping):
         else:
             group_lens = self.wrapper.grouper.get_group_lens()
             if self.wrapper.grouper.is_grouping_disabled(group_by=group_by) and in_sim_order:
-                init_cash = to_1d(self.init_cash(), raw=True)
+                init_cash = to_1d(self.init_cash, raw=True)
                 call_seq = to_2d(self.call_seq, raw=True)
                 cash = nb.cash_in_sim_order_nb(cash_flow, group_lens, init_cash, call_seq)
             else:
-                init_cash = to_1d(self.init_cash(group_by=False), raw=True)
+                init_cash = to_1d(self.get_init_cash(group_by=False), raw=True)
                 cash = nb.cash_nb(cash_flow, group_lens, init_cash)
         return self.wrapper.wrap(cash, group_by=group_by)
 
@@ -2120,7 +2150,9 @@ class Portfolio(Wrapping):
     def total_profit(self, group_by=None):
         &#34;&#34;&#34;Get total profit per column/group.
 
-        Calculated directly from order records. Very fast.&#34;&#34;&#34;
+        Calculated directly from order records (fast).
+
+        Uses filled close if `Portfolio.use_filled_close` is True.&#34;&#34;&#34;
         if self.wrapper.grouper.is_grouped(group_by=group_by):
             total_profit = to_1d(self.total_profit(group_by=False), raw=True)
             group_lens = self.wrapper.grouper.get_group_lens(group_by=group_by)
@@ -2129,19 +2161,22 @@ class Portfolio(Wrapping):
                 group_lens
             )
         else:
-            close = to_2d(self.fill_close(), raw=True)
+            if self.use_filled_close:
+                close = to_2d(self.fill_close(), raw=True)
+            else:
+                close = to_2d(self.close, raw=True)
             total_profit = nb.total_profit_nb(
                 self.wrapper.shape_2d,
                 close,
-                self._orders.values,
-                self._orders.col_mapper.col_map
+                self.orders.values,
+                self.orders.col_mapper.col_map
             )
         return self.wrapper.wrap_reduced(total_profit, group_by=group_by)
 
     @cached_method
     def final_value(self, group_by=None):
         &#34;&#34;&#34;Get total profit per column/group.&#34;&#34;&#34;
-        init_cash = to_1d(self.init_cash(group_by=group_by), raw=True)
+        init_cash = to_1d(self.get_init_cash(group_by=group_by), raw=True)
         total_profit = to_1d(self.total_profit(group_by=group_by), raw=True)
         final_value = nb.final_value_nb(total_profit, init_cash)
         return self.wrapper.wrap_reduced(final_value, group_by=group_by)
@@ -2149,7 +2184,7 @@ class Portfolio(Wrapping):
     @cached_method
     def total_return(self, group_by=None):
         &#34;&#34;&#34;Get total profit per column/group.&#34;&#34;&#34;
-        init_cash = to_1d(self.init_cash(group_by=group_by), raw=True)
+        init_cash = to_1d(self.get_init_cash(group_by=group_by), raw=True)
         total_profit = to_1d(self.total_profit(group_by=group_by), raw=True)
         total_return = nb.total_return_nb(total_profit, init_cash)
         return self.wrapper.wrap_reduced(total_return, group_by=group_by)
@@ -2160,11 +2195,11 @@ class Portfolio(Wrapping):
         value = to_2d(self.value(group_by=group_by, in_sim_order=in_sim_order), raw=True)
         if self.wrapper.grouper.is_grouping_disabled(group_by=group_by) and in_sim_order:
             group_lens = self.wrapper.grouper.get_group_lens()
-            init_cash_grouped = to_1d(self.init_cash(), raw=True)
+            init_cash_grouped = to_1d(self.init_cash, raw=True)
             call_seq = to_2d(self.call_seq, raw=True)
             returns = nb.returns_in_sim_order_nb(value, group_lens, init_cash_grouped, call_seq)
         else:
-            init_cash = to_1d(self.init_cash(group_by=group_by), raw=True)
+            init_cash = to_1d(self.get_init_cash(group_by=group_by), raw=True)
             returns = nb.returns_nb(value, init_cash)
         return self.wrapper.wrap(returns, group_by=group_by)
 
@@ -2187,23 +2222,28 @@ class Portfolio(Wrapping):
 
         If grouped, evenly distributes initial cash among assets in the group.
 
+        Uses filled close if `Portfolio.use_filled_close` is True.
+
         !!! note
             Does not take into account fees and slippage. For this, create a separate portfolio.&#34;&#34;&#34;
-        close_filled = to_2d(self.fill_close(), raw=True)
+        if self.use_filled_close:
+            close = to_2d(self.fill_close(), raw=True)
+        else:
+            close = to_2d(self.close, raw=True)
         if self.wrapper.grouper.is_grouped(group_by=group_by):
             group_lens = self.wrapper.grouper.get_group_lens(group_by=group_by)
-            init_cash_grouped = to_1d(self.init_cash(group_by=group_by), raw=True)
-            market_value = nb.market_value_grouped_nb(close_filled, group_lens, init_cash_grouped)
+            init_cash_grouped = to_1d(self.get_init_cash(group_by=group_by), raw=True)
+            market_value = nb.market_value_grouped_nb(close, group_lens, init_cash_grouped)
         else:
-            init_cash = to_1d(self.init_cash(group_by=False), raw=True)
-            market_value = nb.market_value_nb(close_filled, init_cash)
+            init_cash = to_1d(self.get_init_cash(group_by=False), raw=True)
+            market_value = nb.market_value_nb(close, init_cash)
         return self.wrapper.wrap(market_value, group_by=group_by)
 
     @cached_method
     def market_returns(self, group_by=None):
         &#34;&#34;&#34;Get return series per column/group based on market (benchmark) value.&#34;&#34;&#34;
         market_value = to_2d(self.market_value(group_by=group_by), raw=True)
-        init_cash = to_1d(self.init_cash(group_by=group_by), raw=True)
+        init_cash = to_1d(self.get_init_cash(group_by=group_by), raw=True)
         market_returns = nb.returns_nb(market_value, init_cash)
         return self.wrapper.wrap(market_returns, group_by=group_by)
 
@@ -2230,12 +2270,12 @@ class Portfolio(Wrapping):
             Use `column` only if caching is enabled, otherwise it may re-compute the same
             objects multiple times.&#34;&#34;&#34;
         # Pre-calculate
-        trades = self.trades(group_by=group_by)
+        trades = self.get_trades(group_by=group_by)
         if incl_unrealized is None:
             incl_unrealized = self.incl_unrealized
         if not incl_unrealized:
             trades = trades.closed
-        drawdowns = self.drawdowns(group_by=group_by)
+        drawdowns = self.get_drawdowns(group_by=group_by)
         if active_returns:
             returns = self.active_returns(group_by=group_by)
         else:
@@ -2246,7 +2286,7 @@ class Portfolio(Wrapping):
             &#39;Start&#39;: self.wrapper.index[0],
             &#39;End&#39;: self.wrapper.index[-1],
             &#39;Duration&#39;: self.wrapper.shape[0] * self.wrapper.freq,
-            &#39;Init. Cash&#39;: self.init_cash(group_by=group_by),
+            &#39;Init. Cash&#39;: self.get_init_cash(group_by=group_by),
             &#39;Total Profit&#39;: self.total_profit(group_by=group_by),
             &#39;Total Return [%]&#39;: self.total_return(group_by=group_by) * 100,
             &#39;Benchmark Return [%]&#39;: self.total_market_return(group_by=group_by) * 100,
@@ -2641,8 +2681,8 @@ class Portfolio(Wrapping):
 
                 if name == &#39;orders&#39;:
                     orders_kwargs = kwargs.pop(&#39;orders_kwargs&#39;, {})
-                    method_kwargs = _extract_method_kwargs(self_col.orders, orders_kwargs)
-                    self_col.orders(**method_kwargs).plot(
+                    method_kwargs = _extract_method_kwargs(self_col.get_orders, orders_kwargs)
+                    self_col.get_orders(**method_kwargs).plot(
                         **orders_kwargs,
                         row=row, col=col, fig=fig)
                     fig.layout[xaxis][&#39;title&#39;] = &#39;Date&#39;
@@ -2650,8 +2690,8 @@ class Portfolio(Wrapping):
     
                 elif name == &#39;trades&#39;:
                     trades_kwargs = kwargs.pop(&#39;trades_kwargs&#39;, {})
-                    method_kwargs = _extract_method_kwargs(self_col.trades, trades_kwargs)
-                    self_col.trades(**method_kwargs).plot(
+                    method_kwargs = _extract_method_kwargs(self_col.get_trades, trades_kwargs)
+                    self_col.get_trades(**method_kwargs).plot(
                         **trades_kwargs,
                         row=row, col=col, xref=xref, yref=yref, fig=fig)
                     fig.layout[xaxis][&#39;title&#39;] = &#39;Date&#39;
@@ -2659,8 +2699,8 @@ class Portfolio(Wrapping):
     
                 elif name == &#39;positions&#39;:
                     positions_kwargs = kwargs.pop(&#39;positions_kwargs&#39;, {})
-                    method_kwargs = _extract_method_kwargs(self_col.positions, positions_kwargs)
-                    self_col.positions(**method_kwargs).plot(
+                    method_kwargs = _extract_method_kwargs(self_col.get_positions, positions_kwargs)
+                    self_col.get_positions(**method_kwargs).plot(
                         **positions_kwargs,
                         row=row, col=col, xref=xref, yref=yref, fig=fig)
                     fig.layout[xaxis][&#39;title&#39;] = &#39;Date&#39;
@@ -2670,8 +2710,8 @@ class Portfolio(Wrapping):
                     trade_pnl_kwargs = merge_dicts(dict(
                         hline_shape_kwargs=hline_shape_kwargs
                     ), kwargs.pop(&#39;trade_pnl_kwargs&#39;, {}))
-                    method_kwargs = _extract_method_kwargs(self_col.trades, trade_pnl_kwargs)
-                    self_col.trades(**method_kwargs).plot_pnl(
+                    method_kwargs = _extract_method_kwargs(self_col.get_trades, trade_pnl_kwargs)
+                    self_col.get_trades(**method_kwargs).plot_pnl(
                         **trade_pnl_kwargs,
                         row=row, col=col, xref=xref, yref=yref, fig=fig)
                     fig.layout[xaxis][&#39;title&#39;] = &#39;Date&#39;
@@ -2679,8 +2719,8 @@ class Portfolio(Wrapping):
     
                 elif name == &#39;position_pnl&#39;:
                     position_pnl_kwargs = kwargs.pop(&#39;position_pnl_kwargs&#39;, {})
-                    method_kwargs = _extract_method_kwargs(self_col.positions, position_pnl_kwargs)
-                    self_col.positions(**method_kwargs).plot_pnl(
+                    method_kwargs = _extract_method_kwargs(self_col.get_positions, position_pnl_kwargs)
+                    self_col.get_positions(**method_kwargs).plot_pnl(
                         **position_pnl_kwargs,
                         row=row, col=col, xref=xref, yref=yref, fig=fig)
                     fig.layout[xaxis][&#39;title&#39;] = &#39;Date&#39;
@@ -2716,8 +2756,8 @@ class Portfolio(Wrapping):
                             name=&#39;Value&#39;
                         )
                     ), kwargs.pop(&#39;drawdowns_kwargs&#39;, {}))
-                    method_kwargs = _extract_method_kwargs(self_col.drawdowns, drawdowns_kwargs)
-                    self_col.drawdowns(**method_kwargs).plot(
+                    method_kwargs = _extract_method_kwargs(self_col.get_drawdowns, drawdowns_kwargs)
+                    self_col.get_drawdowns(**method_kwargs).plot(
                         **drawdowns_kwargs,
                         row=row, col=col, xref=xref, yref=yref, fig=fig)
                     fig.layout[xaxis][&#39;title&#39;] = &#39;Date&#39;
@@ -2811,7 +2851,7 @@ class Portfolio(Wrapping):
                     self_col.cash(**method_kwargs).vbt.plot_against(
                         0, **cash_kwargs,
                         row=row, col=col, fig=fig)
-                    _add_hline(self_col.init_cash(), x_domain, yref)
+                    _add_hline(self_col.init_cash, x_domain, yref)
                     fig.layout[xaxis][&#39;title&#39;] = &#39;Date&#39;
                     fig.layout[yaxis][&#39;title&#39;] = &#39;Cash&#39;
     
@@ -2847,9 +2887,9 @@ class Portfolio(Wrapping):
                     ), kwargs.pop(&#39;value_kwargs&#39;, {}))
                     method_kwargs = _extract_method_kwargs(self_col.value, value_kwargs)
                     self_col.value(**method_kwargs).vbt.plot_against(
-                        self_col.init_cash(), **value_kwargs,
+                        self_col.init_cash, **value_kwargs,
                         row=row, col=col, fig=fig)
-                    _add_hline(self_col.init_cash(), x_domain, yref)
+                    _add_hline(self_col.init_cash, x_domain, yref)
                     fig.layout[xaxis][&#39;title&#39;] = &#39;Date&#39;
                     fig.layout[yaxis][&#39;title&#39;] = &#39;Value&#39;
     
@@ -3039,7 +3079,7 @@ class Portfolio(Wrapping):
 <dl>
 <dt id="vectorbt.portfolio.base.Portfolio"><code class="flex name class">
 <span>class <span class="ident parent-fname">Portfolio</span></span>
-<span>(</span><span>wrapper, close, order_records, log_records, init_cash, cash_sharing, call_seq, incl_unrealized=None)</span>
+<span>(</span><span>wrapper, close, order_records, log_records, init_cash, cash_sharing, call_seq, incl_unrealized=None, use_filled_close=None)</span>
 </code></dt>
 <dd>
 <div class="desc"><p>Class for modeling portfolio and measuring its performance.</p>
@@ -3050,6 +3090,8 @@ class Portfolio(Wrapping):
 <p>Array wrapper.</p>
 <p>See <code><a title="vectorbt.base.array_wrapper.ArrayWrapper" href="../base/array_wrapper.html#vectorbt.base.array_wrapper.ArrayWrapper">ArrayWrapper</a></code>.</p>
 </dd>
+<dt><strong><code>close</code></strong> :&ensp;<code>array_like</code></dt>
+<dd>Reference price, such as close.</dd>
 <dt><strong><code>order_records</code></strong> :&ensp;<code>array_like</code></dt>
 <dd>A structured NumPy array of order records.</dd>
 <dt><strong><code>log_records</code></strong> :&ensp;<code>array_like</code></dt>
@@ -3062,6 +3104,12 @@ class Portfolio(Wrapping):
 <dd>Sequence of calls per row and group.</dd>
 <dt><strong><code>incl_unrealized</code></strong> :&ensp;<code>bool</code></dt>
 <dd>Whether to include unrealized P&amp;L in statistics.</dd>
+<dt><strong><code>use_filled_close</code></strong> :&ensp;<code>bool</code></dt>
+<dd>
+<p>Whether to forward-backward fill NaN values in <code>close</code>.</p>
+<p>Doesn't affect simulation and only used for total profit and market value.</p>
+<p>See <code><a title="vectorbt.portfolio.base.Portfolio.fill_close" href="#vectorbt.portfolio.base.Portfolio.fill_close">Portfolio.fill_close()</a></code>.</p>
+</dd>
 </dl>
 <div class="admonition note">
 <p class="admonition-title">Note</p>
@@ -3083,12 +3131,18 @@ The <code>__init__</code> method is reserved for indexing purposes.</p>
         wrapper (ArrayWrapper): Array wrapper.
 
             See `vectorbt.base.array_wrapper.ArrayWrapper`.
+        close (array_like): Reference price, such as close.
         order_records (array_like): A structured NumPy array of order records.
         log_records (array_like): A structured NumPy array of log records.
         init_cash (InitCashMode, float or array_like of float): Initial capital.
         cash_sharing (bool): Whether to share cash within the same group.
         call_seq (array_like of int): Sequence of calls per row and group.
         incl_unrealized (bool): Whether to include unrealized P&amp;L in statistics.
+        use_filled_close (bool): Whether to forward-backward fill NaN values in `close`.
+
+            Doesn&#39;t affect simulation and only used for total profit and market value.
+
+            See `Portfolio.fill_close`.
 
     !!! note
         Use class methods with `from_` prefix to build a portfolio.
@@ -3098,7 +3152,7 @@ The <code>__init__</code> method is reserved for indexing purposes.</p>
         This class is meant to be immutable. To change any attribute, use `Portfolio.copy`.&#34;&#34;&#34;
 
     def __init__(self, wrapper, close, order_records, log_records, init_cash,
-                 cash_sharing, call_seq, incl_unrealized=None):
+                 cash_sharing, call_seq, incl_unrealized=None, use_filled_close=None):
         Wrapping.__init__(
             self,
             wrapper,
@@ -3108,13 +3162,16 @@ The <code>__init__</code> method is reserved for indexing purposes.</p>
             init_cash=init_cash,
             cash_sharing=cash_sharing,
             call_seq=call_seq,
-            incl_unrealized=incl_unrealized
+            incl_unrealized=incl_unrealized,
+            use_filled_close=use_filled_close
         )
         # Get defaults
         from vectorbt import settings
 
         if incl_unrealized is None:
             incl_unrealized = settings.portfolio[&#39;incl_unrealized&#39;]
+        if use_filled_close is None:
+            use_filled_close = settings.portfolio[&#39;use_filled_close&#39;]
 
         # Store passed arguments
         self._close = broadcast_to(close, wrapper.dummy(group_by=False))
@@ -3124,14 +3181,15 @@ The <code>__init__</code> method is reserved for indexing purposes.</p>
         self._cash_sharing = cash_sharing
         self._call_seq = call_seq
         self._incl_unrealized = incl_unrealized
+        self._use_filled_close = use_filled_close
 
     def _indexing_func(self, pd_indexing_func):
         &#34;&#34;&#34;Perform indexing on `Portfolio`.&#34;&#34;&#34;
         new_wrapper, _, group_idxs, col_idxs = \
             self.wrapper._indexing_func_meta(pd_indexing_func, column_only_select=True)
         new_close = new_wrapper.wrap(to_2d(self.close, raw=True)[:, col_idxs], group_by=False)
-        new_order_records = self._orders._col_idxs_records(col_idxs)
-        new_log_records = self._logs._col_idxs_records(col_idxs)
+        new_order_records = self.orders._col_idxs_records(col_idxs)
+        new_log_records = self.logs._col_idxs_records(col_idxs)
         if isinstance(self._init_cash, int):
             new_init_cash = self._init_cash
         else:
@@ -3210,7 +3268,7 @@ The <code>__init__</code> method is reserved for indexing purposes.</p>
             close_first (bool or array_like): Whether to close the position first before reversal.
                 Will broadcast.
 
-                See `close_first` in `Portfolio.from_order_func`.
+                See `close_first` in `Portfolio.from_orders`.
             allow_partial (bool or array_like): Whether to allow partial fills.
                 Will broadcast.
 
@@ -3863,7 +3921,7 @@ The <code>__init__</code> method is reserved for indexing purposes.</p>
                         init_cash=None, cash_sharing=None, call_seq=None, active_mask=None,
                         prep_func_nb=None, prep_args=None, group_prep_func_nb=None, group_prep_args=None,
                         row_prep_func_nb=None, row_prep_args=None, segment_prep_func_nb=None,
-                        segment_prep_args=None, row_wise=None, log=None, max_orders=None, max_logs=None,
+                        segment_prep_args=None, row_wise=None, max_orders=None, max_logs=None,
                         seed=None, group_by=None, broadcast_kwargs=None, wrapper_kwargs=None, freq=None, **kwargs):
         &#34;&#34;&#34;Build portfolio from a custom order function.
 
@@ -3876,11 +3934,6 @@ The <code>__init__</code> method is reserved for indexing purposes.</p>
                 Will broadcast to `target_shape`.
 
                 Will be used for calculating unrealized P&amp;L and portfolio value.
-
-                !!! note
-                    In contrast to other methods, the valuation price is previous `close`
-                    instead of order price, since the price of an order is unknown before call.
-                    You can still set valuation price explicitly in `segment_prep_func_nb`.
             order_func_nb (callable): Order generation function.
             *order_args: Arguments passed to `order_func_nb`.
             target_shape (tuple): Target shape to iterate over. Defaults to `close.shape`.
@@ -3961,6 +4014,11 @@ The <code>__init__</code> method is reserved for indexing purposes.</p>
             as their purpose is unknown. You should broadcast manually or use flexible indexing.
 
             Also see notes on `Portfolio.from_orders`.
+
+        !!! note
+            In contrast to other methods, the valuation price is previous `close`
+            instead of order price, since the price of an order is unknown before call.
+            You can still set valuation price explicitly in `segment_prep_func_nb`.
 
         ## Example
 
@@ -4286,64 +4344,10 @@ The <code>__init__</code> method is reserved for indexing purposes.</p>
         &#34;&#34;&#34;Whether to include unrealized trade P&amp;L in statistics.&#34;&#34;&#34;
         return self._incl_unrealized
 
-    # ############# Records ############# #
-
     @property
-    def order_records(self):
-        &#34;&#34;&#34;A structured NumPy array of order records.&#34;&#34;&#34;
-        return self._order_records
-
-    @cached_property
-    def _orders(self):
-        return Orders(self.wrapper, self.order_records, self.close)
-
-    def orders(self, group_by=None):
-        &#34;&#34;&#34;Get order records.
-
-        See `vectorbt.portfolio.orders.Orders`.&#34;&#34;&#34;
-        return self._orders.regroup(group_by=group_by)
-
-    @property
-    def log_records(self):
-        &#34;&#34;&#34;A structured NumPy array of log records.&#34;&#34;&#34;
-        return self._log_records
-
-    @cached_property
-    def _logs(self):
-        return Logs(self.wrapper, self.log_records)
-
-    def logs(self, group_by=None):
-        &#34;&#34;&#34;Get log records.
-
-        See `vectorbt.portfolio.logs.Logs`.&#34;&#34;&#34;
-        return self._logs.regroup(group_by=group_by)
-
-    @cached_property
-    def _trades(self):
-        return Trades.from_orders(self._orders)
-
-    def trades(self, group_by=None):
-        &#34;&#34;&#34;Get trade records.
-
-        See `vectorbt.portfolio.trades.Trades`.&#34;&#34;&#34;
-        return self._trades.regroup(group_by=group_by)
-
-    @cached_property
-    def _positions(self):
-        return Positions.from_trades(self._trades)
-
-    def positions(self, group_by=None):
-        &#34;&#34;&#34;Get position records.
-
-        See `vectorbt.portfolio.trades.Positions`.&#34;&#34;&#34;
-        return self._positions.regroup(group_by=group_by)
-
-    @cached_method
-    def drawdowns(self, **kwargs):
-        &#34;&#34;&#34;Get drawdown records from `Portfolio.value`.
-
-        See `vectorbt.generic.drawdowns.Drawdowns`.&#34;&#34;&#34;
-        return Drawdowns.from_ts(self.value(**kwargs), freq=self.wrapper.freq)
+    def use_filled_close(self):
+        &#34;&#34;&#34;Whether to forward-backward fill NaN values in `Portfolio.close`.&#34;&#34;&#34;
+        return self._use_filled_close
 
     # ############# Reference price ############# #
 
@@ -4355,7 +4359,6 @@ The <code>__init__</code> method is reserved for indexing purposes.</p>
     @cached_method
     def fill_close(self, ffill=True, bfill=True):
         &#34;&#34;&#34;Fill NaN values of `Portfolio.close`.
-
         Use `ffill` and `bfill` to fill forwards and backwards respectively.&#34;&#34;&#34;
         close = to_2d(self.close, raw=True)
         if ffill and np.any(np.isnan(close[-1, :])):
@@ -4363,6 +4366,76 @@ The <code>__init__</code> method is reserved for indexing purposes.</p>
         if bfill and np.any(np.isnan(close[0, :])):
             close = generic_nb.ffill_nb(close[::-1, :])[::-1, :]
         return self.wrapper.wrap(close, group_by=False)
+
+    # ############# Records ############# #
+
+    @property
+    def order_records(self):
+        &#34;&#34;&#34;A structured NumPy array of order records.&#34;&#34;&#34;
+        return self._order_records
+
+    @cached_property
+    def orders(self):
+        &#34;&#34;&#34;`Portfolio.get_orders` with default arguments.&#34;&#34;&#34;
+        return Orders(self.wrapper, self.order_records, self.close)
+
+    def get_orders(self, group_by=None):
+        &#34;&#34;&#34;Get order records.
+
+        See `vectorbt.portfolio.orders.Orders`.&#34;&#34;&#34;
+        return self.orders.regroup(group_by=group_by)
+
+    @property
+    def log_records(self):
+        &#34;&#34;&#34;A structured NumPy array of log records.&#34;&#34;&#34;
+        return self._log_records
+
+    @cached_property
+    def logs(self):
+        &#34;&#34;&#34;`Portfolio.get_logs` with default arguments.&#34;&#34;&#34;
+        return Logs(self.wrapper, self.log_records)
+
+    def get_logs(self, group_by=None):
+        &#34;&#34;&#34;Get log records.
+
+        See `vectorbt.portfolio.logs.Logs`.&#34;&#34;&#34;
+        return self.logs.regroup(group_by=group_by)
+
+    @cached_property
+    def trades(self):
+        &#34;&#34;&#34;`Portfolio.get_trades` with default arguments.&#34;&#34;&#34;
+        return Trades.from_orders(self.orders)
+
+    def get_trades(self, group_by=None):
+        &#34;&#34;&#34;Get trade records.
+
+        See `vectorbt.portfolio.trades.Trades`.&#34;&#34;&#34;
+        return self.trades.regroup(group_by=group_by)
+
+    @cached_property
+    def positions(self):
+        &#34;&#34;&#34;`Portfolio.get_positions` with default arguments.&#34;&#34;&#34;
+        return Positions.from_trades(self.trades)
+
+    def get_positions(self, group_by=None):
+        &#34;&#34;&#34;Get position records.
+
+        See `vectorbt.portfolio.trades.Positions`.&#34;&#34;&#34;
+        return self.positions.regroup(group_by=group_by)
+
+    @cached_property
+    def drawdowns(self):
+        &#34;&#34;&#34;`Portfolio.get_drawdowns` with default arguments.&#34;&#34;&#34;
+        return self.get_drawdowns()
+
+    @cached_method
+    def get_drawdowns(self, **kwargs):
+        &#34;&#34;&#34;Get drawdown records from `Portfolio.value`.
+
+        See `vectorbt.generic.drawdowns.Drawdowns`.
+
+        `**kwargs` are passed to `Portfolio.value`.&#34;&#34;&#34;
+        return Drawdowns.from_ts(self.value(**kwargs), freq=self.wrapper.freq)
 
     # ############# Shares ############# #
 
@@ -4372,8 +4445,8 @@ The <code>__init__</code> method is reserved for indexing purposes.</p>
         direction = convert_str_enum_value(Direction, direction)
         share_flow = nb.share_flow_nb(
             self.wrapper.shape_2d,
-            self._orders.values,
-            self._orders.col_mapper.col_map,
+            self.orders.values,
+            self.orders.col_mapper.col_map,
             direction
         )
         return self.wrapper.wrap(share_flow, group_by=False)
@@ -4431,15 +4504,20 @@ The <code>__init__</code> method is reserved for indexing purposes.</p>
         else:
             cash_flow = nb.cash_flow_nb(
                 self.wrapper.shape_2d,
-                self._orders.values,
-                self._orders.col_mapper.col_map,
+                self.orders.values,
+                self.orders.col_mapper.col_map,
                 short_cash
             )
         return self.wrapper.wrap(cash_flow, group_by=group_by)
 
+    @cached_property
+    def init_cash(self):
+        &#34;&#34;&#34;`Portfolio.get_init_cash` with default arguments.&#34;&#34;&#34;
+        return self.get_init_cash()
+
     @cached_method
-    def init_cash(self, group_by=None):
-        &#34;&#34;&#34;Get initial amount of cash per column/group.
+    def get_init_cash(self, group_by=None):
+        &#34;&#34;&#34;Initial amount of cash per column/group with default arguments.
 
         !!! note
             If initial cash is found automatically and no own cash is used throughout simulation
@@ -4470,7 +4548,7 @@ The <code>__init__</code> method is reserved for indexing purposes.</p>
         cash_flow = to_2d(self.cash_flow(group_by=group_by, short_cash=short_cash), raw=True)
         if self.wrapper.grouper.is_grouped(group_by=group_by):
             group_lens = self.wrapper.grouper.get_group_lens(group_by=group_by)
-            init_cash = to_1d(self.init_cash(group_by=group_by), raw=True)
+            init_cash = to_1d(self.get_init_cash(group_by=group_by), raw=True)
             cash = nb.cash_grouped_nb(
                 self.wrapper.shape_2d,
                 cash_flow,
@@ -4480,11 +4558,11 @@ The <code>__init__</code> method is reserved for indexing purposes.</p>
         else:
             group_lens = self.wrapper.grouper.get_group_lens()
             if self.wrapper.grouper.is_grouping_disabled(group_by=group_by) and in_sim_order:
-                init_cash = to_1d(self.init_cash(), raw=True)
+                init_cash = to_1d(self.init_cash, raw=True)
                 call_seq = to_2d(self.call_seq, raw=True)
                 cash = nb.cash_in_sim_order_nb(cash_flow, group_lens, init_cash, call_seq)
             else:
-                init_cash = to_1d(self.init_cash(group_by=False), raw=True)
+                init_cash = to_1d(self.get_init_cash(group_by=False), raw=True)
                 cash = nb.cash_nb(cash_flow, group_lens, init_cash)
         return self.wrapper.wrap(cash, group_by=group_by)
 
@@ -4548,7 +4626,9 @@ The <code>__init__</code> method is reserved for indexing purposes.</p>
     def total_profit(self, group_by=None):
         &#34;&#34;&#34;Get total profit per column/group.
 
-        Calculated directly from order records. Very fast.&#34;&#34;&#34;
+        Calculated directly from order records (fast).
+
+        Uses filled close if `Portfolio.use_filled_close` is True.&#34;&#34;&#34;
         if self.wrapper.grouper.is_grouped(group_by=group_by):
             total_profit = to_1d(self.total_profit(group_by=False), raw=True)
             group_lens = self.wrapper.grouper.get_group_lens(group_by=group_by)
@@ -4557,19 +4637,22 @@ The <code>__init__</code> method is reserved for indexing purposes.</p>
                 group_lens
             )
         else:
-            close = to_2d(self.fill_close(), raw=True)
+            if self.use_filled_close:
+                close = to_2d(self.fill_close(), raw=True)
+            else:
+                close = to_2d(self.close, raw=True)
             total_profit = nb.total_profit_nb(
                 self.wrapper.shape_2d,
                 close,
-                self._orders.values,
-                self._orders.col_mapper.col_map
+                self.orders.values,
+                self.orders.col_mapper.col_map
             )
         return self.wrapper.wrap_reduced(total_profit, group_by=group_by)
 
     @cached_method
     def final_value(self, group_by=None):
         &#34;&#34;&#34;Get total profit per column/group.&#34;&#34;&#34;
-        init_cash = to_1d(self.init_cash(group_by=group_by), raw=True)
+        init_cash = to_1d(self.get_init_cash(group_by=group_by), raw=True)
         total_profit = to_1d(self.total_profit(group_by=group_by), raw=True)
         final_value = nb.final_value_nb(total_profit, init_cash)
         return self.wrapper.wrap_reduced(final_value, group_by=group_by)
@@ -4577,7 +4660,7 @@ The <code>__init__</code> method is reserved for indexing purposes.</p>
     @cached_method
     def total_return(self, group_by=None):
         &#34;&#34;&#34;Get total profit per column/group.&#34;&#34;&#34;
-        init_cash = to_1d(self.init_cash(group_by=group_by), raw=True)
+        init_cash = to_1d(self.get_init_cash(group_by=group_by), raw=True)
         total_profit = to_1d(self.total_profit(group_by=group_by), raw=True)
         total_return = nb.total_return_nb(total_profit, init_cash)
         return self.wrapper.wrap_reduced(total_return, group_by=group_by)
@@ -4588,11 +4671,11 @@ The <code>__init__</code> method is reserved for indexing purposes.</p>
         value = to_2d(self.value(group_by=group_by, in_sim_order=in_sim_order), raw=True)
         if self.wrapper.grouper.is_grouping_disabled(group_by=group_by) and in_sim_order:
             group_lens = self.wrapper.grouper.get_group_lens()
-            init_cash_grouped = to_1d(self.init_cash(), raw=True)
+            init_cash_grouped = to_1d(self.init_cash, raw=True)
             call_seq = to_2d(self.call_seq, raw=True)
             returns = nb.returns_in_sim_order_nb(value, group_lens, init_cash_grouped, call_seq)
         else:
-            init_cash = to_1d(self.init_cash(group_by=group_by), raw=True)
+            init_cash = to_1d(self.get_init_cash(group_by=group_by), raw=True)
             returns = nb.returns_nb(value, init_cash)
         return self.wrapper.wrap(returns, group_by=group_by)
 
@@ -4615,23 +4698,28 @@ The <code>__init__</code> method is reserved for indexing purposes.</p>
 
         If grouped, evenly distributes initial cash among assets in the group.
 
+        Uses filled close if `Portfolio.use_filled_close` is True.
+
         !!! note
             Does not take into account fees and slippage. For this, create a separate portfolio.&#34;&#34;&#34;
-        close_filled = to_2d(self.fill_close(), raw=True)
+        if self.use_filled_close:
+            close = to_2d(self.fill_close(), raw=True)
+        else:
+            close = to_2d(self.close, raw=True)
         if self.wrapper.grouper.is_grouped(group_by=group_by):
             group_lens = self.wrapper.grouper.get_group_lens(group_by=group_by)
-            init_cash_grouped = to_1d(self.init_cash(group_by=group_by), raw=True)
-            market_value = nb.market_value_grouped_nb(close_filled, group_lens, init_cash_grouped)
+            init_cash_grouped = to_1d(self.get_init_cash(group_by=group_by), raw=True)
+            market_value = nb.market_value_grouped_nb(close, group_lens, init_cash_grouped)
         else:
-            init_cash = to_1d(self.init_cash(group_by=False), raw=True)
-            market_value = nb.market_value_nb(close_filled, init_cash)
+            init_cash = to_1d(self.get_init_cash(group_by=False), raw=True)
+            market_value = nb.market_value_nb(close, init_cash)
         return self.wrapper.wrap(market_value, group_by=group_by)
 
     @cached_method
     def market_returns(self, group_by=None):
         &#34;&#34;&#34;Get return series per column/group based on market (benchmark) value.&#34;&#34;&#34;
         market_value = to_2d(self.market_value(group_by=group_by), raw=True)
-        init_cash = to_1d(self.init_cash(group_by=group_by), raw=True)
+        init_cash = to_1d(self.get_init_cash(group_by=group_by), raw=True)
         market_returns = nb.returns_nb(market_value, init_cash)
         return self.wrapper.wrap(market_returns, group_by=group_by)
 
@@ -4658,12 +4746,12 @@ The <code>__init__</code> method is reserved for indexing purposes.</p>
             Use `column` only if caching is enabled, otherwise it may re-compute the same
             objects multiple times.&#34;&#34;&#34;
         # Pre-calculate
-        trades = self.trades(group_by=group_by)
+        trades = self.get_trades(group_by=group_by)
         if incl_unrealized is None:
             incl_unrealized = self.incl_unrealized
         if not incl_unrealized:
             trades = trades.closed
-        drawdowns = self.drawdowns(group_by=group_by)
+        drawdowns = self.get_drawdowns(group_by=group_by)
         if active_returns:
             returns = self.active_returns(group_by=group_by)
         else:
@@ -4674,7 +4762,7 @@ The <code>__init__</code> method is reserved for indexing purposes.</p>
             &#39;Start&#39;: self.wrapper.index[0],
             &#39;End&#39;: self.wrapper.index[-1],
             &#39;Duration&#39;: self.wrapper.shape[0] * self.wrapper.freq,
-            &#39;Init. Cash&#39;: self.init_cash(group_by=group_by),
+            &#39;Init. Cash&#39;: self.get_init_cash(group_by=group_by),
             &#39;Total Profit&#39;: self.total_profit(group_by=group_by),
             &#39;Total Return [%]&#39;: self.total_return(group_by=group_by) * 100,
             &#39;Benchmark Return [%]&#39;: self.total_market_return(group_by=group_by) * 100,
@@ -5069,8 +5157,8 @@ The <code>__init__</code> method is reserved for indexing purposes.</p>
 
                 if name == &#39;orders&#39;:
                     orders_kwargs = kwargs.pop(&#39;orders_kwargs&#39;, {})
-                    method_kwargs = _extract_method_kwargs(self_col.orders, orders_kwargs)
-                    self_col.orders(**method_kwargs).plot(
+                    method_kwargs = _extract_method_kwargs(self_col.get_orders, orders_kwargs)
+                    self_col.get_orders(**method_kwargs).plot(
                         **orders_kwargs,
                         row=row, col=col, fig=fig)
                     fig.layout[xaxis][&#39;title&#39;] = &#39;Date&#39;
@@ -5078,8 +5166,8 @@ The <code>__init__</code> method is reserved for indexing purposes.</p>
     
                 elif name == &#39;trades&#39;:
                     trades_kwargs = kwargs.pop(&#39;trades_kwargs&#39;, {})
-                    method_kwargs = _extract_method_kwargs(self_col.trades, trades_kwargs)
-                    self_col.trades(**method_kwargs).plot(
+                    method_kwargs = _extract_method_kwargs(self_col.get_trades, trades_kwargs)
+                    self_col.get_trades(**method_kwargs).plot(
                         **trades_kwargs,
                         row=row, col=col, xref=xref, yref=yref, fig=fig)
                     fig.layout[xaxis][&#39;title&#39;] = &#39;Date&#39;
@@ -5087,8 +5175,8 @@ The <code>__init__</code> method is reserved for indexing purposes.</p>
     
                 elif name == &#39;positions&#39;:
                     positions_kwargs = kwargs.pop(&#39;positions_kwargs&#39;, {})
-                    method_kwargs = _extract_method_kwargs(self_col.positions, positions_kwargs)
-                    self_col.positions(**method_kwargs).plot(
+                    method_kwargs = _extract_method_kwargs(self_col.get_positions, positions_kwargs)
+                    self_col.get_positions(**method_kwargs).plot(
                         **positions_kwargs,
                         row=row, col=col, xref=xref, yref=yref, fig=fig)
                     fig.layout[xaxis][&#39;title&#39;] = &#39;Date&#39;
@@ -5098,8 +5186,8 @@ The <code>__init__</code> method is reserved for indexing purposes.</p>
                     trade_pnl_kwargs = merge_dicts(dict(
                         hline_shape_kwargs=hline_shape_kwargs
                     ), kwargs.pop(&#39;trade_pnl_kwargs&#39;, {}))
-                    method_kwargs = _extract_method_kwargs(self_col.trades, trade_pnl_kwargs)
-                    self_col.trades(**method_kwargs).plot_pnl(
+                    method_kwargs = _extract_method_kwargs(self_col.get_trades, trade_pnl_kwargs)
+                    self_col.get_trades(**method_kwargs).plot_pnl(
                         **trade_pnl_kwargs,
                         row=row, col=col, xref=xref, yref=yref, fig=fig)
                     fig.layout[xaxis][&#39;title&#39;] = &#39;Date&#39;
@@ -5107,8 +5195,8 @@ The <code>__init__</code> method is reserved for indexing purposes.</p>
     
                 elif name == &#39;position_pnl&#39;:
                     position_pnl_kwargs = kwargs.pop(&#39;position_pnl_kwargs&#39;, {})
-                    method_kwargs = _extract_method_kwargs(self_col.positions, position_pnl_kwargs)
-                    self_col.positions(**method_kwargs).plot_pnl(
+                    method_kwargs = _extract_method_kwargs(self_col.get_positions, position_pnl_kwargs)
+                    self_col.get_positions(**method_kwargs).plot_pnl(
                         **position_pnl_kwargs,
                         row=row, col=col, xref=xref, yref=yref, fig=fig)
                     fig.layout[xaxis][&#39;title&#39;] = &#39;Date&#39;
@@ -5144,8 +5232,8 @@ The <code>__init__</code> method is reserved for indexing purposes.</p>
                             name=&#39;Value&#39;
                         )
                     ), kwargs.pop(&#39;drawdowns_kwargs&#39;, {}))
-                    method_kwargs = _extract_method_kwargs(self_col.drawdowns, drawdowns_kwargs)
-                    self_col.drawdowns(**method_kwargs).plot(
+                    method_kwargs = _extract_method_kwargs(self_col.get_drawdowns, drawdowns_kwargs)
+                    self_col.get_drawdowns(**method_kwargs).plot(
                         **drawdowns_kwargs,
                         row=row, col=col, xref=xref, yref=yref, fig=fig)
                     fig.layout[xaxis][&#39;title&#39;] = &#39;Date&#39;
@@ -5239,7 +5327,7 @@ The <code>__init__</code> method is reserved for indexing purposes.</p>
                     self_col.cash(**method_kwargs).vbt.plot_against(
                         0, **cash_kwargs,
                         row=row, col=col, fig=fig)
-                    _add_hline(self_col.init_cash(), x_domain, yref)
+                    _add_hline(self_col.init_cash, x_domain, yref)
                     fig.layout[xaxis][&#39;title&#39;] = &#39;Date&#39;
                     fig.layout[yaxis][&#39;title&#39;] = &#39;Cash&#39;
     
@@ -5275,9 +5363,9 @@ The <code>__init__</code> method is reserved for indexing purposes.</p>
                     ), kwargs.pop(&#39;value_kwargs&#39;, {}))
                     method_kwargs = _extract_method_kwargs(self_col.value, value_kwargs)
                     self_col.value(**method_kwargs).vbt.plot_against(
-                        self_col.init_cash(), **value_kwargs,
+                        self_col.init_cash, **value_kwargs,
                         row=row, col=col, fig=fig)
-                    _add_hline(self_col.init_cash(), x_domain, yref)
+                    _add_hline(self_col.init_cash, x_domain, yref)
                     fig.layout[xaxis][&#39;title&#39;] = &#39;Date&#39;
                     fig.layout[yaxis][&#39;title&#39;] = &#39;Value&#39;
     
@@ -5409,7 +5497,7 @@ The <code>__init__</code> method is reserved for indexing purposes.</p>
 <h3 class="section-subtitle">Static methods</h3>
 <dl>
 <dt id="vectorbt.portfolio.base.Portfolio.from_order_func"><code class="name flex">
-<span>def <span class="ident fname">from_order_func</span></span>(<span>close, order_func_nb, *order_args, target_shape=None, keys=None, init_cash=None, cash_sharing=None, call_seq=None, active_mask=None, prep_func_nb=None, prep_args=None, group_prep_func_nb=None, group_prep_args=None, row_prep_func_nb=None, row_prep_args=None, segment_prep_func_nb=None, segment_prep_args=None, row_wise=None, log=None, max_orders=None, max_logs=None, seed=None, group_by=None, broadcast_kwargs=None, wrapper_kwargs=None, freq=None, **kwargs)</span>
+<span>def <span class="ident fname">from_order_func</span></span>(<span>close, order_func_nb, *order_args, target_shape=None, keys=None, init_cash=None, cash_sharing=None, call_seq=None, active_mask=None, prep_func_nb=None, prep_args=None, group_prep_func_nb=None, group_prep_args=None, row_prep_func_nb=None, row_prep_args=None, segment_prep_func_nb=None, segment_prep_args=None, row_wise=None, max_orders=None, max_logs=None, seed=None, group_by=None, broadcast_kwargs=None, wrapper_kwargs=None, freq=None, **kwargs)</span>
 </code></dt>
 <dd>
 <div class="desc"><p>Build portfolio from a custom order function.</p>
@@ -5422,12 +5510,6 @@ The <code>__init__</code> method is reserved for indexing purposes.</p>
 <p>Reference price, such as close.
 Will broadcast to <code>target_shape</code>.</p>
 <p>Will be used for calculating unrealized P&amp;L and portfolio value.</p>
-<div class="admonition note">
-<p class="admonition-title">Note</p>
-<p>In contrast to other methods, the valuation price is previous <code>close</code>
-instead of order price, since the price of an order is unknown before call.
-You can still set valuation price explicitly in <code>segment_prep_func_nb</code>.</p>
-</div>
 </dd>
 <dt><strong><code>order_func_nb</code></strong> :&ensp;<code>callable</code></dt>
 <dd>Order generation function.</dd>
@@ -5552,6 +5634,12 @@ Defaults to the number of elements in the broadcasted shape.</p>
 <p>Objects passed as arguments to both functions will not broadcast to <code>target_shape</code>
 as their purpose is unknown. You should broadcast manually or use flexible indexing.</p>
 <p>Also see notes on <code><a title="vectorbt.portfolio.base.Portfolio.from_orders" href="#vectorbt.portfolio.base.Portfolio.from_orders">Portfolio.from_orders()</a></code>.</p>
+</div>
+<div class="admonition note">
+<p class="admonition-title">Note</p>
+<p>In contrast to other methods, the valuation price is previous <code>close</code>
+instead of order price, since the price of an order is unknown before call.
+You can still set valuation price explicitly in <code>segment_prep_func_nb</code>.</p>
 </div>
 <h2 id="example">Example</h2>
 <p>Buy 10 shares each tick:</p>
@@ -5689,7 +5777,7 @@ def from_order_func(cls, close, order_func_nb, *order_args, target_shape=None, k
                     init_cash=None, cash_sharing=None, call_seq=None, active_mask=None,
                     prep_func_nb=None, prep_args=None, group_prep_func_nb=None, group_prep_args=None,
                     row_prep_func_nb=None, row_prep_args=None, segment_prep_func_nb=None,
-                    segment_prep_args=None, row_wise=None, log=None, max_orders=None, max_logs=None,
+                    segment_prep_args=None, row_wise=None, max_orders=None, max_logs=None,
                     seed=None, group_by=None, broadcast_kwargs=None, wrapper_kwargs=None, freq=None, **kwargs):
     &#34;&#34;&#34;Build portfolio from a custom order function.
 
@@ -5702,11 +5790,6 @@ def from_order_func(cls, close, order_func_nb, *order_args, target_shape=None, k
             Will broadcast to `target_shape`.
 
             Will be used for calculating unrealized P&amp;L and portfolio value.
-
-            !!! note
-                In contrast to other methods, the valuation price is previous `close`
-                instead of order price, since the price of an order is unknown before call.
-                You can still set valuation price explicitly in `segment_prep_func_nb`.
         order_func_nb (callable): Order generation function.
         *order_args: Arguments passed to `order_func_nb`.
         target_shape (tuple): Target shape to iterate over. Defaults to `close.shape`.
@@ -5787,6 +5870,11 @@ def from_order_func(cls, close, order_func_nb, *order_args, target_shape=None, k
         as their purpose is unknown. You should broadcast manually or use flexible indexing.
 
         Also see notes on `Portfolio.from_orders`.
+
+    !!! note
+        In contrast to other methods, the valuation price is previous `close`
+        instead of order price, since the price of an order is unknown before call.
+        You can still set valuation price explicitly in `segment_prep_func_nb`.
 
     ## Example
 
@@ -6766,7 +6854,7 @@ Will broadcast.</dd>
 <dd>
 <p>Whether to close the position first before reversal.
 Will broadcast.</p>
-<p>See <code>close_first</code> in <code><a title="vectorbt.portfolio.base.Portfolio.from_order_func" href="#vectorbt.portfolio.base.Portfolio.from_order_func">Portfolio.from_order_func()</a></code>.</p>
+<p>See <code>close_first</code> in <code><a title="vectorbt.portfolio.base.Portfolio.from_orders" href="#vectorbt.portfolio.base.Portfolio.from_orders">Portfolio.from_orders()</a></code>.</p>
 </dd>
 <dt><strong><code>allow_partial</code></strong> :&ensp;<code>bool</code> or <code>array_like</code></dt>
 <dd>
@@ -7015,7 +7103,7 @@ def from_signals(cls, close, entries, exits, size=None, price=None, fees=None, f
         close_first (bool or array_like): Whether to close the position first before reversal.
             Will broadcast.
 
-            See `close_first` in `Portfolio.from_order_func`.
+            See `close_first` in `Portfolio.from_orders`.
         allow_partial (bool or array_like): Whether to allow partial fills.
             Will broadcast.
 
@@ -7350,6 +7438,30 @@ def close(self):
     return self._close</code></pre>
 </details>
 </dd>
+<dt id="vectorbt.portfolio.base.Portfolio.drawdowns"><code class="name">var <span class="ident fname">drawdowns</span></code></dt>
+<dd>
+<div class="desc"><p><code><a title="vectorbt.portfolio.base.Portfolio.get_drawdowns" href="#vectorbt.portfolio.base.Portfolio.get_drawdowns">Portfolio.get_drawdowns()</a></code> with default arguments.</p></div>
+<details class="source">
+<summary>
+<span>Expand source code</span>
+</summary>
+<pre><code class="python">def __get__(self, instance, owner=None):
+    if instance is None:
+        return self
+    if not is_caching_enabled(self.name, instance, **self.kwargs):
+        return super().__get__(instance, owner=owner)
+    cache = instance.__dict__
+    val = cache.get(self.attrname, _NOT_FOUND)
+    if val is _NOT_FOUND:
+        with self.lock:
+            # check if another thread filled cache while we awaited lock
+            val = cache.get(self.attrname, _NOT_FOUND)
+            if val is _NOT_FOUND:
+                val = self.func(instance)
+                cache[self.attrname] = val
+    return val</code></pre>
+</details>
+</dd>
 <dt id="vectorbt.portfolio.base.Portfolio.incl_unrealized"><code class="name">var <span class="ident fname">incl_unrealized</span></code></dt>
 <dd>
 <div class="desc"><p>Whether to include unrealized trade P&amp;L in statistics.</p></div>
@@ -7361,6 +7473,30 @@ def close(self):
 def incl_unrealized(self):
     &#34;&#34;&#34;Whether to include unrealized trade P&amp;L in statistics.&#34;&#34;&#34;
     return self._incl_unrealized</code></pre>
+</details>
+</dd>
+<dt id="vectorbt.portfolio.base.Portfolio.init_cash"><code class="name">var <span class="ident fname">init_cash</span></code></dt>
+<dd>
+<div class="desc"><p><code><a title="vectorbt.portfolio.base.Portfolio.get_init_cash" href="#vectorbt.portfolio.base.Portfolio.get_init_cash">Portfolio.get_init_cash()</a></code> with default arguments.</p></div>
+<details class="source">
+<summary>
+<span>Expand source code</span>
+</summary>
+<pre><code class="python">def __get__(self, instance, owner=None):
+    if instance is None:
+        return self
+    if not is_caching_enabled(self.name, instance, **self.kwargs):
+        return super().__get__(instance, owner=owner)
+    cache = instance.__dict__
+    val = cache.get(self.attrname, _NOT_FOUND)
+    if val is _NOT_FOUND:
+        with self.lock:
+            # check if another thread filled cache while we awaited lock
+            val = cache.get(self.attrname, _NOT_FOUND)
+            if val is _NOT_FOUND:
+                val = self.func(instance)
+                cache[self.attrname] = val
+    return val</code></pre>
 </details>
 </dd>
 <dt id="vectorbt.portfolio.base.Portfolio.log_records"><code class="name">var <span class="ident fname">log_records</span></code></dt>
@@ -7376,6 +7512,30 @@ def log_records(self):
     return self._log_records</code></pre>
 </details>
 </dd>
+<dt id="vectorbt.portfolio.base.Portfolio.logs"><code class="name">var <span class="ident fname">logs</span></code></dt>
+<dd>
+<div class="desc"><p><code><a title="vectorbt.portfolio.base.Portfolio.get_logs" href="#vectorbt.portfolio.base.Portfolio.get_logs">Portfolio.get_logs()</a></code> with default arguments.</p></div>
+<details class="source">
+<summary>
+<span>Expand source code</span>
+</summary>
+<pre><code class="python">def __get__(self, instance, owner=None):
+    if instance is None:
+        return self
+    if not is_caching_enabled(self.name, instance, **self.kwargs):
+        return super().__get__(instance, owner=owner)
+    cache = instance.__dict__
+    val = cache.get(self.attrname, _NOT_FOUND)
+    if val is _NOT_FOUND:
+        with self.lock:
+            # check if another thread filled cache while we awaited lock
+            val = cache.get(self.attrname, _NOT_FOUND)
+            if val is _NOT_FOUND:
+                val = self.func(instance)
+                cache[self.attrname] = val
+    return val</code></pre>
+</details>
+</dd>
 <dt id="vectorbt.portfolio.base.Portfolio.order_records"><code class="name">var <span class="ident fname">order_records</span></code></dt>
 <dd>
 <div class="desc"><p>A structured NumPy array of order records.</p></div>
@@ -7387,6 +7547,91 @@ def log_records(self):
 def order_records(self):
     &#34;&#34;&#34;A structured NumPy array of order records.&#34;&#34;&#34;
     return self._order_records</code></pre>
+</details>
+</dd>
+<dt id="vectorbt.portfolio.base.Portfolio.orders"><code class="name">var <span class="ident fname">orders</span></code></dt>
+<dd>
+<div class="desc"><p><code><a title="vectorbt.portfolio.base.Portfolio.get_orders" href="#vectorbt.portfolio.base.Portfolio.get_orders">Portfolio.get_orders()</a></code> with default arguments.</p></div>
+<details class="source">
+<summary>
+<span>Expand source code</span>
+</summary>
+<pre><code class="python">def __get__(self, instance, owner=None):
+    if instance is None:
+        return self
+    if not is_caching_enabled(self.name, instance, **self.kwargs):
+        return super().__get__(instance, owner=owner)
+    cache = instance.__dict__
+    val = cache.get(self.attrname, _NOT_FOUND)
+    if val is _NOT_FOUND:
+        with self.lock:
+            # check if another thread filled cache while we awaited lock
+            val = cache.get(self.attrname, _NOT_FOUND)
+            if val is _NOT_FOUND:
+                val = self.func(instance)
+                cache[self.attrname] = val
+    return val</code></pre>
+</details>
+</dd>
+<dt id="vectorbt.portfolio.base.Portfolio.positions"><code class="name">var <span class="ident fname">positions</span></code></dt>
+<dd>
+<div class="desc"><p><code><a title="vectorbt.portfolio.base.Portfolio.get_positions" href="#vectorbt.portfolio.base.Portfolio.get_positions">Portfolio.get_positions()</a></code> with default arguments.</p></div>
+<details class="source">
+<summary>
+<span>Expand source code</span>
+</summary>
+<pre><code class="python">def __get__(self, instance, owner=None):
+    if instance is None:
+        return self
+    if not is_caching_enabled(self.name, instance, **self.kwargs):
+        return super().__get__(instance, owner=owner)
+    cache = instance.__dict__
+    val = cache.get(self.attrname, _NOT_FOUND)
+    if val is _NOT_FOUND:
+        with self.lock:
+            # check if another thread filled cache while we awaited lock
+            val = cache.get(self.attrname, _NOT_FOUND)
+            if val is _NOT_FOUND:
+                val = self.func(instance)
+                cache[self.attrname] = val
+    return val</code></pre>
+</details>
+</dd>
+<dt id="vectorbt.portfolio.base.Portfolio.trades"><code class="name">var <span class="ident fname">trades</span></code></dt>
+<dd>
+<div class="desc"><p><code><a title="vectorbt.portfolio.base.Portfolio.get_trades" href="#vectorbt.portfolio.base.Portfolio.get_trades">Portfolio.get_trades()</a></code> with default arguments.</p></div>
+<details class="source">
+<summary>
+<span>Expand source code</span>
+</summary>
+<pre><code class="python">def __get__(self, instance, owner=None):
+    if instance is None:
+        return self
+    if not is_caching_enabled(self.name, instance, **self.kwargs):
+        return super().__get__(instance, owner=owner)
+    cache = instance.__dict__
+    val = cache.get(self.attrname, _NOT_FOUND)
+    if val is _NOT_FOUND:
+        with self.lock:
+            # check if another thread filled cache while we awaited lock
+            val = cache.get(self.attrname, _NOT_FOUND)
+            if val is _NOT_FOUND:
+                val = self.func(instance)
+                cache[self.attrname] = val
+    return val</code></pre>
+</details>
+</dd>
+<dt id="vectorbt.portfolio.base.Portfolio.use_filled_close"><code class="name">var <span class="ident fname">use_filled_close</span></code></dt>
+<dd>
+<div class="desc"><p>Whether to forward-backward fill NaN values in <code><a title="vectorbt.portfolio.base.Portfolio.close" href="#vectorbt.portfolio.base.Portfolio.close">Portfolio.close</a></code>.</p></div>
+<details class="source">
+<summary>
+<span>Expand source code</span>
+</summary>
+<pre><code class="python">@property
+def use_filled_close(self):
+    &#34;&#34;&#34;Whether to forward-backward fill NaN values in `Portfolio.close`.&#34;&#34;&#34;
+    return self._use_filled_close</code></pre>
 </details>
 </dd>
 </dl>
@@ -7710,7 +7955,7 @@ def cash(self, group_by=None, in_sim_order=False, short_cash=True):
     cash_flow = to_2d(self.cash_flow(group_by=group_by, short_cash=short_cash), raw=True)
     if self.wrapper.grouper.is_grouped(group_by=group_by):
         group_lens = self.wrapper.grouper.get_group_lens(group_by=group_by)
-        init_cash = to_1d(self.init_cash(group_by=group_by), raw=True)
+        init_cash = to_1d(self.get_init_cash(group_by=group_by), raw=True)
         cash = nb.cash_grouped_nb(
             self.wrapper.shape_2d,
             cash_flow,
@@ -7720,11 +7965,11 @@ def cash(self, group_by=None, in_sim_order=False, short_cash=True):
     else:
         group_lens = self.wrapper.grouper.get_group_lens()
         if self.wrapper.grouper.is_grouping_disabled(group_by=group_by) and in_sim_order:
-            init_cash = to_1d(self.init_cash(), raw=True)
+            init_cash = to_1d(self.init_cash, raw=True)
             call_seq = to_2d(self.call_seq, raw=True)
             cash = nb.cash_in_sim_order_nb(cash_flow, group_lens, init_cash, call_seq)
         else:
-            init_cash = to_1d(self.init_cash(group_by=False), raw=True)
+            init_cash = to_1d(self.get_init_cash(group_by=False), raw=True)
             cash = nb.cash_nb(cash_flow, group_lens, init_cash)
     return self.wrapper.wrap(cash, group_by=group_by)</code></pre>
 </details>
@@ -7753,8 +7998,8 @@ def cash_flow(self, group_by=None, short_cash=True):
     else:
         cash_flow = nb.cash_flow_nb(
             self.wrapper.shape_2d,
-            self._orders.values,
-            self._orders.col_mapper.col_map,
+            self.orders.values,
+            self.orders.col_mapper.col_map,
             short_cash
         )
     return self.wrapper.wrap(cash_flow, group_by=group_by)</code></pre>
@@ -8033,30 +8278,12 @@ def cash_flow(self, group_by=None, short_cash=True):
     return method(*args, **new_kwargs)</code></pre>
 </details>
 </dd>
-<dt id="vectorbt.portfolio.base.Portfolio.drawdowns"><code class="name flex">
-<span>def <span class="ident fname">drawdowns</span></span>(<span>self, **kwargs)</span>
-</code></dt>
-<dd>
-<div class="desc"><p>Get drawdown records from <code><a title="vectorbt.portfolio.base.Portfolio.value" href="#vectorbt.portfolio.base.Portfolio.value">Portfolio.value()</a></code>.</p>
-<p>See <code><a title="vectorbt.generic.drawdowns.Drawdowns" href="../generic/drawdowns.html#vectorbt.generic.drawdowns.Drawdowns">Drawdowns</a></code>.</p></div>
-<details class="source">
-<summary>
-<span>Expand source code</span>
-</summary>
-<pre><code class="python">@cached_method
-def drawdowns(self, **kwargs):
-    &#34;&#34;&#34;Get drawdown records from `Portfolio.value`.
-
-    See `vectorbt.generic.drawdowns.Drawdowns`.&#34;&#34;&#34;
-    return Drawdowns.from_ts(self.value(**kwargs), freq=self.wrapper.freq)</code></pre>
-</details>
-</dd>
 <dt id="vectorbt.portfolio.base.Portfolio.fill_close"><code class="name flex">
 <span>def <span class="ident fname">fill_close</span></span>(<span>self, ffill=True, bfill=True)</span>
 </code></dt>
 <dd>
-<div class="desc"><p>Fill NaN values of <code><a title="vectorbt.portfolio.base.Portfolio.close" href="#vectorbt.portfolio.base.Portfolio.close">Portfolio.close</a></code>.</p>
-<p>Use <code>ffill</code> and <code>bfill</code> to fill forwards and backwards respectively.</p></div>
+<div class="desc"><p>Fill NaN values of <code><a title="vectorbt.portfolio.base.Portfolio.close" href="#vectorbt.portfolio.base.Portfolio.close">Portfolio.close</a></code>.
+Use <code>ffill</code> and <code>bfill</code> to fill forwards and backwards respectively.</p></div>
 <details class="source">
 <summary>
 <span>Expand source code</span>
@@ -8064,7 +8291,6 @@ def drawdowns(self, **kwargs):
 <pre><code class="python">@cached_method
 def fill_close(self, ffill=True, bfill=True):
     &#34;&#34;&#34;Fill NaN values of `Portfolio.close`.
-
     Use `ffill` and `bfill` to fill forwards and backwards respectively.&#34;&#34;&#34;
     close = to_2d(self.close, raw=True)
     if ffill and np.any(np.isnan(close[-1, :])):
@@ -8086,10 +8312,139 @@ def fill_close(self, ffill=True, bfill=True):
 <pre><code class="python">@cached_method
 def final_value(self, group_by=None):
     &#34;&#34;&#34;Get total profit per column/group.&#34;&#34;&#34;
-    init_cash = to_1d(self.init_cash(group_by=group_by), raw=True)
+    init_cash = to_1d(self.get_init_cash(group_by=group_by), raw=True)
     total_profit = to_1d(self.total_profit(group_by=group_by), raw=True)
     final_value = nb.final_value_nb(total_profit, init_cash)
     return self.wrapper.wrap_reduced(final_value, group_by=group_by)</code></pre>
+</details>
+</dd>
+<dt id="vectorbt.portfolio.base.Portfolio.get_drawdowns"><code class="name flex">
+<span>def <span class="ident fname">get_drawdowns</span></span>(<span>self, **kwargs)</span>
+</code></dt>
+<dd>
+<div class="desc"><p>Get drawdown records from <code><a title="vectorbt.portfolio.base.Portfolio.value" href="#vectorbt.portfolio.base.Portfolio.value">Portfolio.value()</a></code>.</p>
+<p>See <code><a title="vectorbt.generic.drawdowns.Drawdowns" href="../generic/drawdowns.html#vectorbt.generic.drawdowns.Drawdowns">Drawdowns</a></code>.</p>
+<p><code>**kwargs</code> are passed to <code><a title="vectorbt.portfolio.base.Portfolio.value" href="#vectorbt.portfolio.base.Portfolio.value">Portfolio.value()</a></code>.</p></div>
+<details class="source">
+<summary>
+<span>Expand source code</span>
+</summary>
+<pre><code class="python">@cached_method
+def get_drawdowns(self, **kwargs):
+    &#34;&#34;&#34;Get drawdown records from `Portfolio.value`.
+
+    See `vectorbt.generic.drawdowns.Drawdowns`.
+
+    `**kwargs` are passed to `Portfolio.value`.&#34;&#34;&#34;
+    return Drawdowns.from_ts(self.value(**kwargs), freq=self.wrapper.freq)</code></pre>
+</details>
+</dd>
+<dt id="vectorbt.portfolio.base.Portfolio.get_init_cash"><code class="name flex">
+<span>def <span class="ident fname">get_init_cash</span></span>(<span>self, group_by=None)</span>
+</code></dt>
+<dd>
+<div class="desc"><p>Initial amount of cash per column/group with default arguments.</p>
+<div class="admonition note">
+<p class="admonition-title">Note</p>
+<p>If initial cash is found automatically and no own cash is used throughout simulation
+(for example, when shorting), initial cash will be set to 1 instead of 0 to
+enable smooth calculation of returns.</p>
+</div></div>
+<details class="source">
+<summary>
+<span>Expand source code</span>
+</summary>
+<pre><code class="python">@cached_method
+def get_init_cash(self, group_by=None):
+    &#34;&#34;&#34;Initial amount of cash per column/group with default arguments.
+
+    !!! note
+        If initial cash is found automatically and no own cash is used throughout simulation
+        (for example, when shorting), initial cash will be set to 1 instead of 0 to
+        enable smooth calculation of returns.&#34;&#34;&#34;
+    if isinstance(self._init_cash, int):
+        cash_flow = to_2d(self.cash_flow(group_by=group_by), raw=True)
+        cash_min = np.min(np.cumsum(cash_flow, axis=0), axis=0)
+        init_cash = np.where(cash_min &lt; 0, np.abs(cash_min), 1.)
+        if self._init_cash == InitCashMode.AutoAlign:
+            init_cash = np.full(init_cash.shape, np.max(init_cash))
+    else:
+        init_cash = to_1d(self._init_cash, raw=True)
+        if self.wrapper.grouper.is_grouped(group_by=group_by):
+            group_lens = self.wrapper.grouper.get_group_lens(group_by=group_by)
+            init_cash = nb.init_cash_grouped_nb(init_cash, group_lens, self.cash_sharing)
+        else:
+            group_lens = self.wrapper.grouper.get_group_lens()
+            init_cash = nb.init_cash_nb(init_cash, group_lens, self.cash_sharing)
+    return self.wrapper.wrap_reduced(init_cash, group_by=group_by)</code></pre>
+</details>
+</dd>
+<dt id="vectorbt.portfolio.base.Portfolio.get_logs"><code class="name flex">
+<span>def <span class="ident fname">get_logs</span></span>(<span>self, group_by=None)</span>
+</code></dt>
+<dd>
+<div class="desc"><p>Get log records.</p>
+<p>See <code><a title="vectorbt.portfolio.logs.Logs" href="logs.html#vectorbt.portfolio.logs.Logs">Logs</a></code>.</p></div>
+<details class="source">
+<summary>
+<span>Expand source code</span>
+</summary>
+<pre><code class="python">def get_logs(self, group_by=None):
+    &#34;&#34;&#34;Get log records.
+
+    See `vectorbt.portfolio.logs.Logs`.&#34;&#34;&#34;
+    return self.logs.regroup(group_by=group_by)</code></pre>
+</details>
+</dd>
+<dt id="vectorbt.portfolio.base.Portfolio.get_orders"><code class="name flex">
+<span>def <span class="ident fname">get_orders</span></span>(<span>self, group_by=None)</span>
+</code></dt>
+<dd>
+<div class="desc"><p>Get order records.</p>
+<p>See <code><a title="vectorbt.portfolio.orders.Orders" href="orders.html#vectorbt.portfolio.orders.Orders">Orders</a></code>.</p></div>
+<details class="source">
+<summary>
+<span>Expand source code</span>
+</summary>
+<pre><code class="python">def get_orders(self, group_by=None):
+    &#34;&#34;&#34;Get order records.
+
+    See `vectorbt.portfolio.orders.Orders`.&#34;&#34;&#34;
+    return self.orders.regroup(group_by=group_by)</code></pre>
+</details>
+</dd>
+<dt id="vectorbt.portfolio.base.Portfolio.get_positions"><code class="name flex">
+<span>def <span class="ident fname">get_positions</span></span>(<span>self, group_by=None)</span>
+</code></dt>
+<dd>
+<div class="desc"><p>Get position records.</p>
+<p>See <code><a title="vectorbt.portfolio.trades.Positions" href="trades.html#vectorbt.portfolio.trades.Positions">Positions</a></code>.</p></div>
+<details class="source">
+<summary>
+<span>Expand source code</span>
+</summary>
+<pre><code class="python">def get_positions(self, group_by=None):
+    &#34;&#34;&#34;Get position records.
+
+    See `vectorbt.portfolio.trades.Positions`.&#34;&#34;&#34;
+    return self.positions.regroup(group_by=group_by)</code></pre>
+</details>
+</dd>
+<dt id="vectorbt.portfolio.base.Portfolio.get_trades"><code class="name flex">
+<span>def <span class="ident fname">get_trades</span></span>(<span>self, group_by=None)</span>
+</code></dt>
+<dd>
+<div class="desc"><p>Get trade records.</p>
+<p>See <code><a title="vectorbt.portfolio.trades.Trades" href="trades.html#vectorbt.portfolio.trades.Trades">Trades</a></code>.</p></div>
+<details class="source">
+<summary>
+<span>Expand source code</span>
+</summary>
+<pre><code class="python">def get_trades(self, group_by=None):
+    &#34;&#34;&#34;Get trade records.
+
+    See `vectorbt.portfolio.trades.Trades`.&#34;&#34;&#34;
+    return self.trades.regroup(group_by=group_by)</code></pre>
 </details>
 </dd>
 <dt id="vectorbt.portfolio.base.Portfolio.gross_exposure"><code class="name flex">
@@ -8174,63 +8529,6 @@ def holding_value(self, direction=&#39;all&#39;, group_by=None):
     return method(*args, **new_kwargs)</code></pre>
 </details>
 </dd>
-<dt id="vectorbt.portfolio.base.Portfolio.init_cash"><code class="name flex">
-<span>def <span class="ident fname">init_cash</span></span>(<span>self, group_by=None)</span>
-</code></dt>
-<dd>
-<div class="desc"><p>Get initial amount of cash per column/group.</p>
-<div class="admonition note">
-<p class="admonition-title">Note</p>
-<p>If initial cash is found automatically and no own cash is used throughout simulation
-(for example, when shorting), initial cash will be set to 1 instead of 0 to
-enable smooth calculation of returns.</p>
-</div></div>
-<details class="source">
-<summary>
-<span>Expand source code</span>
-</summary>
-<pre><code class="python">@cached_method
-def init_cash(self, group_by=None):
-    &#34;&#34;&#34;Get initial amount of cash per column/group.
-
-    !!! note
-        If initial cash is found automatically and no own cash is used throughout simulation
-        (for example, when shorting), initial cash will be set to 1 instead of 0 to
-        enable smooth calculation of returns.&#34;&#34;&#34;
-    if isinstance(self._init_cash, int):
-        cash_flow = to_2d(self.cash_flow(group_by=group_by), raw=True)
-        cash_min = np.min(np.cumsum(cash_flow, axis=0), axis=0)
-        init_cash = np.where(cash_min &lt; 0, np.abs(cash_min), 1.)
-        if self._init_cash == InitCashMode.AutoAlign:
-            init_cash = np.full(init_cash.shape, np.max(init_cash))
-    else:
-        init_cash = to_1d(self._init_cash, raw=True)
-        if self.wrapper.grouper.is_grouped(group_by=group_by):
-            group_lens = self.wrapper.grouper.get_group_lens(group_by=group_by)
-            init_cash = nb.init_cash_grouped_nb(init_cash, group_lens, self.cash_sharing)
-        else:
-            group_lens = self.wrapper.grouper.get_group_lens()
-            init_cash = nb.init_cash_nb(init_cash, group_lens, self.cash_sharing)
-    return self.wrapper.wrap_reduced(init_cash, group_by=group_by)</code></pre>
-</details>
-</dd>
-<dt id="vectorbt.portfolio.base.Portfolio.logs"><code class="name flex">
-<span>def <span class="ident fname">logs</span></span>(<span>self, group_by=None)</span>
-</code></dt>
-<dd>
-<div class="desc"><p>Get log records.</p>
-<p>See <code><a title="vectorbt.portfolio.logs.Logs" href="logs.html#vectorbt.portfolio.logs.Logs">Logs</a></code>.</p></div>
-<details class="source">
-<summary>
-<span>Expand source code</span>
-</summary>
-<pre><code class="python">def logs(self, group_by=None):
-    &#34;&#34;&#34;Get log records.
-
-    See `vectorbt.portfolio.logs.Logs`.&#34;&#34;&#34;
-    return self._logs.regroup(group_by=group_by)</code></pre>
-</details>
-</dd>
 <dt id="vectorbt.portfolio.base.Portfolio.market_returns"><code class="name flex">
 <span>def <span class="ident fname">market_returns</span></span>(<span>self, group_by=None)</span>
 </code></dt>
@@ -8244,7 +8542,7 @@ def init_cash(self, group_by=None):
 def market_returns(self, group_by=None):
     &#34;&#34;&#34;Get return series per column/group based on market (benchmark) value.&#34;&#34;&#34;
     market_value = to_2d(self.market_value(group_by=group_by), raw=True)
-    init_cash = to_1d(self.init_cash(group_by=group_by), raw=True)
+    init_cash = to_1d(self.get_init_cash(group_by=group_by), raw=True)
     market_returns = nb.returns_nb(market_value, init_cash)
     return self.wrapper.wrap(market_returns, group_by=group_by)</code></pre>
 </details>
@@ -8255,6 +8553,7 @@ def market_returns(self, group_by=None):
 <dd>
 <div class="desc"><p>Get market (benchmark) value series per column/group.</p>
 <p>If grouped, evenly distributes initial cash among assets in the group.</p>
+<p>Uses filled close if <code><a title="vectorbt.portfolio.base.Portfolio.use_filled_close" href="#vectorbt.portfolio.base.Portfolio.use_filled_close">Portfolio.use_filled_close</a></code> is True.</p>
 <div class="admonition note">
 <p class="admonition-title">Note</p>
 <p>Does not take into account fees and slippage. For this, create a separate portfolio.</p>
@@ -8269,16 +8568,21 @@ def market_value(self, group_by=None):
 
     If grouped, evenly distributes initial cash among assets in the group.
 
+    Uses filled close if `Portfolio.use_filled_close` is True.
+
     !!! note
         Does not take into account fees and slippage. For this, create a separate portfolio.&#34;&#34;&#34;
-    close_filled = to_2d(self.fill_close(), raw=True)
+    if self.use_filled_close:
+        close = to_2d(self.fill_close(), raw=True)
+    else:
+        close = to_2d(self.close, raw=True)
     if self.wrapper.grouper.is_grouped(group_by=group_by):
         group_lens = self.wrapper.grouper.get_group_lens(group_by=group_by)
-        init_cash_grouped = to_1d(self.init_cash(group_by=group_by), raw=True)
-        market_value = nb.market_value_grouped_nb(close_filled, group_lens, init_cash_grouped)
+        init_cash_grouped = to_1d(self.get_init_cash(group_by=group_by), raw=True)
+        market_value = nb.market_value_grouped_nb(close, group_lens, init_cash_grouped)
     else:
-        init_cash = to_1d(self.init_cash(group_by=False), raw=True)
-        market_value = nb.market_value_nb(close_filled, init_cash)
+        init_cash = to_1d(self.get_init_cash(group_by=False), raw=True)
+        market_value = nb.market_value_nb(close, init_cash)
     return self.wrapper.wrap(market_value, group_by=group_by)</code></pre>
 </details>
 </dd>
@@ -8376,23 +8680,6 @@ def net_exposure(self, group_by=None):
         if arg_name in kwargs:
             new_kwargs[arg_name] = kwargs[arg_name]
     return method(*args, **new_kwargs)</code></pre>
-</details>
-</dd>
-<dt id="vectorbt.portfolio.base.Portfolio.orders"><code class="name flex">
-<span>def <span class="ident fname">orders</span></span>(<span>self, group_by=None)</span>
-</code></dt>
-<dd>
-<div class="desc"><p>Get order records.</p>
-<p>See <code><a title="vectorbt.portfolio.orders.Orders" href="orders.html#vectorbt.portfolio.orders.Orders">Orders</a></code>.</p></div>
-<details class="source">
-<summary>
-<span>Expand source code</span>
-</summary>
-<pre><code class="python">def orders(self, group_by=None):
-    &#34;&#34;&#34;Get order records.
-
-    See `vectorbt.portfolio.orders.Orders`.&#34;&#34;&#34;
-    return self._orders.regroup(group_by=group_by)</code></pre>
 </details>
 </dd>
 <dt id="vectorbt.portfolio.base.Portfolio.plot"><code class="name flex">
@@ -8767,8 +9054,8 @@ by creating a placeholder that can be written later:</p>
 
             if name == &#39;orders&#39;:
                 orders_kwargs = kwargs.pop(&#39;orders_kwargs&#39;, {})
-                method_kwargs = _extract_method_kwargs(self_col.orders, orders_kwargs)
-                self_col.orders(**method_kwargs).plot(
+                method_kwargs = _extract_method_kwargs(self_col.get_orders, orders_kwargs)
+                self_col.get_orders(**method_kwargs).plot(
                     **orders_kwargs,
                     row=row, col=col, fig=fig)
                 fig.layout[xaxis][&#39;title&#39;] = &#39;Date&#39;
@@ -8776,8 +9063,8 @@ by creating a placeholder that can be written later:</p>
 
             elif name == &#39;trades&#39;:
                 trades_kwargs = kwargs.pop(&#39;trades_kwargs&#39;, {})
-                method_kwargs = _extract_method_kwargs(self_col.trades, trades_kwargs)
-                self_col.trades(**method_kwargs).plot(
+                method_kwargs = _extract_method_kwargs(self_col.get_trades, trades_kwargs)
+                self_col.get_trades(**method_kwargs).plot(
                     **trades_kwargs,
                     row=row, col=col, xref=xref, yref=yref, fig=fig)
                 fig.layout[xaxis][&#39;title&#39;] = &#39;Date&#39;
@@ -8785,8 +9072,8 @@ by creating a placeholder that can be written later:</p>
 
             elif name == &#39;positions&#39;:
                 positions_kwargs = kwargs.pop(&#39;positions_kwargs&#39;, {})
-                method_kwargs = _extract_method_kwargs(self_col.positions, positions_kwargs)
-                self_col.positions(**method_kwargs).plot(
+                method_kwargs = _extract_method_kwargs(self_col.get_positions, positions_kwargs)
+                self_col.get_positions(**method_kwargs).plot(
                     **positions_kwargs,
                     row=row, col=col, xref=xref, yref=yref, fig=fig)
                 fig.layout[xaxis][&#39;title&#39;] = &#39;Date&#39;
@@ -8796,8 +9083,8 @@ by creating a placeholder that can be written later:</p>
                 trade_pnl_kwargs = merge_dicts(dict(
                     hline_shape_kwargs=hline_shape_kwargs
                 ), kwargs.pop(&#39;trade_pnl_kwargs&#39;, {}))
-                method_kwargs = _extract_method_kwargs(self_col.trades, trade_pnl_kwargs)
-                self_col.trades(**method_kwargs).plot_pnl(
+                method_kwargs = _extract_method_kwargs(self_col.get_trades, trade_pnl_kwargs)
+                self_col.get_trades(**method_kwargs).plot_pnl(
                     **trade_pnl_kwargs,
                     row=row, col=col, xref=xref, yref=yref, fig=fig)
                 fig.layout[xaxis][&#39;title&#39;] = &#39;Date&#39;
@@ -8805,8 +9092,8 @@ by creating a placeholder that can be written later:</p>
 
             elif name == &#39;position_pnl&#39;:
                 position_pnl_kwargs = kwargs.pop(&#39;position_pnl_kwargs&#39;, {})
-                method_kwargs = _extract_method_kwargs(self_col.positions, position_pnl_kwargs)
-                self_col.positions(**method_kwargs).plot_pnl(
+                method_kwargs = _extract_method_kwargs(self_col.get_positions, position_pnl_kwargs)
+                self_col.get_positions(**method_kwargs).plot_pnl(
                     **position_pnl_kwargs,
                     row=row, col=col, xref=xref, yref=yref, fig=fig)
                 fig.layout[xaxis][&#39;title&#39;] = &#39;Date&#39;
@@ -8842,8 +9129,8 @@ by creating a placeholder that can be written later:</p>
                         name=&#39;Value&#39;
                     )
                 ), kwargs.pop(&#39;drawdowns_kwargs&#39;, {}))
-                method_kwargs = _extract_method_kwargs(self_col.drawdowns, drawdowns_kwargs)
-                self_col.drawdowns(**method_kwargs).plot(
+                method_kwargs = _extract_method_kwargs(self_col.get_drawdowns, drawdowns_kwargs)
+                self_col.get_drawdowns(**method_kwargs).plot(
                     **drawdowns_kwargs,
                     row=row, col=col, xref=xref, yref=yref, fig=fig)
                 fig.layout[xaxis][&#39;title&#39;] = &#39;Date&#39;
@@ -8937,7 +9224,7 @@ by creating a placeholder that can be written later:</p>
                 self_col.cash(**method_kwargs).vbt.plot_against(
                     0, **cash_kwargs,
                     row=row, col=col, fig=fig)
-                _add_hline(self_col.init_cash(), x_domain, yref)
+                _add_hline(self_col.init_cash, x_domain, yref)
                 fig.layout[xaxis][&#39;title&#39;] = &#39;Date&#39;
                 fig.layout[yaxis][&#39;title&#39;] = &#39;Cash&#39;
 
@@ -8973,9 +9260,9 @@ by creating a placeholder that can be written later:</p>
                 ), kwargs.pop(&#39;value_kwargs&#39;, {}))
                 method_kwargs = _extract_method_kwargs(self_col.value, value_kwargs)
                 self_col.value(**method_kwargs).vbt.plot_against(
-                    self_col.init_cash(), **value_kwargs,
+                    self_col.init_cash, **value_kwargs,
                     row=row, col=col, fig=fig)
-                _add_hline(self_col.init_cash(), x_domain, yref)
+                _add_hline(self_col.init_cash, x_domain, yref)
                 fig.layout[xaxis][&#39;title&#39;] = &#39;Date&#39;
                 fig.layout[yaxis][&#39;title&#39;] = &#39;Value&#39;
 
@@ -9138,23 +9425,6 @@ def pos_mask(self, direction=&#39;all&#39;, group_by=None):
     return self.wrapper.wrap(pos_mask, group_by=group_by)</code></pre>
 </details>
 </dd>
-<dt id="vectorbt.portfolio.base.Portfolio.positions"><code class="name flex">
-<span>def <span class="ident fname">positions</span></span>(<span>self, group_by=None)</span>
-</code></dt>
-<dd>
-<div class="desc"><p>Get position records.</p>
-<p>See <code><a title="vectorbt.portfolio.trades.Positions" href="trades.html#vectorbt.portfolio.trades.Positions">Positions</a></code>.</p></div>
-<details class="source">
-<summary>
-<span>Expand source code</span>
-</summary>
-<pre><code class="python">def positions(self, group_by=None):
-    &#34;&#34;&#34;Get position records.
-
-    See `vectorbt.portfolio.trades.Positions`.&#34;&#34;&#34;
-    return self._positions.regroup(group_by=group_by)</code></pre>
-</details>
-</dd>
 <dt id="vectorbt.portfolio.base.Portfolio.regroup"><code class="name flex">
 <span>def <span class="ident fname">regroup</span></span>(<span>self, group_by, **kwargs)</span>
 </code></dt>
@@ -9190,11 +9460,11 @@ def returns(self, group_by=None, in_sim_order=False):
     value = to_2d(self.value(group_by=group_by, in_sim_order=in_sim_order), raw=True)
     if self.wrapper.grouper.is_grouping_disabled(group_by=group_by) and in_sim_order:
         group_lens = self.wrapper.grouper.get_group_lens()
-        init_cash_grouped = to_1d(self.init_cash(), raw=True)
+        init_cash_grouped = to_1d(self.init_cash, raw=True)
         call_seq = to_2d(self.call_seq, raw=True)
         returns = nb.returns_in_sim_order_nb(value, group_lens, init_cash_grouped, call_seq)
     else:
-        init_cash = to_1d(self.init_cash(group_by=group_by), raw=True)
+        init_cash = to_1d(self.get_init_cash(group_by=group_by), raw=True)
         returns = nb.returns_nb(value, init_cash)
     return self.wrapper.wrap(returns, group_by=group_by)</code></pre>
 </details>
@@ -9258,8 +9528,8 @@ def share_flow(self, direction=&#39;all&#39;):
     direction = convert_str_enum_value(Direction, direction)
     share_flow = nb.share_flow_nb(
         self.wrapper.shape_2d,
-        self._orders.values,
-        self._orders.col_mapper.col_map,
+        self.orders.values,
+        self.orders.col_mapper.col_map,
         direction
     )
     return self.wrapper.wrap(share_flow, group_by=False)</code></pre>
@@ -9400,12 +9670,12 @@ def stats(self, column=None, group_by=None, incl_unrealized=None, active_returns
         Use `column` only if caching is enabled, otherwise it may re-compute the same
         objects multiple times.&#34;&#34;&#34;
     # Pre-calculate
-    trades = self.trades(group_by=group_by)
+    trades = self.get_trades(group_by=group_by)
     if incl_unrealized is None:
         incl_unrealized = self.incl_unrealized
     if not incl_unrealized:
         trades = trades.closed
-    drawdowns = self.drawdowns(group_by=group_by)
+    drawdowns = self.get_drawdowns(group_by=group_by)
     if active_returns:
         returns = self.active_returns(group_by=group_by)
     else:
@@ -9416,7 +9686,7 @@ def stats(self, column=None, group_by=None, incl_unrealized=None, active_returns
         &#39;Start&#39;: self.wrapper.index[0],
         &#39;End&#39;: self.wrapper.index[-1],
         &#39;Duration&#39;: self.wrapper.shape[0] * self.wrapper.freq,
-        &#39;Init. Cash&#39;: self.init_cash(group_by=group_by),
+        &#39;Init. Cash&#39;: self.get_init_cash(group_by=group_by),
         &#39;Total Profit&#39;: self.total_profit(group_by=group_by),
         &#39;Total Return [%]&#39;: self.total_return(group_by=group_by) * 100,
         &#39;Benchmark Return [%]&#39;: self.total_market_return(group_by=group_by) * 100,
@@ -9514,7 +9784,8 @@ def total_market_return(self, group_by=None):
 </code></dt>
 <dd>
 <div class="desc"><p>Get total profit per column/group.</p>
-<p>Calculated directly from order records. Very fast.</p></div>
+<p>Calculated directly from order records (fast).</p>
+<p>Uses filled close if <code><a title="vectorbt.portfolio.base.Portfolio.use_filled_close" href="#vectorbt.portfolio.base.Portfolio.use_filled_close">Portfolio.use_filled_close</a></code> is True.</p></div>
 <details class="source">
 <summary>
 <span>Expand source code</span>
@@ -9523,7 +9794,9 @@ def total_market_return(self, group_by=None):
 def total_profit(self, group_by=None):
     &#34;&#34;&#34;Get total profit per column/group.
 
-    Calculated directly from order records. Very fast.&#34;&#34;&#34;
+    Calculated directly from order records (fast).
+
+    Uses filled close if `Portfolio.use_filled_close` is True.&#34;&#34;&#34;
     if self.wrapper.grouper.is_grouped(group_by=group_by):
         total_profit = to_1d(self.total_profit(group_by=False), raw=True)
         group_lens = self.wrapper.grouper.get_group_lens(group_by=group_by)
@@ -9532,12 +9805,15 @@ def total_profit(self, group_by=None):
             group_lens
         )
     else:
-        close = to_2d(self.fill_close(), raw=True)
+        if self.use_filled_close:
+            close = to_2d(self.fill_close(), raw=True)
+        else:
+            close = to_2d(self.close, raw=True)
         total_profit = nb.total_profit_nb(
             self.wrapper.shape_2d,
             close,
-            self._orders.values,
-            self._orders.col_mapper.col_map
+            self.orders.values,
+            self.orders.col_mapper.col_map
         )
     return self.wrapper.wrap_reduced(total_profit, group_by=group_by)</code></pre>
 </details>
@@ -9554,27 +9830,10 @@ def total_profit(self, group_by=None):
 <pre><code class="python">@cached_method
 def total_return(self, group_by=None):
     &#34;&#34;&#34;Get total profit per column/group.&#34;&#34;&#34;
-    init_cash = to_1d(self.init_cash(group_by=group_by), raw=True)
+    init_cash = to_1d(self.get_init_cash(group_by=group_by), raw=True)
     total_profit = to_1d(self.total_profit(group_by=group_by), raw=True)
     total_return = nb.total_return_nb(total_profit, init_cash)
     return self.wrapper.wrap_reduced(total_return, group_by=group_by)</code></pre>
-</details>
-</dd>
-<dt id="vectorbt.portfolio.base.Portfolio.trades"><code class="name flex">
-<span>def <span class="ident fname">trades</span></span>(<span>self, group_by=None)</span>
-</code></dt>
-<dd>
-<div class="desc"><p>Get trade records.</p>
-<p>See <code><a title="vectorbt.portfolio.trades.Trades" href="trades.html#vectorbt.portfolio.trades.Trades">Trades</a></code>.</p></div>
-<details class="source">
-<summary>
-<span>Expand source code</span>
-</summary>
-<pre><code class="python">def trades(self, group_by=None):
-    &#34;&#34;&#34;Get trade records.
-
-    See `vectorbt.portfolio.trades.Trades`.&#34;&#34;&#34;
-    return self._trades.regroup(group_by=group_by)</code></pre>
 </details>
 </dd>
 <dt id="vectorbt.portfolio.base.Portfolio.up_capture"><code class="name flex">
@@ -9785,6 +10044,12 @@ title="Search"
 <li><code><a title="vectorbt.portfolio.base.Portfolio.from_order_func" href="#vectorbt.portfolio.base.Portfolio.from_order_func">from_order_func</a></code></li>
 <li><code><a title="vectorbt.portfolio.base.Portfolio.from_orders" href="#vectorbt.portfolio.base.Portfolio.from_orders">from_orders</a></code></li>
 <li><code><a title="vectorbt.portfolio.base.Portfolio.from_signals" href="#vectorbt.portfolio.base.Portfolio.from_signals">from_signals</a></code></li>
+<li><code><a title="vectorbt.portfolio.base.Portfolio.get_drawdowns" href="#vectorbt.portfolio.base.Portfolio.get_drawdowns">get_drawdowns</a></code></li>
+<li><code><a title="vectorbt.portfolio.base.Portfolio.get_init_cash" href="#vectorbt.portfolio.base.Portfolio.get_init_cash">get_init_cash</a></code></li>
+<li><code><a title="vectorbt.portfolio.base.Portfolio.get_logs" href="#vectorbt.portfolio.base.Portfolio.get_logs">get_logs</a></code></li>
+<li><code><a title="vectorbt.portfolio.base.Portfolio.get_orders" href="#vectorbt.portfolio.base.Portfolio.get_orders">get_orders</a></code></li>
+<li><code><a title="vectorbt.portfolio.base.Portfolio.get_positions" href="#vectorbt.portfolio.base.Portfolio.get_positions">get_positions</a></code></li>
+<li><code><a title="vectorbt.portfolio.base.Portfolio.get_trades" href="#vectorbt.portfolio.base.Portfolio.get_trades">get_trades</a></code></li>
 <li><code><a title="vectorbt.portfolio.base.Portfolio.gross_exposure" href="#vectorbt.portfolio.base.Portfolio.gross_exposure">gross_exposure</a></code></li>
 <li><code><a title="vectorbt.portfolio.base.Portfolio.holding_value" href="#vectorbt.portfolio.base.Portfolio.holding_value">holding_value</a></code></li>
 <li><code><a title="vectorbt.portfolio.base.Portfolio.incl_unrealized" href="#vectorbt.portfolio.base.Portfolio.incl_unrealized">incl_unrealized</a></code></li>
@@ -9818,6 +10083,7 @@ title="Search"
 <li><code><a title="vectorbt.portfolio.base.Portfolio.total_return" href="#vectorbt.portfolio.base.Portfolio.total_return">total_return</a></code></li>
 <li><code><a title="vectorbt.portfolio.base.Portfolio.trades" href="#vectorbt.portfolio.base.Portfolio.trades">trades</a></code></li>
 <li><code><a title="vectorbt.portfolio.base.Portfolio.up_capture" href="#vectorbt.portfolio.base.Portfolio.up_capture">up_capture</a></code></li>
+<li><code><a title="vectorbt.portfolio.base.Portfolio.use_filled_close" href="#vectorbt.portfolio.base.Portfolio.use_filled_close">use_filled_close</a></code></li>
 <li><code><a title="vectorbt.portfolio.base.Portfolio.value" href="#vectorbt.portfolio.base.Portfolio.value">value</a></code></li>
 <li><code><a title="vectorbt.portfolio.base.Portfolio.value_at_risk" href="#vectorbt.portfolio.base.Portfolio.value_at_risk">value_at_risk</a></code></li>
 </ul>
