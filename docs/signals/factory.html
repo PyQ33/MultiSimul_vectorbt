@@ -44,11 +44,12 @@ ga('create', 'UA-142521178-3', 'auto'); ga('send', 'pageview');
 import numpy as np
 from numba import njit
 from numba.typed import List
+import inspect
 
 from vectorbt.utils import checks
 from vectorbt.utils.config import merge_dicts
 from vectorbt.base import combine_fns
-from vectorbt.indicators.factory import IndicatorFactory
+from vectorbt.indicators.factory import IndicatorFactory, to_typed_list
 from vectorbt.signals.nb import generate_ex_nb, generate_enex_nb, first_choice_nb
 
 
@@ -439,11 +440,11 @@ class SignalFactory(IndicatorFactory):
         def _check_settings(func_settings):
             for k in func_settings:
                 if k not in (
-                        &#39;pass_inputs&#39;,
-                        &#39;pass_in_outputs&#39;,
-                        &#39;pass_params&#39;,
-                        &#39;pass_kwargs&#39;,
-                        &#39;pass_cache&#39;
+                    &#39;pass_inputs&#39;,
+                    &#39;pass_in_outputs&#39;,
+                    &#39;pass_params&#39;,
+                    &#39;pass_kwargs&#39;,
+                    &#39;pass_cache&#39;
                 ):
                     raise ValueError(f&#34;Can&#39;t find key {k} in function settings&#34;)
 
@@ -473,40 +474,82 @@ class SignalFactory(IndicatorFactory):
         exit_param_names = _get_func_names(exit_settings, &#39;pass_params&#39;, param_names)
         cache_param_names = _get_func_names(cache_settings, &#39;pass_params&#39;, param_names)
 
+        # Build a function that selects a parameter tuple
         if exit_only and not iteratively:
-            @njit
-            def apply_nb(i, entries, exit_wait, exit_input_list, exit_in_output_tuples,
-                         exit_param_tuples, exit_args):
-                return generate_ex_nb(
-                    entries,
-                    exit_wait,
-                    exit_choice_func,
-                    *exit_input_list,
-                    *exit_in_output_tuples[i],
-                    *exit_param_tuples[i],
-                    *exit_args
-                )
+            _0 = &#34;i&#34;
+            _0 += &#34;, entries&#34;
+            _0 += &#34;, exit_wait&#34;
+            _0 += &#34;, exit_input_tuple&#34;
+            if len(exit_in_output_names) &gt; 0:
+                _0 += &#34;, exit_in_output_tuples&#34;
+            if len(exit_param_names) &gt; 0:
+                _0 += &#34;, exit_param_tuples&#34;
+            _0 += &#34;, exit_args&#34;
+            _1 = &#34;entries&#34;
+            _1 += &#34;, exit_wait&#34;
+            _1 += &#34;, exit_choice_func&#34;
+            _1 += &#34;, *exit_input_tuple&#34;
+            if len(exit_in_output_names) &gt; 0:
+                _1 += &#34;, *exit_in_output_tuples[i]&#34;
+            if len(exit_param_names) &gt; 0:
+                _1 += &#34;, *exit_param_tuples[i]&#34;
+            _1 += &#34;, *exit_args&#34;
+            func_str = &#34;def apply_func_nb({0}):\n   return generate_ex_nb({1})&#34;.format(_0, _1)
+            scope = {
+                &#39;generate_ex_nb&#39;: generate_ex_nb,
+                &#39;exit_choice_func&#39;: exit_choice_func
+            }
+            filename = inspect.getfile(lambda: None)
+            code = compile(func_str, filename, &#39;single&#39;)
+            exec(code, scope)
+            apply_func_nb = scope[&#39;apply_func_nb&#39;]
+            apply_func_nb = njit(apply_func_nb)
+
         else:
-            @njit
-            def apply_nb(i, shape, entry_wait, exit_wait, entry_input_list, exit_input_list,
-                         entry_in_output_tuples, exit_in_output_tuples, entry_param_tuples,
-                         exit_param_tuples, entry_args, exit_args):
-                return generate_enex_nb(
-                    shape,
-                    entry_wait, exit_wait,
-                    entry_choice_func, (
-                        *entry_input_list,
-                        *entry_in_output_tuples[i],
-                        *entry_param_tuples[i],
-                        *entry_args
-                    ),
-                    exit_choice_func, (
-                        *exit_input_list,
-                        *exit_in_output_tuples[i],
-                        *exit_param_tuples[i],
-                        *exit_args
-                    )
-                )
+            _0 = &#34;i&#34;
+            _0 += &#34;, shape&#34;
+            _0 += &#34;, entry_wait&#34;
+            _0 += &#34;, exit_wait&#34;
+            _0 += &#34;, entry_input_tuple&#34;
+            _0 += &#34;, exit_input_tuple&#34;
+            if len(entry_in_output_names) &gt; 0:
+                _0 += &#34;, entry_in_output_tuples&#34;
+            if len(exit_in_output_names) &gt; 0:
+                _0 += &#34;, exit_in_output_tuples&#34;
+            if len(entry_param_names) &gt; 0:
+                _0 += &#34;, entry_param_tuples&#34;
+            if len(exit_param_names) &gt; 0:
+                _0 += &#34;, exit_param_tuples&#34;
+            _0 += &#34;, entry_args&#34;
+            _0 += &#34;, exit_args&#34;
+            _1 = &#34;shape&#34;
+            _1 += &#34;, entry_wait&#34;
+            _1 += &#34;, exit_wait&#34;
+            _1 += &#34;, entry_choice_func&#34;
+            _1 += &#34;, (*entry_input_tuple&#34;
+            if len(entry_in_output_names) &gt; 0:
+                _1 += &#34;, *entry_in_output_tuples[i]&#34;
+            if len(entry_param_names) &gt; 0:
+                _1 += &#34;, *entry_param_tuples[i]&#34;
+            _1 += &#34;, *entry_args)&#34;
+            _1 += &#34;, exit_choice_func&#34;
+            _1 += &#34;, (*exit_input_tuple&#34;
+            if len(exit_in_output_names) &gt; 0:
+                _1 += &#34;, *exit_in_output_tuples[i]&#34;
+            if len(exit_param_names) &gt; 0:
+                _1 += &#34;, *exit_param_tuples[i]&#34;
+            _1 += &#34;, *exit_args)&#34;
+            func_str = &#34;def apply_func_nb({0}):\n   return generate_enex_nb({1})&#34;.format(_0, _1)
+            scope = {
+                &#39;generate_enex_nb&#39;: generate_enex_nb,
+                &#39;entry_choice_func&#39;: entry_choice_func,
+                &#39;exit_choice_func&#39;: exit_choice_func
+            }
+            filename = inspect.getfile(lambda: None)
+            code = compile(func_str, filename, &#39;single&#39;)
+            exec(code, scope)
+            apply_func_nb = scope[&#39;apply_func_nb&#39;]
+            apply_func_nb = njit(apply_func_nb)
 
         def custom_func(input_list, in_output_list, param_list, *args, input_shape=None, flex_2d=None,
                         entry_args=None, exit_args=None, cache_args=None, entry_kwargs=None,
@@ -559,49 +602,41 @@ class SignalFactory(IndicatorFactory):
             exit_wait = exit_kwargs[&#39;wait&#39;]
 
             # Distribute arguments across functions
-            entry_input_list = ()
-            exit_input_list = ()
-            cache_input_list = ()
+            entry_input_tuple = ()
+            exit_input_tuple = ()
+            cache_input_tuple = ()
             for input_name in entry_input_names:
-                entry_input_list += (input_list[input_names.index(input_name)],)
+                entry_input_tuple += (input_list[input_names.index(input_name)],)
             for input_name in exit_input_names:
-                exit_input_list += (input_list[input_names.index(input_name)],)
+                exit_input_tuple += (input_list[input_names.index(input_name)],)
             for input_name in cache_input_names:
-                cache_input_list += (input_list[input_names.index(input_name)],)
+                cache_input_tuple += (input_list[input_names.index(input_name)],)
 
-            entry_in_output_list = ()
-            exit_in_output_list = ()
-            cache_in_output_list = ()
+            entry_in_output_list = []
+            exit_in_output_list = []
+            cache_in_output_list = []
             for in_output_name in entry_in_output_names:
-                entry_in_output_list += (in_output_list[in_output_names.index(in_output_name)],)
+                entry_in_output_list.append(in_output_list[in_output_names.index(in_output_name)])
             for in_output_name in exit_in_output_names:
-                exit_in_output_list += (in_output_list[in_output_names.index(in_output_name)],)
+                exit_in_output_list.append(in_output_list[in_output_names.index(in_output_name)])
             for in_output_name in cache_in_output_names:
-                cache_in_output_list += (in_output_list[in_output_names.index(in_output_name)],)
+                cache_in_output_list.append(in_output_list[in_output_names.index(in_output_name)])
 
-            entry_param_list = ()
-            exit_param_list = ()
-            cache_param_list = ()
+            entry_param_list = []
+            exit_param_list = []
+            cache_param_list = []
             for param_name in entry_param_names:
-                entry_param_list += (param_list[param_names.index(param_name)],)
+                entry_param_list.append(param_list[param_names.index(param_name)])
             for param_name in exit_param_names:
-                exit_param_list += (param_list[param_names.index(param_name)],)
+                exit_param_list.append(param_list[param_names.index(param_name)])
             for param_name in cache_param_names:
-                cache_param_list += (param_list[param_names.index(param_name)],)
+                cache_param_list.append(param_list[param_names.index(param_name)])
 
             n_params = len(param_list[0]) if len(param_list) &gt; 0 else 1
-            entry_in_output_tuples = tuple(zip(*entry_in_output_list))
-            if len(entry_in_output_tuples) == 0:
-                entry_in_output_tuples = ((),) * n_params
-            exit_in_output_tuples = tuple(zip(*exit_in_output_list))
-            if len(exit_in_output_tuples) == 0:
-                exit_in_output_tuples = ((),) * n_params
-            entry_param_tuples = tuple(zip(*entry_param_list))
-            if len(entry_param_tuples) == 0:
-                entry_param_tuples = ((),) * n_params
-            exit_param_tuples = tuple(zip(*exit_param_list))
-            if len(exit_param_tuples) == 0:
-                exit_param_tuples = ((),) * n_params
+            entry_in_output_tuples = list(zip(*entry_in_output_list))
+            exit_in_output_tuples = list(zip(*exit_in_output_list))
+            entry_param_tuples = list(zip(*entry_param_list))
+            exit_param_tuples = list(zip(*exit_param_list))
 
             def _build_more_args(func_settings, func_kwargs):
                 pass_kwargs = func_settings.get(&#39;pass_kwargs&#39;, [])
@@ -624,10 +659,18 @@ class SignalFactory(IndicatorFactory):
             # Caching
             cache = use_cache
             if cache is None and cache_func is not None:
+                _cache_in_output_list = cache_in_output_list
+                _cache_param_list = cache_param_list
+                if checks.is_numba_func(cache_func):
+                    if len(_cache_in_output_list) &gt; 0:
+                        _cache_in_output_list = [to_typed_list(in_outputs) for in_outputs in _cache_in_output_list]
+                    if len(_cache_param_list) &gt; 0:
+                        _cache_param_list = [to_typed_list(params) for params in _cache_param_list]
+
                 cache = cache_func(
-                    *cache_input_list,
-                    *cache_in_output_list,
-                    *cache_param_list,
+                    *cache_input_tuple,
+                    *_cache_in_output_list,
+                    *_cache_param_list,
                     *cache_args,
                     *cache_more_args
                 )
@@ -647,29 +690,56 @@ class SignalFactory(IndicatorFactory):
 
             # Apply and concatenate
             if exit_only and not iteratively:
+                if len(exit_in_output_names) &gt; 0:
+                    _exit_in_output_tuples = (to_typed_list(exit_in_output_tuples),)
+                else:
+                    _exit_in_output_tuples = ()
+                if len(exit_param_names) &gt; 0:
+                    _exit_param_tuples = (to_typed_list(exit_param_tuples),)
+                else:
+                    _exit_param_tuples = ()
+
                 return combine_fns.apply_and_concat_one_nb(
                     n_params,
-                    apply_nb,
+                    apply_func_nb,
                     input_list[0],
                     exit_wait,
-                    exit_input_list,
-                    exit_in_output_tuples,
-                    exit_param_tuples,
+                    exit_input_tuple,
+                    *_exit_in_output_tuples,
+                    *_exit_param_tuples,
                     exit_args + exit_more_args + exit_cache
                 )
+
             else:
+                if len(entry_in_output_names) &gt; 0:
+                    _entry_in_output_tuples = (to_typed_list(entry_in_output_tuples),)
+                else:
+                    _entry_in_output_tuples = ()
+                if len(entry_param_names) &gt; 0:
+                    _entry_param_tuples = (to_typed_list(entry_param_tuples),)
+                else:
+                    _entry_param_tuples = ()
+                if len(exit_in_output_names) &gt; 0:
+                    _exit_in_output_tuples = (to_typed_list(exit_in_output_tuples),)
+                else:
+                    _exit_in_output_tuples = ()
+                if len(exit_param_names) &gt; 0:
+                    _exit_param_tuples = (to_typed_list(exit_param_tuples),)
+                else:
+                    _exit_param_tuples = ()
+
                 return combine_fns.apply_and_concat_multiple_nb(
                     n_params,
-                    apply_nb,
+                    apply_func_nb,
                     input_shape,
                     entry_wait,
                     exit_wait,
-                    entry_input_list,
-                    exit_input_list,
-                    entry_in_output_tuples,
-                    exit_in_output_tuples,
-                    entry_param_tuples,
-                    exit_param_tuples,
+                    entry_input_tuple,
+                    exit_input_tuple,
+                    *_entry_in_output_tuples,
+                    *_exit_in_output_tuples,
+                    *_entry_param_tuples,
+                    *_exit_param_tuples,
                     entry_args + entry_more_args + entry_cache,
                     exit_args + exit_more_args + exit_cache
                 )
@@ -1163,11 +1233,11 @@ a new indicator object with newly indexed attributes.</p>
         def _check_settings(func_settings):
             for k in func_settings:
                 if k not in (
-                        &#39;pass_inputs&#39;,
-                        &#39;pass_in_outputs&#39;,
-                        &#39;pass_params&#39;,
-                        &#39;pass_kwargs&#39;,
-                        &#39;pass_cache&#39;
+                    &#39;pass_inputs&#39;,
+                    &#39;pass_in_outputs&#39;,
+                    &#39;pass_params&#39;,
+                    &#39;pass_kwargs&#39;,
+                    &#39;pass_cache&#39;
                 ):
                     raise ValueError(f&#34;Can&#39;t find key {k} in function settings&#34;)
 
@@ -1197,40 +1267,82 @@ a new indicator object with newly indexed attributes.</p>
         exit_param_names = _get_func_names(exit_settings, &#39;pass_params&#39;, param_names)
         cache_param_names = _get_func_names(cache_settings, &#39;pass_params&#39;, param_names)
 
+        # Build a function that selects a parameter tuple
         if exit_only and not iteratively:
-            @njit
-            def apply_nb(i, entries, exit_wait, exit_input_list, exit_in_output_tuples,
-                         exit_param_tuples, exit_args):
-                return generate_ex_nb(
-                    entries,
-                    exit_wait,
-                    exit_choice_func,
-                    *exit_input_list,
-                    *exit_in_output_tuples[i],
-                    *exit_param_tuples[i],
-                    *exit_args
-                )
+            _0 = &#34;i&#34;
+            _0 += &#34;, entries&#34;
+            _0 += &#34;, exit_wait&#34;
+            _0 += &#34;, exit_input_tuple&#34;
+            if len(exit_in_output_names) &gt; 0:
+                _0 += &#34;, exit_in_output_tuples&#34;
+            if len(exit_param_names) &gt; 0:
+                _0 += &#34;, exit_param_tuples&#34;
+            _0 += &#34;, exit_args&#34;
+            _1 = &#34;entries&#34;
+            _1 += &#34;, exit_wait&#34;
+            _1 += &#34;, exit_choice_func&#34;
+            _1 += &#34;, *exit_input_tuple&#34;
+            if len(exit_in_output_names) &gt; 0:
+                _1 += &#34;, *exit_in_output_tuples[i]&#34;
+            if len(exit_param_names) &gt; 0:
+                _1 += &#34;, *exit_param_tuples[i]&#34;
+            _1 += &#34;, *exit_args&#34;
+            func_str = &#34;def apply_func_nb({0}):\n   return generate_ex_nb({1})&#34;.format(_0, _1)
+            scope = {
+                &#39;generate_ex_nb&#39;: generate_ex_nb,
+                &#39;exit_choice_func&#39;: exit_choice_func
+            }
+            filename = inspect.getfile(lambda: None)
+            code = compile(func_str, filename, &#39;single&#39;)
+            exec(code, scope)
+            apply_func_nb = scope[&#39;apply_func_nb&#39;]
+            apply_func_nb = njit(apply_func_nb)
+
         else:
-            @njit
-            def apply_nb(i, shape, entry_wait, exit_wait, entry_input_list, exit_input_list,
-                         entry_in_output_tuples, exit_in_output_tuples, entry_param_tuples,
-                         exit_param_tuples, entry_args, exit_args):
-                return generate_enex_nb(
-                    shape,
-                    entry_wait, exit_wait,
-                    entry_choice_func, (
-                        *entry_input_list,
-                        *entry_in_output_tuples[i],
-                        *entry_param_tuples[i],
-                        *entry_args
-                    ),
-                    exit_choice_func, (
-                        *exit_input_list,
-                        *exit_in_output_tuples[i],
-                        *exit_param_tuples[i],
-                        *exit_args
-                    )
-                )
+            _0 = &#34;i&#34;
+            _0 += &#34;, shape&#34;
+            _0 += &#34;, entry_wait&#34;
+            _0 += &#34;, exit_wait&#34;
+            _0 += &#34;, entry_input_tuple&#34;
+            _0 += &#34;, exit_input_tuple&#34;
+            if len(entry_in_output_names) &gt; 0:
+                _0 += &#34;, entry_in_output_tuples&#34;
+            if len(exit_in_output_names) &gt; 0:
+                _0 += &#34;, exit_in_output_tuples&#34;
+            if len(entry_param_names) &gt; 0:
+                _0 += &#34;, entry_param_tuples&#34;
+            if len(exit_param_names) &gt; 0:
+                _0 += &#34;, exit_param_tuples&#34;
+            _0 += &#34;, entry_args&#34;
+            _0 += &#34;, exit_args&#34;
+            _1 = &#34;shape&#34;
+            _1 += &#34;, entry_wait&#34;
+            _1 += &#34;, exit_wait&#34;
+            _1 += &#34;, entry_choice_func&#34;
+            _1 += &#34;, (*entry_input_tuple&#34;
+            if len(entry_in_output_names) &gt; 0:
+                _1 += &#34;, *entry_in_output_tuples[i]&#34;
+            if len(entry_param_names) &gt; 0:
+                _1 += &#34;, *entry_param_tuples[i]&#34;
+            _1 += &#34;, *entry_args)&#34;
+            _1 += &#34;, exit_choice_func&#34;
+            _1 += &#34;, (*exit_input_tuple&#34;
+            if len(exit_in_output_names) &gt; 0:
+                _1 += &#34;, *exit_in_output_tuples[i]&#34;
+            if len(exit_param_names) &gt; 0:
+                _1 += &#34;, *exit_param_tuples[i]&#34;
+            _1 += &#34;, *exit_args)&#34;
+            func_str = &#34;def apply_func_nb({0}):\n   return generate_enex_nb({1})&#34;.format(_0, _1)
+            scope = {
+                &#39;generate_enex_nb&#39;: generate_enex_nb,
+                &#39;entry_choice_func&#39;: entry_choice_func,
+                &#39;exit_choice_func&#39;: exit_choice_func
+            }
+            filename = inspect.getfile(lambda: None)
+            code = compile(func_str, filename, &#39;single&#39;)
+            exec(code, scope)
+            apply_func_nb = scope[&#39;apply_func_nb&#39;]
+            apply_func_nb = njit(apply_func_nb)
 
         def custom_func(input_list, in_output_list, param_list, *args, input_shape=None, flex_2d=None,
                         entry_args=None, exit_args=None, cache_args=None, entry_kwargs=None,
@@ -1283,49 +1395,41 @@ a new indicator object with newly indexed attributes.</p>
             exit_wait = exit_kwargs[&#39;wait&#39;]
 
             # Distribute arguments across functions
-            entry_input_list = ()
-            exit_input_list = ()
-            cache_input_list = ()
+            entry_input_tuple = ()
+            exit_input_tuple = ()
+            cache_input_tuple = ()
             for input_name in entry_input_names:
-                entry_input_list += (input_list[input_names.index(input_name)],)
+                entry_input_tuple += (input_list[input_names.index(input_name)],)
             for input_name in exit_input_names:
-                exit_input_list += (input_list[input_names.index(input_name)],)
+                exit_input_tuple += (input_list[input_names.index(input_name)],)
             for input_name in cache_input_names:
-                cache_input_list += (input_list[input_names.index(input_name)],)
+                cache_input_tuple += (input_list[input_names.index(input_name)],)
 
-            entry_in_output_list = ()
-            exit_in_output_list = ()
-            cache_in_output_list = ()
+            entry_in_output_list = []
+            exit_in_output_list = []
+            cache_in_output_list = []
             for in_output_name in entry_in_output_names:
-                entry_in_output_list += (in_output_list[in_output_names.index(in_output_name)],)
+                entry_in_output_list.append(in_output_list[in_output_names.index(in_output_name)])
             for in_output_name in exit_in_output_names:
-                exit_in_output_list += (in_output_list[in_output_names.index(in_output_name)],)
+                exit_in_output_list.append(in_output_list[in_output_names.index(in_output_name)])
             for in_output_name in cache_in_output_names:
-                cache_in_output_list += (in_output_list[in_output_names.index(in_output_name)],)
+                cache_in_output_list.append(in_output_list[in_output_names.index(in_output_name)])
 
-            entry_param_list = ()
-            exit_param_list = ()
-            cache_param_list = ()
+            entry_param_list = []
+            exit_param_list = []
+            cache_param_list = []
             for param_name in entry_param_names:
-                entry_param_list += (param_list[param_names.index(param_name)],)
+                entry_param_list.append(param_list[param_names.index(param_name)])
             for param_name in exit_param_names:
-                exit_param_list += (param_list[param_names.index(param_name)],)
+                exit_param_list.append(param_list[param_names.index(param_name)])
             for param_name in cache_param_names:
-                cache_param_list += (param_list[param_names.index(param_name)],)
+                cache_param_list.append(param_list[param_names.index(param_name)])
 
             n_params = len(param_list[0]) if len(param_list) &gt; 0 else 1
-            entry_in_output_tuples = tuple(zip(*entry_in_output_list))
-            if len(entry_in_output_tuples) == 0:
-                entry_in_output_tuples = ((),) * n_params
-            exit_in_output_tuples = tuple(zip(*exit_in_output_list))
-            if len(exit_in_output_tuples) == 0:
-                exit_in_output_tuples = ((),) * n_params
-            entry_param_tuples = tuple(zip(*entry_param_list))
-            if len(entry_param_tuples) == 0:
-                entry_param_tuples = ((),) * n_params
-            exit_param_tuples = tuple(zip(*exit_param_list))
-            if len(exit_param_tuples) == 0:
-                exit_param_tuples = ((),) * n_params
+            entry_in_output_tuples = list(zip(*entry_in_output_list))
+            exit_in_output_tuples = list(zip(*exit_in_output_list))
+            entry_param_tuples = list(zip(*entry_param_list))
+            exit_param_tuples = list(zip(*exit_param_list))
 
             def _build_more_args(func_settings, func_kwargs):
                 pass_kwargs = func_settings.get(&#39;pass_kwargs&#39;, [])
@@ -1348,10 +1452,18 @@ a new indicator object with newly indexed attributes.</p>
             # Caching
             cache = use_cache
             if cache is None and cache_func is not None:
+                _cache_in_output_list = cache_in_output_list
+                _cache_param_list = cache_param_list
+                if checks.is_numba_func(cache_func):
+                    if len(_cache_in_output_list) &gt; 0:
+                        _cache_in_output_list = [to_typed_list(in_outputs) for in_outputs in _cache_in_output_list]
+                    if len(_cache_param_list) &gt; 0:
+                        _cache_param_list = [to_typed_list(params) for params in _cache_param_list]
+
                 cache = cache_func(
-                    *cache_input_list,
-                    *cache_in_output_list,
-                    *cache_param_list,
+                    *cache_input_tuple,
+                    *_cache_in_output_list,
+                    *_cache_param_list,
                     *cache_args,
                     *cache_more_args
                 )
@@ -1371,29 +1483,56 @@ a new indicator object with newly indexed attributes.</p>
 
             # Apply and concatenate
             if exit_only and not iteratively:
+                if len(exit_in_output_names) &gt; 0:
+                    _exit_in_output_tuples = (to_typed_list(exit_in_output_tuples),)
+                else:
+                    _exit_in_output_tuples = ()
+                if len(exit_param_names) &gt; 0:
+                    _exit_param_tuples = (to_typed_list(exit_param_tuples),)
+                else:
+                    _exit_param_tuples = ()
+
                 return combine_fns.apply_and_concat_one_nb(
                     n_params,
-                    apply_nb,
+                    apply_func_nb,
                     input_list[0],
                     exit_wait,
-                    exit_input_list,
-                    exit_in_output_tuples,
-                    exit_param_tuples,
+                    exit_input_tuple,
+                    *_exit_in_output_tuples,
+                    *_exit_param_tuples,
                     exit_args + exit_more_args + exit_cache
                 )
+
             else:
+                if len(entry_in_output_names) &gt; 0:
+                    _entry_in_output_tuples = (to_typed_list(entry_in_output_tuples),)
+                else:
+                    _entry_in_output_tuples = ()
+                if len(entry_param_names) &gt; 0:
+                    _entry_param_tuples = (to_typed_list(entry_param_tuples),)
+                else:
+                    _entry_param_tuples = ()
+                if len(exit_in_output_names) &gt; 0:
+                    _exit_in_output_tuples = (to_typed_list(exit_in_output_tuples),)
+                else:
+                    _exit_in_output_tuples = ()
+                if len(exit_param_names) &gt; 0:
+                    _exit_param_tuples = (to_typed_list(exit_param_tuples),)
+                else:
+                    _exit_param_tuples = ()
+
                 return combine_fns.apply_and_concat_multiple_nb(
                     n_params,
-                    apply_nb,
+                    apply_func_nb,
                     input_shape,
                     entry_wait,
                     exit_wait,
-                    entry_input_list,
-                    exit_input_list,
-                    entry_in_output_tuples,
-                    exit_in_output_tuples,
-                    entry_param_tuples,
-                    exit_param_tuples,
+                    entry_input_tuple,
+                    exit_input_tuple,
+                    *_entry_in_output_tuples,
+                    *_exit_in_output_tuples,
+                    *_entry_param_tuples,
+                    *_exit_param_tuples,
                     entry_args + entry_more_args + entry_cache,
                     exit_args + exit_more_args + exit_cache
                 )
@@ -1934,11 +2073,11 @@ custom_prob2 0.0 1.0 0.0 1.0
     def _check_settings(func_settings):
         for k in func_settings:
             if k not in (
-                    &#39;pass_inputs&#39;,
-                    &#39;pass_in_outputs&#39;,
-                    &#39;pass_params&#39;,
-                    &#39;pass_kwargs&#39;,
-                    &#39;pass_cache&#39;
+                &#39;pass_inputs&#39;,
+                &#39;pass_in_outputs&#39;,
+                &#39;pass_params&#39;,
+                &#39;pass_kwargs&#39;,
+                &#39;pass_cache&#39;
             ):
                 raise ValueError(f&#34;Can&#39;t find key {k} in function settings&#34;)
 
@@ -1968,40 +2107,82 @@ custom_prob2 0.0 1.0 0.0 1.0
     exit_param_names = _get_func_names(exit_settings, &#39;pass_params&#39;, param_names)
     cache_param_names = _get_func_names(cache_settings, &#39;pass_params&#39;, param_names)
 
+    # Build a function that selects a parameter tuple
     if exit_only and not iteratively:
-        @njit
-        def apply_nb(i, entries, exit_wait, exit_input_list, exit_in_output_tuples,
-                     exit_param_tuples, exit_args):
-            return generate_ex_nb(
-                entries,
-                exit_wait,
-                exit_choice_func,
-                *exit_input_list,
-                *exit_in_output_tuples[i],
-                *exit_param_tuples[i],
-                *exit_args
-            )
+        _0 = &#34;i&#34;
+        _0 += &#34;, entries&#34;
+        _0 += &#34;, exit_wait&#34;
+        _0 += &#34;, exit_input_tuple&#34;
+        if len(exit_in_output_names) &gt; 0:
+            _0 += &#34;, exit_in_output_tuples&#34;
+        if len(exit_param_names) &gt; 0:
+            _0 += &#34;, exit_param_tuples&#34;
+        _0 += &#34;, exit_args&#34;
+        _1 = &#34;entries&#34;
+        _1 += &#34;, exit_wait&#34;
+        _1 += &#34;, exit_choice_func&#34;
+        _1 += &#34;, *exit_input_tuple&#34;
+        if len(exit_in_output_names) &gt; 0:
+            _1 += &#34;, *exit_in_output_tuples[i]&#34;
+        if len(exit_param_names) &gt; 0:
+            _1 += &#34;, *exit_param_tuples[i]&#34;
+        _1 += &#34;, *exit_args&#34;
+        func_str = &#34;def apply_func_nb({0}):\n   return generate_ex_nb({1})&#34;.format(_0, _1)
+        scope = {
+            &#39;generate_ex_nb&#39;: generate_ex_nb,
+            &#39;exit_choice_func&#39;: exit_choice_func
+        }
+        filename = inspect.getfile(lambda: None)
+        code = compile(func_str, filename, &#39;single&#39;)
+        exec(code, scope)
+        apply_func_nb = scope[&#39;apply_func_nb&#39;]
+        apply_func_nb = njit(apply_func_nb)
+
     else:
-        @njit
-        def apply_nb(i, shape, entry_wait, exit_wait, entry_input_list, exit_input_list,
-                     entry_in_output_tuples, exit_in_output_tuples, entry_param_tuples,
-                     exit_param_tuples, entry_args, exit_args):
-            return generate_enex_nb(
-                shape,
-                entry_wait, exit_wait,
-                entry_choice_func, (
-                    *entry_input_list,
-                    *entry_in_output_tuples[i],
-                    *entry_param_tuples[i],
-                    *entry_args
-                ),
-                exit_choice_func, (
-                    *exit_input_list,
-                    *exit_in_output_tuples[i],
-                    *exit_param_tuples[i],
-                    *exit_args
-                )
-            )
+        _0 = &#34;i&#34;
+        _0 += &#34;, shape&#34;
+        _0 += &#34;, entry_wait&#34;
+        _0 += &#34;, exit_wait&#34;
+        _0 += &#34;, entry_input_tuple&#34;
+        _0 += &#34;, exit_input_tuple&#34;
+        if len(entry_in_output_names) &gt; 0:
+            _0 += &#34;, entry_in_output_tuples&#34;
+        if len(exit_in_output_names) &gt; 0:
+            _0 += &#34;, exit_in_output_tuples&#34;
+        if len(entry_param_names) &gt; 0:
+            _0 += &#34;, entry_param_tuples&#34;
+        if len(exit_param_names) &gt; 0:
+            _0 += &#34;, exit_param_tuples&#34;
+        _0 += &#34;, entry_args&#34;
+        _0 += &#34;, exit_args&#34;
+        _1 = &#34;shape&#34;
+        _1 += &#34;, entry_wait&#34;
+        _1 += &#34;, exit_wait&#34;
+        _1 += &#34;, entry_choice_func&#34;
+        _1 += &#34;, (*entry_input_tuple&#34;
+        if len(entry_in_output_names) &gt; 0:
+            _1 += &#34;, *entry_in_output_tuples[i]&#34;
+        if len(entry_param_names) &gt; 0:
+            _1 += &#34;, *entry_param_tuples[i]&#34;
+        _1 += &#34;, *entry_args)&#34;
+        _1 += &#34;, exit_choice_func&#34;
+        _1 += &#34;, (*exit_input_tuple&#34;
+        if len(exit_in_output_names) &gt; 0:
+            _1 += &#34;, *exit_in_output_tuples[i]&#34;
+        if len(exit_param_names) &gt; 0:
+            _1 += &#34;, *exit_param_tuples[i]&#34;
+        _1 += &#34;, *exit_args)&#34;
+        func_str = &#34;def apply_func_nb({0}):\n   return generate_enex_nb({1})&#34;.format(_0, _1)
+        scope = {
+            &#39;generate_enex_nb&#39;: generate_enex_nb,
+            &#39;entry_choice_func&#39;: entry_choice_func,
+            &#39;exit_choice_func&#39;: exit_choice_func
+        }
+        filename = inspect.getfile(lambda: None)
+        code = compile(func_str, filename, &#39;single&#39;)
+        exec(code, scope)
+        apply_func_nb = scope[&#39;apply_func_nb&#39;]
+        apply_func_nb = njit(apply_func_nb)
 
     def custom_func(input_list, in_output_list, param_list, *args, input_shape=None, flex_2d=None,
                     entry_args=None, exit_args=None, cache_args=None, entry_kwargs=None,
@@ -2054,49 +2235,41 @@ custom_prob2 0.0 1.0 0.0 1.0
         exit_wait = exit_kwargs[&#39;wait&#39;]
 
         # Distribute arguments across functions
-        entry_input_list = ()
-        exit_input_list = ()
-        cache_input_list = ()
+        entry_input_tuple = ()
+        exit_input_tuple = ()
+        cache_input_tuple = ()
         for input_name in entry_input_names:
-            entry_input_list += (input_list[input_names.index(input_name)],)
+            entry_input_tuple += (input_list[input_names.index(input_name)],)
         for input_name in exit_input_names:
-            exit_input_list += (input_list[input_names.index(input_name)],)
+            exit_input_tuple += (input_list[input_names.index(input_name)],)
         for input_name in cache_input_names:
-            cache_input_list += (input_list[input_names.index(input_name)],)
+            cache_input_tuple += (input_list[input_names.index(input_name)],)
 
-        entry_in_output_list = ()
-        exit_in_output_list = ()
-        cache_in_output_list = ()
+        entry_in_output_list = []
+        exit_in_output_list = []
+        cache_in_output_list = []
         for in_output_name in entry_in_output_names:
-            entry_in_output_list += (in_output_list[in_output_names.index(in_output_name)],)
+            entry_in_output_list.append(in_output_list[in_output_names.index(in_output_name)])
         for in_output_name in exit_in_output_names:
-            exit_in_output_list += (in_output_list[in_output_names.index(in_output_name)],)
+            exit_in_output_list.append(in_output_list[in_output_names.index(in_output_name)])
         for in_output_name in cache_in_output_names:
-            cache_in_output_list += (in_output_list[in_output_names.index(in_output_name)],)
+            cache_in_output_list.append(in_output_list[in_output_names.index(in_output_name)])
 
-        entry_param_list = ()
-        exit_param_list = ()
-        cache_param_list = ()
+        entry_param_list = []
+        exit_param_list = []
+        cache_param_list = []
         for param_name in entry_param_names:
-            entry_param_list += (param_list[param_names.index(param_name)],)
+            entry_param_list.append(param_list[param_names.index(param_name)])
         for param_name in exit_param_names:
-            exit_param_list += (param_list[param_names.index(param_name)],)
+            exit_param_list.append(param_list[param_names.index(param_name)])
         for param_name in cache_param_names:
-            cache_param_list += (param_list[param_names.index(param_name)],)
+            cache_param_list.append(param_list[param_names.index(param_name)])
 
         n_params = len(param_list[0]) if len(param_list) &gt; 0 else 1
-        entry_in_output_tuples = tuple(zip(*entry_in_output_list))
-        if len(entry_in_output_tuples) == 0:
-            entry_in_output_tuples = ((),) * n_params
-        exit_in_output_tuples = tuple(zip(*exit_in_output_list))
-        if len(exit_in_output_tuples) == 0:
-            exit_in_output_tuples = ((),) * n_params
-        entry_param_tuples = tuple(zip(*entry_param_list))
-        if len(entry_param_tuples) == 0:
-            entry_param_tuples = ((),) * n_params
-        exit_param_tuples = tuple(zip(*exit_param_list))
-        if len(exit_param_tuples) == 0:
-            exit_param_tuples = ((),) * n_params
+        entry_in_output_tuples = list(zip(*entry_in_output_list))
+        exit_in_output_tuples = list(zip(*exit_in_output_list))
+        entry_param_tuples = list(zip(*entry_param_list))
+        exit_param_tuples = list(zip(*exit_param_list))
 
         def _build_more_args(func_settings, func_kwargs):
             pass_kwargs = func_settings.get(&#39;pass_kwargs&#39;, [])
@@ -2119,10 +2292,18 @@ custom_prob2 0.0 1.0 0.0 1.0
         # Caching
         cache = use_cache
         if cache is None and cache_func is not None:
+            _cache_in_output_list = cache_in_output_list
+            _cache_param_list = cache_param_list
+            if checks.is_numba_func(cache_func):
+                if len(_cache_in_output_list) &gt; 0:
+                    _cache_in_output_list = [to_typed_list(in_outputs) for in_outputs in _cache_in_output_list]
+                if len(_cache_param_list) &gt; 0:
+                    _cache_param_list = [to_typed_list(params) for params in _cache_param_list]
+
             cache = cache_func(
-                *cache_input_list,
-                *cache_in_output_list,
-                *cache_param_list,
+                *cache_input_tuple,
+                *_cache_in_output_list,
+                *_cache_param_list,
                 *cache_args,
                 *cache_more_args
             )
@@ -2142,29 +2323,56 @@ custom_prob2 0.0 1.0 0.0 1.0
 
         # Apply and concatenate
         if exit_only and not iteratively:
+            if len(exit_in_output_names) &gt; 0:
+                _exit_in_output_tuples = (to_typed_list(exit_in_output_tuples),)
+            else:
+                _exit_in_output_tuples = ()
+            if len(exit_param_names) &gt; 0:
+                _exit_param_tuples = (to_typed_list(exit_param_tuples),)
+            else:
+                _exit_param_tuples = ()
+
             return combine_fns.apply_and_concat_one_nb(
                 n_params,
-                apply_nb,
+                apply_func_nb,
                 input_list[0],
                 exit_wait,
-                exit_input_list,
-                exit_in_output_tuples,
-                exit_param_tuples,
+                exit_input_tuple,
+                *_exit_in_output_tuples,
+                *_exit_param_tuples,
                 exit_args + exit_more_args + exit_cache
             )
+
         else:
+            if len(entry_in_output_names) &gt; 0:
+                _entry_in_output_tuples = (to_typed_list(entry_in_output_tuples),)
+            else:
+                _entry_in_output_tuples = ()
+            if len(entry_param_names) &gt; 0:
+                _entry_param_tuples = (to_typed_list(entry_param_tuples),)
+            else:
+                _entry_param_tuples = ()
+            if len(exit_in_output_names) &gt; 0:
+                _exit_in_output_tuples = (to_typed_list(exit_in_output_tuples),)
+            else:
+                _exit_in_output_tuples = ()
+            if len(exit_param_names) &gt; 0:
+                _exit_param_tuples = (to_typed_list(exit_param_tuples),)
+            else:
+                _exit_param_tuples = ()
+
             return combine_fns.apply_and_concat_multiple_nb(
                 n_params,
-                apply_nb,
+                apply_func_nb,
                 input_shape,
                 entry_wait,
                 exit_wait,
-                entry_input_list,
-                exit_input_list,
-                entry_in_output_tuples,
-                exit_in_output_tuples,
-                entry_param_tuples,
-                exit_param_tuples,
+                entry_input_tuple,
+                exit_input_tuple,
+                *_entry_in_output_tuples,
+                *_exit_in_output_tuples,
+                *_entry_param_tuples,
+                *_exit_param_tuples,
                 entry_args + entry_more_args + entry_cache,
                 exit_args + exit_more_args + exit_cache
             )
