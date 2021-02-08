@@ -56,19 +56,19 @@ from scipy.stats import skew, kurtosis
 from vectorbt.root_accessors import register_dataframe_accessor, register_series_accessor
 from vectorbt.utils import checks
 from vectorbt.utils.config import merge_dicts
-from vectorbt.utils.widgets import CustomFigureWidget
+from vectorbt.utils.widgets import FigureWidget
 from vectorbt.utils.decorators import cached_property, cached_method
 from vectorbt.base import reshape_fns
 from vectorbt.generic.accessors import (
-    Generic_Accessor,
-    Generic_SRAccessor,
-    Generic_DFAccessor
+    GenericAccessor,
+    GenericSRAccessor,
+    GenericDFAccessor
 )
 from vectorbt.utils.datetime import freq_delta, DatetimeTypes
 from vectorbt.returns import nb, metrics
 
 
-class Returns_Accessor(Generic_Accessor):
+class ReturnsAccessor(GenericAccessor):
     &#34;&#34;&#34;Accessor on top of return series. For both, Series and DataFrames.
 
     Accessible through `pd.Series.vbt.returns` and `pd.DataFrame.vbt.returns`.&#34;&#34;&#34;
@@ -77,14 +77,14 @@ class Returns_Accessor(Generic_Accessor):
         if not checks.is_pandas(obj):  # parent accessor
             obj = obj._obj
 
-        Generic_Accessor.__init__(self, obj, **kwargs)
+        GenericAccessor.__init__(self, obj, **kwargs)
 
         # Set year frequency
         self._year_freq = year_freq
 
     @classmethod
     def from_price(cls, price, **kwargs):
-        &#34;&#34;&#34;Returns a new `Returns_Accessor` instance with returns from `price`.&#34;&#34;&#34;
+        &#34;&#34;&#34;Returns a new `ReturnsAccessor` instance with returns from `price`.&#34;&#34;&#34;
         return cls(price.vbt.pct_change(), **kwargs)
 
     @property
@@ -325,7 +325,7 @@ class Returns_Accessor(Generic_Accessor):
 
     @cached_property
     def drawdowns(self):
-        &#34;&#34;&#34;`Returns_Accessor.get_drawdowns` with default arguments.&#34;&#34;&#34;
+        &#34;&#34;&#34;`ReturnsAccessor.get_drawdowns` with default arguments.&#34;&#34;&#34;
         return self.get_drawdowns()
 
     @cached_method
@@ -355,33 +355,32 @@ class Returns_Accessor(Generic_Accessor):
         ```python-repl
         &gt;&gt;&gt; import pandas as pd
         &gt;&gt;&gt; from datetime import datetime
-        &gt;&gt;&gt; import yfinance as yf
         &gt;&gt;&gt; import vectorbt as vbt
 
-        &gt;&gt;&gt; btc_price = yf.Ticker(&#34;BTC-USD&#34;).history()[&#39;Close&#39;]
-        &gt;&gt;&gt; spy_price = yf.Ticker(&#34;SPY&#34;).history()[&#39;Close&#39;]
-        &gt;&gt;&gt; price_df = pd.concat([btc_price, spy_price], axis=1, keys=(&#34;BTC-USD&#34;, &#34;SPY&#34;))
-        &gt;&gt;&gt; returns_df = price_df.pct_change()
-        &gt;&gt;&gt; returns_df[&#34;BTC-USD&#34;].vbt.returns.stats(returns_df[&#34;SPY&#34;])
-        Start                    2020-11-01 00:00:00
-        End                      2020-12-01 00:00:00
-        Duration                    31 days 00:00:00
-        Total Return [%]                     37.9835
-        Benchmark Return [%]                 10.7935
-        Annual Return [%]                    4329.46
-        Annual Volatility [%]                71.5084
-        Sharpe Ratio                         5.84964
-        Calmar Ratio                         413.819
-        Max. Drawdown [%]                   -10.4622
-        Omega Ratio                          2.36607
-        Sortino Ratio                        11.0962
-        Skew                                0.036609
-        Kurtosis                             1.04302
-        Tail Ratio                           1.66878
-        Common Sense Ratio                   73.9178
-        Value at Risk                     -0.0412519
-        Alpha                                43.0408
-        Beta                                0.531022
+        &gt;&gt;&gt; symbols = [&#34;BTC-USD&#34;, &#34;SPY&#34;]
+        &gt;&gt;&gt; price_by_symbol = vbt.utils.data.download(symbols, cols=&#39;Close&#39;)
+        &gt;&gt;&gt; price = vbt.utils.data.concat_symbols(price_by_symbol)
+        &gt;&gt;&gt; returns = price.pct_change()
+        &gt;&gt;&gt; returns[&#34;BTC-USD&#34;].vbt.returns(freq=&#39;D&#39;).stats(returns[&#34;SPY&#34;])
+        Start                    2021-01-06 00:00:00
+        End                      2021-02-07 00:00:00
+        Duration                    32 days 00:00:00
+        Total Return [%]                   -0.418286
+        Benchmark Return [%]                 3.79066
+        Annual Return [%]                   -4.66859
+        Annual Volatility [%]                 97.232
+        Sharpe Ratio                        0.423346
+        Calmar Ratio                       -0.183759
+        Max. Drawdown [%]                   -25.4061
+        Omega Ratio                          1.05892
+        Sortino Ratio                       0.601933
+        Skew                               -0.317326
+        Kurtosis                            0.436989
+        Tail Ratio                           1.12418
+        Common Sense Ratio                    1.0717
+        Value at Risk                     -0.0695332
+        Alpha                               0.180043
+        Beta                                0.859574
         Name: BTC-USD, dtype: object
         ```
         &#34;&#34;&#34;
@@ -416,7 +415,7 @@ class Returns_Accessor(Generic_Accessor):
 
 
 @register_series_accessor(&#39;returns&#39;)
-class Returns_SRAccessor(Returns_Accessor, Generic_SRAccessor):
+class ReturnsSRAccessor(ReturnsAccessor, GenericSRAccessor):
     &#34;&#34;&#34;Accessor on top of return series. For Series only.
 
     Accessible through `pd.Series.vbt.returns`.&#34;&#34;&#34;
@@ -425,12 +424,12 @@ class Returns_SRAccessor(Returns_Accessor, Generic_SRAccessor):
         if not checks.is_pandas(obj):  # parent accessor
             obj = obj._obj
 
-        Generic_SRAccessor.__init__(self, obj, **kwargs)
-        Returns_Accessor.__init__(self, obj, year_freq=year_freq, **kwargs)
+        GenericSRAccessor.__init__(self, obj, **kwargs)
+        ReturnsAccessor.__init__(self, obj, year_freq=year_freq, **kwargs)
 
     def plot_cum_returns(self, benchmark_rets=None, start_value=1, fill_to_benchmark=False,
                          main_kwargs=None, benchmark_kwargs=None, hline_shape_kwargs=None,
-                         row=None, col=None, xref=&#39;x&#39;, yref=&#39;y&#39;,
+                         add_trace_kwargs=None, xref=&#39;x&#39;, yref=&#39;y&#39;,
                          fig=None, **layout_kwargs):  # pragma: no cover
         &#34;&#34;&#34;Plot cumulative returns.
 
@@ -439,11 +438,10 @@ class Returns_SRAccessor(Returns_Accessor, Generic_SRAccessor):
                 Will broadcast per element.
             start_value (float): The starting returns.
             fill_to_benchmark (bool): Whether to fill between main and benchmark, or between main and `start_value`.
-            main_kwargs (dict): Keyword arguments passed to `vectorbt.generic.accessors.Generic_SRAccessor.plot` for main.
-            benchmark_kwargs (dict): Keyword arguments passed to `vectorbt.generic.accessors.Generic_SRAccessor.plot` for benchmark.
+            main_kwargs (dict): Keyword arguments passed to `vectorbt.generic.accessors.GenericSRAccessor.plot` for main.
+            benchmark_kwargs (dict): Keyword arguments passed to `vectorbt.generic.accessors.GenericSRAccessor.plot` for benchmark.
             hline_shape_kwargs (dict): Keyword arguments passed to `plotly.graph_objects.Figure.add_shape` for `start_value` line.
-            row (int): Row position.
-            col (int): Column position.
+            add_trace_kwargs (dict): Keyword arguments passed to `add_trace`.
             xref (str): X coordinate axis.
             yref (str): Y coordinate axis.
             fig (plotly.graph_objects.Figure): Figure to add traces to.
@@ -466,7 +464,7 @@ class Returns_SRAccessor(Returns_Accessor, Generic_SRAccessor):
         from vectorbt.settings import color_schema
 
         if fig is None:
-            fig = CustomFigureWidget()
+            fig = FigureWidget()
         fig.update_layout(**layout_kwargs)
         x_domain = [0, 1]
         xaxis = &#39;xaxis&#39; + xref[1:]
@@ -488,7 +486,7 @@ class Returns_SRAccessor(Returns_Accessor, Generic_SRAccessor):
                 )
             ), benchmark_kwargs)
             benchmark_cumrets = benchmark_rets.vbt.returns.cumulative(start_value=start_value)
-            benchmark_cumrets.vbt.plot(**benchmark_kwargs, row=row, col=col, fig=fig)
+            benchmark_cumrets.vbt.plot(**benchmark_kwargs, add_trace_kwargs=add_trace_kwargs, fig=fig)
         else:
             benchmark_cumrets = None
 
@@ -503,9 +501,9 @@ class Returns_SRAccessor(Returns_Accessor, Generic_SRAccessor):
         ), main_kwargs)
         cumrets = self.cumulative(start_value=start_value)
         if fill_to_benchmark:
-            cumrets.vbt.plot_against(benchmark_cumrets, **main_kwargs, row=row, col=col, fig=fig)
+            cumrets.vbt.plot_against(benchmark_cumrets, **main_kwargs, add_trace_kwargs=add_trace_kwargs, fig=fig)
         else:
-            cumrets.vbt.plot_against(start_value, **main_kwargs, row=row, col=col, fig=fig)
+            cumrets.vbt.plot_against(start_value, **main_kwargs, add_trace_kwargs=add_trace_kwargs, fig=fig)
 
         # Plot hline
         if hline_shape_kwargs is None:
@@ -528,7 +526,7 @@ class Returns_SRAccessor(Returns_Accessor, Generic_SRAccessor):
 
 
 @register_dataframe_accessor(&#39;returns&#39;)
-class Returns_DFAccessor(Returns_Accessor, Generic_DFAccessor):
+class ReturnsDFAccessor(ReturnsAccessor, GenericDFAccessor):
     &#34;&#34;&#34;Accessor on top of return series. For DataFrames only.
 
     Accessible through `pd.DataFrame.vbt.returns`.&#34;&#34;&#34;
@@ -537,8 +535,8 @@ class Returns_DFAccessor(Returns_Accessor, Generic_DFAccessor):
         if not checks.is_pandas(obj):  # parent accessor
             obj = obj._obj
 
-        Generic_DFAccessor.__init__(self, obj, **kwargs)
-        Returns_Accessor.__init__(self, obj, year_freq=year_freq, **kwargs)</code></pre>
+        GenericDFAccessor.__init__(self, obj, **kwargs)
+        ReturnsAccessor.__init__(self, obj, year_freq=year_freq, **kwargs)</code></pre>
 </details>
 </section>
 <section>
@@ -550,8 +548,8 @@ class Returns_DFAccessor(Returns_Accessor, Generic_DFAccessor):
 <section>
 <h2 class="section-title" id="header-classes">Classes</h2>
 <dl>
-<dt id="vectorbt.returns.accessors.Returns_Accessor"><code class="flex name class">
-<span>class <span class="ident parent-fname">Returns_Accessor</span></span>
+<dt id="vectorbt.returns.accessors.ReturnsAccessor"><code class="flex name class">
+<span>class <span class="ident parent-fname">ReturnsAccessor</span></span>
 <span>(</span><span>obj, year_freq=None, **kwargs)</span>
 </code></dt>
 <dd>
@@ -561,7 +559,7 @@ class Returns_DFAccessor(Returns_Accessor, Generic_DFAccessor):
 <summary>
 <span>Expand source code</span>
 </summary>
-<pre><code class="python">class Returns_Accessor(Generic_Accessor):
+<pre><code class="python">class ReturnsAccessor(GenericAccessor):
     &#34;&#34;&#34;Accessor on top of return series. For both, Series and DataFrames.
 
     Accessible through `pd.Series.vbt.returns` and `pd.DataFrame.vbt.returns`.&#34;&#34;&#34;
@@ -570,14 +568,14 @@ class Returns_DFAccessor(Returns_Accessor, Generic_DFAccessor):
         if not checks.is_pandas(obj):  # parent accessor
             obj = obj._obj
 
-        Generic_Accessor.__init__(self, obj, **kwargs)
+        GenericAccessor.__init__(self, obj, **kwargs)
 
         # Set year frequency
         self._year_freq = year_freq
 
     @classmethod
     def from_price(cls, price, **kwargs):
-        &#34;&#34;&#34;Returns a new `Returns_Accessor` instance with returns from `price`.&#34;&#34;&#34;
+        &#34;&#34;&#34;Returns a new `ReturnsAccessor` instance with returns from `price`.&#34;&#34;&#34;
         return cls(price.vbt.pct_change(), **kwargs)
 
     @property
@@ -818,7 +816,7 @@ class Returns_DFAccessor(Returns_Accessor, Generic_DFAccessor):
 
     @cached_property
     def drawdowns(self):
-        &#34;&#34;&#34;`Returns_Accessor.get_drawdowns` with default arguments.&#34;&#34;&#34;
+        &#34;&#34;&#34;`ReturnsAccessor.get_drawdowns` with default arguments.&#34;&#34;&#34;
         return self.get_drawdowns()
 
     @cached_method
@@ -848,33 +846,32 @@ class Returns_DFAccessor(Returns_Accessor, Generic_DFAccessor):
         ```python-repl
         &gt;&gt;&gt; import pandas as pd
         &gt;&gt;&gt; from datetime import datetime
-        &gt;&gt;&gt; import yfinance as yf
         &gt;&gt;&gt; import vectorbt as vbt
 
-        &gt;&gt;&gt; btc_price = yf.Ticker(&#34;BTC-USD&#34;).history()[&#39;Close&#39;]
-        &gt;&gt;&gt; spy_price = yf.Ticker(&#34;SPY&#34;).history()[&#39;Close&#39;]
-        &gt;&gt;&gt; price_df = pd.concat([btc_price, spy_price], axis=1, keys=(&#34;BTC-USD&#34;, &#34;SPY&#34;))
-        &gt;&gt;&gt; returns_df = price_df.pct_change()
-        &gt;&gt;&gt; returns_df[&#34;BTC-USD&#34;].vbt.returns.stats(returns_df[&#34;SPY&#34;])
-        Start                    2020-11-01 00:00:00
-        End                      2020-12-01 00:00:00
-        Duration                    31 days 00:00:00
-        Total Return [%]                     37.9835
-        Benchmark Return [%]                 10.7935
-        Annual Return [%]                    4329.46
-        Annual Volatility [%]                71.5084
-        Sharpe Ratio                         5.84964
-        Calmar Ratio                         413.819
-        Max. Drawdown [%]                   -10.4622
-        Omega Ratio                          2.36607
-        Sortino Ratio                        11.0962
-        Skew                                0.036609
-        Kurtosis                             1.04302
-        Tail Ratio                           1.66878
-        Common Sense Ratio                   73.9178
-        Value at Risk                     -0.0412519
-        Alpha                                43.0408
-        Beta                                0.531022
+        &gt;&gt;&gt; symbols = [&#34;BTC-USD&#34;, &#34;SPY&#34;]
+        &gt;&gt;&gt; price_by_symbol = vbt.utils.data.download(symbols, cols=&#39;Close&#39;)
+        &gt;&gt;&gt; price = vbt.utils.data.concat_symbols(price_by_symbol)
+        &gt;&gt;&gt; returns = price.pct_change()
+        &gt;&gt;&gt; returns[&#34;BTC-USD&#34;].vbt.returns(freq=&#39;D&#39;).stats(returns[&#34;SPY&#34;])
+        Start                    2021-01-06 00:00:00
+        End                      2021-02-07 00:00:00
+        Duration                    32 days 00:00:00
+        Total Return [%]                   -0.418286
+        Benchmark Return [%]                 3.79066
+        Annual Return [%]                   -4.66859
+        Annual Volatility [%]                 97.232
+        Sharpe Ratio                        0.423346
+        Calmar Ratio                       -0.183759
+        Max. Drawdown [%]                   -25.4061
+        Omega Ratio                          1.05892
+        Sortino Ratio                       0.601933
+        Skew                               -0.317326
+        Kurtosis                            0.436989
+        Tail Ratio                           1.12418
+        Common Sense Ratio                    1.0717
+        Value at Risk                     -0.0695332
+        Alpha                               0.180043
+        Beta                                0.859574
         Name: BTC-USD, dtype: object
         ```
         &#34;&#34;&#34;
@@ -909,35 +906,35 @@ class Returns_DFAccessor(Returns_Accessor, Generic_DFAccessor):
 </details>
 <h3 class="section-subtitle">Ancestors</h3>
 <ul class="hlist">
-<li><a title="vectorbt.generic.accessors.Generic_Accessor" href="../generic/accessors.html#vectorbt.generic.accessors.Generic_Accessor">Generic_Accessor</a></li>
-<li><a title="vectorbt.base.accessors.Base_Accessor" href="../base/accessors.html#vectorbt.base.accessors.Base_Accessor">Base_Accessor</a></li>
+<li><a title="vectorbt.generic.accessors.GenericAccessor" href="../generic/accessors.html#vectorbt.generic.accessors.GenericAccessor">GenericAccessor</a></li>
+<li><a title="vectorbt.base.accessors.BaseAccessor" href="../base/accessors.html#vectorbt.base.accessors.BaseAccessor">BaseAccessor</a></li>
 </ul>
 <h3 class="section-subtitle">Subclasses</h3>
 <ul class="hlist">
-<li><a title="vectorbt.returns.accessors.Returns_DFAccessor" href="#vectorbt.returns.accessors.Returns_DFAccessor">Returns_DFAccessor</a></li>
-<li><a title="vectorbt.returns.accessors.Returns_SRAccessor" href="#vectorbt.returns.accessors.Returns_SRAccessor">Returns_SRAccessor</a></li>
+<li><a title="vectorbt.returns.accessors.ReturnsDFAccessor" href="#vectorbt.returns.accessors.ReturnsDFAccessor">ReturnsDFAccessor</a></li>
+<li><a title="vectorbt.returns.accessors.ReturnsSRAccessor" href="#vectorbt.returns.accessors.ReturnsSRAccessor">ReturnsSRAccessor</a></li>
 </ul>
 <h3 class="section-subtitle">Static methods</h3>
 <dl>
-<dt id="vectorbt.returns.accessors.Returns_Accessor.from_price"><code class="name flex">
+<dt id="vectorbt.returns.accessors.ReturnsAccessor.from_price"><code class="name flex">
 <span>def <span class="ident fname">from_price</span></span>(<span>price, **kwargs)</span>
 </code></dt>
 <dd>
-<div class="desc"><p>Returns a new <code><a title="vectorbt.returns.accessors.Returns_Accessor" href="#vectorbt.returns.accessors.Returns_Accessor">Returns_Accessor</a></code> instance with returns from <code>price</code>.</p></div>
+<div class="desc"><p>Returns a new <code><a title="vectorbt.returns.accessors.ReturnsAccessor" href="#vectorbt.returns.accessors.ReturnsAccessor">ReturnsAccessor</a></code> instance with returns from <code>price</code>.</p></div>
 <details class="source">
 <summary>
 <span>Expand source code</span>
 </summary>
 <pre><code class="python">@classmethod
 def from_price(cls, price, **kwargs):
-    &#34;&#34;&#34;Returns a new `Returns_Accessor` instance with returns from `price`.&#34;&#34;&#34;
+    &#34;&#34;&#34;Returns a new `ReturnsAccessor` instance with returns from `price`.&#34;&#34;&#34;
     return cls(price.vbt.pct_change(), **kwargs)</code></pre>
 </details>
 </dd>
 </dl>
 <h3 class="section-subtitle">Instance variables</h3>
 <dl>
-<dt id="vectorbt.returns.accessors.Returns_Accessor.ann_factor"><code class="name">var <span class="ident fname">ann_factor</span></code></dt>
+<dt id="vectorbt.returns.accessors.ReturnsAccessor.ann_factor"><code class="name">var <span class="ident fname">ann_factor</span></code></dt>
 <dd>
 <div class="desc"><p>Annualization factor.</p></div>
 <details class="source">
@@ -952,9 +949,9 @@ def ann_factor(self):
     return self.year_freq / self.wrapper.freq</code></pre>
 </details>
 </dd>
-<dt id="vectorbt.returns.accessors.Returns_Accessor.drawdowns"><code class="name">var <span class="ident fname">drawdowns</span></code></dt>
+<dt id="vectorbt.returns.accessors.ReturnsAccessor.drawdowns"><code class="name">var <span class="ident fname">drawdowns</span></code></dt>
 <dd>
-<div class="desc"><p><code><a title="vectorbt.returns.accessors.Returns_Accessor.get_drawdowns" href="#vectorbt.returns.accessors.Returns_Accessor.get_drawdowns">Returns_Accessor.get_drawdowns()</a></code> with default arguments.</p></div>
+<div class="desc"><p><code><a title="vectorbt.returns.accessors.ReturnsAccessor.get_drawdowns" href="#vectorbt.returns.accessors.ReturnsAccessor.get_drawdowns">ReturnsAccessor.get_drawdowns()</a></code> with default arguments.</p></div>
 <details class="source">
 <summary>
 <span>Expand source code</span>
@@ -976,7 +973,7 @@ def ann_factor(self):
     return val</code></pre>
 </details>
 </dd>
-<dt id="vectorbt.returns.accessors.Returns_Accessor.year_freq"><code class="name">var <span class="ident fname">year_freq</span></code></dt>
+<dt id="vectorbt.returns.accessors.ReturnsAccessor.year_freq"><code class="name">var <span class="ident fname">year_freq</span></code></dt>
 <dd>
 <div class="desc"><p>Year frequency.</p></div>
 <details class="source">
@@ -997,7 +994,7 @@ def year_freq(self):
 </dl>
 <h3 class="section-subtitle">Methods</h3>
 <dl>
-<dt id="vectorbt.returns.accessors.Returns_Accessor.alpha"><code class="name flex">
+<dt id="vectorbt.returns.accessors.ReturnsAccessor.alpha"><code class="name flex">
 <span>def <span class="ident fname">alpha</span></span>(<span>self, benchmark_rets, risk_free=0.0)</span>
 </code></dt>
 <dd>
@@ -1030,7 +1027,7 @@ Will broadcast per column.</dd>
     return self.wrapper.wrap_reduced(nb.alpha_nb(self.to_2d_array(), benchmark_rets, self.ann_factor, risk_free))</code></pre>
 </details>
 </dd>
-<dt id="vectorbt.returns.accessors.Returns_Accessor.annual"><code class="name flex">
+<dt id="vectorbt.returns.accessors.ReturnsAccessor.annual"><code class="name flex">
 <span>def <span class="ident fname">annual</span></span>(<span>self)</span>
 </code></dt>
 <dd>
@@ -1048,7 +1045,7 @@ Will broadcast per column.</dd>
     return self.resample_apply(self.year_freq, nb.total_return_apply_nb)</code></pre>
 </details>
 </dd>
-<dt id="vectorbt.returns.accessors.Returns_Accessor.annualized"><code class="name flex">
+<dt id="vectorbt.returns.accessors.ReturnsAccessor.annualized"><code class="name flex">
 <span>def <span class="ident fname">annualized</span></span>(<span>self)</span>
 </code></dt>
 <dd>
@@ -1065,7 +1062,7 @@ Will broadcast per column.</dd>
     return self.wrapper.wrap_reduced(nb.annualized_return_nb(self.to_2d_array(), self.ann_factor))</code></pre>
 </details>
 </dd>
-<dt id="vectorbt.returns.accessors.Returns_Accessor.annualized_volatility"><code class="name flex">
+<dt id="vectorbt.returns.accessors.ReturnsAccessor.annualized_volatility"><code class="name flex">
 <span>def <span class="ident fname">annualized_volatility</span></span>(<span>self, levy_alpha=2.0)</span>
 </code></dt>
 <dd>
@@ -1090,7 +1087,7 @@ Will broadcast per column.</dd>
     return self.wrapper.wrap_reduced(nb.annualized_volatility_nb(self.to_2d_array(), self.ann_factor, levy_alpha))</code></pre>
 </details>
 </dd>
-<dt id="vectorbt.returns.accessors.Returns_Accessor.beta"><code class="name flex">
+<dt id="vectorbt.returns.accessors.ReturnsAccessor.beta"><code class="name flex">
 <span>def <span class="ident fname">beta</span></span>(<span>self, benchmark_rets)</span>
 </code></dt>
 <dd>
@@ -1117,7 +1114,7 @@ Will broadcast per element.</dd>
     return self.wrapper.wrap_reduced(nb.beta_nb(self.to_2d_array(), benchmark_rets))</code></pre>
 </details>
 </dd>
-<dt id="vectorbt.returns.accessors.Returns_Accessor.calmar_ratio"><code class="name flex">
+<dt id="vectorbt.returns.accessors.ReturnsAccessor.calmar_ratio"><code class="name flex">
 <span>def <span class="ident fname">calmar_ratio</span></span>(<span>self)</span>
 </code></dt>
 <dd>
@@ -1131,7 +1128,7 @@ Will broadcast per element.</dd>
     return self.wrapper.wrap_reduced(nb.calmar_ratio_nb(self.to_2d_array(), self.ann_factor))</code></pre>
 </details>
 </dd>
-<dt id="vectorbt.returns.accessors.Returns_Accessor.capture"><code class="name flex">
+<dt id="vectorbt.returns.accessors.ReturnsAccessor.capture"><code class="name flex">
 <span>def <span class="ident fname">capture</span></span>(<span>self, benchmark_rets)</span>
 </code></dt>
 <dd>
@@ -1158,7 +1155,7 @@ Will broadcast per element.</dd>
     return self.wrapper.wrap_reduced(nb.capture_nb(self.to_2d_array(), benchmark_rets, self.ann_factor))</code></pre>
 </details>
 </dd>
-<dt id="vectorbt.returns.accessors.Returns_Accessor.common_sense_ratio"><code class="name flex">
+<dt id="vectorbt.returns.accessors.ReturnsAccessor.common_sense_ratio"><code class="name flex">
 <span>def <span class="ident fname">common_sense_ratio</span></span>(<span>self)</span>
 </code></dt>
 <dd>
@@ -1172,7 +1169,7 @@ Will broadcast per element.</dd>
     return self.tail_ratio() * (1 + self.annualized())</code></pre>
 </details>
 </dd>
-<dt id="vectorbt.returns.accessors.Returns_Accessor.conditional_value_at_risk"><code class="name flex">
+<dt id="vectorbt.returns.accessors.ReturnsAccessor.conditional_value_at_risk"><code class="name flex">
 <span>def <span class="ident fname">conditional_value_at_risk</span></span>(<span>self, cutoff=0.05)</span>
 </code></dt>
 <dd>
@@ -1197,7 +1194,7 @@ bottom percentile of returns. Will broadcast per column.</dd>
     return self.wrapper.wrap_reduced(nb.conditional_value_at_risk_nb(self.to_2d_array(), cutoff))</code></pre>
 </details>
 </dd>
-<dt id="vectorbt.returns.accessors.Returns_Accessor.cumulative"><code class="name flex">
+<dt id="vectorbt.returns.accessors.ReturnsAccessor.cumulative"><code class="name flex">
 <span>def <span class="ident fname">cumulative</span></span>(<span>self, start_value=0.0)</span>
 </code></dt>
 <dd>
@@ -1222,7 +1219,7 @@ Will broadcast per column.</dd>
     return self.wrapper.wrap(nb.cum_returns_nb(self.to_2d_array(), start_value))</code></pre>
 </details>
 </dd>
-<dt id="vectorbt.returns.accessors.Returns_Accessor.daily"><code class="name flex">
+<dt id="vectorbt.returns.accessors.ReturnsAccessor.daily"><code class="name flex">
 <span>def <span class="ident fname">daily</span></span>(<span>self)</span>
 </code></dt>
 <dd>
@@ -1240,7 +1237,7 @@ Will broadcast per column.</dd>
     return self.resample_apply(&#39;1D&#39;, nb.total_return_apply_nb)</code></pre>
 </details>
 </dd>
-<dt id="vectorbt.returns.accessors.Returns_Accessor.deflated_sharpe_ratio"><code class="name flex">
+<dt id="vectorbt.returns.accessors.ReturnsAccessor.deflated_sharpe_ratio"><code class="name flex">
 <span>def <span class="ident fname">deflated_sharpe_ratio</span></span>(<span>self, risk_free=0.0, var_sharpe=None, nb_trials=None, ddof=0, bias=True)</span>
 </code></dt>
 <dd>
@@ -1279,7 +1276,7 @@ If <code>nb_trials</code> is None, is set to the number of columns.</p></div>
     ))</code></pre>
 </details>
 </dd>
-<dt id="vectorbt.returns.accessors.Returns_Accessor.down_capture"><code class="name flex">
+<dt id="vectorbt.returns.accessors.ReturnsAccessor.down_capture"><code class="name flex">
 <span>def <span class="ident fname">down_capture</span></span>(<span>self, benchmark_rets)</span>
 </code></dt>
 <dd>
@@ -1306,7 +1303,7 @@ Will broadcast per element.</dd>
     return self.wrapper.wrap_reduced(nb.down_capture_nb(self.to_2d_array(), benchmark_rets, self.ann_factor))</code></pre>
 </details>
 </dd>
-<dt id="vectorbt.returns.accessors.Returns_Accessor.downside_risk"><code class="name flex">
+<dt id="vectorbt.returns.accessors.ReturnsAccessor.downside_risk"><code class="name flex">
 <span>def <span class="ident fname">downside_risk</span></span>(<span>self, required_return=0.0)</span>
 </code></dt>
 <dd>
@@ -1331,7 +1328,7 @@ Will broadcast per column.</dd>
     return self.wrapper.wrap_reduced(nb.downside_risk_nb(self.to_2d_array(), self.ann_factor, required_return))</code></pre>
 </details>
 </dd>
-<dt id="vectorbt.returns.accessors.Returns_Accessor.drawdown"><code class="name flex">
+<dt id="vectorbt.returns.accessors.ReturnsAccessor.drawdown"><code class="name flex">
 <span>def <span class="ident fname">drawdown</span></span>(<span>self)</span>
 </code></dt>
 <dd>
@@ -1345,7 +1342,7 @@ Will broadcast per column.</dd>
     return self.wrapper.wrap(nb.drawdown_nb(self.to_2d_array()))</code></pre>
 </details>
 </dd>
-<dt id="vectorbt.returns.accessors.Returns_Accessor.get_drawdowns"><code class="name flex">
+<dt id="vectorbt.returns.accessors.ReturnsAccessor.get_drawdowns"><code class="name flex">
 <span>def <span class="ident fname">get_drawdowns</span></span>(<span>self, group_by=None, **kwargs)</span>
 </code></dt>
 <dd>
@@ -1365,7 +1362,7 @@ def get_drawdowns(self, group_by=None, **kwargs):
     return self.cumulative(start_value=1.).vbt(freq=self.wrapper.freq, group_by=group_by).get_drawdowns(**kwargs)</code></pre>
 </details>
 </dd>
-<dt id="vectorbt.returns.accessors.Returns_Accessor.information_ratio"><code class="name flex">
+<dt id="vectorbt.returns.accessors.ReturnsAccessor.information_ratio"><code class="name flex">
 <span>def <span class="ident fname">information_ratio</span></span>(<span>self, benchmark_rets)</span>
 </code></dt>
 <dd>
@@ -1393,7 +1390,7 @@ Will broadcast per element.</dd>
     return self.wrapper.wrap_reduced(nb.information_ratio_nb(self.to_2d_array(), benchmark_rets))</code></pre>
 </details>
 </dd>
-<dt id="vectorbt.returns.accessors.Returns_Accessor.max_drawdown"><code class="name flex">
+<dt id="vectorbt.returns.accessors.ReturnsAccessor.max_drawdown"><code class="name flex">
 <span>def <span class="ident fname">max_drawdown</span></span>(<span>self)</span>
 </code></dt>
 <dd>
@@ -1407,7 +1404,7 @@ Will broadcast per element.</dd>
     return self.wrapper.wrap_reduced(nb.max_drawdown_nb(self.to_2d_array()))</code></pre>
 </details>
 </dd>
-<dt id="vectorbt.returns.accessors.Returns_Accessor.omega_ratio"><code class="name flex">
+<dt id="vectorbt.returns.accessors.ReturnsAccessor.omega_ratio"><code class="name flex">
 <span>def <span class="ident fname">omega_ratio</span></span>(<span>self, risk_free=0.0, required_return=0.0)</span>
 </code></dt>
 <dd>
@@ -1439,7 +1436,7 @@ Will broadcast per column.</dd>
         self.to_2d_array(), self.ann_factor, risk_free, required_return))</code></pre>
 </details>
 </dd>
-<dt id="vectorbt.returns.accessors.Returns_Accessor.sharpe_ratio"><code class="name flex">
+<dt id="vectorbt.returns.accessors.ReturnsAccessor.sharpe_ratio"><code class="name flex">
 <span>def <span class="ident fname">sharpe_ratio</span></span>(<span>self, risk_free=0.0)</span>
 </code></dt>
 <dd>
@@ -1464,7 +1461,7 @@ Will broadcast per column.</dd>
     return self.wrapper.wrap_reduced(nb.sharpe_ratio_nb(self.to_2d_array(), self.ann_factor, risk_free))</code></pre>
 </details>
 </dd>
-<dt id="vectorbt.returns.accessors.Returns_Accessor.sortino_ratio"><code class="name flex">
+<dt id="vectorbt.returns.accessors.ReturnsAccessor.sortino_ratio"><code class="name flex">
 <span>def <span class="ident fname">sortino_ratio</span></span>(<span>self, required_return=0.0)</span>
 </code></dt>
 <dd>
@@ -1489,7 +1486,7 @@ Will broadcast per column.</dd>
     return self.wrapper.wrap_reduced(nb.sortino_ratio_nb(self.to_2d_array(), self.ann_factor, required_return))</code></pre>
 </details>
 </dd>
-<dt id="vectorbt.returns.accessors.Returns_Accessor.stats"><code class="name flex">
+<dt id="vectorbt.returns.accessors.ReturnsAccessor.stats"><code class="name flex">
 <span>def <span class="ident fname">stats</span></span>(<span>self, benchmark_rets, levy_alpha=2.0, risk_free=0.0, required_return=0.0)</span>
 </code></dt>
 <dd>
@@ -1512,33 +1509,32 @@ Will broadcast per column.</dd>
 <h2 id="example">Example</h2>
 <pre><code class="language-python-repl">&gt;&gt;&gt; import pandas as pd
 &gt;&gt;&gt; from datetime import datetime
-&gt;&gt;&gt; import yfinance as yf
 &gt;&gt;&gt; import vectorbt as vbt
 
-&gt;&gt;&gt; btc_price = yf.Ticker(&quot;BTC-USD&quot;).history()['Close']
-&gt;&gt;&gt; spy_price = yf.Ticker(&quot;SPY&quot;).history()['Close']
-&gt;&gt;&gt; price_df = pd.concat([btc_price, spy_price], axis=1, keys=(&quot;BTC-USD&quot;, &quot;SPY&quot;))
-&gt;&gt;&gt; returns_df = price_df.pct_change()
-&gt;&gt;&gt; returns_df[&quot;BTC-USD&quot;].vbt.returns.stats(returns_df[&quot;SPY&quot;])
-Start                    2020-11-01 00:00:00
-End                      2020-12-01 00:00:00
-Duration                    31 days 00:00:00
-Total Return [%]                     37.9835
-Benchmark Return [%]                 10.7935
-Annual Return [%]                    4329.46
-Annual Volatility [%]                71.5084
-Sharpe Ratio                         5.84964
-Calmar Ratio                         413.819
-Max. Drawdown [%]                   -10.4622
-Omega Ratio                          2.36607
-Sortino Ratio                        11.0962
-Skew                                0.036609
-Kurtosis                             1.04302
-Tail Ratio                           1.66878
-Common Sense Ratio                   73.9178
-Value at Risk                     -0.0412519
-Alpha                                43.0408
-Beta                                0.531022
+&gt;&gt;&gt; symbols = [&quot;BTC-USD&quot;, &quot;SPY&quot;]
+&gt;&gt;&gt; price_by_symbol = vbt.utils.data.download(symbols, cols='Close')
+&gt;&gt;&gt; price = vbt.utils.data.concat_symbols(price_by_symbol)
+&gt;&gt;&gt; returns = price.pct_change()
+&gt;&gt;&gt; returns[&quot;BTC-USD&quot;].vbt.returns(freq='D').stats(returns[&quot;SPY&quot;])
+Start                    2021-01-06 00:00:00
+End                      2021-02-07 00:00:00
+Duration                    32 days 00:00:00
+Total Return [%]                   -0.418286
+Benchmark Return [%]                 3.79066
+Annual Return [%]                   -4.66859
+Annual Volatility [%]                 97.232
+Sharpe Ratio                        0.423346
+Calmar Ratio                       -0.183759
+Max. Drawdown [%]                   -25.4061
+Omega Ratio                          1.05892
+Sortino Ratio                       0.601933
+Skew                               -0.317326
+Kurtosis                            0.436989
+Tail Ratio                           1.12418
+Common Sense Ratio                    1.0717
+Value at Risk                     -0.0695332
+Alpha                               0.180043
+Beta                                0.859574
 Name: BTC-USD, dtype: object
 </code></pre></div>
 <details class="source">
@@ -1563,33 +1559,32 @@ Name: BTC-USD, dtype: object
     ```python-repl
     &gt;&gt;&gt; import pandas as pd
     &gt;&gt;&gt; from datetime import datetime
-    &gt;&gt;&gt; import yfinance as yf
     &gt;&gt;&gt; import vectorbt as vbt
 
-    &gt;&gt;&gt; btc_price = yf.Ticker(&#34;BTC-USD&#34;).history()[&#39;Close&#39;]
-    &gt;&gt;&gt; spy_price = yf.Ticker(&#34;SPY&#34;).history()[&#39;Close&#39;]
-    &gt;&gt;&gt; price_df = pd.concat([btc_price, spy_price], axis=1, keys=(&#34;BTC-USD&#34;, &#34;SPY&#34;))
-    &gt;&gt;&gt; returns_df = price_df.pct_change()
-    &gt;&gt;&gt; returns_df[&#34;BTC-USD&#34;].vbt.returns.stats(returns_df[&#34;SPY&#34;])
-    Start                    2020-11-01 00:00:00
-    End                      2020-12-01 00:00:00
-    Duration                    31 days 00:00:00
-    Total Return [%]                     37.9835
-    Benchmark Return [%]                 10.7935
-    Annual Return [%]                    4329.46
-    Annual Volatility [%]                71.5084
-    Sharpe Ratio                         5.84964
-    Calmar Ratio                         413.819
-    Max. Drawdown [%]                   -10.4622
-    Omega Ratio                          2.36607
-    Sortino Ratio                        11.0962
-    Skew                                0.036609
-    Kurtosis                             1.04302
-    Tail Ratio                           1.66878
-    Common Sense Ratio                   73.9178
-    Value at Risk                     -0.0412519
-    Alpha                                43.0408
-    Beta                                0.531022
+    &gt;&gt;&gt; symbols = [&#34;BTC-USD&#34;, &#34;SPY&#34;]
+    &gt;&gt;&gt; price_by_symbol = vbt.utils.data.download(symbols, cols=&#39;Close&#39;)
+    &gt;&gt;&gt; price = vbt.utils.data.concat_symbols(price_by_symbol)
+    &gt;&gt;&gt; returns = price.pct_change()
+    &gt;&gt;&gt; returns[&#34;BTC-USD&#34;].vbt.returns(freq=&#39;D&#39;).stats(returns[&#34;SPY&#34;])
+    Start                    2021-01-06 00:00:00
+    End                      2021-02-07 00:00:00
+    Duration                    32 days 00:00:00
+    Total Return [%]                   -0.418286
+    Benchmark Return [%]                 3.79066
+    Annual Return [%]                   -4.66859
+    Annual Volatility [%]                 97.232
+    Sharpe Ratio                        0.423346
+    Calmar Ratio                       -0.183759
+    Max. Drawdown [%]                   -25.4061
+    Omega Ratio                          1.05892
+    Sortino Ratio                       0.601933
+    Skew                               -0.317326
+    Kurtosis                            0.436989
+    Tail Ratio                           1.12418
+    Common Sense Ratio                    1.0717
+    Value at Risk                     -0.0695332
+    Alpha                               0.180043
+    Beta                                0.859574
     Name: BTC-USD, dtype: object
     ```
     &#34;&#34;&#34;
@@ -1623,7 +1618,7 @@ Name: BTC-USD, dtype: object
     return stats_df</code></pre>
 </details>
 </dd>
-<dt id="vectorbt.returns.accessors.Returns_Accessor.tail_ratio"><code class="name flex">
+<dt id="vectorbt.returns.accessors.ReturnsAccessor.tail_ratio"><code class="name flex">
 <span>def <span class="ident fname">tail_ratio</span></span>(<span>self)</span>
 </code></dt>
 <dd>
@@ -1637,7 +1632,7 @@ Name: BTC-USD, dtype: object
     return self.wrapper.wrap_reduced(nb.tail_ratio_nb(self.to_2d_array()))</code></pre>
 </details>
 </dd>
-<dt id="vectorbt.returns.accessors.Returns_Accessor.total"><code class="name flex">
+<dt id="vectorbt.returns.accessors.ReturnsAccessor.total"><code class="name flex">
 <span>def <span class="ident fname">total</span></span>(<span>self)</span>
 </code></dt>
 <dd>
@@ -1652,7 +1647,7 @@ Name: BTC-USD, dtype: object
         self.to_2d_array(), np.full(len(self.wrapper.columns), 0.)))</code></pre>
 </details>
 </dd>
-<dt id="vectorbt.returns.accessors.Returns_Accessor.up_capture"><code class="name flex">
+<dt id="vectorbt.returns.accessors.ReturnsAccessor.up_capture"><code class="name flex">
 <span>def <span class="ident fname">up_capture</span></span>(<span>self, benchmark_rets)</span>
 </code></dt>
 <dd>
@@ -1679,7 +1674,7 @@ Will broadcast per element.</dd>
     return self.wrapper.wrap_reduced(nb.up_capture_nb(self.to_2d_array(), benchmark_rets, self.ann_factor))</code></pre>
 </details>
 </dd>
-<dt id="vectorbt.returns.accessors.Returns_Accessor.value_at_risk"><code class="name flex">
+<dt id="vectorbt.returns.accessors.ReturnsAccessor.value_at_risk"><code class="name flex">
 <span>def <span class="ident fname">value_at_risk</span></span>(<span>self, cutoff=0.05)</span>
 </code></dt>
 <dd>
@@ -1707,84 +1702,86 @@ bottom percentile of returns. Will broadcast per column.</dd>
 </dl>
 <h3 class="section-subtitle">Inherited members</h3>
 <ul class="hlist">
-<li><code><b><a title="vectorbt.generic.accessors.Generic_Accessor" href="../generic/accessors.html#vectorbt.generic.accessors.Generic_Accessor">Generic_Accessor</a></b></code>:
+<li><code><b><a title="vectorbt.generic.accessors.GenericAccessor" href="../generic/accessors.html#vectorbt.generic.accessors.GenericAccessor">GenericAccessor</a></b></code>:
 <ul class="hlist">
-<li><code><a title="vectorbt.generic.accessors.Generic_Accessor.align_to" href="../base/accessors.html#vectorbt.base.accessors.Base_Accessor.align_to">align_to</a></code></li>
-<li><code><a title="vectorbt.generic.accessors.Generic_Accessor.apply" href="../base/accessors.html#vectorbt.base.accessors.Base_Accessor.apply">apply</a></code></li>
-<li><code><a title="vectorbt.generic.accessors.Generic_Accessor.apply_and_concat" href="../base/accessors.html#vectorbt.base.accessors.Base_Accessor.apply_and_concat">apply_and_concat</a></code></li>
-<li><code><a title="vectorbt.generic.accessors.Generic_Accessor.apply_and_reduce" href="../generic/accessors.html#vectorbt.generic.accessors.Generic_Accessor.apply_and_reduce">apply_and_reduce</a></code></li>
-<li><code><a title="vectorbt.generic.accessors.Generic_Accessor.apply_on_index" href="../base/accessors.html#vectorbt.base.accessors.Base_Accessor.apply_on_index">apply_on_index</a></code></li>
-<li><code><a title="vectorbt.generic.accessors.Generic_Accessor.applymap" href="../generic/accessors.html#vectorbt.generic.accessors.Generic_Accessor.applymap">applymap</a></code></li>
-<li><code><a title="vectorbt.generic.accessors.Generic_Accessor.bar" href="../generic/accessors.html#vectorbt.generic.accessors.Generic_Accessor.bar">bar</a></code></li>
-<li><code><a title="vectorbt.generic.accessors.Generic_Accessor.box" href="../generic/accessors.html#vectorbt.generic.accessors.Generic_Accessor.box">box</a></code></li>
-<li><code><a title="vectorbt.generic.accessors.Generic_Accessor.broadcast" href="../base/accessors.html#vectorbt.base.accessors.Base_Accessor.broadcast">broadcast</a></code></li>
-<li><code><a title="vectorbt.generic.accessors.Generic_Accessor.broadcast_to" href="../base/accessors.html#vectorbt.base.accessors.Base_Accessor.broadcast_to">broadcast_to</a></code></li>
-<li><code><a title="vectorbt.generic.accessors.Generic_Accessor.combine_with" href="../base/accessors.html#vectorbt.base.accessors.Base_Accessor.combine_with">combine_with</a></code></li>
-<li><code><a title="vectorbt.generic.accessors.Generic_Accessor.combine_with_multiple" href="../base/accessors.html#vectorbt.base.accessors.Base_Accessor.combine_with_multiple">combine_with_multiple</a></code></li>
-<li><code><a title="vectorbt.generic.accessors.Generic_Accessor.concat" href="../base/accessors.html#vectorbt.base.accessors.Base_Accessor.concat">concat</a></code></li>
-<li><code><a title="vectorbt.generic.accessors.Generic_Accessor.count" href="../generic/accessors.html#vectorbt.generic.accessors.Generic_Accessor.count">count</a></code></li>
-<li><code><a title="vectorbt.generic.accessors.Generic_Accessor.cumprod" href="../generic/accessors.html#vectorbt.generic.accessors.Generic_Accessor.cumprod">cumprod</a></code></li>
-<li><code><a title="vectorbt.generic.accessors.Generic_Accessor.cumsum" href="../generic/accessors.html#vectorbt.generic.accessors.Generic_Accessor.cumsum">cumsum</a></code></li>
-<li><code><a title="vectorbt.generic.accessors.Generic_Accessor.describe" href="../generic/accessors.html#vectorbt.generic.accessors.Generic_Accessor.describe">describe</a></code></li>
-<li><code><a title="vectorbt.generic.accessors.Generic_Accessor.diff" href="../generic/accessors.html#vectorbt.generic.accessors.Generic_Accessor.diff">diff</a></code></li>
-<li><code><a title="vectorbt.generic.accessors.Generic_Accessor.drop_duplicate_levels" href="../base/accessors.html#vectorbt.base.accessors.Base_Accessor.drop_duplicate_levels">drop_duplicate_levels</a></code></li>
-<li><code><a title="vectorbt.generic.accessors.Generic_Accessor.drop_levels" href="../base/accessors.html#vectorbt.base.accessors.Base_Accessor.drop_levels">drop_levels</a></code></li>
-<li><code><a title="vectorbt.generic.accessors.Generic_Accessor.drop_redundant_levels" href="../base/accessors.html#vectorbt.base.accessors.Base_Accessor.drop_redundant_levels">drop_redundant_levels</a></code></li>
-<li><code><a title="vectorbt.generic.accessors.Generic_Accessor.empty" href="../base/accessors.html#vectorbt.base.accessors.Base_Accessor.empty">empty</a></code></li>
-<li><code><a title="vectorbt.generic.accessors.Generic_Accessor.empty_like" href="../base/accessors.html#vectorbt.base.accessors.Base_Accessor.empty_like">empty_like</a></code></li>
-<li><code><a title="vectorbt.generic.accessors.Generic_Accessor.ewm_mean" href="../generic/accessors.html#vectorbt.generic.accessors.Generic_Accessor.ewm_mean">ewm_mean</a></code></li>
-<li><code><a title="vectorbt.generic.accessors.Generic_Accessor.ewm_std" href="../generic/accessors.html#vectorbt.generic.accessors.Generic_Accessor.ewm_std">ewm_std</a></code></li>
-<li><code><a title="vectorbt.generic.accessors.Generic_Accessor.expanding_apply" href="../generic/accessors.html#vectorbt.generic.accessors.Generic_Accessor.expanding_apply">expanding_apply</a></code></li>
-<li><code><a title="vectorbt.generic.accessors.Generic_Accessor.expanding_max" href="../generic/accessors.html#vectorbt.generic.accessors.Generic_Accessor.expanding_max">expanding_max</a></code></li>
-<li><code><a title="vectorbt.generic.accessors.Generic_Accessor.expanding_mean" href="../generic/accessors.html#vectorbt.generic.accessors.Generic_Accessor.expanding_mean">expanding_mean</a></code></li>
-<li><code><a title="vectorbt.generic.accessors.Generic_Accessor.expanding_min" href="../generic/accessors.html#vectorbt.generic.accessors.Generic_Accessor.expanding_min">expanding_min</a></code></li>
-<li><code><a title="vectorbt.generic.accessors.Generic_Accessor.expanding_std" href="../generic/accessors.html#vectorbt.generic.accessors.Generic_Accessor.expanding_std">expanding_std</a></code></li>
-<li><code><a title="vectorbt.generic.accessors.Generic_Accessor.ffill" href="../generic/accessors.html#vectorbt.generic.accessors.Generic_Accessor.ffill">ffill</a></code></li>
-<li><code><a title="vectorbt.generic.accessors.Generic_Accessor.fillna" href="../generic/accessors.html#vectorbt.generic.accessors.Generic_Accessor.fillna">fillna</a></code></li>
-<li><code><a title="vectorbt.generic.accessors.Generic_Accessor.filter" href="../generic/accessors.html#vectorbt.generic.accessors.Generic_Accessor.filter">filter</a></code></li>
-<li><code><a title="vectorbt.generic.accessors.Generic_Accessor.flatten_grouped" href="../generic/accessors.html#vectorbt.generic.accessors.Generic_Accessor.flatten_grouped">flatten_grouped</a></code></li>
-<li><code><a title="vectorbt.generic.accessors.Generic_Accessor.fshift" href="../generic/accessors.html#vectorbt.generic.accessors.Generic_Accessor.fshift">fshift</a></code></li>
-<li><code><a title="vectorbt.generic.accessors.Generic_Accessor.groupby_apply" href="../generic/accessors.html#vectorbt.generic.accessors.Generic_Accessor.groupby_apply">groupby_apply</a></code></li>
-<li><code><a title="vectorbt.generic.accessors.Generic_Accessor.hist" href="../generic/accessors.html#vectorbt.generic.accessors.Generic_Accessor.hist">hist</a></code></li>
-<li><code><a title="vectorbt.generic.accessors.Generic_Accessor.idxmax" href="../generic/accessors.html#vectorbt.generic.accessors.Generic_Accessor.idxmax">idxmax</a></code></li>
-<li><code><a title="vectorbt.generic.accessors.Generic_Accessor.idxmin" href="../generic/accessors.html#vectorbt.generic.accessors.Generic_Accessor.idxmin">idxmin</a></code></li>
-<li><code><a title="vectorbt.generic.accessors.Generic_Accessor.make_symmetric" href="../base/accessors.html#vectorbt.base.accessors.Base_Accessor.make_symmetric">make_symmetric</a></code></li>
-<li><code><a title="vectorbt.generic.accessors.Generic_Accessor.max" href="../generic/accessors.html#vectorbt.generic.accessors.Generic_Accessor.max">max</a></code></li>
-<li><code><a title="vectorbt.generic.accessors.Generic_Accessor.mean" href="../generic/accessors.html#vectorbt.generic.accessors.Generic_Accessor.mean">mean</a></code></li>
-<li><code><a title="vectorbt.generic.accessors.Generic_Accessor.median" href="../generic/accessors.html#vectorbt.generic.accessors.Generic_Accessor.median">median</a></code></li>
-<li><code><a title="vectorbt.generic.accessors.Generic_Accessor.min" href="../generic/accessors.html#vectorbt.generic.accessors.Generic_Accessor.min">min</a></code></li>
-<li><code><a title="vectorbt.generic.accessors.Generic_Accessor.pct_change" href="../generic/accessors.html#vectorbt.generic.accessors.Generic_Accessor.pct_change">pct_change</a></code></li>
-<li><code><a title="vectorbt.generic.accessors.Generic_Accessor.product" href="../generic/accessors.html#vectorbt.generic.accessors.Generic_Accessor.product">product</a></code></li>
-<li><code><a title="vectorbt.generic.accessors.Generic_Accessor.reduce" href="../generic/accessors.html#vectorbt.generic.accessors.Generic_Accessor.reduce">reduce</a></code></li>
-<li><code><a title="vectorbt.generic.accessors.Generic_Accessor.rename_levels" href="../base/accessors.html#vectorbt.base.accessors.Base_Accessor.rename_levels">rename_levels</a></code></li>
-<li><code><a title="vectorbt.generic.accessors.Generic_Accessor.repeat" href="../base/accessors.html#vectorbt.base.accessors.Base_Accessor.repeat">repeat</a></code></li>
-<li><code><a title="vectorbt.generic.accessors.Generic_Accessor.resample_apply" href="../generic/accessors.html#vectorbt.generic.accessors.Generic_Accessor.resample_apply">resample_apply</a></code></li>
-<li><code><a title="vectorbt.generic.accessors.Generic_Accessor.rolling_apply" href="../generic/accessors.html#vectorbt.generic.accessors.Generic_Accessor.rolling_apply">rolling_apply</a></code></li>
-<li><code><a title="vectorbt.generic.accessors.Generic_Accessor.rolling_max" href="../generic/accessors.html#vectorbt.generic.accessors.Generic_Accessor.rolling_max">rolling_max</a></code></li>
-<li><code><a title="vectorbt.generic.accessors.Generic_Accessor.rolling_mean" href="../generic/accessors.html#vectorbt.generic.accessors.Generic_Accessor.rolling_mean">rolling_mean</a></code></li>
-<li><code><a title="vectorbt.generic.accessors.Generic_Accessor.rolling_min" href="../generic/accessors.html#vectorbt.generic.accessors.Generic_Accessor.rolling_min">rolling_min</a></code></li>
-<li><code><a title="vectorbt.generic.accessors.Generic_Accessor.rolling_std" href="../generic/accessors.html#vectorbt.generic.accessors.Generic_Accessor.rolling_std">rolling_std</a></code></li>
-<li><code><a title="vectorbt.generic.accessors.Generic_Accessor.scatter" href="../generic/accessors.html#vectorbt.generic.accessors.Generic_Accessor.scatter">scatter</a></code></li>
-<li><code><a title="vectorbt.generic.accessors.Generic_Accessor.select_levels" href="../base/accessors.html#vectorbt.base.accessors.Base_Accessor.select_levels">select_levels</a></code></li>
-<li><code><a title="vectorbt.generic.accessors.Generic_Accessor.shuffle" href="../generic/accessors.html#vectorbt.generic.accessors.Generic_Accessor.shuffle">shuffle</a></code></li>
-<li><code><a title="vectorbt.generic.accessors.Generic_Accessor.split_into_ranges" href="../generic/accessors.html#vectorbt.generic.accessors.Generic_Accessor.split_into_ranges">split_into_ranges</a></code></li>
-<li><code><a title="vectorbt.generic.accessors.Generic_Accessor.squeeze_grouped" href="../generic/accessors.html#vectorbt.generic.accessors.Generic_Accessor.squeeze_grouped">squeeze_grouped</a></code></li>
-<li><code><a title="vectorbt.generic.accessors.Generic_Accessor.stack_index" href="../base/accessors.html#vectorbt.base.accessors.Base_Accessor.stack_index">stack_index</a></code></li>
-<li><code><a title="vectorbt.generic.accessors.Generic_Accessor.std" href="../generic/accessors.html#vectorbt.generic.accessors.Generic_Accessor.std">std</a></code></li>
-<li><code><a title="vectorbt.generic.accessors.Generic_Accessor.sum" href="../generic/accessors.html#vectorbt.generic.accessors.Generic_Accessor.sum">sum</a></code></li>
-<li><code><a title="vectorbt.generic.accessors.Generic_Accessor.tile" href="../base/accessors.html#vectorbt.base.accessors.Base_Accessor.tile">tile</a></code></li>
-<li><code><a title="vectorbt.generic.accessors.Generic_Accessor.to_1d_array" href="../base/accessors.html#vectorbt.base.accessors.Base_Accessor.to_1d_array">to_1d_array</a></code></li>
-<li><code><a title="vectorbt.generic.accessors.Generic_Accessor.to_2d_array" href="../base/accessors.html#vectorbt.base.accessors.Base_Accessor.to_2d_array">to_2d_array</a></code></li>
-<li><code><a title="vectorbt.generic.accessors.Generic_Accessor.to_mapped_array" href="../generic/accessors.html#vectorbt.generic.accessors.Generic_Accessor.to_mapped_array">to_mapped_array</a></code></li>
-<li><code><a title="vectorbt.generic.accessors.Generic_Accessor.unstack_to_array" href="../base/accessors.html#vectorbt.base.accessors.Base_Accessor.unstack_to_array">unstack_to_array</a></code></li>
-<li><code><a title="vectorbt.generic.accessors.Generic_Accessor.unstack_to_df" href="../base/accessors.html#vectorbt.base.accessors.Base_Accessor.unstack_to_df">unstack_to_df</a></code></li>
-<li><code><a title="vectorbt.generic.accessors.Generic_Accessor.wrapper" href="../base/accessors.html#vectorbt.base.accessors.Base_Accessor.wrapper">wrapper</a></code></li>
+<li><code><a title="vectorbt.generic.accessors.GenericAccessor.align_to" href="../base/accessors.html#vectorbt.base.accessors.BaseAccessor.align_to">align_to</a></code></li>
+<li><code><a title="vectorbt.generic.accessors.GenericAccessor.apply" href="../base/accessors.html#vectorbt.base.accessors.BaseAccessor.apply">apply</a></code></li>
+<li><code><a title="vectorbt.generic.accessors.GenericAccessor.apply_and_concat" href="../base/accessors.html#vectorbt.base.accessors.BaseAccessor.apply_and_concat">apply_and_concat</a></code></li>
+<li><code><a title="vectorbt.generic.accessors.GenericAccessor.apply_and_reduce" href="../generic/accessors.html#vectorbt.generic.accessors.GenericAccessor.apply_and_reduce">apply_and_reduce</a></code></li>
+<li><code><a title="vectorbt.generic.accessors.GenericAccessor.apply_on_index" href="../base/accessors.html#vectorbt.base.accessors.BaseAccessor.apply_on_index">apply_on_index</a></code></li>
+<li><code><a title="vectorbt.generic.accessors.GenericAccessor.applymap" href="../generic/accessors.html#vectorbt.generic.accessors.GenericAccessor.applymap">applymap</a></code></li>
+<li><code><a title="vectorbt.generic.accessors.GenericAccessor.barplot" href="../generic/accessors.html#vectorbt.generic.accessors.GenericAccessor.barplot">barplot</a></code></li>
+<li><code><a title="vectorbt.generic.accessors.GenericAccessor.boxplot" href="../generic/accessors.html#vectorbt.generic.accessors.GenericAccessor.boxplot">boxplot</a></code></li>
+<li><code><a title="vectorbt.generic.accessors.GenericAccessor.broadcast" href="../base/accessors.html#vectorbt.base.accessors.BaseAccessor.broadcast">broadcast</a></code></li>
+<li><code><a title="vectorbt.generic.accessors.GenericAccessor.broadcast_to" href="../base/accessors.html#vectorbt.base.accessors.BaseAccessor.broadcast_to">broadcast_to</a></code></li>
+<li><code><a title="vectorbt.generic.accessors.GenericAccessor.combine_with" href="../base/accessors.html#vectorbt.base.accessors.BaseAccessor.combine_with">combine_with</a></code></li>
+<li><code><a title="vectorbt.generic.accessors.GenericAccessor.combine_with_multiple" href="../base/accessors.html#vectorbt.base.accessors.BaseAccessor.combine_with_multiple">combine_with_multiple</a></code></li>
+<li><code><a title="vectorbt.generic.accessors.GenericAccessor.concat" href="../base/accessors.html#vectorbt.base.accessors.BaseAccessor.concat">concat</a></code></li>
+<li><code><a title="vectorbt.generic.accessors.GenericAccessor.count" href="../generic/accessors.html#vectorbt.generic.accessors.GenericAccessor.count">count</a></code></li>
+<li><code><a title="vectorbt.generic.accessors.GenericAccessor.cumprod" href="../generic/accessors.html#vectorbt.generic.accessors.GenericAccessor.cumprod">cumprod</a></code></li>
+<li><code><a title="vectorbt.generic.accessors.GenericAccessor.cumsum" href="../generic/accessors.html#vectorbt.generic.accessors.GenericAccessor.cumsum">cumsum</a></code></li>
+<li><code><a title="vectorbt.generic.accessors.GenericAccessor.describe" href="../generic/accessors.html#vectorbt.generic.accessors.GenericAccessor.describe">describe</a></code></li>
+<li><code><a title="vectorbt.generic.accessors.GenericAccessor.diff" href="../generic/accessors.html#vectorbt.generic.accessors.GenericAccessor.diff">diff</a></code></li>
+<li><code><a title="vectorbt.generic.accessors.GenericAccessor.drop_duplicate_levels" href="../base/accessors.html#vectorbt.base.accessors.BaseAccessor.drop_duplicate_levels">drop_duplicate_levels</a></code></li>
+<li><code><a title="vectorbt.generic.accessors.GenericAccessor.drop_levels" href="../base/accessors.html#vectorbt.base.accessors.BaseAccessor.drop_levels">drop_levels</a></code></li>
+<li><code><a title="vectorbt.generic.accessors.GenericAccessor.drop_redundant_levels" href="../base/accessors.html#vectorbt.base.accessors.BaseAccessor.drop_redundant_levels">drop_redundant_levels</a></code></li>
+<li><code><a title="vectorbt.generic.accessors.GenericAccessor.empty" href="../base/accessors.html#vectorbt.base.accessors.BaseAccessor.empty">empty</a></code></li>
+<li><code><a title="vectorbt.generic.accessors.GenericAccessor.empty_like" href="../base/accessors.html#vectorbt.base.accessors.BaseAccessor.empty_like">empty_like</a></code></li>
+<li><code><a title="vectorbt.generic.accessors.GenericAccessor.ewm_mean" href="../generic/accessors.html#vectorbt.generic.accessors.GenericAccessor.ewm_mean">ewm_mean</a></code></li>
+<li><code><a title="vectorbt.generic.accessors.GenericAccessor.ewm_std" href="../generic/accessors.html#vectorbt.generic.accessors.GenericAccessor.ewm_std">ewm_std</a></code></li>
+<li><code><a title="vectorbt.generic.accessors.GenericAccessor.expanding_apply" href="../generic/accessors.html#vectorbt.generic.accessors.GenericAccessor.expanding_apply">expanding_apply</a></code></li>
+<li><code><a title="vectorbt.generic.accessors.GenericAccessor.expanding_max" href="../generic/accessors.html#vectorbt.generic.accessors.GenericAccessor.expanding_max">expanding_max</a></code></li>
+<li><code><a title="vectorbt.generic.accessors.GenericAccessor.expanding_mean" href="../generic/accessors.html#vectorbt.generic.accessors.GenericAccessor.expanding_mean">expanding_mean</a></code></li>
+<li><code><a title="vectorbt.generic.accessors.GenericAccessor.expanding_min" href="../generic/accessors.html#vectorbt.generic.accessors.GenericAccessor.expanding_min">expanding_min</a></code></li>
+<li><code><a title="vectorbt.generic.accessors.GenericAccessor.expanding_std" href="../generic/accessors.html#vectorbt.generic.accessors.GenericAccessor.expanding_std">expanding_std</a></code></li>
+<li><code><a title="vectorbt.generic.accessors.GenericAccessor.ffill" href="../generic/accessors.html#vectorbt.generic.accessors.GenericAccessor.ffill">ffill</a></code></li>
+<li><code><a title="vectorbt.generic.accessors.GenericAccessor.fillna" href="../generic/accessors.html#vectorbt.generic.accessors.GenericAccessor.fillna">fillna</a></code></li>
+<li><code><a title="vectorbt.generic.accessors.GenericAccessor.filter" href="../generic/accessors.html#vectorbt.generic.accessors.GenericAccessor.filter">filter</a></code></li>
+<li><code><a title="vectorbt.generic.accessors.GenericAccessor.flatten_grouped" href="../generic/accessors.html#vectorbt.generic.accessors.GenericAccessor.flatten_grouped">flatten_grouped</a></code></li>
+<li><code><a title="vectorbt.generic.accessors.GenericAccessor.fshift" href="../generic/accessors.html#vectorbt.generic.accessors.GenericAccessor.fshift">fshift</a></code></li>
+<li><code><a title="vectorbt.generic.accessors.GenericAccessor.groupby_apply" href="../generic/accessors.html#vectorbt.generic.accessors.GenericAccessor.groupby_apply">groupby_apply</a></code></li>
+<li><code><a title="vectorbt.generic.accessors.GenericAccessor.histplot" href="../generic/accessors.html#vectorbt.generic.accessors.GenericAccessor.histplot">histplot</a></code></li>
+<li><code><a title="vectorbt.generic.accessors.GenericAccessor.idxmax" href="../generic/accessors.html#vectorbt.generic.accessors.GenericAccessor.idxmax">idxmax</a></code></li>
+<li><code><a title="vectorbt.generic.accessors.GenericAccessor.idxmin" href="../generic/accessors.html#vectorbt.generic.accessors.GenericAccessor.idxmin">idxmin</a></code></li>
+<li><code><a title="vectorbt.generic.accessors.GenericAccessor.lineplot" href="../generic/accessors.html#vectorbt.generic.accessors.GenericAccessor.lineplot">lineplot</a></code></li>
+<li><code><a title="vectorbt.generic.accessors.GenericAccessor.make_symmetric" href="../base/accessors.html#vectorbt.base.accessors.BaseAccessor.make_symmetric">make_symmetric</a></code></li>
+<li><code><a title="vectorbt.generic.accessors.GenericAccessor.max" href="../generic/accessors.html#vectorbt.generic.accessors.GenericAccessor.max">max</a></code></li>
+<li><code><a title="vectorbt.generic.accessors.GenericAccessor.mean" href="../generic/accessors.html#vectorbt.generic.accessors.GenericAccessor.mean">mean</a></code></li>
+<li><code><a title="vectorbt.generic.accessors.GenericAccessor.median" href="../generic/accessors.html#vectorbt.generic.accessors.GenericAccessor.median">median</a></code></li>
+<li><code><a title="vectorbt.generic.accessors.GenericAccessor.min" href="../generic/accessors.html#vectorbt.generic.accessors.GenericAccessor.min">min</a></code></li>
+<li><code><a title="vectorbt.generic.accessors.GenericAccessor.pct_change" href="../generic/accessors.html#vectorbt.generic.accessors.GenericAccessor.pct_change">pct_change</a></code></li>
+<li><code><a title="vectorbt.generic.accessors.GenericAccessor.plot" href="../generic/accessors.html#vectorbt.generic.accessors.GenericAccessor.plot">plot</a></code></li>
+<li><code><a title="vectorbt.generic.accessors.GenericAccessor.product" href="../generic/accessors.html#vectorbt.generic.accessors.GenericAccessor.product">product</a></code></li>
+<li><code><a title="vectorbt.generic.accessors.GenericAccessor.reduce" href="../generic/accessors.html#vectorbt.generic.accessors.GenericAccessor.reduce">reduce</a></code></li>
+<li><code><a title="vectorbt.generic.accessors.GenericAccessor.rename_levels" href="../base/accessors.html#vectorbt.base.accessors.BaseAccessor.rename_levels">rename_levels</a></code></li>
+<li><code><a title="vectorbt.generic.accessors.GenericAccessor.repeat" href="../base/accessors.html#vectorbt.base.accessors.BaseAccessor.repeat">repeat</a></code></li>
+<li><code><a title="vectorbt.generic.accessors.GenericAccessor.resample_apply" href="../generic/accessors.html#vectorbt.generic.accessors.GenericAccessor.resample_apply">resample_apply</a></code></li>
+<li><code><a title="vectorbt.generic.accessors.GenericAccessor.rolling_apply" href="../generic/accessors.html#vectorbt.generic.accessors.GenericAccessor.rolling_apply">rolling_apply</a></code></li>
+<li><code><a title="vectorbt.generic.accessors.GenericAccessor.rolling_max" href="../generic/accessors.html#vectorbt.generic.accessors.GenericAccessor.rolling_max">rolling_max</a></code></li>
+<li><code><a title="vectorbt.generic.accessors.GenericAccessor.rolling_mean" href="../generic/accessors.html#vectorbt.generic.accessors.GenericAccessor.rolling_mean">rolling_mean</a></code></li>
+<li><code><a title="vectorbt.generic.accessors.GenericAccessor.rolling_min" href="../generic/accessors.html#vectorbt.generic.accessors.GenericAccessor.rolling_min">rolling_min</a></code></li>
+<li><code><a title="vectorbt.generic.accessors.GenericAccessor.rolling_std" href="../generic/accessors.html#vectorbt.generic.accessors.GenericAccessor.rolling_std">rolling_std</a></code></li>
+<li><code><a title="vectorbt.generic.accessors.GenericAccessor.scatterplot" href="../generic/accessors.html#vectorbt.generic.accessors.GenericAccessor.scatterplot">scatterplot</a></code></li>
+<li><code><a title="vectorbt.generic.accessors.GenericAccessor.select_levels" href="../base/accessors.html#vectorbt.base.accessors.BaseAccessor.select_levels">select_levels</a></code></li>
+<li><code><a title="vectorbt.generic.accessors.GenericAccessor.shuffle" href="../generic/accessors.html#vectorbt.generic.accessors.GenericAccessor.shuffle">shuffle</a></code></li>
+<li><code><a title="vectorbt.generic.accessors.GenericAccessor.split_into_ranges" href="../generic/accessors.html#vectorbt.generic.accessors.GenericAccessor.split_into_ranges">split_into_ranges</a></code></li>
+<li><code><a title="vectorbt.generic.accessors.GenericAccessor.squeeze_grouped" href="../generic/accessors.html#vectorbt.generic.accessors.GenericAccessor.squeeze_grouped">squeeze_grouped</a></code></li>
+<li><code><a title="vectorbt.generic.accessors.GenericAccessor.stack_index" href="../base/accessors.html#vectorbt.base.accessors.BaseAccessor.stack_index">stack_index</a></code></li>
+<li><code><a title="vectorbt.generic.accessors.GenericAccessor.std" href="../generic/accessors.html#vectorbt.generic.accessors.GenericAccessor.std">std</a></code></li>
+<li><code><a title="vectorbt.generic.accessors.GenericAccessor.sum" href="../generic/accessors.html#vectorbt.generic.accessors.GenericAccessor.sum">sum</a></code></li>
+<li><code><a title="vectorbt.generic.accessors.GenericAccessor.tile" href="../base/accessors.html#vectorbt.base.accessors.BaseAccessor.tile">tile</a></code></li>
+<li><code><a title="vectorbt.generic.accessors.GenericAccessor.to_1d_array" href="../base/accessors.html#vectorbt.base.accessors.BaseAccessor.to_1d_array">to_1d_array</a></code></li>
+<li><code><a title="vectorbt.generic.accessors.GenericAccessor.to_2d_array" href="../base/accessors.html#vectorbt.base.accessors.BaseAccessor.to_2d_array">to_2d_array</a></code></li>
+<li><code><a title="vectorbt.generic.accessors.GenericAccessor.to_mapped_array" href="../generic/accessors.html#vectorbt.generic.accessors.GenericAccessor.to_mapped_array">to_mapped_array</a></code></li>
+<li><code><a title="vectorbt.generic.accessors.GenericAccessor.unstack_to_array" href="../base/accessors.html#vectorbt.base.accessors.BaseAccessor.unstack_to_array">unstack_to_array</a></code></li>
+<li><code><a title="vectorbt.generic.accessors.GenericAccessor.unstack_to_df" href="../base/accessors.html#vectorbt.base.accessors.BaseAccessor.unstack_to_df">unstack_to_df</a></code></li>
+<li><code><a title="vectorbt.generic.accessors.GenericAccessor.wrapper" href="../base/accessors.html#vectorbt.base.accessors.BaseAccessor.wrapper">wrapper</a></code></li>
 </ul>
 </li>
 </ul>
 </dd>
-<dt id="vectorbt.returns.accessors.Returns_DFAccessor"><code class="flex name class">
-<span>class <span class="ident parent-fname">Returns_DFAccessor</span></span>
+<dt id="vectorbt.returns.accessors.ReturnsDFAccessor"><code class="flex name class">
+<span>class <span class="ident parent-fname">ReturnsDFAccessor</span></span>
 <span>(</span><span>obj, year_freq=None, **kwargs)</span>
 </code></dt>
 <dd>
@@ -1794,7 +1791,7 @@ bottom percentile of returns. Will broadcast per column.</dd>
 <summary>
 <span>Expand source code</span>
 </summary>
-<pre><code class="python">class Returns_DFAccessor(Returns_Accessor, Generic_DFAccessor):
+<pre><code class="python">class ReturnsDFAccessor(ReturnsAccessor, GenericDFAccessor):
     &#34;&#34;&#34;Accessor on top of return series. For DataFrames only.
 
     Accessible through `pd.DataFrame.vbt.returns`.&#34;&#34;&#34;
@@ -1803,133 +1800,134 @@ bottom percentile of returns. Will broadcast per column.</dd>
         if not checks.is_pandas(obj):  # parent accessor
             obj = obj._obj
 
-        Generic_DFAccessor.__init__(self, obj, **kwargs)
-        Returns_Accessor.__init__(self, obj, year_freq=year_freq, **kwargs)</code></pre>
+        GenericDFAccessor.__init__(self, obj, **kwargs)
+        ReturnsAccessor.__init__(self, obj, year_freq=year_freq, **kwargs)</code></pre>
 </details>
 <h3 class="section-subtitle">Ancestors</h3>
 <ul class="hlist">
-<li><a title="vectorbt.returns.accessors.Returns_Accessor" href="#vectorbt.returns.accessors.Returns_Accessor">Returns_Accessor</a></li>
-<li><a title="vectorbt.generic.accessors.Generic_DFAccessor" href="../generic/accessors.html#vectorbt.generic.accessors.Generic_DFAccessor">Generic_DFAccessor</a></li>
-<li><a title="vectorbt.generic.accessors.Generic_Accessor" href="../generic/accessors.html#vectorbt.generic.accessors.Generic_Accessor">Generic_Accessor</a></li>
-<li><a title="vectorbt.base.accessors.Base_DFAccessor" href="../base/accessors.html#vectorbt.base.accessors.Base_DFAccessor">Base_DFAccessor</a></li>
-<li><a title="vectorbt.base.accessors.Base_Accessor" href="../base/accessors.html#vectorbt.base.accessors.Base_Accessor">Base_Accessor</a></li>
+<li><a title="vectorbt.returns.accessors.ReturnsAccessor" href="#vectorbt.returns.accessors.ReturnsAccessor">ReturnsAccessor</a></li>
+<li><a title="vectorbt.generic.accessors.GenericDFAccessor" href="../generic/accessors.html#vectorbt.generic.accessors.GenericDFAccessor">GenericDFAccessor</a></li>
+<li><a title="vectorbt.generic.accessors.GenericAccessor" href="../generic/accessors.html#vectorbt.generic.accessors.GenericAccessor">GenericAccessor</a></li>
+<li><a title="vectorbt.base.accessors.BaseDFAccessor" href="../base/accessors.html#vectorbt.base.accessors.BaseDFAccessor">BaseDFAccessor</a></li>
+<li><a title="vectorbt.base.accessors.BaseAccessor" href="../base/accessors.html#vectorbt.base.accessors.BaseAccessor">BaseAccessor</a></li>
 </ul>
 <h3 class="section-subtitle">Inherited members</h3>
 <ul class="hlist">
-<li><code><b><a title="vectorbt.returns.accessors.Returns_Accessor" href="#vectorbt.returns.accessors.Returns_Accessor">Returns_Accessor</a></b></code>:
+<li><code><b><a title="vectorbt.returns.accessors.ReturnsAccessor" href="#vectorbt.returns.accessors.ReturnsAccessor">ReturnsAccessor</a></b></code>:
 <ul class="hlist">
-<li><code><a title="vectorbt.returns.accessors.Returns_Accessor.align_to" href="../base/accessors.html#vectorbt.base.accessors.Base_Accessor.align_to">align_to</a></code></li>
-<li><code><a title="vectorbt.returns.accessors.Returns_Accessor.alpha" href="#vectorbt.returns.accessors.Returns_Accessor.alpha">alpha</a></code></li>
-<li><code><a title="vectorbt.returns.accessors.Returns_Accessor.ann_factor" href="#vectorbt.returns.accessors.Returns_Accessor.ann_factor">ann_factor</a></code></li>
-<li><code><a title="vectorbt.returns.accessors.Returns_Accessor.annual" href="#vectorbt.returns.accessors.Returns_Accessor.annual">annual</a></code></li>
-<li><code><a title="vectorbt.returns.accessors.Returns_Accessor.annualized" href="#vectorbt.returns.accessors.Returns_Accessor.annualized">annualized</a></code></li>
-<li><code><a title="vectorbt.returns.accessors.Returns_Accessor.annualized_volatility" href="#vectorbt.returns.accessors.Returns_Accessor.annualized_volatility">annualized_volatility</a></code></li>
-<li><code><a title="vectorbt.returns.accessors.Returns_Accessor.apply" href="../base/accessors.html#vectorbt.base.accessors.Base_Accessor.apply">apply</a></code></li>
-<li><code><a title="vectorbt.returns.accessors.Returns_Accessor.apply_and_concat" href="../base/accessors.html#vectorbt.base.accessors.Base_Accessor.apply_and_concat">apply_and_concat</a></code></li>
-<li><code><a title="vectorbt.returns.accessors.Returns_Accessor.apply_and_reduce" href="../generic/accessors.html#vectorbt.generic.accessors.Generic_Accessor.apply_and_reduce">apply_and_reduce</a></code></li>
-<li><code><a title="vectorbt.returns.accessors.Returns_Accessor.apply_on_index" href="../base/accessors.html#vectorbt.base.accessors.Base_Accessor.apply_on_index">apply_on_index</a></code></li>
-<li><code><a title="vectorbt.returns.accessors.Returns_Accessor.applymap" href="../generic/accessors.html#vectorbt.generic.accessors.Generic_Accessor.applymap">applymap</a></code></li>
-<li><code><a title="vectorbt.returns.accessors.Returns_Accessor.bar" href="../generic/accessors.html#vectorbt.generic.accessors.Generic_Accessor.bar">bar</a></code></li>
-<li><code><a title="vectorbt.returns.accessors.Returns_Accessor.beta" href="#vectorbt.returns.accessors.Returns_Accessor.beta">beta</a></code></li>
-<li><code><a title="vectorbt.returns.accessors.Returns_Accessor.box" href="../generic/accessors.html#vectorbt.generic.accessors.Generic_Accessor.box">box</a></code></li>
-<li><code><a title="vectorbt.returns.accessors.Returns_Accessor.broadcast" href="../base/accessors.html#vectorbt.base.accessors.Base_Accessor.broadcast">broadcast</a></code></li>
-<li><code><a title="vectorbt.returns.accessors.Returns_Accessor.broadcast_to" href="../base/accessors.html#vectorbt.base.accessors.Base_Accessor.broadcast_to">broadcast_to</a></code></li>
-<li><code><a title="vectorbt.returns.accessors.Returns_Accessor.calmar_ratio" href="#vectorbt.returns.accessors.Returns_Accessor.calmar_ratio">calmar_ratio</a></code></li>
-<li><code><a title="vectorbt.returns.accessors.Returns_Accessor.capture" href="#vectorbt.returns.accessors.Returns_Accessor.capture">capture</a></code></li>
-<li><code><a title="vectorbt.returns.accessors.Returns_Accessor.combine_with" href="../base/accessors.html#vectorbt.base.accessors.Base_Accessor.combine_with">combine_with</a></code></li>
-<li><code><a title="vectorbt.returns.accessors.Returns_Accessor.combine_with_multiple" href="../base/accessors.html#vectorbt.base.accessors.Base_Accessor.combine_with_multiple">combine_with_multiple</a></code></li>
-<li><code><a title="vectorbt.returns.accessors.Returns_Accessor.common_sense_ratio" href="#vectorbt.returns.accessors.Returns_Accessor.common_sense_ratio">common_sense_ratio</a></code></li>
-<li><code><a title="vectorbt.returns.accessors.Returns_Accessor.concat" href="../base/accessors.html#vectorbt.base.accessors.Base_Accessor.concat">concat</a></code></li>
-<li><code><a title="vectorbt.returns.accessors.Returns_Accessor.conditional_value_at_risk" href="#vectorbt.returns.accessors.Returns_Accessor.conditional_value_at_risk">conditional_value_at_risk</a></code></li>
-<li><code><a title="vectorbt.returns.accessors.Returns_Accessor.count" href="../generic/accessors.html#vectorbt.generic.accessors.Generic_Accessor.count">count</a></code></li>
-<li><code><a title="vectorbt.returns.accessors.Returns_Accessor.cumprod" href="../generic/accessors.html#vectorbt.generic.accessors.Generic_Accessor.cumprod">cumprod</a></code></li>
-<li><code><a title="vectorbt.returns.accessors.Returns_Accessor.cumsum" href="../generic/accessors.html#vectorbt.generic.accessors.Generic_Accessor.cumsum">cumsum</a></code></li>
-<li><code><a title="vectorbt.returns.accessors.Returns_Accessor.cumulative" href="#vectorbt.returns.accessors.Returns_Accessor.cumulative">cumulative</a></code></li>
-<li><code><a title="vectorbt.returns.accessors.Returns_Accessor.daily" href="#vectorbt.returns.accessors.Returns_Accessor.daily">daily</a></code></li>
-<li><code><a title="vectorbt.returns.accessors.Returns_Accessor.deflated_sharpe_ratio" href="#vectorbt.returns.accessors.Returns_Accessor.deflated_sharpe_ratio">deflated_sharpe_ratio</a></code></li>
-<li><code><a title="vectorbt.returns.accessors.Returns_Accessor.describe" href="../generic/accessors.html#vectorbt.generic.accessors.Generic_Accessor.describe">describe</a></code></li>
-<li><code><a title="vectorbt.returns.accessors.Returns_Accessor.diff" href="../generic/accessors.html#vectorbt.generic.accessors.Generic_Accessor.diff">diff</a></code></li>
-<li><code><a title="vectorbt.returns.accessors.Returns_Accessor.down_capture" href="#vectorbt.returns.accessors.Returns_Accessor.down_capture">down_capture</a></code></li>
-<li><code><a title="vectorbt.returns.accessors.Returns_Accessor.downside_risk" href="#vectorbt.returns.accessors.Returns_Accessor.downside_risk">downside_risk</a></code></li>
-<li><code><a title="vectorbt.returns.accessors.Returns_Accessor.drawdown" href="#vectorbt.returns.accessors.Returns_Accessor.drawdown">drawdown</a></code></li>
-<li><code><a title="vectorbt.returns.accessors.Returns_Accessor.drawdowns" href="#vectorbt.returns.accessors.Returns_Accessor.drawdowns">drawdowns</a></code></li>
-<li><code><a title="vectorbt.returns.accessors.Returns_Accessor.drop_duplicate_levels" href="../base/accessors.html#vectorbt.base.accessors.Base_Accessor.drop_duplicate_levels">drop_duplicate_levels</a></code></li>
-<li><code><a title="vectorbt.returns.accessors.Returns_Accessor.drop_levels" href="../base/accessors.html#vectorbt.base.accessors.Base_Accessor.drop_levels">drop_levels</a></code></li>
-<li><code><a title="vectorbt.returns.accessors.Returns_Accessor.drop_redundant_levels" href="../base/accessors.html#vectorbt.base.accessors.Base_Accessor.drop_redundant_levels">drop_redundant_levels</a></code></li>
-<li><code><a title="vectorbt.returns.accessors.Returns_Accessor.empty" href="../base/accessors.html#vectorbt.base.accessors.Base_Accessor.empty">empty</a></code></li>
-<li><code><a title="vectorbt.returns.accessors.Returns_Accessor.empty_like" href="../base/accessors.html#vectorbt.base.accessors.Base_Accessor.empty_like">empty_like</a></code></li>
-<li><code><a title="vectorbt.returns.accessors.Returns_Accessor.ewm_mean" href="../generic/accessors.html#vectorbt.generic.accessors.Generic_Accessor.ewm_mean">ewm_mean</a></code></li>
-<li><code><a title="vectorbt.returns.accessors.Returns_Accessor.ewm_std" href="../generic/accessors.html#vectorbt.generic.accessors.Generic_Accessor.ewm_std">ewm_std</a></code></li>
-<li><code><a title="vectorbt.returns.accessors.Returns_Accessor.expanding_apply" href="../generic/accessors.html#vectorbt.generic.accessors.Generic_Accessor.expanding_apply">expanding_apply</a></code></li>
-<li><code><a title="vectorbt.returns.accessors.Returns_Accessor.expanding_max" href="../generic/accessors.html#vectorbt.generic.accessors.Generic_Accessor.expanding_max">expanding_max</a></code></li>
-<li><code><a title="vectorbt.returns.accessors.Returns_Accessor.expanding_mean" href="../generic/accessors.html#vectorbt.generic.accessors.Generic_Accessor.expanding_mean">expanding_mean</a></code></li>
-<li><code><a title="vectorbt.returns.accessors.Returns_Accessor.expanding_min" href="../generic/accessors.html#vectorbt.generic.accessors.Generic_Accessor.expanding_min">expanding_min</a></code></li>
-<li><code><a title="vectorbt.returns.accessors.Returns_Accessor.expanding_std" href="../generic/accessors.html#vectorbt.generic.accessors.Generic_Accessor.expanding_std">expanding_std</a></code></li>
-<li><code><a title="vectorbt.returns.accessors.Returns_Accessor.ffill" href="../generic/accessors.html#vectorbt.generic.accessors.Generic_Accessor.ffill">ffill</a></code></li>
-<li><code><a title="vectorbt.returns.accessors.Returns_Accessor.fillna" href="../generic/accessors.html#vectorbt.generic.accessors.Generic_Accessor.fillna">fillna</a></code></li>
-<li><code><a title="vectorbt.returns.accessors.Returns_Accessor.filter" href="../generic/accessors.html#vectorbt.generic.accessors.Generic_Accessor.filter">filter</a></code></li>
-<li><code><a title="vectorbt.returns.accessors.Returns_Accessor.flatten_grouped" href="../generic/accessors.html#vectorbt.generic.accessors.Generic_Accessor.flatten_grouped">flatten_grouped</a></code></li>
-<li><code><a title="vectorbt.returns.accessors.Returns_Accessor.from_price" href="#vectorbt.returns.accessors.Returns_Accessor.from_price">from_price</a></code></li>
-<li><code><a title="vectorbt.returns.accessors.Returns_Accessor.fshift" href="../generic/accessors.html#vectorbt.generic.accessors.Generic_Accessor.fshift">fshift</a></code></li>
-<li><code><a title="vectorbt.returns.accessors.Returns_Accessor.get_drawdowns" href="#vectorbt.returns.accessors.Returns_Accessor.get_drawdowns">get_drawdowns</a></code></li>
-<li><code><a title="vectorbt.returns.accessors.Returns_Accessor.groupby_apply" href="../generic/accessors.html#vectorbt.generic.accessors.Generic_Accessor.groupby_apply">groupby_apply</a></code></li>
-<li><code><a title="vectorbt.returns.accessors.Returns_Accessor.hist" href="../generic/accessors.html#vectorbt.generic.accessors.Generic_Accessor.hist">hist</a></code></li>
-<li><code><a title="vectorbt.returns.accessors.Returns_Accessor.idxmax" href="../generic/accessors.html#vectorbt.generic.accessors.Generic_Accessor.idxmax">idxmax</a></code></li>
-<li><code><a title="vectorbt.returns.accessors.Returns_Accessor.idxmin" href="../generic/accessors.html#vectorbt.generic.accessors.Generic_Accessor.idxmin">idxmin</a></code></li>
-<li><code><a title="vectorbt.returns.accessors.Returns_Accessor.information_ratio" href="#vectorbt.returns.accessors.Returns_Accessor.information_ratio">information_ratio</a></code></li>
-<li><code><a title="vectorbt.returns.accessors.Returns_Accessor.make_symmetric" href="../base/accessors.html#vectorbt.base.accessors.Base_Accessor.make_symmetric">make_symmetric</a></code></li>
-<li><code><a title="vectorbt.returns.accessors.Returns_Accessor.max" href="../generic/accessors.html#vectorbt.generic.accessors.Generic_Accessor.max">max</a></code></li>
-<li><code><a title="vectorbt.returns.accessors.Returns_Accessor.max_drawdown" href="#vectorbt.returns.accessors.Returns_Accessor.max_drawdown">max_drawdown</a></code></li>
-<li><code><a title="vectorbt.returns.accessors.Returns_Accessor.mean" href="../generic/accessors.html#vectorbt.generic.accessors.Generic_Accessor.mean">mean</a></code></li>
-<li><code><a title="vectorbt.returns.accessors.Returns_Accessor.median" href="../generic/accessors.html#vectorbt.generic.accessors.Generic_Accessor.median">median</a></code></li>
-<li><code><a title="vectorbt.returns.accessors.Returns_Accessor.min" href="../generic/accessors.html#vectorbt.generic.accessors.Generic_Accessor.min">min</a></code></li>
-<li><code><a title="vectorbt.returns.accessors.Returns_Accessor.omega_ratio" href="#vectorbt.returns.accessors.Returns_Accessor.omega_ratio">omega_ratio</a></code></li>
-<li><code><a title="vectorbt.returns.accessors.Returns_Accessor.pct_change" href="../generic/accessors.html#vectorbt.generic.accessors.Generic_Accessor.pct_change">pct_change</a></code></li>
-<li><code><a title="vectorbt.returns.accessors.Returns_Accessor.product" href="../generic/accessors.html#vectorbt.generic.accessors.Generic_Accessor.product">product</a></code></li>
-<li><code><a title="vectorbt.returns.accessors.Returns_Accessor.reduce" href="../generic/accessors.html#vectorbt.generic.accessors.Generic_Accessor.reduce">reduce</a></code></li>
-<li><code><a title="vectorbt.returns.accessors.Returns_Accessor.rename_levels" href="../base/accessors.html#vectorbt.base.accessors.Base_Accessor.rename_levels">rename_levels</a></code></li>
-<li><code><a title="vectorbt.returns.accessors.Returns_Accessor.repeat" href="../base/accessors.html#vectorbt.base.accessors.Base_Accessor.repeat">repeat</a></code></li>
-<li><code><a title="vectorbt.returns.accessors.Returns_Accessor.resample_apply" href="../generic/accessors.html#vectorbt.generic.accessors.Generic_Accessor.resample_apply">resample_apply</a></code></li>
-<li><code><a title="vectorbt.returns.accessors.Returns_Accessor.rolling_apply" href="../generic/accessors.html#vectorbt.generic.accessors.Generic_Accessor.rolling_apply">rolling_apply</a></code></li>
-<li><code><a title="vectorbt.returns.accessors.Returns_Accessor.rolling_max" href="../generic/accessors.html#vectorbt.generic.accessors.Generic_Accessor.rolling_max">rolling_max</a></code></li>
-<li><code><a title="vectorbt.returns.accessors.Returns_Accessor.rolling_mean" href="../generic/accessors.html#vectorbt.generic.accessors.Generic_Accessor.rolling_mean">rolling_mean</a></code></li>
-<li><code><a title="vectorbt.returns.accessors.Returns_Accessor.rolling_min" href="../generic/accessors.html#vectorbt.generic.accessors.Generic_Accessor.rolling_min">rolling_min</a></code></li>
-<li><code><a title="vectorbt.returns.accessors.Returns_Accessor.rolling_std" href="../generic/accessors.html#vectorbt.generic.accessors.Generic_Accessor.rolling_std">rolling_std</a></code></li>
-<li><code><a title="vectorbt.returns.accessors.Returns_Accessor.scatter" href="../generic/accessors.html#vectorbt.generic.accessors.Generic_Accessor.scatter">scatter</a></code></li>
-<li><code><a title="vectorbt.returns.accessors.Returns_Accessor.select_levels" href="../base/accessors.html#vectorbt.base.accessors.Base_Accessor.select_levels">select_levels</a></code></li>
-<li><code><a title="vectorbt.returns.accessors.Returns_Accessor.sharpe_ratio" href="#vectorbt.returns.accessors.Returns_Accessor.sharpe_ratio">sharpe_ratio</a></code></li>
-<li><code><a title="vectorbt.returns.accessors.Returns_Accessor.shuffle" href="../generic/accessors.html#vectorbt.generic.accessors.Generic_Accessor.shuffle">shuffle</a></code></li>
-<li><code><a title="vectorbt.returns.accessors.Returns_Accessor.sortino_ratio" href="#vectorbt.returns.accessors.Returns_Accessor.sortino_ratio">sortino_ratio</a></code></li>
-<li><code><a title="vectorbt.returns.accessors.Returns_Accessor.split_into_ranges" href="../generic/accessors.html#vectorbt.generic.accessors.Generic_Accessor.split_into_ranges">split_into_ranges</a></code></li>
-<li><code><a title="vectorbt.returns.accessors.Returns_Accessor.squeeze_grouped" href="../generic/accessors.html#vectorbt.generic.accessors.Generic_Accessor.squeeze_grouped">squeeze_grouped</a></code></li>
-<li><code><a title="vectorbt.returns.accessors.Returns_Accessor.stack_index" href="../base/accessors.html#vectorbt.base.accessors.Base_Accessor.stack_index">stack_index</a></code></li>
-<li><code><a title="vectorbt.returns.accessors.Returns_Accessor.stats" href="#vectorbt.returns.accessors.Returns_Accessor.stats">stats</a></code></li>
-<li><code><a title="vectorbt.returns.accessors.Returns_Accessor.std" href="../generic/accessors.html#vectorbt.generic.accessors.Generic_Accessor.std">std</a></code></li>
-<li><code><a title="vectorbt.returns.accessors.Returns_Accessor.sum" href="../generic/accessors.html#vectorbt.generic.accessors.Generic_Accessor.sum">sum</a></code></li>
-<li><code><a title="vectorbt.returns.accessors.Returns_Accessor.tail_ratio" href="#vectorbt.returns.accessors.Returns_Accessor.tail_ratio">tail_ratio</a></code></li>
-<li><code><a title="vectorbt.returns.accessors.Returns_Accessor.tile" href="../base/accessors.html#vectorbt.base.accessors.Base_Accessor.tile">tile</a></code></li>
-<li><code><a title="vectorbt.returns.accessors.Returns_Accessor.to_1d_array" href="../base/accessors.html#vectorbt.base.accessors.Base_Accessor.to_1d_array">to_1d_array</a></code></li>
-<li><code><a title="vectorbt.returns.accessors.Returns_Accessor.to_2d_array" href="../base/accessors.html#vectorbt.base.accessors.Base_Accessor.to_2d_array">to_2d_array</a></code></li>
-<li><code><a title="vectorbt.returns.accessors.Returns_Accessor.to_mapped_array" href="../generic/accessors.html#vectorbt.generic.accessors.Generic_Accessor.to_mapped_array">to_mapped_array</a></code></li>
-<li><code><a title="vectorbt.returns.accessors.Returns_Accessor.total" href="#vectorbt.returns.accessors.Returns_Accessor.total">total</a></code></li>
-<li><code><a title="vectorbt.returns.accessors.Returns_Accessor.unstack_to_array" href="../base/accessors.html#vectorbt.base.accessors.Base_Accessor.unstack_to_array">unstack_to_array</a></code></li>
-<li><code><a title="vectorbt.returns.accessors.Returns_Accessor.unstack_to_df" href="../base/accessors.html#vectorbt.base.accessors.Base_Accessor.unstack_to_df">unstack_to_df</a></code></li>
-<li><code><a title="vectorbt.returns.accessors.Returns_Accessor.up_capture" href="#vectorbt.returns.accessors.Returns_Accessor.up_capture">up_capture</a></code></li>
-<li><code><a title="vectorbt.returns.accessors.Returns_Accessor.value_at_risk" href="#vectorbt.returns.accessors.Returns_Accessor.value_at_risk">value_at_risk</a></code></li>
-<li><code><a title="vectorbt.returns.accessors.Returns_Accessor.wrapper" href="../base/accessors.html#vectorbt.base.accessors.Base_Accessor.wrapper">wrapper</a></code></li>
-<li><code><a title="vectorbt.returns.accessors.Returns_Accessor.year_freq" href="#vectorbt.returns.accessors.Returns_Accessor.year_freq">year_freq</a></code></li>
+<li><code><a title="vectorbt.returns.accessors.ReturnsAccessor.align_to" href="../base/accessors.html#vectorbt.base.accessors.BaseAccessor.align_to">align_to</a></code></li>
+<li><code><a title="vectorbt.returns.accessors.ReturnsAccessor.alpha" href="#vectorbt.returns.accessors.ReturnsAccessor.alpha">alpha</a></code></li>
+<li><code><a title="vectorbt.returns.accessors.ReturnsAccessor.ann_factor" href="#vectorbt.returns.accessors.ReturnsAccessor.ann_factor">ann_factor</a></code></li>
+<li><code><a title="vectorbt.returns.accessors.ReturnsAccessor.annual" href="#vectorbt.returns.accessors.ReturnsAccessor.annual">annual</a></code></li>
+<li><code><a title="vectorbt.returns.accessors.ReturnsAccessor.annualized" href="#vectorbt.returns.accessors.ReturnsAccessor.annualized">annualized</a></code></li>
+<li><code><a title="vectorbt.returns.accessors.ReturnsAccessor.annualized_volatility" href="#vectorbt.returns.accessors.ReturnsAccessor.annualized_volatility">annualized_volatility</a></code></li>
+<li><code><a title="vectorbt.returns.accessors.ReturnsAccessor.apply" href="../base/accessors.html#vectorbt.base.accessors.BaseAccessor.apply">apply</a></code></li>
+<li><code><a title="vectorbt.returns.accessors.ReturnsAccessor.apply_and_concat" href="../base/accessors.html#vectorbt.base.accessors.BaseAccessor.apply_and_concat">apply_and_concat</a></code></li>
+<li><code><a title="vectorbt.returns.accessors.ReturnsAccessor.apply_and_reduce" href="../generic/accessors.html#vectorbt.generic.accessors.GenericAccessor.apply_and_reduce">apply_and_reduce</a></code></li>
+<li><code><a title="vectorbt.returns.accessors.ReturnsAccessor.apply_on_index" href="../base/accessors.html#vectorbt.base.accessors.BaseAccessor.apply_on_index">apply_on_index</a></code></li>
+<li><code><a title="vectorbt.returns.accessors.ReturnsAccessor.applymap" href="../generic/accessors.html#vectorbt.generic.accessors.GenericAccessor.applymap">applymap</a></code></li>
+<li><code><a title="vectorbt.returns.accessors.ReturnsAccessor.barplot" href="../generic/accessors.html#vectorbt.generic.accessors.GenericAccessor.barplot">barplot</a></code></li>
+<li><code><a title="vectorbt.returns.accessors.ReturnsAccessor.beta" href="#vectorbt.returns.accessors.ReturnsAccessor.beta">beta</a></code></li>
+<li><code><a title="vectorbt.returns.accessors.ReturnsAccessor.boxplot" href="../generic/accessors.html#vectorbt.generic.accessors.GenericAccessor.boxplot">boxplot</a></code></li>
+<li><code><a title="vectorbt.returns.accessors.ReturnsAccessor.broadcast" href="../base/accessors.html#vectorbt.base.accessors.BaseAccessor.broadcast">broadcast</a></code></li>
+<li><code><a title="vectorbt.returns.accessors.ReturnsAccessor.broadcast_to" href="../base/accessors.html#vectorbt.base.accessors.BaseAccessor.broadcast_to">broadcast_to</a></code></li>
+<li><code><a title="vectorbt.returns.accessors.ReturnsAccessor.calmar_ratio" href="#vectorbt.returns.accessors.ReturnsAccessor.calmar_ratio">calmar_ratio</a></code></li>
+<li><code><a title="vectorbt.returns.accessors.ReturnsAccessor.capture" href="#vectorbt.returns.accessors.ReturnsAccessor.capture">capture</a></code></li>
+<li><code><a title="vectorbt.returns.accessors.ReturnsAccessor.combine_with" href="../base/accessors.html#vectorbt.base.accessors.BaseAccessor.combine_with">combine_with</a></code></li>
+<li><code><a title="vectorbt.returns.accessors.ReturnsAccessor.combine_with_multiple" href="../base/accessors.html#vectorbt.base.accessors.BaseAccessor.combine_with_multiple">combine_with_multiple</a></code></li>
+<li><code><a title="vectorbt.returns.accessors.ReturnsAccessor.common_sense_ratio" href="#vectorbt.returns.accessors.ReturnsAccessor.common_sense_ratio">common_sense_ratio</a></code></li>
+<li><code><a title="vectorbt.returns.accessors.ReturnsAccessor.concat" href="../base/accessors.html#vectorbt.base.accessors.BaseAccessor.concat">concat</a></code></li>
+<li><code><a title="vectorbt.returns.accessors.ReturnsAccessor.conditional_value_at_risk" href="#vectorbt.returns.accessors.ReturnsAccessor.conditional_value_at_risk">conditional_value_at_risk</a></code></li>
+<li><code><a title="vectorbt.returns.accessors.ReturnsAccessor.count" href="../generic/accessors.html#vectorbt.generic.accessors.GenericAccessor.count">count</a></code></li>
+<li><code><a title="vectorbt.returns.accessors.ReturnsAccessor.cumprod" href="../generic/accessors.html#vectorbt.generic.accessors.GenericAccessor.cumprod">cumprod</a></code></li>
+<li><code><a title="vectorbt.returns.accessors.ReturnsAccessor.cumsum" href="../generic/accessors.html#vectorbt.generic.accessors.GenericAccessor.cumsum">cumsum</a></code></li>
+<li><code><a title="vectorbt.returns.accessors.ReturnsAccessor.cumulative" href="#vectorbt.returns.accessors.ReturnsAccessor.cumulative">cumulative</a></code></li>
+<li><code><a title="vectorbt.returns.accessors.ReturnsAccessor.daily" href="#vectorbt.returns.accessors.ReturnsAccessor.daily">daily</a></code></li>
+<li><code><a title="vectorbt.returns.accessors.ReturnsAccessor.deflated_sharpe_ratio" href="#vectorbt.returns.accessors.ReturnsAccessor.deflated_sharpe_ratio">deflated_sharpe_ratio</a></code></li>
+<li><code><a title="vectorbt.returns.accessors.ReturnsAccessor.describe" href="../generic/accessors.html#vectorbt.generic.accessors.GenericAccessor.describe">describe</a></code></li>
+<li><code><a title="vectorbt.returns.accessors.ReturnsAccessor.diff" href="../generic/accessors.html#vectorbt.generic.accessors.GenericAccessor.diff">diff</a></code></li>
+<li><code><a title="vectorbt.returns.accessors.ReturnsAccessor.down_capture" href="#vectorbt.returns.accessors.ReturnsAccessor.down_capture">down_capture</a></code></li>
+<li><code><a title="vectorbt.returns.accessors.ReturnsAccessor.downside_risk" href="#vectorbt.returns.accessors.ReturnsAccessor.downside_risk">downside_risk</a></code></li>
+<li><code><a title="vectorbt.returns.accessors.ReturnsAccessor.drawdown" href="#vectorbt.returns.accessors.ReturnsAccessor.drawdown">drawdown</a></code></li>
+<li><code><a title="vectorbt.returns.accessors.ReturnsAccessor.drawdowns" href="#vectorbt.returns.accessors.ReturnsAccessor.drawdowns">drawdowns</a></code></li>
+<li><code><a title="vectorbt.returns.accessors.ReturnsAccessor.drop_duplicate_levels" href="../base/accessors.html#vectorbt.base.accessors.BaseAccessor.drop_duplicate_levels">drop_duplicate_levels</a></code></li>
+<li><code><a title="vectorbt.returns.accessors.ReturnsAccessor.drop_levels" href="../base/accessors.html#vectorbt.base.accessors.BaseAccessor.drop_levels">drop_levels</a></code></li>
+<li><code><a title="vectorbt.returns.accessors.ReturnsAccessor.drop_redundant_levels" href="../base/accessors.html#vectorbt.base.accessors.BaseAccessor.drop_redundant_levels">drop_redundant_levels</a></code></li>
+<li><code><a title="vectorbt.returns.accessors.ReturnsAccessor.empty" href="../base/accessors.html#vectorbt.base.accessors.BaseAccessor.empty">empty</a></code></li>
+<li><code><a title="vectorbt.returns.accessors.ReturnsAccessor.empty_like" href="../base/accessors.html#vectorbt.base.accessors.BaseAccessor.empty_like">empty_like</a></code></li>
+<li><code><a title="vectorbt.returns.accessors.ReturnsAccessor.ewm_mean" href="../generic/accessors.html#vectorbt.generic.accessors.GenericAccessor.ewm_mean">ewm_mean</a></code></li>
+<li><code><a title="vectorbt.returns.accessors.ReturnsAccessor.ewm_std" href="../generic/accessors.html#vectorbt.generic.accessors.GenericAccessor.ewm_std">ewm_std</a></code></li>
+<li><code><a title="vectorbt.returns.accessors.ReturnsAccessor.expanding_apply" href="../generic/accessors.html#vectorbt.generic.accessors.GenericAccessor.expanding_apply">expanding_apply</a></code></li>
+<li><code><a title="vectorbt.returns.accessors.ReturnsAccessor.expanding_max" href="../generic/accessors.html#vectorbt.generic.accessors.GenericAccessor.expanding_max">expanding_max</a></code></li>
+<li><code><a title="vectorbt.returns.accessors.ReturnsAccessor.expanding_mean" href="../generic/accessors.html#vectorbt.generic.accessors.GenericAccessor.expanding_mean">expanding_mean</a></code></li>
+<li><code><a title="vectorbt.returns.accessors.ReturnsAccessor.expanding_min" href="../generic/accessors.html#vectorbt.generic.accessors.GenericAccessor.expanding_min">expanding_min</a></code></li>
+<li><code><a title="vectorbt.returns.accessors.ReturnsAccessor.expanding_std" href="../generic/accessors.html#vectorbt.generic.accessors.GenericAccessor.expanding_std">expanding_std</a></code></li>
+<li><code><a title="vectorbt.returns.accessors.ReturnsAccessor.ffill" href="../generic/accessors.html#vectorbt.generic.accessors.GenericAccessor.ffill">ffill</a></code></li>
+<li><code><a title="vectorbt.returns.accessors.ReturnsAccessor.fillna" href="../generic/accessors.html#vectorbt.generic.accessors.GenericAccessor.fillna">fillna</a></code></li>
+<li><code><a title="vectorbt.returns.accessors.ReturnsAccessor.filter" href="../generic/accessors.html#vectorbt.generic.accessors.GenericAccessor.filter">filter</a></code></li>
+<li><code><a title="vectorbt.returns.accessors.ReturnsAccessor.flatten_grouped" href="../generic/accessors.html#vectorbt.generic.accessors.GenericAccessor.flatten_grouped">flatten_grouped</a></code></li>
+<li><code><a title="vectorbt.returns.accessors.ReturnsAccessor.from_price" href="#vectorbt.returns.accessors.ReturnsAccessor.from_price">from_price</a></code></li>
+<li><code><a title="vectorbt.returns.accessors.ReturnsAccessor.fshift" href="../generic/accessors.html#vectorbt.generic.accessors.GenericAccessor.fshift">fshift</a></code></li>
+<li><code><a title="vectorbt.returns.accessors.ReturnsAccessor.get_drawdowns" href="#vectorbt.returns.accessors.ReturnsAccessor.get_drawdowns">get_drawdowns</a></code></li>
+<li><code><a title="vectorbt.returns.accessors.ReturnsAccessor.groupby_apply" href="../generic/accessors.html#vectorbt.generic.accessors.GenericAccessor.groupby_apply">groupby_apply</a></code></li>
+<li><code><a title="vectorbt.returns.accessors.ReturnsAccessor.histplot" href="../generic/accessors.html#vectorbt.generic.accessors.GenericAccessor.histplot">histplot</a></code></li>
+<li><code><a title="vectorbt.returns.accessors.ReturnsAccessor.idxmax" href="../generic/accessors.html#vectorbt.generic.accessors.GenericAccessor.idxmax">idxmax</a></code></li>
+<li><code><a title="vectorbt.returns.accessors.ReturnsAccessor.idxmin" href="../generic/accessors.html#vectorbt.generic.accessors.GenericAccessor.idxmin">idxmin</a></code></li>
+<li><code><a title="vectorbt.returns.accessors.ReturnsAccessor.information_ratio" href="#vectorbt.returns.accessors.ReturnsAccessor.information_ratio">information_ratio</a></code></li>
+<li><code><a title="vectorbt.returns.accessors.ReturnsAccessor.lineplot" href="../generic/accessors.html#vectorbt.generic.accessors.GenericAccessor.lineplot">lineplot</a></code></li>
+<li><code><a title="vectorbt.returns.accessors.ReturnsAccessor.make_symmetric" href="../base/accessors.html#vectorbt.base.accessors.BaseAccessor.make_symmetric">make_symmetric</a></code></li>
+<li><code><a title="vectorbt.returns.accessors.ReturnsAccessor.max" href="../generic/accessors.html#vectorbt.generic.accessors.GenericAccessor.max">max</a></code></li>
+<li><code><a title="vectorbt.returns.accessors.ReturnsAccessor.max_drawdown" href="#vectorbt.returns.accessors.ReturnsAccessor.max_drawdown">max_drawdown</a></code></li>
+<li><code><a title="vectorbt.returns.accessors.ReturnsAccessor.mean" href="../generic/accessors.html#vectorbt.generic.accessors.GenericAccessor.mean">mean</a></code></li>
+<li><code><a title="vectorbt.returns.accessors.ReturnsAccessor.median" href="../generic/accessors.html#vectorbt.generic.accessors.GenericAccessor.median">median</a></code></li>
+<li><code><a title="vectorbt.returns.accessors.ReturnsAccessor.min" href="../generic/accessors.html#vectorbt.generic.accessors.GenericAccessor.min">min</a></code></li>
+<li><code><a title="vectorbt.returns.accessors.ReturnsAccessor.omega_ratio" href="#vectorbt.returns.accessors.ReturnsAccessor.omega_ratio">omega_ratio</a></code></li>
+<li><code><a title="vectorbt.returns.accessors.ReturnsAccessor.pct_change" href="../generic/accessors.html#vectorbt.generic.accessors.GenericAccessor.pct_change">pct_change</a></code></li>
+<li><code><a title="vectorbt.returns.accessors.ReturnsAccessor.plot" href="../generic/accessors.html#vectorbt.generic.accessors.GenericAccessor.plot">plot</a></code></li>
+<li><code><a title="vectorbt.returns.accessors.ReturnsAccessor.product" href="../generic/accessors.html#vectorbt.generic.accessors.GenericAccessor.product">product</a></code></li>
+<li><code><a title="vectorbt.returns.accessors.ReturnsAccessor.reduce" href="../generic/accessors.html#vectorbt.generic.accessors.GenericAccessor.reduce">reduce</a></code></li>
+<li><code><a title="vectorbt.returns.accessors.ReturnsAccessor.rename_levels" href="../base/accessors.html#vectorbt.base.accessors.BaseAccessor.rename_levels">rename_levels</a></code></li>
+<li><code><a title="vectorbt.returns.accessors.ReturnsAccessor.repeat" href="../base/accessors.html#vectorbt.base.accessors.BaseAccessor.repeat">repeat</a></code></li>
+<li><code><a title="vectorbt.returns.accessors.ReturnsAccessor.resample_apply" href="../generic/accessors.html#vectorbt.generic.accessors.GenericAccessor.resample_apply">resample_apply</a></code></li>
+<li><code><a title="vectorbt.returns.accessors.ReturnsAccessor.rolling_apply" href="../generic/accessors.html#vectorbt.generic.accessors.GenericAccessor.rolling_apply">rolling_apply</a></code></li>
+<li><code><a title="vectorbt.returns.accessors.ReturnsAccessor.rolling_max" href="../generic/accessors.html#vectorbt.generic.accessors.GenericAccessor.rolling_max">rolling_max</a></code></li>
+<li><code><a title="vectorbt.returns.accessors.ReturnsAccessor.rolling_mean" href="../generic/accessors.html#vectorbt.generic.accessors.GenericAccessor.rolling_mean">rolling_mean</a></code></li>
+<li><code><a title="vectorbt.returns.accessors.ReturnsAccessor.rolling_min" href="../generic/accessors.html#vectorbt.generic.accessors.GenericAccessor.rolling_min">rolling_min</a></code></li>
+<li><code><a title="vectorbt.returns.accessors.ReturnsAccessor.rolling_std" href="../generic/accessors.html#vectorbt.generic.accessors.GenericAccessor.rolling_std">rolling_std</a></code></li>
+<li><code><a title="vectorbt.returns.accessors.ReturnsAccessor.scatterplot" href="../generic/accessors.html#vectorbt.generic.accessors.GenericAccessor.scatterplot">scatterplot</a></code></li>
+<li><code><a title="vectorbt.returns.accessors.ReturnsAccessor.select_levels" href="../base/accessors.html#vectorbt.base.accessors.BaseAccessor.select_levels">select_levels</a></code></li>
+<li><code><a title="vectorbt.returns.accessors.ReturnsAccessor.sharpe_ratio" href="#vectorbt.returns.accessors.ReturnsAccessor.sharpe_ratio">sharpe_ratio</a></code></li>
+<li><code><a title="vectorbt.returns.accessors.ReturnsAccessor.shuffle" href="../generic/accessors.html#vectorbt.generic.accessors.GenericAccessor.shuffle">shuffle</a></code></li>
+<li><code><a title="vectorbt.returns.accessors.ReturnsAccessor.sortino_ratio" href="#vectorbt.returns.accessors.ReturnsAccessor.sortino_ratio">sortino_ratio</a></code></li>
+<li><code><a title="vectorbt.returns.accessors.ReturnsAccessor.split_into_ranges" href="../generic/accessors.html#vectorbt.generic.accessors.GenericAccessor.split_into_ranges">split_into_ranges</a></code></li>
+<li><code><a title="vectorbt.returns.accessors.ReturnsAccessor.squeeze_grouped" href="../generic/accessors.html#vectorbt.generic.accessors.GenericAccessor.squeeze_grouped">squeeze_grouped</a></code></li>
+<li><code><a title="vectorbt.returns.accessors.ReturnsAccessor.stack_index" href="../base/accessors.html#vectorbt.base.accessors.BaseAccessor.stack_index">stack_index</a></code></li>
+<li><code><a title="vectorbt.returns.accessors.ReturnsAccessor.stats" href="#vectorbt.returns.accessors.ReturnsAccessor.stats">stats</a></code></li>
+<li><code><a title="vectorbt.returns.accessors.ReturnsAccessor.std" href="../generic/accessors.html#vectorbt.generic.accessors.GenericAccessor.std">std</a></code></li>
+<li><code><a title="vectorbt.returns.accessors.ReturnsAccessor.sum" href="../generic/accessors.html#vectorbt.generic.accessors.GenericAccessor.sum">sum</a></code></li>
+<li><code><a title="vectorbt.returns.accessors.ReturnsAccessor.tail_ratio" href="#vectorbt.returns.accessors.ReturnsAccessor.tail_ratio">tail_ratio</a></code></li>
+<li><code><a title="vectorbt.returns.accessors.ReturnsAccessor.tile" href="../base/accessors.html#vectorbt.base.accessors.BaseAccessor.tile">tile</a></code></li>
+<li><code><a title="vectorbt.returns.accessors.ReturnsAccessor.to_1d_array" href="../base/accessors.html#vectorbt.base.accessors.BaseAccessor.to_1d_array">to_1d_array</a></code></li>
+<li><code><a title="vectorbt.returns.accessors.ReturnsAccessor.to_2d_array" href="../base/accessors.html#vectorbt.base.accessors.BaseAccessor.to_2d_array">to_2d_array</a></code></li>
+<li><code><a title="vectorbt.returns.accessors.ReturnsAccessor.to_mapped_array" href="../generic/accessors.html#vectorbt.generic.accessors.GenericAccessor.to_mapped_array">to_mapped_array</a></code></li>
+<li><code><a title="vectorbt.returns.accessors.ReturnsAccessor.total" href="#vectorbt.returns.accessors.ReturnsAccessor.total">total</a></code></li>
+<li><code><a title="vectorbt.returns.accessors.ReturnsAccessor.unstack_to_array" href="../base/accessors.html#vectorbt.base.accessors.BaseAccessor.unstack_to_array">unstack_to_array</a></code></li>
+<li><code><a title="vectorbt.returns.accessors.ReturnsAccessor.unstack_to_df" href="../base/accessors.html#vectorbt.base.accessors.BaseAccessor.unstack_to_df">unstack_to_df</a></code></li>
+<li><code><a title="vectorbt.returns.accessors.ReturnsAccessor.up_capture" href="#vectorbt.returns.accessors.ReturnsAccessor.up_capture">up_capture</a></code></li>
+<li><code><a title="vectorbt.returns.accessors.ReturnsAccessor.value_at_risk" href="#vectorbt.returns.accessors.ReturnsAccessor.value_at_risk">value_at_risk</a></code></li>
+<li><code><a title="vectorbt.returns.accessors.ReturnsAccessor.wrapper" href="../base/accessors.html#vectorbt.base.accessors.BaseAccessor.wrapper">wrapper</a></code></li>
+<li><code><a title="vectorbt.returns.accessors.ReturnsAccessor.year_freq" href="#vectorbt.returns.accessors.ReturnsAccessor.year_freq">year_freq</a></code></li>
 </ul>
 </li>
-<li><code><b><a title="vectorbt.generic.accessors.Generic_DFAccessor" href="../generic/accessors.html#vectorbt.generic.accessors.Generic_DFAccessor">Generic_DFAccessor</a></b></code>:
+<li><code><b><a title="vectorbt.generic.accessors.GenericDFAccessor" href="../generic/accessors.html#vectorbt.generic.accessors.GenericDFAccessor">GenericDFAccessor</a></b></code>:
 <ul class="hlist">
-<li><code><a title="vectorbt.generic.accessors.Generic_DFAccessor.heatmap" href="../generic/accessors.html#vectorbt.generic.accessors.Generic_DFAccessor.heatmap">heatmap</a></code></li>
-<li><code><a title="vectorbt.generic.accessors.Generic_DFAccessor.plot" href="../generic/accessors.html#vectorbt.generic.accessors.Generic_DFAccessor.plot">plot</a></code></li>
+<li><code><a title="vectorbt.generic.accessors.GenericDFAccessor.heatmap" href="../generic/accessors.html#vectorbt.generic.accessors.GenericDFAccessor.heatmap">heatmap</a></code></li>
 </ul>
 </li>
 </ul>
 </dd>
-<dt id="vectorbt.returns.accessors.Returns_SRAccessor"><code class="flex name class">
-<span>class <span class="ident parent-fname">Returns_SRAccessor</span></span>
+<dt id="vectorbt.returns.accessors.ReturnsSRAccessor"><code class="flex name class">
+<span>class <span class="ident parent-fname">ReturnsSRAccessor</span></span>
 <span>(</span><span>obj, year_freq=None, **kwargs)</span>
 </code></dt>
 <dd>
@@ -1939,7 +1937,7 @@ bottom percentile of returns. Will broadcast per column.</dd>
 <summary>
 <span>Expand source code</span>
 </summary>
-<pre><code class="python">class Returns_SRAccessor(Returns_Accessor, Generic_SRAccessor):
+<pre><code class="python">class ReturnsSRAccessor(ReturnsAccessor, GenericSRAccessor):
     &#34;&#34;&#34;Accessor on top of return series. For Series only.
 
     Accessible through `pd.Series.vbt.returns`.&#34;&#34;&#34;
@@ -1948,12 +1946,12 @@ bottom percentile of returns. Will broadcast per column.</dd>
         if not checks.is_pandas(obj):  # parent accessor
             obj = obj._obj
 
-        Generic_SRAccessor.__init__(self, obj, **kwargs)
-        Returns_Accessor.__init__(self, obj, year_freq=year_freq, **kwargs)
+        GenericSRAccessor.__init__(self, obj, **kwargs)
+        ReturnsAccessor.__init__(self, obj, year_freq=year_freq, **kwargs)
 
     def plot_cum_returns(self, benchmark_rets=None, start_value=1, fill_to_benchmark=False,
                          main_kwargs=None, benchmark_kwargs=None, hline_shape_kwargs=None,
-                         row=None, col=None, xref=&#39;x&#39;, yref=&#39;y&#39;,
+                         add_trace_kwargs=None, xref=&#39;x&#39;, yref=&#39;y&#39;,
                          fig=None, **layout_kwargs):  # pragma: no cover
         &#34;&#34;&#34;Plot cumulative returns.
 
@@ -1962,11 +1960,10 @@ bottom percentile of returns. Will broadcast per column.</dd>
                 Will broadcast per element.
             start_value (float): The starting returns.
             fill_to_benchmark (bool): Whether to fill between main and benchmark, or between main and `start_value`.
-            main_kwargs (dict): Keyword arguments passed to `vectorbt.generic.accessors.Generic_SRAccessor.plot` for main.
-            benchmark_kwargs (dict): Keyword arguments passed to `vectorbt.generic.accessors.Generic_SRAccessor.plot` for benchmark.
+            main_kwargs (dict): Keyword arguments passed to `vectorbt.generic.accessors.GenericSRAccessor.plot` for main.
+            benchmark_kwargs (dict): Keyword arguments passed to `vectorbt.generic.accessors.GenericSRAccessor.plot` for benchmark.
             hline_shape_kwargs (dict): Keyword arguments passed to `plotly.graph_objects.Figure.add_shape` for `start_value` line.
-            row (int): Row position.
-            col (int): Column position.
+            add_trace_kwargs (dict): Keyword arguments passed to `add_trace`.
             xref (str): X coordinate axis.
             yref (str): Y coordinate axis.
             fig (plotly.graph_objects.Figure): Figure to add traces to.
@@ -1989,7 +1986,7 @@ bottom percentile of returns. Will broadcast per column.</dd>
         from vectorbt.settings import color_schema
 
         if fig is None:
-            fig = CustomFigureWidget()
+            fig = FigureWidget()
         fig.update_layout(**layout_kwargs)
         x_domain = [0, 1]
         xaxis = &#39;xaxis&#39; + xref[1:]
@@ -2011,7 +2008,7 @@ bottom percentile of returns. Will broadcast per column.</dd>
                 )
             ), benchmark_kwargs)
             benchmark_cumrets = benchmark_rets.vbt.returns.cumulative(start_value=start_value)
-            benchmark_cumrets.vbt.plot(**benchmark_kwargs, row=row, col=col, fig=fig)
+            benchmark_cumrets.vbt.plot(**benchmark_kwargs, add_trace_kwargs=add_trace_kwargs, fig=fig)
         else:
             benchmark_cumrets = None
 
@@ -2026,9 +2023,9 @@ bottom percentile of returns. Will broadcast per column.</dd>
         ), main_kwargs)
         cumrets = self.cumulative(start_value=start_value)
         if fill_to_benchmark:
-            cumrets.vbt.plot_against(benchmark_cumrets, **main_kwargs, row=row, col=col, fig=fig)
+            cumrets.vbt.plot_against(benchmark_cumrets, **main_kwargs, add_trace_kwargs=add_trace_kwargs, fig=fig)
         else:
-            cumrets.vbt.plot_against(start_value, **main_kwargs, row=row, col=col, fig=fig)
+            cumrets.vbt.plot_against(start_value, **main_kwargs, add_trace_kwargs=add_trace_kwargs, fig=fig)
 
         # Plot hline
         if hline_shape_kwargs is None:
@@ -2051,16 +2048,16 @@ bottom percentile of returns. Will broadcast per column.</dd>
 </details>
 <h3 class="section-subtitle">Ancestors</h3>
 <ul class="hlist">
-<li><a title="vectorbt.returns.accessors.Returns_Accessor" href="#vectorbt.returns.accessors.Returns_Accessor">Returns_Accessor</a></li>
-<li><a title="vectorbt.generic.accessors.Generic_SRAccessor" href="../generic/accessors.html#vectorbt.generic.accessors.Generic_SRAccessor">Generic_SRAccessor</a></li>
-<li><a title="vectorbt.generic.accessors.Generic_Accessor" href="../generic/accessors.html#vectorbt.generic.accessors.Generic_Accessor">Generic_Accessor</a></li>
-<li><a title="vectorbt.base.accessors.Base_SRAccessor" href="../base/accessors.html#vectorbt.base.accessors.Base_SRAccessor">Base_SRAccessor</a></li>
-<li><a title="vectorbt.base.accessors.Base_Accessor" href="../base/accessors.html#vectorbt.base.accessors.Base_Accessor">Base_Accessor</a></li>
+<li><a title="vectorbt.returns.accessors.ReturnsAccessor" href="#vectorbt.returns.accessors.ReturnsAccessor">ReturnsAccessor</a></li>
+<li><a title="vectorbt.generic.accessors.GenericSRAccessor" href="../generic/accessors.html#vectorbt.generic.accessors.GenericSRAccessor">GenericSRAccessor</a></li>
+<li><a title="vectorbt.generic.accessors.GenericAccessor" href="../generic/accessors.html#vectorbt.generic.accessors.GenericAccessor">GenericAccessor</a></li>
+<li><a title="vectorbt.base.accessors.BaseSRAccessor" href="../base/accessors.html#vectorbt.base.accessors.BaseSRAccessor">BaseSRAccessor</a></li>
+<li><a title="vectorbt.base.accessors.BaseAccessor" href="../base/accessors.html#vectorbt.base.accessors.BaseAccessor">BaseAccessor</a></li>
 </ul>
 <h3 class="section-subtitle">Methods</h3>
 <dl>
-<dt id="vectorbt.returns.accessors.Returns_SRAccessor.plot_cum_returns"><code class="name flex">
-<span>def <span class="ident fname">plot_cum_returns</span></span>(<span>self, benchmark_rets=None, start_value=1, fill_to_benchmark=False, main_kwargs=None, benchmark_kwargs=None, hline_shape_kwargs=None, row=None, col=None, xref='x', yref='y', fig=None, **layout_kwargs)</span>
+<dt id="vectorbt.returns.accessors.ReturnsSRAccessor.plot_cum_returns"><code class="name flex">
+<span>def <span class="ident fname">plot_cum_returns</span></span>(<span>self, benchmark_rets=None, start_value=1, fill_to_benchmark=False, main_kwargs=None, benchmark_kwargs=None, hline_shape_kwargs=None, add_trace_kwargs=None, xref='x', yref='y', fig=None, **layout_kwargs)</span>
 </code></dt>
 <dd>
 <div class="desc"><p>Plot cumulative returns.</p>
@@ -2074,15 +2071,13 @@ Will broadcast per element.</dd>
 <dt><strong><code>fill_to_benchmark</code></strong> :&ensp;<code>bool</code></dt>
 <dd>Whether to fill between main and benchmark, or between main and <code>start_value</code>.</dd>
 <dt><strong><code>main_kwargs</code></strong> :&ensp;<code>dict</code></dt>
-<dd>Keyword arguments passed to <code><a title="vectorbt.generic.accessors.Generic_SRAccessor.plot" href="../generic/accessors.html#vectorbt.generic.accessors.Generic_SRAccessor.plot">Generic_SRAccessor.plot()</a></code> for main.</dd>
+<dd>Keyword arguments passed to <code><a title="vectorbt.generic.accessors.GenericSRAccessor.plot" href="../generic/accessors.html#vectorbt.generic.accessors.GenericAccessor.plot">GenericAccessor.plot()</a></code> for main.</dd>
 <dt><strong><code>benchmark_kwargs</code></strong> :&ensp;<code>dict</code></dt>
-<dd>Keyword arguments passed to <code><a title="vectorbt.generic.accessors.Generic_SRAccessor.plot" href="../generic/accessors.html#vectorbt.generic.accessors.Generic_SRAccessor.plot">Generic_SRAccessor.plot()</a></code> for benchmark.</dd>
+<dd>Keyword arguments passed to <code><a title="vectorbt.generic.accessors.GenericSRAccessor.plot" href="../generic/accessors.html#vectorbt.generic.accessors.GenericAccessor.plot">GenericAccessor.plot()</a></code> for benchmark.</dd>
 <dt><strong><code>hline_shape_kwargs</code></strong> :&ensp;<code>dict</code></dt>
 <dd>Keyword arguments passed to <code>plotly.graph_objects.Figure.add_shape</code> for <code>start_value</code> line.</dd>
-<dt><strong><code>row</code></strong> :&ensp;<code>int</code></dt>
-<dd>Row position.</dd>
-<dt><strong><code>col</code></strong> :&ensp;<code>int</code></dt>
-<dd>Column position.</dd>
+<dt><strong><code>add_trace_kwargs</code></strong> :&ensp;<code>dict</code></dt>
+<dd>Keyword arguments passed to <code>add_trace</code>.</dd>
 <dt><strong><code>xref</code></strong> :&ensp;<code>str</code></dt>
 <dd>X coordinate axis.</dd>
 <dt><strong><code>yref</code></strong> :&ensp;<code>str</code></dt>
@@ -2108,7 +2103,7 @@ Will broadcast per element.</dd>
 </summary>
 <pre><code class="python">def plot_cum_returns(self, benchmark_rets=None, start_value=1, fill_to_benchmark=False,
                      main_kwargs=None, benchmark_kwargs=None, hline_shape_kwargs=None,
-                     row=None, col=None, xref=&#39;x&#39;, yref=&#39;y&#39;,
+                     add_trace_kwargs=None, xref=&#39;x&#39;, yref=&#39;y&#39;,
                      fig=None, **layout_kwargs):  # pragma: no cover
     &#34;&#34;&#34;Plot cumulative returns.
 
@@ -2117,11 +2112,10 @@ Will broadcast per element.</dd>
             Will broadcast per element.
         start_value (float): The starting returns.
         fill_to_benchmark (bool): Whether to fill between main and benchmark, or between main and `start_value`.
-        main_kwargs (dict): Keyword arguments passed to `vectorbt.generic.accessors.Generic_SRAccessor.plot` for main.
-        benchmark_kwargs (dict): Keyword arguments passed to `vectorbt.generic.accessors.Generic_SRAccessor.plot` for benchmark.
+        main_kwargs (dict): Keyword arguments passed to `vectorbt.generic.accessors.GenericSRAccessor.plot` for main.
+        benchmark_kwargs (dict): Keyword arguments passed to `vectorbt.generic.accessors.GenericSRAccessor.plot` for benchmark.
         hline_shape_kwargs (dict): Keyword arguments passed to `plotly.graph_objects.Figure.add_shape` for `start_value` line.
-        row (int): Row position.
-        col (int): Column position.
+        add_trace_kwargs (dict): Keyword arguments passed to `add_trace`.
         xref (str): X coordinate axis.
         yref (str): Y coordinate axis.
         fig (plotly.graph_objects.Figure): Figure to add traces to.
@@ -2144,7 +2138,7 @@ Will broadcast per element.</dd>
     from vectorbt.settings import color_schema
 
     if fig is None:
-        fig = CustomFigureWidget()
+        fig = FigureWidget()
     fig.update_layout(**layout_kwargs)
     x_domain = [0, 1]
     xaxis = &#39;xaxis&#39; + xref[1:]
@@ -2166,7 +2160,7 @@ Will broadcast per element.</dd>
             )
         ), benchmark_kwargs)
         benchmark_cumrets = benchmark_rets.vbt.returns.cumulative(start_value=start_value)
-        benchmark_cumrets.vbt.plot(**benchmark_kwargs, row=row, col=col, fig=fig)
+        benchmark_cumrets.vbt.plot(**benchmark_kwargs, add_trace_kwargs=add_trace_kwargs, fig=fig)
     else:
         benchmark_cumrets = None
 
@@ -2181,9 +2175,9 @@ Will broadcast per element.</dd>
     ), main_kwargs)
     cumrets = self.cumulative(start_value=start_value)
     if fill_to_benchmark:
-        cumrets.vbt.plot_against(benchmark_cumrets, **main_kwargs, row=row, col=col, fig=fig)
+        cumrets.vbt.plot_against(benchmark_cumrets, **main_kwargs, add_trace_kwargs=add_trace_kwargs, fig=fig)
     else:
-        cumrets.vbt.plot_against(start_value, **main_kwargs, row=row, col=col, fig=fig)
+        cumrets.vbt.plot_against(start_value, **main_kwargs, add_trace_kwargs=add_trace_kwargs, fig=fig)
 
     # Plot hline
     if hline_shape_kwargs is None:
@@ -2208,116 +2202,119 @@ Will broadcast per element.</dd>
 </dl>
 <h3 class="section-subtitle">Inherited members</h3>
 <ul class="hlist">
-<li><code><b><a title="vectorbt.returns.accessors.Returns_Accessor" href="#vectorbt.returns.accessors.Returns_Accessor">Returns_Accessor</a></b></code>:
+<li><code><b><a title="vectorbt.returns.accessors.ReturnsAccessor" href="#vectorbt.returns.accessors.ReturnsAccessor">ReturnsAccessor</a></b></code>:
 <ul class="hlist">
-<li><code><a title="vectorbt.returns.accessors.Returns_Accessor.align_to" href="../base/accessors.html#vectorbt.base.accessors.Base_Accessor.align_to">align_to</a></code></li>
-<li><code><a title="vectorbt.returns.accessors.Returns_Accessor.alpha" href="#vectorbt.returns.accessors.Returns_Accessor.alpha">alpha</a></code></li>
-<li><code><a title="vectorbt.returns.accessors.Returns_Accessor.ann_factor" href="#vectorbt.returns.accessors.Returns_Accessor.ann_factor">ann_factor</a></code></li>
-<li><code><a title="vectorbt.returns.accessors.Returns_Accessor.annual" href="#vectorbt.returns.accessors.Returns_Accessor.annual">annual</a></code></li>
-<li><code><a title="vectorbt.returns.accessors.Returns_Accessor.annualized" href="#vectorbt.returns.accessors.Returns_Accessor.annualized">annualized</a></code></li>
-<li><code><a title="vectorbt.returns.accessors.Returns_Accessor.annualized_volatility" href="#vectorbt.returns.accessors.Returns_Accessor.annualized_volatility">annualized_volatility</a></code></li>
-<li><code><a title="vectorbt.returns.accessors.Returns_Accessor.apply" href="../base/accessors.html#vectorbt.base.accessors.Base_Accessor.apply">apply</a></code></li>
-<li><code><a title="vectorbt.returns.accessors.Returns_Accessor.apply_and_concat" href="../base/accessors.html#vectorbt.base.accessors.Base_Accessor.apply_and_concat">apply_and_concat</a></code></li>
-<li><code><a title="vectorbt.returns.accessors.Returns_Accessor.apply_and_reduce" href="../generic/accessors.html#vectorbt.generic.accessors.Generic_Accessor.apply_and_reduce">apply_and_reduce</a></code></li>
-<li><code><a title="vectorbt.returns.accessors.Returns_Accessor.apply_on_index" href="../base/accessors.html#vectorbt.base.accessors.Base_Accessor.apply_on_index">apply_on_index</a></code></li>
-<li><code><a title="vectorbt.returns.accessors.Returns_Accessor.applymap" href="../generic/accessors.html#vectorbt.generic.accessors.Generic_Accessor.applymap">applymap</a></code></li>
-<li><code><a title="vectorbt.returns.accessors.Returns_Accessor.bar" href="../generic/accessors.html#vectorbt.generic.accessors.Generic_Accessor.bar">bar</a></code></li>
-<li><code><a title="vectorbt.returns.accessors.Returns_Accessor.beta" href="#vectorbt.returns.accessors.Returns_Accessor.beta">beta</a></code></li>
-<li><code><a title="vectorbt.returns.accessors.Returns_Accessor.box" href="../generic/accessors.html#vectorbt.generic.accessors.Generic_Accessor.box">box</a></code></li>
-<li><code><a title="vectorbt.returns.accessors.Returns_Accessor.broadcast" href="../base/accessors.html#vectorbt.base.accessors.Base_Accessor.broadcast">broadcast</a></code></li>
-<li><code><a title="vectorbt.returns.accessors.Returns_Accessor.broadcast_to" href="../base/accessors.html#vectorbt.base.accessors.Base_Accessor.broadcast_to">broadcast_to</a></code></li>
-<li><code><a title="vectorbt.returns.accessors.Returns_Accessor.calmar_ratio" href="#vectorbt.returns.accessors.Returns_Accessor.calmar_ratio">calmar_ratio</a></code></li>
-<li><code><a title="vectorbt.returns.accessors.Returns_Accessor.capture" href="#vectorbt.returns.accessors.Returns_Accessor.capture">capture</a></code></li>
-<li><code><a title="vectorbt.returns.accessors.Returns_Accessor.combine_with" href="../base/accessors.html#vectorbt.base.accessors.Base_Accessor.combine_with">combine_with</a></code></li>
-<li><code><a title="vectorbt.returns.accessors.Returns_Accessor.combine_with_multiple" href="../base/accessors.html#vectorbt.base.accessors.Base_Accessor.combine_with_multiple">combine_with_multiple</a></code></li>
-<li><code><a title="vectorbt.returns.accessors.Returns_Accessor.common_sense_ratio" href="#vectorbt.returns.accessors.Returns_Accessor.common_sense_ratio">common_sense_ratio</a></code></li>
-<li><code><a title="vectorbt.returns.accessors.Returns_Accessor.concat" href="../base/accessors.html#vectorbt.base.accessors.Base_Accessor.concat">concat</a></code></li>
-<li><code><a title="vectorbt.returns.accessors.Returns_Accessor.conditional_value_at_risk" href="#vectorbt.returns.accessors.Returns_Accessor.conditional_value_at_risk">conditional_value_at_risk</a></code></li>
-<li><code><a title="vectorbt.returns.accessors.Returns_Accessor.count" href="../generic/accessors.html#vectorbt.generic.accessors.Generic_Accessor.count">count</a></code></li>
-<li><code><a title="vectorbt.returns.accessors.Returns_Accessor.cumprod" href="../generic/accessors.html#vectorbt.generic.accessors.Generic_Accessor.cumprod">cumprod</a></code></li>
-<li><code><a title="vectorbt.returns.accessors.Returns_Accessor.cumsum" href="../generic/accessors.html#vectorbt.generic.accessors.Generic_Accessor.cumsum">cumsum</a></code></li>
-<li><code><a title="vectorbt.returns.accessors.Returns_Accessor.cumulative" href="#vectorbt.returns.accessors.Returns_Accessor.cumulative">cumulative</a></code></li>
-<li><code><a title="vectorbt.returns.accessors.Returns_Accessor.daily" href="#vectorbt.returns.accessors.Returns_Accessor.daily">daily</a></code></li>
-<li><code><a title="vectorbt.returns.accessors.Returns_Accessor.deflated_sharpe_ratio" href="#vectorbt.returns.accessors.Returns_Accessor.deflated_sharpe_ratio">deflated_sharpe_ratio</a></code></li>
-<li><code><a title="vectorbt.returns.accessors.Returns_Accessor.describe" href="../generic/accessors.html#vectorbt.generic.accessors.Generic_Accessor.describe">describe</a></code></li>
-<li><code><a title="vectorbt.returns.accessors.Returns_Accessor.diff" href="../generic/accessors.html#vectorbt.generic.accessors.Generic_Accessor.diff">diff</a></code></li>
-<li><code><a title="vectorbt.returns.accessors.Returns_Accessor.down_capture" href="#vectorbt.returns.accessors.Returns_Accessor.down_capture">down_capture</a></code></li>
-<li><code><a title="vectorbt.returns.accessors.Returns_Accessor.downside_risk" href="#vectorbt.returns.accessors.Returns_Accessor.downside_risk">downside_risk</a></code></li>
-<li><code><a title="vectorbt.returns.accessors.Returns_Accessor.drawdown" href="#vectorbt.returns.accessors.Returns_Accessor.drawdown">drawdown</a></code></li>
-<li><code><a title="vectorbt.returns.accessors.Returns_Accessor.drawdowns" href="#vectorbt.returns.accessors.Returns_Accessor.drawdowns">drawdowns</a></code></li>
-<li><code><a title="vectorbt.returns.accessors.Returns_Accessor.drop_duplicate_levels" href="../base/accessors.html#vectorbt.base.accessors.Base_Accessor.drop_duplicate_levels">drop_duplicate_levels</a></code></li>
-<li><code><a title="vectorbt.returns.accessors.Returns_Accessor.drop_levels" href="../base/accessors.html#vectorbt.base.accessors.Base_Accessor.drop_levels">drop_levels</a></code></li>
-<li><code><a title="vectorbt.returns.accessors.Returns_Accessor.drop_redundant_levels" href="../base/accessors.html#vectorbt.base.accessors.Base_Accessor.drop_redundant_levels">drop_redundant_levels</a></code></li>
-<li><code><a title="vectorbt.returns.accessors.Returns_Accessor.empty" href="../base/accessors.html#vectorbt.base.accessors.Base_Accessor.empty">empty</a></code></li>
-<li><code><a title="vectorbt.returns.accessors.Returns_Accessor.empty_like" href="../base/accessors.html#vectorbt.base.accessors.Base_Accessor.empty_like">empty_like</a></code></li>
-<li><code><a title="vectorbt.returns.accessors.Returns_Accessor.ewm_mean" href="../generic/accessors.html#vectorbt.generic.accessors.Generic_Accessor.ewm_mean">ewm_mean</a></code></li>
-<li><code><a title="vectorbt.returns.accessors.Returns_Accessor.ewm_std" href="../generic/accessors.html#vectorbt.generic.accessors.Generic_Accessor.ewm_std">ewm_std</a></code></li>
-<li><code><a title="vectorbt.returns.accessors.Returns_Accessor.expanding_apply" href="../generic/accessors.html#vectorbt.generic.accessors.Generic_Accessor.expanding_apply">expanding_apply</a></code></li>
-<li><code><a title="vectorbt.returns.accessors.Returns_Accessor.expanding_max" href="../generic/accessors.html#vectorbt.generic.accessors.Generic_Accessor.expanding_max">expanding_max</a></code></li>
-<li><code><a title="vectorbt.returns.accessors.Returns_Accessor.expanding_mean" href="../generic/accessors.html#vectorbt.generic.accessors.Generic_Accessor.expanding_mean">expanding_mean</a></code></li>
-<li><code><a title="vectorbt.returns.accessors.Returns_Accessor.expanding_min" href="../generic/accessors.html#vectorbt.generic.accessors.Generic_Accessor.expanding_min">expanding_min</a></code></li>
-<li><code><a title="vectorbt.returns.accessors.Returns_Accessor.expanding_std" href="../generic/accessors.html#vectorbt.generic.accessors.Generic_Accessor.expanding_std">expanding_std</a></code></li>
-<li><code><a title="vectorbt.returns.accessors.Returns_Accessor.ffill" href="../generic/accessors.html#vectorbt.generic.accessors.Generic_Accessor.ffill">ffill</a></code></li>
-<li><code><a title="vectorbt.returns.accessors.Returns_Accessor.fillna" href="../generic/accessors.html#vectorbt.generic.accessors.Generic_Accessor.fillna">fillna</a></code></li>
-<li><code><a title="vectorbt.returns.accessors.Returns_Accessor.filter" href="../generic/accessors.html#vectorbt.generic.accessors.Generic_Accessor.filter">filter</a></code></li>
-<li><code><a title="vectorbt.returns.accessors.Returns_Accessor.flatten_grouped" href="../generic/accessors.html#vectorbt.generic.accessors.Generic_Accessor.flatten_grouped">flatten_grouped</a></code></li>
-<li><code><a title="vectorbt.returns.accessors.Returns_Accessor.from_price" href="#vectorbt.returns.accessors.Returns_Accessor.from_price">from_price</a></code></li>
-<li><code><a title="vectorbt.returns.accessors.Returns_Accessor.fshift" href="../generic/accessors.html#vectorbt.generic.accessors.Generic_Accessor.fshift">fshift</a></code></li>
-<li><code><a title="vectorbt.returns.accessors.Returns_Accessor.get_drawdowns" href="#vectorbt.returns.accessors.Returns_Accessor.get_drawdowns">get_drawdowns</a></code></li>
-<li><code><a title="vectorbt.returns.accessors.Returns_Accessor.groupby_apply" href="../generic/accessors.html#vectorbt.generic.accessors.Generic_Accessor.groupby_apply">groupby_apply</a></code></li>
-<li><code><a title="vectorbt.returns.accessors.Returns_Accessor.hist" href="../generic/accessors.html#vectorbt.generic.accessors.Generic_Accessor.hist">hist</a></code></li>
-<li><code><a title="vectorbt.returns.accessors.Returns_Accessor.idxmax" href="../generic/accessors.html#vectorbt.generic.accessors.Generic_Accessor.idxmax">idxmax</a></code></li>
-<li><code><a title="vectorbt.returns.accessors.Returns_Accessor.idxmin" href="../generic/accessors.html#vectorbt.generic.accessors.Generic_Accessor.idxmin">idxmin</a></code></li>
-<li><code><a title="vectorbt.returns.accessors.Returns_Accessor.information_ratio" href="#vectorbt.returns.accessors.Returns_Accessor.information_ratio">information_ratio</a></code></li>
-<li><code><a title="vectorbt.returns.accessors.Returns_Accessor.make_symmetric" href="../base/accessors.html#vectorbt.base.accessors.Base_Accessor.make_symmetric">make_symmetric</a></code></li>
-<li><code><a title="vectorbt.returns.accessors.Returns_Accessor.max" href="../generic/accessors.html#vectorbt.generic.accessors.Generic_Accessor.max">max</a></code></li>
-<li><code><a title="vectorbt.returns.accessors.Returns_Accessor.max_drawdown" href="#vectorbt.returns.accessors.Returns_Accessor.max_drawdown">max_drawdown</a></code></li>
-<li><code><a title="vectorbt.returns.accessors.Returns_Accessor.mean" href="../generic/accessors.html#vectorbt.generic.accessors.Generic_Accessor.mean">mean</a></code></li>
-<li><code><a title="vectorbt.returns.accessors.Returns_Accessor.median" href="../generic/accessors.html#vectorbt.generic.accessors.Generic_Accessor.median">median</a></code></li>
-<li><code><a title="vectorbt.returns.accessors.Returns_Accessor.min" href="../generic/accessors.html#vectorbt.generic.accessors.Generic_Accessor.min">min</a></code></li>
-<li><code><a title="vectorbt.returns.accessors.Returns_Accessor.omega_ratio" href="#vectorbt.returns.accessors.Returns_Accessor.omega_ratio">omega_ratio</a></code></li>
-<li><code><a title="vectorbt.returns.accessors.Returns_Accessor.pct_change" href="../generic/accessors.html#vectorbt.generic.accessors.Generic_Accessor.pct_change">pct_change</a></code></li>
-<li><code><a title="vectorbt.returns.accessors.Returns_Accessor.product" href="../generic/accessors.html#vectorbt.generic.accessors.Generic_Accessor.product">product</a></code></li>
-<li><code><a title="vectorbt.returns.accessors.Returns_Accessor.reduce" href="../generic/accessors.html#vectorbt.generic.accessors.Generic_Accessor.reduce">reduce</a></code></li>
-<li><code><a title="vectorbt.returns.accessors.Returns_Accessor.rename_levels" href="../base/accessors.html#vectorbt.base.accessors.Base_Accessor.rename_levels">rename_levels</a></code></li>
-<li><code><a title="vectorbt.returns.accessors.Returns_Accessor.repeat" href="../base/accessors.html#vectorbt.base.accessors.Base_Accessor.repeat">repeat</a></code></li>
-<li><code><a title="vectorbt.returns.accessors.Returns_Accessor.resample_apply" href="../generic/accessors.html#vectorbt.generic.accessors.Generic_Accessor.resample_apply">resample_apply</a></code></li>
-<li><code><a title="vectorbt.returns.accessors.Returns_Accessor.rolling_apply" href="../generic/accessors.html#vectorbt.generic.accessors.Generic_Accessor.rolling_apply">rolling_apply</a></code></li>
-<li><code><a title="vectorbt.returns.accessors.Returns_Accessor.rolling_max" href="../generic/accessors.html#vectorbt.generic.accessors.Generic_Accessor.rolling_max">rolling_max</a></code></li>
-<li><code><a title="vectorbt.returns.accessors.Returns_Accessor.rolling_mean" href="../generic/accessors.html#vectorbt.generic.accessors.Generic_Accessor.rolling_mean">rolling_mean</a></code></li>
-<li><code><a title="vectorbt.returns.accessors.Returns_Accessor.rolling_min" href="../generic/accessors.html#vectorbt.generic.accessors.Generic_Accessor.rolling_min">rolling_min</a></code></li>
-<li><code><a title="vectorbt.returns.accessors.Returns_Accessor.rolling_std" href="../generic/accessors.html#vectorbt.generic.accessors.Generic_Accessor.rolling_std">rolling_std</a></code></li>
-<li><code><a title="vectorbt.returns.accessors.Returns_Accessor.scatter" href="../generic/accessors.html#vectorbt.generic.accessors.Generic_Accessor.scatter">scatter</a></code></li>
-<li><code><a title="vectorbt.returns.accessors.Returns_Accessor.select_levels" href="../base/accessors.html#vectorbt.base.accessors.Base_Accessor.select_levels">select_levels</a></code></li>
-<li><code><a title="vectorbt.returns.accessors.Returns_Accessor.sharpe_ratio" href="#vectorbt.returns.accessors.Returns_Accessor.sharpe_ratio">sharpe_ratio</a></code></li>
-<li><code><a title="vectorbt.returns.accessors.Returns_Accessor.shuffle" href="../generic/accessors.html#vectorbt.generic.accessors.Generic_Accessor.shuffle">shuffle</a></code></li>
-<li><code><a title="vectorbt.returns.accessors.Returns_Accessor.sortino_ratio" href="#vectorbt.returns.accessors.Returns_Accessor.sortino_ratio">sortino_ratio</a></code></li>
-<li><code><a title="vectorbt.returns.accessors.Returns_Accessor.split_into_ranges" href="../generic/accessors.html#vectorbt.generic.accessors.Generic_Accessor.split_into_ranges">split_into_ranges</a></code></li>
-<li><code><a title="vectorbt.returns.accessors.Returns_Accessor.squeeze_grouped" href="../generic/accessors.html#vectorbt.generic.accessors.Generic_Accessor.squeeze_grouped">squeeze_grouped</a></code></li>
-<li><code><a title="vectorbt.returns.accessors.Returns_Accessor.stack_index" href="../base/accessors.html#vectorbt.base.accessors.Base_Accessor.stack_index">stack_index</a></code></li>
-<li><code><a title="vectorbt.returns.accessors.Returns_Accessor.stats" href="#vectorbt.returns.accessors.Returns_Accessor.stats">stats</a></code></li>
-<li><code><a title="vectorbt.returns.accessors.Returns_Accessor.std" href="../generic/accessors.html#vectorbt.generic.accessors.Generic_Accessor.std">std</a></code></li>
-<li><code><a title="vectorbt.returns.accessors.Returns_Accessor.sum" href="../generic/accessors.html#vectorbt.generic.accessors.Generic_Accessor.sum">sum</a></code></li>
-<li><code><a title="vectorbt.returns.accessors.Returns_Accessor.tail_ratio" href="#vectorbt.returns.accessors.Returns_Accessor.tail_ratio">tail_ratio</a></code></li>
-<li><code><a title="vectorbt.returns.accessors.Returns_Accessor.tile" href="../base/accessors.html#vectorbt.base.accessors.Base_Accessor.tile">tile</a></code></li>
-<li><code><a title="vectorbt.returns.accessors.Returns_Accessor.to_1d_array" href="../base/accessors.html#vectorbt.base.accessors.Base_Accessor.to_1d_array">to_1d_array</a></code></li>
-<li><code><a title="vectorbt.returns.accessors.Returns_Accessor.to_2d_array" href="../base/accessors.html#vectorbt.base.accessors.Base_Accessor.to_2d_array">to_2d_array</a></code></li>
-<li><code><a title="vectorbt.returns.accessors.Returns_Accessor.to_mapped_array" href="../generic/accessors.html#vectorbt.generic.accessors.Generic_Accessor.to_mapped_array">to_mapped_array</a></code></li>
-<li><code><a title="vectorbt.returns.accessors.Returns_Accessor.total" href="#vectorbt.returns.accessors.Returns_Accessor.total">total</a></code></li>
-<li><code><a title="vectorbt.returns.accessors.Returns_Accessor.unstack_to_array" href="../base/accessors.html#vectorbt.base.accessors.Base_Accessor.unstack_to_array">unstack_to_array</a></code></li>
-<li><code><a title="vectorbt.returns.accessors.Returns_Accessor.unstack_to_df" href="../base/accessors.html#vectorbt.base.accessors.Base_Accessor.unstack_to_df">unstack_to_df</a></code></li>
-<li><code><a title="vectorbt.returns.accessors.Returns_Accessor.up_capture" href="#vectorbt.returns.accessors.Returns_Accessor.up_capture">up_capture</a></code></li>
-<li><code><a title="vectorbt.returns.accessors.Returns_Accessor.value_at_risk" href="#vectorbt.returns.accessors.Returns_Accessor.value_at_risk">value_at_risk</a></code></li>
-<li><code><a title="vectorbt.returns.accessors.Returns_Accessor.wrapper" href="../base/accessors.html#vectorbt.base.accessors.Base_Accessor.wrapper">wrapper</a></code></li>
-<li><code><a title="vectorbt.returns.accessors.Returns_Accessor.year_freq" href="#vectorbt.returns.accessors.Returns_Accessor.year_freq">year_freq</a></code></li>
+<li><code><a title="vectorbt.returns.accessors.ReturnsAccessor.align_to" href="../base/accessors.html#vectorbt.base.accessors.BaseAccessor.align_to">align_to</a></code></li>
+<li><code><a title="vectorbt.returns.accessors.ReturnsAccessor.alpha" href="#vectorbt.returns.accessors.ReturnsAccessor.alpha">alpha</a></code></li>
+<li><code><a title="vectorbt.returns.accessors.ReturnsAccessor.ann_factor" href="#vectorbt.returns.accessors.ReturnsAccessor.ann_factor">ann_factor</a></code></li>
+<li><code><a title="vectorbt.returns.accessors.ReturnsAccessor.annual" href="#vectorbt.returns.accessors.ReturnsAccessor.annual">annual</a></code></li>
+<li><code><a title="vectorbt.returns.accessors.ReturnsAccessor.annualized" href="#vectorbt.returns.accessors.ReturnsAccessor.annualized">annualized</a></code></li>
+<li><code><a title="vectorbt.returns.accessors.ReturnsAccessor.annualized_volatility" href="#vectorbt.returns.accessors.ReturnsAccessor.annualized_volatility">annualized_volatility</a></code></li>
+<li><code><a title="vectorbt.returns.accessors.ReturnsAccessor.apply" href="../base/accessors.html#vectorbt.base.accessors.BaseAccessor.apply">apply</a></code></li>
+<li><code><a title="vectorbt.returns.accessors.ReturnsAccessor.apply_and_concat" href="../base/accessors.html#vectorbt.base.accessors.BaseAccessor.apply_and_concat">apply_and_concat</a></code></li>
+<li><code><a title="vectorbt.returns.accessors.ReturnsAccessor.apply_and_reduce" href="../generic/accessors.html#vectorbt.generic.accessors.GenericAccessor.apply_and_reduce">apply_and_reduce</a></code></li>
+<li><code><a title="vectorbt.returns.accessors.ReturnsAccessor.apply_on_index" href="../base/accessors.html#vectorbt.base.accessors.BaseAccessor.apply_on_index">apply_on_index</a></code></li>
+<li><code><a title="vectorbt.returns.accessors.ReturnsAccessor.applymap" href="../generic/accessors.html#vectorbt.generic.accessors.GenericAccessor.applymap">applymap</a></code></li>
+<li><code><a title="vectorbt.returns.accessors.ReturnsAccessor.barplot" href="../generic/accessors.html#vectorbt.generic.accessors.GenericAccessor.barplot">barplot</a></code></li>
+<li><code><a title="vectorbt.returns.accessors.ReturnsAccessor.beta" href="#vectorbt.returns.accessors.ReturnsAccessor.beta">beta</a></code></li>
+<li><code><a title="vectorbt.returns.accessors.ReturnsAccessor.boxplot" href="../generic/accessors.html#vectorbt.generic.accessors.GenericAccessor.boxplot">boxplot</a></code></li>
+<li><code><a title="vectorbt.returns.accessors.ReturnsAccessor.broadcast" href="../base/accessors.html#vectorbt.base.accessors.BaseAccessor.broadcast">broadcast</a></code></li>
+<li><code><a title="vectorbt.returns.accessors.ReturnsAccessor.broadcast_to" href="../base/accessors.html#vectorbt.base.accessors.BaseAccessor.broadcast_to">broadcast_to</a></code></li>
+<li><code><a title="vectorbt.returns.accessors.ReturnsAccessor.calmar_ratio" href="#vectorbt.returns.accessors.ReturnsAccessor.calmar_ratio">calmar_ratio</a></code></li>
+<li><code><a title="vectorbt.returns.accessors.ReturnsAccessor.capture" href="#vectorbt.returns.accessors.ReturnsAccessor.capture">capture</a></code></li>
+<li><code><a title="vectorbt.returns.accessors.ReturnsAccessor.combine_with" href="../base/accessors.html#vectorbt.base.accessors.BaseAccessor.combine_with">combine_with</a></code></li>
+<li><code><a title="vectorbt.returns.accessors.ReturnsAccessor.combine_with_multiple" href="../base/accessors.html#vectorbt.base.accessors.BaseAccessor.combine_with_multiple">combine_with_multiple</a></code></li>
+<li><code><a title="vectorbt.returns.accessors.ReturnsAccessor.common_sense_ratio" href="#vectorbt.returns.accessors.ReturnsAccessor.common_sense_ratio">common_sense_ratio</a></code></li>
+<li><code><a title="vectorbt.returns.accessors.ReturnsAccessor.concat" href="../base/accessors.html#vectorbt.base.accessors.BaseAccessor.concat">concat</a></code></li>
+<li><code><a title="vectorbt.returns.accessors.ReturnsAccessor.conditional_value_at_risk" href="#vectorbt.returns.accessors.ReturnsAccessor.conditional_value_at_risk">conditional_value_at_risk</a></code></li>
+<li><code><a title="vectorbt.returns.accessors.ReturnsAccessor.count" href="../generic/accessors.html#vectorbt.generic.accessors.GenericAccessor.count">count</a></code></li>
+<li><code><a title="vectorbt.returns.accessors.ReturnsAccessor.cumprod" href="../generic/accessors.html#vectorbt.generic.accessors.GenericAccessor.cumprod">cumprod</a></code></li>
+<li><code><a title="vectorbt.returns.accessors.ReturnsAccessor.cumsum" href="../generic/accessors.html#vectorbt.generic.accessors.GenericAccessor.cumsum">cumsum</a></code></li>
+<li><code><a title="vectorbt.returns.accessors.ReturnsAccessor.cumulative" href="#vectorbt.returns.accessors.ReturnsAccessor.cumulative">cumulative</a></code></li>
+<li><code><a title="vectorbt.returns.accessors.ReturnsAccessor.daily" href="#vectorbt.returns.accessors.ReturnsAccessor.daily">daily</a></code></li>
+<li><code><a title="vectorbt.returns.accessors.ReturnsAccessor.deflated_sharpe_ratio" href="#vectorbt.returns.accessors.ReturnsAccessor.deflated_sharpe_ratio">deflated_sharpe_ratio</a></code></li>
+<li><code><a title="vectorbt.returns.accessors.ReturnsAccessor.describe" href="../generic/accessors.html#vectorbt.generic.accessors.GenericAccessor.describe">describe</a></code></li>
+<li><code><a title="vectorbt.returns.accessors.ReturnsAccessor.diff" href="../generic/accessors.html#vectorbt.generic.accessors.GenericAccessor.diff">diff</a></code></li>
+<li><code><a title="vectorbt.returns.accessors.ReturnsAccessor.down_capture" href="#vectorbt.returns.accessors.ReturnsAccessor.down_capture">down_capture</a></code></li>
+<li><code><a title="vectorbt.returns.accessors.ReturnsAccessor.downside_risk" href="#vectorbt.returns.accessors.ReturnsAccessor.downside_risk">downside_risk</a></code></li>
+<li><code><a title="vectorbt.returns.accessors.ReturnsAccessor.drawdown" href="#vectorbt.returns.accessors.ReturnsAccessor.drawdown">drawdown</a></code></li>
+<li><code><a title="vectorbt.returns.accessors.ReturnsAccessor.drawdowns" href="#vectorbt.returns.accessors.ReturnsAccessor.drawdowns">drawdowns</a></code></li>
+<li><code><a title="vectorbt.returns.accessors.ReturnsAccessor.drop_duplicate_levels" href="../base/accessors.html#vectorbt.base.accessors.BaseAccessor.drop_duplicate_levels">drop_duplicate_levels</a></code></li>
+<li><code><a title="vectorbt.returns.accessors.ReturnsAccessor.drop_levels" href="../base/accessors.html#vectorbt.base.accessors.BaseAccessor.drop_levels">drop_levels</a></code></li>
+<li><code><a title="vectorbt.returns.accessors.ReturnsAccessor.drop_redundant_levels" href="../base/accessors.html#vectorbt.base.accessors.BaseAccessor.drop_redundant_levels">drop_redundant_levels</a></code></li>
+<li><code><a title="vectorbt.returns.accessors.ReturnsAccessor.empty" href="../base/accessors.html#vectorbt.base.accessors.BaseAccessor.empty">empty</a></code></li>
+<li><code><a title="vectorbt.returns.accessors.ReturnsAccessor.empty_like" href="../base/accessors.html#vectorbt.base.accessors.BaseAccessor.empty_like">empty_like</a></code></li>
+<li><code><a title="vectorbt.returns.accessors.ReturnsAccessor.ewm_mean" href="../generic/accessors.html#vectorbt.generic.accessors.GenericAccessor.ewm_mean">ewm_mean</a></code></li>
+<li><code><a title="vectorbt.returns.accessors.ReturnsAccessor.ewm_std" href="../generic/accessors.html#vectorbt.generic.accessors.GenericAccessor.ewm_std">ewm_std</a></code></li>
+<li><code><a title="vectorbt.returns.accessors.ReturnsAccessor.expanding_apply" href="../generic/accessors.html#vectorbt.generic.accessors.GenericAccessor.expanding_apply">expanding_apply</a></code></li>
+<li><code><a title="vectorbt.returns.accessors.ReturnsAccessor.expanding_max" href="../generic/accessors.html#vectorbt.generic.accessors.GenericAccessor.expanding_max">expanding_max</a></code></li>
+<li><code><a title="vectorbt.returns.accessors.ReturnsAccessor.expanding_mean" href="../generic/accessors.html#vectorbt.generic.accessors.GenericAccessor.expanding_mean">expanding_mean</a></code></li>
+<li><code><a title="vectorbt.returns.accessors.ReturnsAccessor.expanding_min" href="../generic/accessors.html#vectorbt.generic.accessors.GenericAccessor.expanding_min">expanding_min</a></code></li>
+<li><code><a title="vectorbt.returns.accessors.ReturnsAccessor.expanding_std" href="../generic/accessors.html#vectorbt.generic.accessors.GenericAccessor.expanding_std">expanding_std</a></code></li>
+<li><code><a title="vectorbt.returns.accessors.ReturnsAccessor.ffill" href="../generic/accessors.html#vectorbt.generic.accessors.GenericAccessor.ffill">ffill</a></code></li>
+<li><code><a title="vectorbt.returns.accessors.ReturnsAccessor.fillna" href="../generic/accessors.html#vectorbt.generic.accessors.GenericAccessor.fillna">fillna</a></code></li>
+<li><code><a title="vectorbt.returns.accessors.ReturnsAccessor.filter" href="../generic/accessors.html#vectorbt.generic.accessors.GenericAccessor.filter">filter</a></code></li>
+<li><code><a title="vectorbt.returns.accessors.ReturnsAccessor.flatten_grouped" href="../generic/accessors.html#vectorbt.generic.accessors.GenericAccessor.flatten_grouped">flatten_grouped</a></code></li>
+<li><code><a title="vectorbt.returns.accessors.ReturnsAccessor.from_price" href="#vectorbt.returns.accessors.ReturnsAccessor.from_price">from_price</a></code></li>
+<li><code><a title="vectorbt.returns.accessors.ReturnsAccessor.fshift" href="../generic/accessors.html#vectorbt.generic.accessors.GenericAccessor.fshift">fshift</a></code></li>
+<li><code><a title="vectorbt.returns.accessors.ReturnsAccessor.get_drawdowns" href="#vectorbt.returns.accessors.ReturnsAccessor.get_drawdowns">get_drawdowns</a></code></li>
+<li><code><a title="vectorbt.returns.accessors.ReturnsAccessor.groupby_apply" href="../generic/accessors.html#vectorbt.generic.accessors.GenericAccessor.groupby_apply">groupby_apply</a></code></li>
+<li><code><a title="vectorbt.returns.accessors.ReturnsAccessor.histplot" href="../generic/accessors.html#vectorbt.generic.accessors.GenericAccessor.histplot">histplot</a></code></li>
+<li><code><a title="vectorbt.returns.accessors.ReturnsAccessor.idxmax" href="../generic/accessors.html#vectorbt.generic.accessors.GenericAccessor.idxmax">idxmax</a></code></li>
+<li><code><a title="vectorbt.returns.accessors.ReturnsAccessor.idxmin" href="../generic/accessors.html#vectorbt.generic.accessors.GenericAccessor.idxmin">idxmin</a></code></li>
+<li><code><a title="vectorbt.returns.accessors.ReturnsAccessor.information_ratio" href="#vectorbt.returns.accessors.ReturnsAccessor.information_ratio">information_ratio</a></code></li>
+<li><code><a title="vectorbt.returns.accessors.ReturnsAccessor.lineplot" href="../generic/accessors.html#vectorbt.generic.accessors.GenericAccessor.lineplot">lineplot</a></code></li>
+<li><code><a title="vectorbt.returns.accessors.ReturnsAccessor.make_symmetric" href="../base/accessors.html#vectorbt.base.accessors.BaseAccessor.make_symmetric">make_symmetric</a></code></li>
+<li><code><a title="vectorbt.returns.accessors.ReturnsAccessor.max" href="../generic/accessors.html#vectorbt.generic.accessors.GenericAccessor.max">max</a></code></li>
+<li><code><a title="vectorbt.returns.accessors.ReturnsAccessor.max_drawdown" href="#vectorbt.returns.accessors.ReturnsAccessor.max_drawdown">max_drawdown</a></code></li>
+<li><code><a title="vectorbt.returns.accessors.ReturnsAccessor.mean" href="../generic/accessors.html#vectorbt.generic.accessors.GenericAccessor.mean">mean</a></code></li>
+<li><code><a title="vectorbt.returns.accessors.ReturnsAccessor.median" href="../generic/accessors.html#vectorbt.generic.accessors.GenericAccessor.median">median</a></code></li>
+<li><code><a title="vectorbt.returns.accessors.ReturnsAccessor.min" href="../generic/accessors.html#vectorbt.generic.accessors.GenericAccessor.min">min</a></code></li>
+<li><code><a title="vectorbt.returns.accessors.ReturnsAccessor.omega_ratio" href="#vectorbt.returns.accessors.ReturnsAccessor.omega_ratio">omega_ratio</a></code></li>
+<li><code><a title="vectorbt.returns.accessors.ReturnsAccessor.pct_change" href="../generic/accessors.html#vectorbt.generic.accessors.GenericAccessor.pct_change">pct_change</a></code></li>
+<li><code><a title="vectorbt.returns.accessors.ReturnsAccessor.plot" href="../generic/accessors.html#vectorbt.generic.accessors.GenericAccessor.plot">plot</a></code></li>
+<li><code><a title="vectorbt.returns.accessors.ReturnsAccessor.product" href="../generic/accessors.html#vectorbt.generic.accessors.GenericAccessor.product">product</a></code></li>
+<li><code><a title="vectorbt.returns.accessors.ReturnsAccessor.reduce" href="../generic/accessors.html#vectorbt.generic.accessors.GenericAccessor.reduce">reduce</a></code></li>
+<li><code><a title="vectorbt.returns.accessors.ReturnsAccessor.rename_levels" href="../base/accessors.html#vectorbt.base.accessors.BaseAccessor.rename_levels">rename_levels</a></code></li>
+<li><code><a title="vectorbt.returns.accessors.ReturnsAccessor.repeat" href="../base/accessors.html#vectorbt.base.accessors.BaseAccessor.repeat">repeat</a></code></li>
+<li><code><a title="vectorbt.returns.accessors.ReturnsAccessor.resample_apply" href="../generic/accessors.html#vectorbt.generic.accessors.GenericAccessor.resample_apply">resample_apply</a></code></li>
+<li><code><a title="vectorbt.returns.accessors.ReturnsAccessor.rolling_apply" href="../generic/accessors.html#vectorbt.generic.accessors.GenericAccessor.rolling_apply">rolling_apply</a></code></li>
+<li><code><a title="vectorbt.returns.accessors.ReturnsAccessor.rolling_max" href="../generic/accessors.html#vectorbt.generic.accessors.GenericAccessor.rolling_max">rolling_max</a></code></li>
+<li><code><a title="vectorbt.returns.accessors.ReturnsAccessor.rolling_mean" href="../generic/accessors.html#vectorbt.generic.accessors.GenericAccessor.rolling_mean">rolling_mean</a></code></li>
+<li><code><a title="vectorbt.returns.accessors.ReturnsAccessor.rolling_min" href="../generic/accessors.html#vectorbt.generic.accessors.GenericAccessor.rolling_min">rolling_min</a></code></li>
+<li><code><a title="vectorbt.returns.accessors.ReturnsAccessor.rolling_std" href="../generic/accessors.html#vectorbt.generic.accessors.GenericAccessor.rolling_std">rolling_std</a></code></li>
+<li><code><a title="vectorbt.returns.accessors.ReturnsAccessor.scatterplot" href="../generic/accessors.html#vectorbt.generic.accessors.GenericAccessor.scatterplot">scatterplot</a></code></li>
+<li><code><a title="vectorbt.returns.accessors.ReturnsAccessor.select_levels" href="../base/accessors.html#vectorbt.base.accessors.BaseAccessor.select_levels">select_levels</a></code></li>
+<li><code><a title="vectorbt.returns.accessors.ReturnsAccessor.sharpe_ratio" href="#vectorbt.returns.accessors.ReturnsAccessor.sharpe_ratio">sharpe_ratio</a></code></li>
+<li><code><a title="vectorbt.returns.accessors.ReturnsAccessor.shuffle" href="../generic/accessors.html#vectorbt.generic.accessors.GenericAccessor.shuffle">shuffle</a></code></li>
+<li><code><a title="vectorbt.returns.accessors.ReturnsAccessor.sortino_ratio" href="#vectorbt.returns.accessors.ReturnsAccessor.sortino_ratio">sortino_ratio</a></code></li>
+<li><code><a title="vectorbt.returns.accessors.ReturnsAccessor.split_into_ranges" href="../generic/accessors.html#vectorbt.generic.accessors.GenericAccessor.split_into_ranges">split_into_ranges</a></code></li>
+<li><code><a title="vectorbt.returns.accessors.ReturnsAccessor.squeeze_grouped" href="../generic/accessors.html#vectorbt.generic.accessors.GenericAccessor.squeeze_grouped">squeeze_grouped</a></code></li>
+<li><code><a title="vectorbt.returns.accessors.ReturnsAccessor.stack_index" href="../base/accessors.html#vectorbt.base.accessors.BaseAccessor.stack_index">stack_index</a></code></li>
+<li><code><a title="vectorbt.returns.accessors.ReturnsAccessor.stats" href="#vectorbt.returns.accessors.ReturnsAccessor.stats">stats</a></code></li>
+<li><code><a title="vectorbt.returns.accessors.ReturnsAccessor.std" href="../generic/accessors.html#vectorbt.generic.accessors.GenericAccessor.std">std</a></code></li>
+<li><code><a title="vectorbt.returns.accessors.ReturnsAccessor.sum" href="../generic/accessors.html#vectorbt.generic.accessors.GenericAccessor.sum">sum</a></code></li>
+<li><code><a title="vectorbt.returns.accessors.ReturnsAccessor.tail_ratio" href="#vectorbt.returns.accessors.ReturnsAccessor.tail_ratio">tail_ratio</a></code></li>
+<li><code><a title="vectorbt.returns.accessors.ReturnsAccessor.tile" href="../base/accessors.html#vectorbt.base.accessors.BaseAccessor.tile">tile</a></code></li>
+<li><code><a title="vectorbt.returns.accessors.ReturnsAccessor.to_1d_array" href="../base/accessors.html#vectorbt.base.accessors.BaseAccessor.to_1d_array">to_1d_array</a></code></li>
+<li><code><a title="vectorbt.returns.accessors.ReturnsAccessor.to_2d_array" href="../base/accessors.html#vectorbt.base.accessors.BaseAccessor.to_2d_array">to_2d_array</a></code></li>
+<li><code><a title="vectorbt.returns.accessors.ReturnsAccessor.to_mapped_array" href="../generic/accessors.html#vectorbt.generic.accessors.GenericAccessor.to_mapped_array">to_mapped_array</a></code></li>
+<li><code><a title="vectorbt.returns.accessors.ReturnsAccessor.total" href="#vectorbt.returns.accessors.ReturnsAccessor.total">total</a></code></li>
+<li><code><a title="vectorbt.returns.accessors.ReturnsAccessor.unstack_to_array" href="../base/accessors.html#vectorbt.base.accessors.BaseAccessor.unstack_to_array">unstack_to_array</a></code></li>
+<li><code><a title="vectorbt.returns.accessors.ReturnsAccessor.unstack_to_df" href="../base/accessors.html#vectorbt.base.accessors.BaseAccessor.unstack_to_df">unstack_to_df</a></code></li>
+<li><code><a title="vectorbt.returns.accessors.ReturnsAccessor.up_capture" href="#vectorbt.returns.accessors.ReturnsAccessor.up_capture">up_capture</a></code></li>
+<li><code><a title="vectorbt.returns.accessors.ReturnsAccessor.value_at_risk" href="#vectorbt.returns.accessors.ReturnsAccessor.value_at_risk">value_at_risk</a></code></li>
+<li><code><a title="vectorbt.returns.accessors.ReturnsAccessor.wrapper" href="../base/accessors.html#vectorbt.base.accessors.BaseAccessor.wrapper">wrapper</a></code></li>
+<li><code><a title="vectorbt.returns.accessors.ReturnsAccessor.year_freq" href="#vectorbt.returns.accessors.ReturnsAccessor.year_freq">year_freq</a></code></li>
 </ul>
 </li>
-<li><code><b><a title="vectorbt.generic.accessors.Generic_SRAccessor" href="../generic/accessors.html#vectorbt.generic.accessors.Generic_SRAccessor">Generic_SRAccessor</a></b></code>:
+<li><code><b><a title="vectorbt.generic.accessors.GenericSRAccessor" href="../generic/accessors.html#vectorbt.generic.accessors.GenericSRAccessor">GenericSRAccessor</a></b></code>:
 <ul class="hlist">
-<li><code><a title="vectorbt.generic.accessors.Generic_SRAccessor.heatmap" href="../generic/accessors.html#vectorbt.generic.accessors.Generic_SRAccessor.heatmap">heatmap</a></code></li>
-<li><code><a title="vectorbt.generic.accessors.Generic_SRAccessor.plot" href="../generic/accessors.html#vectorbt.generic.accessors.Generic_SRAccessor.plot">plot</a></code></li>
-<li><code><a title="vectorbt.generic.accessors.Generic_SRAccessor.plot_against" href="../generic/accessors.html#vectorbt.generic.accessors.Generic_SRAccessor.plot_against">plot_against</a></code></li>
-<li><code><a title="vectorbt.generic.accessors.Generic_SRAccessor.volume" href="../generic/accessors.html#vectorbt.generic.accessors.Generic_SRAccessor.volume">volume</a></code></li>
+<li><code><a title="vectorbt.generic.accessors.GenericSRAccessor.heatmap" href="../generic/accessors.html#vectorbt.generic.accessors.GenericSRAccessor.heatmap">heatmap</a></code></li>
+<li><code><a title="vectorbt.generic.accessors.GenericSRAccessor.overlay_with_heatmap" href="../generic/accessors.html#vectorbt.generic.accessors.GenericSRAccessor.overlay_with_heatmap">overlay_with_heatmap</a></code></li>
+<li><code><a title="vectorbt.generic.accessors.GenericSRAccessor.plot_against" href="../generic/accessors.html#vectorbt.generic.accessors.GenericSRAccessor.plot_against">plot_against</a></code></li>
+<li><code><a title="vectorbt.generic.accessors.GenericSRAccessor.qqplot" href="../generic/accessors.html#vectorbt.generic.accessors.GenericSRAccessor.qqplot">qqplot</a></code></li>
+<li><code><a title="vectorbt.generic.accessors.GenericSRAccessor.volume" href="../generic/accessors.html#vectorbt.generic.accessors.GenericSRAccessor.volume">volume</a></code></li>
 </ul>
 </li>
 </ul>
@@ -2353,47 +2350,47 @@ title="Search"
 <li><h3><a href="#header-classes">Classes</a></h3>
 <ul>
 <li>
-<h4><code><a title="vectorbt.returns.accessors.Returns_Accessor" href="#vectorbt.returns.accessors.Returns_Accessor">Returns_Accessor</a></code></h4>
+<h4><code><a title="vectorbt.returns.accessors.ReturnsAccessor" href="#vectorbt.returns.accessors.ReturnsAccessor">ReturnsAccessor</a></code></h4>
 <ul class="">
-<li><code><a title="vectorbt.returns.accessors.Returns_Accessor.alpha" href="#vectorbt.returns.accessors.Returns_Accessor.alpha">alpha</a></code></li>
-<li><code><a title="vectorbt.returns.accessors.Returns_Accessor.ann_factor" href="#vectorbt.returns.accessors.Returns_Accessor.ann_factor">ann_factor</a></code></li>
-<li><code><a title="vectorbt.returns.accessors.Returns_Accessor.annual" href="#vectorbt.returns.accessors.Returns_Accessor.annual">annual</a></code></li>
-<li><code><a title="vectorbt.returns.accessors.Returns_Accessor.annualized" href="#vectorbt.returns.accessors.Returns_Accessor.annualized">annualized</a></code></li>
-<li><code><a title="vectorbt.returns.accessors.Returns_Accessor.annualized_volatility" href="#vectorbt.returns.accessors.Returns_Accessor.annualized_volatility">annualized_volatility</a></code></li>
-<li><code><a title="vectorbt.returns.accessors.Returns_Accessor.beta" href="#vectorbt.returns.accessors.Returns_Accessor.beta">beta</a></code></li>
-<li><code><a title="vectorbt.returns.accessors.Returns_Accessor.calmar_ratio" href="#vectorbt.returns.accessors.Returns_Accessor.calmar_ratio">calmar_ratio</a></code></li>
-<li><code><a title="vectorbt.returns.accessors.Returns_Accessor.capture" href="#vectorbt.returns.accessors.Returns_Accessor.capture">capture</a></code></li>
-<li><code><a title="vectorbt.returns.accessors.Returns_Accessor.common_sense_ratio" href="#vectorbt.returns.accessors.Returns_Accessor.common_sense_ratio">common_sense_ratio</a></code></li>
-<li><code><a title="vectorbt.returns.accessors.Returns_Accessor.conditional_value_at_risk" href="#vectorbt.returns.accessors.Returns_Accessor.conditional_value_at_risk">conditional_value_at_risk</a></code></li>
-<li><code><a title="vectorbt.returns.accessors.Returns_Accessor.cumulative" href="#vectorbt.returns.accessors.Returns_Accessor.cumulative">cumulative</a></code></li>
-<li><code><a title="vectorbt.returns.accessors.Returns_Accessor.daily" href="#vectorbt.returns.accessors.Returns_Accessor.daily">daily</a></code></li>
-<li><code><a title="vectorbt.returns.accessors.Returns_Accessor.deflated_sharpe_ratio" href="#vectorbt.returns.accessors.Returns_Accessor.deflated_sharpe_ratio">deflated_sharpe_ratio</a></code></li>
-<li><code><a title="vectorbt.returns.accessors.Returns_Accessor.down_capture" href="#vectorbt.returns.accessors.Returns_Accessor.down_capture">down_capture</a></code></li>
-<li><code><a title="vectorbt.returns.accessors.Returns_Accessor.downside_risk" href="#vectorbt.returns.accessors.Returns_Accessor.downside_risk">downside_risk</a></code></li>
-<li><code><a title="vectorbt.returns.accessors.Returns_Accessor.drawdown" href="#vectorbt.returns.accessors.Returns_Accessor.drawdown">drawdown</a></code></li>
-<li><code><a title="vectorbt.returns.accessors.Returns_Accessor.drawdowns" href="#vectorbt.returns.accessors.Returns_Accessor.drawdowns">drawdowns</a></code></li>
-<li><code><a title="vectorbt.returns.accessors.Returns_Accessor.from_price" href="#vectorbt.returns.accessors.Returns_Accessor.from_price">from_price</a></code></li>
-<li><code><a title="vectorbt.returns.accessors.Returns_Accessor.get_drawdowns" href="#vectorbt.returns.accessors.Returns_Accessor.get_drawdowns">get_drawdowns</a></code></li>
-<li><code><a title="vectorbt.returns.accessors.Returns_Accessor.information_ratio" href="#vectorbt.returns.accessors.Returns_Accessor.information_ratio">information_ratio</a></code></li>
-<li><code><a title="vectorbt.returns.accessors.Returns_Accessor.max_drawdown" href="#vectorbt.returns.accessors.Returns_Accessor.max_drawdown">max_drawdown</a></code></li>
-<li><code><a title="vectorbt.returns.accessors.Returns_Accessor.omega_ratio" href="#vectorbt.returns.accessors.Returns_Accessor.omega_ratio">omega_ratio</a></code></li>
-<li><code><a title="vectorbt.returns.accessors.Returns_Accessor.sharpe_ratio" href="#vectorbt.returns.accessors.Returns_Accessor.sharpe_ratio">sharpe_ratio</a></code></li>
-<li><code><a title="vectorbt.returns.accessors.Returns_Accessor.sortino_ratio" href="#vectorbt.returns.accessors.Returns_Accessor.sortino_ratio">sortino_ratio</a></code></li>
-<li><code><a title="vectorbt.returns.accessors.Returns_Accessor.stats" href="#vectorbt.returns.accessors.Returns_Accessor.stats">stats</a></code></li>
-<li><code><a title="vectorbt.returns.accessors.Returns_Accessor.tail_ratio" href="#vectorbt.returns.accessors.Returns_Accessor.tail_ratio">tail_ratio</a></code></li>
-<li><code><a title="vectorbt.returns.accessors.Returns_Accessor.total" href="#vectorbt.returns.accessors.Returns_Accessor.total">total</a></code></li>
-<li><code><a title="vectorbt.returns.accessors.Returns_Accessor.up_capture" href="#vectorbt.returns.accessors.Returns_Accessor.up_capture">up_capture</a></code></li>
-<li><code><a title="vectorbt.returns.accessors.Returns_Accessor.value_at_risk" href="#vectorbt.returns.accessors.Returns_Accessor.value_at_risk">value_at_risk</a></code></li>
-<li><code><a title="vectorbt.returns.accessors.Returns_Accessor.year_freq" href="#vectorbt.returns.accessors.Returns_Accessor.year_freq">year_freq</a></code></li>
+<li><code><a title="vectorbt.returns.accessors.ReturnsAccessor.alpha" href="#vectorbt.returns.accessors.ReturnsAccessor.alpha">alpha</a></code></li>
+<li><code><a title="vectorbt.returns.accessors.ReturnsAccessor.ann_factor" href="#vectorbt.returns.accessors.ReturnsAccessor.ann_factor">ann_factor</a></code></li>
+<li><code><a title="vectorbt.returns.accessors.ReturnsAccessor.annual" href="#vectorbt.returns.accessors.ReturnsAccessor.annual">annual</a></code></li>
+<li><code><a title="vectorbt.returns.accessors.ReturnsAccessor.annualized" href="#vectorbt.returns.accessors.ReturnsAccessor.annualized">annualized</a></code></li>
+<li><code><a title="vectorbt.returns.accessors.ReturnsAccessor.annualized_volatility" href="#vectorbt.returns.accessors.ReturnsAccessor.annualized_volatility">annualized_volatility</a></code></li>
+<li><code><a title="vectorbt.returns.accessors.ReturnsAccessor.beta" href="#vectorbt.returns.accessors.ReturnsAccessor.beta">beta</a></code></li>
+<li><code><a title="vectorbt.returns.accessors.ReturnsAccessor.calmar_ratio" href="#vectorbt.returns.accessors.ReturnsAccessor.calmar_ratio">calmar_ratio</a></code></li>
+<li><code><a title="vectorbt.returns.accessors.ReturnsAccessor.capture" href="#vectorbt.returns.accessors.ReturnsAccessor.capture">capture</a></code></li>
+<li><code><a title="vectorbt.returns.accessors.ReturnsAccessor.common_sense_ratio" href="#vectorbt.returns.accessors.ReturnsAccessor.common_sense_ratio">common_sense_ratio</a></code></li>
+<li><code><a title="vectorbt.returns.accessors.ReturnsAccessor.conditional_value_at_risk" href="#vectorbt.returns.accessors.ReturnsAccessor.conditional_value_at_risk">conditional_value_at_risk</a></code></li>
+<li><code><a title="vectorbt.returns.accessors.ReturnsAccessor.cumulative" href="#vectorbt.returns.accessors.ReturnsAccessor.cumulative">cumulative</a></code></li>
+<li><code><a title="vectorbt.returns.accessors.ReturnsAccessor.daily" href="#vectorbt.returns.accessors.ReturnsAccessor.daily">daily</a></code></li>
+<li><code><a title="vectorbt.returns.accessors.ReturnsAccessor.deflated_sharpe_ratio" href="#vectorbt.returns.accessors.ReturnsAccessor.deflated_sharpe_ratio">deflated_sharpe_ratio</a></code></li>
+<li><code><a title="vectorbt.returns.accessors.ReturnsAccessor.down_capture" href="#vectorbt.returns.accessors.ReturnsAccessor.down_capture">down_capture</a></code></li>
+<li><code><a title="vectorbt.returns.accessors.ReturnsAccessor.downside_risk" href="#vectorbt.returns.accessors.ReturnsAccessor.downside_risk">downside_risk</a></code></li>
+<li><code><a title="vectorbt.returns.accessors.ReturnsAccessor.drawdown" href="#vectorbt.returns.accessors.ReturnsAccessor.drawdown">drawdown</a></code></li>
+<li><code><a title="vectorbt.returns.accessors.ReturnsAccessor.drawdowns" href="#vectorbt.returns.accessors.ReturnsAccessor.drawdowns">drawdowns</a></code></li>
+<li><code><a title="vectorbt.returns.accessors.ReturnsAccessor.from_price" href="#vectorbt.returns.accessors.ReturnsAccessor.from_price">from_price</a></code></li>
+<li><code><a title="vectorbt.returns.accessors.ReturnsAccessor.get_drawdowns" href="#vectorbt.returns.accessors.ReturnsAccessor.get_drawdowns">get_drawdowns</a></code></li>
+<li><code><a title="vectorbt.returns.accessors.ReturnsAccessor.information_ratio" href="#vectorbt.returns.accessors.ReturnsAccessor.information_ratio">information_ratio</a></code></li>
+<li><code><a title="vectorbt.returns.accessors.ReturnsAccessor.max_drawdown" href="#vectorbt.returns.accessors.ReturnsAccessor.max_drawdown">max_drawdown</a></code></li>
+<li><code><a title="vectorbt.returns.accessors.ReturnsAccessor.omega_ratio" href="#vectorbt.returns.accessors.ReturnsAccessor.omega_ratio">omega_ratio</a></code></li>
+<li><code><a title="vectorbt.returns.accessors.ReturnsAccessor.sharpe_ratio" href="#vectorbt.returns.accessors.ReturnsAccessor.sharpe_ratio">sharpe_ratio</a></code></li>
+<li><code><a title="vectorbt.returns.accessors.ReturnsAccessor.sortino_ratio" href="#vectorbt.returns.accessors.ReturnsAccessor.sortino_ratio">sortino_ratio</a></code></li>
+<li><code><a title="vectorbt.returns.accessors.ReturnsAccessor.stats" href="#vectorbt.returns.accessors.ReturnsAccessor.stats">stats</a></code></li>
+<li><code><a title="vectorbt.returns.accessors.ReturnsAccessor.tail_ratio" href="#vectorbt.returns.accessors.ReturnsAccessor.tail_ratio">tail_ratio</a></code></li>
+<li><code><a title="vectorbt.returns.accessors.ReturnsAccessor.total" href="#vectorbt.returns.accessors.ReturnsAccessor.total">total</a></code></li>
+<li><code><a title="vectorbt.returns.accessors.ReturnsAccessor.up_capture" href="#vectorbt.returns.accessors.ReturnsAccessor.up_capture">up_capture</a></code></li>
+<li><code><a title="vectorbt.returns.accessors.ReturnsAccessor.value_at_risk" href="#vectorbt.returns.accessors.ReturnsAccessor.value_at_risk">value_at_risk</a></code></li>
+<li><code><a title="vectorbt.returns.accessors.ReturnsAccessor.year_freq" href="#vectorbt.returns.accessors.ReturnsAccessor.year_freq">year_freq</a></code></li>
 </ul>
 </li>
 <li>
-<h4><code><a title="vectorbt.returns.accessors.Returns_DFAccessor" href="#vectorbt.returns.accessors.Returns_DFAccessor">Returns_DFAccessor</a></code></h4>
+<h4><code><a title="vectorbt.returns.accessors.ReturnsDFAccessor" href="#vectorbt.returns.accessors.ReturnsDFAccessor">ReturnsDFAccessor</a></code></h4>
 </li>
 <li>
-<h4><code><a title="vectorbt.returns.accessors.Returns_SRAccessor" href="#vectorbt.returns.accessors.Returns_SRAccessor">Returns_SRAccessor</a></code></h4>
+<h4><code><a title="vectorbt.returns.accessors.ReturnsSRAccessor" href="#vectorbt.returns.accessors.ReturnsSRAccessor">ReturnsSRAccessor</a></code></h4>
 <ul class="">
-<li><code><a title="vectorbt.returns.accessors.Returns_SRAccessor.plot_cum_returns" href="#vectorbt.returns.accessors.Returns_SRAccessor.plot_cum_returns">plot_cum_returns</a></code></li>
+<li><code><a title="vectorbt.returns.accessors.ReturnsSRAccessor.plot_cum_returns" href="#vectorbt.returns.accessors.ReturnsSRAccessor.plot_cum_returns">plot_cum_returns</a></code></li>
 </ul>
 </li>
 </ul>

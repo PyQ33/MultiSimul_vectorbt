@@ -59,46 +59,50 @@ in 2020 against every single pattern found in TA-Lib, and translates them into s
 <pre><code class="language-python-repl">&gt;&gt;&gt; import numpy as np
 &gt;&gt;&gt; import pandas as pd
 &gt;&gt;&gt; from datetime import datetime
-&gt;&gt;&gt; import yfinance as yf
 &gt;&gt;&gt; import talib
 &gt;&gt;&gt; import vectorbt as vbt
 
 &gt;&gt;&gt; # Fetch price history
-&gt;&gt;&gt; pairs = ['BTC-USD', 'ETH-USD', 'XRP-USD', 'BNB-USD', 'BCH-USD', 'LTC-USD']
+&gt;&gt;&gt; symbols = ['BTC-USD', 'ETH-USD', 'XRP-USD', 'BNB-USD', 'BCH-USD', 'LTC-USD']
 &gt;&gt;&gt; start = datetime(2020, 1, 1)
 &gt;&gt;&gt; end = datetime(2020, 9, 1)
-&gt;&gt;&gt; pair_history = {p: yf.Ticker(p).history(start=start, end=end) for p in pairs}
+&gt;&gt;&gt; ohlcv_by_symbol = vbt.utils.data.download(symbols, start=start, end=end)
 
 &gt;&gt;&gt; # Put assets into a single dataframe by price type
-&gt;&gt;&gt; price = {}
-&gt;&gt;&gt; for pt in ['Open', 'High', 'Low', 'Close']:
-...     price[pt] = pd.DataFrame({p: df[pt] for p, df in pair_history.items()})
+&gt;&gt;&gt; ohlcv = vbt.utils.data.concat_symbols(ohlcv_by_symbol)
 
-&gt;&gt;&gt; price['Open'].head()
-            BTC-USD  ETH-USD  XRP-USD  BNB-USD  BCH-USD  LTC-USD
+&gt;&gt;&gt; ohlcv['Open'].head()
+symbol          BTC-USD     ETH-USD   XRP-USD    BNB-USD     BCH-USD  Date
+2019-12-31  7294.438965  132.612274  0.194518  13.952087  209.301987
+2020-01-01  7194.892090  129.630661  0.192912  13.730962  204.671295
+2020-01-02  7202.551270  130.820038  0.192708  13.698126  204.354538
+2020-01-03  6984.428711  127.411263  0.187948  13.035329  196.007690
+2020-01-04  7345.375488  134.168518  0.193521  13.667442  222.536560
+
+symbol        LTC-USD
 Date
-2019-12-31  7294.44   132.61   0.1945    13.95   209.30    42.77
-2020-01-01  7194.89   129.63   0.1929    13.73   204.67    41.33
-2020-01-02  7202.55   130.82   0.1927    13.70   204.35    42.02
-2020-01-03  6984.43   127.41   0.1879    13.04   196.01    39.86
-2020-01-04  7345.38   134.17   0.1935    13.67   222.54    42.38
+2019-12-31  42.766113
+2020-01-01  41.326534
+2020-01-02  42.018085
+2020-01-03  39.863129
+2020-01-04  42.383526
 
 &gt;&gt;&gt; # Run every single pattern recognition indicator and combine results
-&gt;&gt;&gt; result = pd.DataFrame.vbt.empty_like(price['Open'], fill_value=0.)
+&gt;&gt;&gt; result = pd.DataFrame.vbt.empty_like(ohlcv['Open'], fill_value=0.)
 &gt;&gt;&gt; for pattern in talib.get_function_groups()['Pattern Recognition']:
 ...     PRecognizer = vbt.IndicatorFactory.from_talib(pattern)
-...     pr = PRecognizer.run(price['Open'], price['High'], price['Low'], price['Close'])
+...     pr = PRecognizer.run(ohlcv['Open'], ohlcv['High'], ohlcv['Low'], ohlcv['Close'])
 ...     result = result + pr.integer
 
 &gt;&gt;&gt; # Don't look into future
 &gt;&gt;&gt; result = result.vbt.fshift(1)
 
 &gt;&gt;&gt; # Treat each number as order value in USD
-&gt;&gt;&gt; size = result / price['Open']
+&gt;&gt;&gt; size = result / ohlcv['Open']
 
 &gt;&gt;&gt; # Simulate portfolio
 &gt;&gt;&gt; portfolio = vbt.Portfolio.from_orders(
-...     price['Close'], size, price=price['Open'],
+...     ohlcv['Close'], size, price=ohlcv['Open'],
 ...     init_cash='autoalign', fees=0.001, slippage=0.001)
 
 &gt;&gt;&gt; # Visualize portfolio value
@@ -125,34 +129,35 @@ for a combined portfolio of multiple independent columns.</p>
 ...     'second', 'second', 'second'
 ... ], name='group')
 &gt;&gt;&gt; comb_portfolio = vbt.Portfolio.from_orders(
-...     price['Close'], size, price=price['Open'],
+...     ohlcv['Close'], size, price=ohlcv['Open'],
 ...     init_cash='autoalign', fees=0.001, slippage=0.001,
 ...     group_by=group_by, cash_sharing=True)
 
 &gt;&gt;&gt; # Get total profit per group
 &gt;&gt;&gt; comb_portfolio.total_profit()
 group
-first     21474.794005
-second     7973.848970
+first     21891.431061
+second     7575.676246
 dtype: float64
 </code></pre>
 <p>Not only can you analyze each group, but also each column in the group:</p>
 <pre><code class="language-python-repl">&gt;&gt;&gt; # Get total profit per column
 &gt;&gt;&gt; comb_portfolio.total_profit(group_by=False)
-BTC-USD     5101.957521
-ETH-USD    12866.045602
-XRP-USD     3506.790882
-BNB-USD     5065.017577
-BCH-USD     -240.275095
-LTC-USD     3149.106488
+symbol
+BTC-USD     5163.844396
+ETH-USD    13368.521326
+XRP-USD     3359.065339
+BNB-USD     4724.565229
+BCH-USD     -259.592709
+LTC-USD     3110.703726
 dtype: float64
 </code></pre>
 <p>In the same way, you can introduce new grouping to the method itself:</p>
 <pre><code class="language-python-repl">&gt;&gt;&gt; # Get total profit per group
 &gt;&gt;&gt; portfolio.total_profit(group_by=group_by)
 group
-first     21474.794005
-second     7973.848970
+first     21891.431061
+second     7575.676246
 dtype: float64
 </code></pre>
 <div class="admonition note">
@@ -166,14 +171,14 @@ indexing operation to each argument with index:</p>
 &lt;vectorbt.portfolio.base.Portfolio at 0x7fac7517ac88&gt;
 
 &gt;&gt;&gt; portfolio['BTC-USD'].total_profit()
-5101.957521326392
+5163.844396244112
 </code></pre>
 <p>Combined portfolio is indexed by group:</p>
 <pre><code class="language-python-repl">&gt;&gt;&gt; comb_portfolio['first']
 &lt;vectorbt.portfolio.base.Portfolio at 0x7fac5756b828&gt;
 
 &gt;&gt;&gt; comb_portfolio['first'].total_profit()
-21474.794005172986
+21891.43106080097
 </code></pre>
 <div class="admonition note">
 <p class="admonition-title">Note</p>
@@ -188,34 +193,32 @@ otherwise on single columns. You can pass wrapper arguments with <code>wrapper_k
 simulation from the beginning to the end, you can turn on logging.</p>
 <pre><code class="language-python-repl">&gt;&gt;&gt; # Simulate portfolio with logging
 &gt;&gt;&gt; portfolio = vbt.Portfolio.from_orders(
-...     price['Close'], size, price=price['Open'],
+...     ohlcv['Close'], size, price=ohlcv['Open'],
 ...     init_cash='autoalign', fees=0.001, slippage=0.001, log=True)
 
 &gt;&gt;&gt; portfolio.logs.records
-        id  idx  col  group  cash_now  shares_now  val_price_now  value_now  \
-0        0    0    0      0       inf    0.000000        7294.44        inf
+        id  idx  col  group  cash_now  shares_now  val_price_now  value_now  0        0    0    0      0       inf    0.000000    7294.438965        inf
 ...    ...  ...  ...    ...       ...         ...            ...        ...
-1469  1469  244    5      5       inf  273.894381          62.84        inf
+1463  1463  243    5      5       inf  271.629075      62.844059        inf
 
-          size  size_type  ...   log  new_cash  new_shares  res_size  \
-0          NaN          0  ...  True       inf    0.000000       NaN
+          size  size_type  ...   log  new_cash  new_shares  res_size  0          NaN          0  ...  True       inf    0.000000       NaN
 ...        ...        ...  ...   ...       ...         ...       ...
-1469  7.956715          0  ...  True       inf  281.851096  7.956715
+1463  7.956202          0  ...  True       inf  279.585277  7.956202
 
-       res_price  res_fees  res_side  res_status  res_status_info  order_id
-0            NaN       NaN        -1           1                0        -1
-...          ...       ...       ...         ...              ...       ...
-1469    62.90284    0.5005         0           0               -1      1054
+        res_price  res_fees  res_side  res_status  res_status_info  order_id
+0             NaN       NaN        -1           1                0        -1
+...           ...       ...       ...         ...              ...       ...
+1463    62.906903    0.5005         0           0               -1      1075
 
-[1470 rows x 31 columns]
+[1464 rows x 30 columns]
 </code></pre>
 <p>Just as orders, logs are also records and thus can be easily analyzed:</p>
 <pre><code class="language-python-repl">&gt;&gt;&gt; from vectorbt.portfolio.enums import OrderStatus
 
 &gt;&gt;&gt; portfolio.logs.map_field('res_status', value_map=OrderStatus).value_counts()
-         BTC-USD  ETH-USD  XRP-USD  BNB-USD  BCH-USD  LTC-USD
-Ignored       59       76       73       74       68       65
-Filled       186      169      172      171      177      180
+symbol   BTC-USD  ETH-USD  XRP-USD  BNB-USD  BCH-USD  LTC-USD
+Ignored       59       72       66       66       66       59
+Filled       185      172      178      178      178      185
 </code></pre>
 <p>Logging can also be turned on just for one order, row, or column, since as many other
 variables it's specified per order and can broadcast automatically.</p>
@@ -235,7 +238,7 @@ To change any attribute, use the <code>copy</code> method and pass the attribute
 <p>If you're running out of memory when working with large arrays, make sure to disable caching
 and then store most important time series manually. For example, if you're interested in Sharpe
 ratio or other metrics based on returns, run and save <code><a title="vectorbt.portfolio.base.Portfolio.returns" href="#vectorbt.portfolio.base.Portfolio.returns">Portfolio.returns()</a></code> and then use the
-<code><a title="vectorbt.returns.accessors.Returns_Accessor" href="../returns/accessors.html#vectorbt.returns.accessors.Returns_Accessor">Returns_Accessor</a></code> to analyze them. Do not use methods akin to
+<code><a title="vectorbt.returns.accessors.ReturnsAccessor" href="../returns/accessors.html#vectorbt.returns.accessors.ReturnsAccessor">ReturnsAccessor</a></code> to analyze them. Do not use methods akin to
 <code><a title="vectorbt.portfolio.base.Portfolio.sharpe_ratio" href="#vectorbt.portfolio.base.Portfolio.sharpe_ratio">Portfolio.sharpe_ratio()</a></code> because they will re-calculate returns each time.</p>
 <p>Alternatively, you can precisely point at attributes and methods that should or shouldn't
 be cached. For example, you can blacklist the entire <code><a title="vectorbt.portfolio.base.Portfolio" href="#vectorbt.portfolio.base.Portfolio">Portfolio</a></code> class except a few most called
@@ -298,46 +301,51 @@ in 2020 against every single pattern found in TA-Lib, and translates them into s
 &gt;&gt;&gt; import numpy as np
 &gt;&gt;&gt; import pandas as pd
 &gt;&gt;&gt; from datetime import datetime
-&gt;&gt;&gt; import yfinance as yf
 &gt;&gt;&gt; import talib
 &gt;&gt;&gt; import vectorbt as vbt
 
 &gt;&gt;&gt; # Fetch price history
-&gt;&gt;&gt; pairs = [&#39;BTC-USD&#39;, &#39;ETH-USD&#39;, &#39;XRP-USD&#39;, &#39;BNB-USD&#39;, &#39;BCH-USD&#39;, &#39;LTC-USD&#39;]
+&gt;&gt;&gt; symbols = [&#39;BTC-USD&#39;, &#39;ETH-USD&#39;, &#39;XRP-USD&#39;, &#39;BNB-USD&#39;, &#39;BCH-USD&#39;, &#39;LTC-USD&#39;]
 &gt;&gt;&gt; start = datetime(2020, 1, 1)
 &gt;&gt;&gt; end = datetime(2020, 9, 1)
-&gt;&gt;&gt; pair_history = {p: yf.Ticker(p).history(start=start, end=end) for p in pairs}
+&gt;&gt;&gt; ohlcv_by_symbol = vbt.utils.data.download(symbols, start=start, end=end)
 
 &gt;&gt;&gt; # Put assets into a single dataframe by price type
-&gt;&gt;&gt; price = {}
-&gt;&gt;&gt; for pt in [&#39;Open&#39;, &#39;High&#39;, &#39;Low&#39;, &#39;Close&#39;]:
-...     price[pt] = pd.DataFrame({p: df[pt] for p, df in pair_history.items()})
+&gt;&gt;&gt; ohlcv = vbt.utils.data.concat_symbols(ohlcv_by_symbol)
 
-&gt;&gt;&gt; price[&#39;Open&#39;].head()
-            BTC-USD  ETH-USD  XRP-USD  BNB-USD  BCH-USD  LTC-USD
+&gt;&gt;&gt; ohlcv[&#39;Open&#39;].head()
+symbol          BTC-USD     ETH-USD   XRP-USD    BNB-USD     BCH-USD  \
 Date
-2019-12-31  7294.44   132.61   0.1945    13.95   209.30    42.77
-2020-01-01  7194.89   129.63   0.1929    13.73   204.67    41.33
-2020-01-02  7202.55   130.82   0.1927    13.70   204.35    42.02
-2020-01-03  6984.43   127.41   0.1879    13.04   196.01    39.86
-2020-01-04  7345.38   134.17   0.1935    13.67   222.54    42.38
+2019-12-31  7294.438965  132.612274  0.194518  13.952087  209.301987
+2020-01-01  7194.892090  129.630661  0.192912  13.730962  204.671295
+2020-01-02  7202.551270  130.820038  0.192708  13.698126  204.354538
+2020-01-03  6984.428711  127.411263  0.187948  13.035329  196.007690
+2020-01-04  7345.375488  134.168518  0.193521  13.667442  222.536560
+
+symbol        LTC-USD
+Date
+2019-12-31  42.766113
+2020-01-01  41.326534
+2020-01-02  42.018085
+2020-01-03  39.863129
+2020-01-04  42.383526
 
 &gt;&gt;&gt; # Run every single pattern recognition indicator and combine results
-&gt;&gt;&gt; result = pd.DataFrame.vbt.empty_like(price[&#39;Open&#39;], fill_value=0.)
+&gt;&gt;&gt; result = pd.DataFrame.vbt.empty_like(ohlcv[&#39;Open&#39;], fill_value=0.)
 &gt;&gt;&gt; for pattern in talib.get_function_groups()[&#39;Pattern Recognition&#39;]:
 ...     PRecognizer = vbt.IndicatorFactory.from_talib(pattern)
-...     pr = PRecognizer.run(price[&#39;Open&#39;], price[&#39;High&#39;], price[&#39;Low&#39;], price[&#39;Close&#39;])
+...     pr = PRecognizer.run(ohlcv[&#39;Open&#39;], ohlcv[&#39;High&#39;], ohlcv[&#39;Low&#39;], ohlcv[&#39;Close&#39;])
 ...     result = result + pr.integer
 
 &gt;&gt;&gt; # Don&#39;t look into future
 &gt;&gt;&gt; result = result.vbt.fshift(1)
 
 &gt;&gt;&gt; # Treat each number as order value in USD
-&gt;&gt;&gt; size = result / price[&#39;Open&#39;]
+&gt;&gt;&gt; size = result / ohlcv[&#39;Open&#39;]
 
 &gt;&gt;&gt; # Simulate portfolio
 &gt;&gt;&gt; portfolio = vbt.Portfolio.from_orders(
-...     price[&#39;Close&#39;], size, price=price[&#39;Open&#39;],
+...     ohlcv[&#39;Close&#39;], size, price=ohlcv[&#39;Open&#39;],
 ...     init_cash=&#39;autoalign&#39;, fees=0.001, slippage=0.001)
 
 &gt;&gt;&gt; # Visualize portfolio value
@@ -371,15 +379,15 @@ For example, let&#39;s divide our portfolio into two groups sharing the same cas
 ...     &#39;second&#39;, &#39;second&#39;, &#39;second&#39;
 ... ], name=&#39;group&#39;)
 &gt;&gt;&gt; comb_portfolio = vbt.Portfolio.from_orders(
-...     price[&#39;Close&#39;], size, price=price[&#39;Open&#39;],
+...     ohlcv[&#39;Close&#39;], size, price=ohlcv[&#39;Open&#39;],
 ...     init_cash=&#39;autoalign&#39;, fees=0.001, slippage=0.001,
 ...     group_by=group_by, cash_sharing=True)
 
 &gt;&gt;&gt; # Get total profit per group
 &gt;&gt;&gt; comb_portfolio.total_profit()
 group
-first     21474.794005
-second     7973.848970
+first     21891.431061
+second     7575.676246
 dtype: float64
 ```
 
@@ -388,12 +396,13 @@ Not only can you analyze each group, but also each column in the group:
 ```python-repl
 &gt;&gt;&gt; # Get total profit per column
 &gt;&gt;&gt; comb_portfolio.total_profit(group_by=False)
-BTC-USD     5101.957521
-ETH-USD    12866.045602
-XRP-USD     3506.790882
-BNB-USD     5065.017577
-BCH-USD     -240.275095
-LTC-USD     3149.106488
+symbol
+BTC-USD     5163.844396
+ETH-USD    13368.521326
+XRP-USD     3359.065339
+BNB-USD     4724.565229
+BCH-USD     -259.592709
+LTC-USD     3110.703726
 dtype: float64
 ```
 
@@ -403,8 +412,8 @@ In the same way, you can introduce new grouping to the method itself:
 &gt;&gt;&gt; # Get total profit per group
 &gt;&gt;&gt; portfolio.total_profit(group_by=group_by)
 group
-first     21474.794005
-second     7973.848970
+first     21891.431061
+second     7575.676246
 dtype: float64
 ```
 
@@ -421,7 +430,7 @@ indexing operation to each argument with index:
 &lt;vectorbt.portfolio.base.Portfolio at 0x7fac7517ac88&gt;
 
 &gt;&gt;&gt; portfolio[&#39;BTC-USD&#39;].total_profit()
-5101.957521326392
+5163.844396244112
 ```
 
 Combined portfolio is indexed by group:
@@ -431,7 +440,7 @@ Combined portfolio is indexed by group:
 &lt;vectorbt.portfolio.base.Portfolio at 0x7fac5756b828&gt;
 
 &gt;&gt;&gt; comb_portfolio[&#39;first&#39;].total_profit()
-21474.794005172986
+21891.43106080097
 ```
 
 !!! note
@@ -450,26 +459,26 @@ simulation from the beginning to the end, you can turn on logging.
 ```python-repl
 &gt;&gt;&gt; # Simulate portfolio with logging
 &gt;&gt;&gt; portfolio = vbt.Portfolio.from_orders(
-...     price[&#39;Close&#39;], size, price=price[&#39;Open&#39;],
+...     ohlcv[&#39;Close&#39;], size, price=ohlcv[&#39;Open&#39;],
 ...     init_cash=&#39;autoalign&#39;, fees=0.001, slippage=0.001, log=True)
 
 &gt;&gt;&gt; portfolio.logs.records
-        id  idx  col  group  cash_now  shares_now  val_price_now  value_now  \\
-0        0    0    0      0       inf    0.000000        7294.44        inf
+        id  idx  col  group  cash_now  shares_now  val_price_now  value_now  \
+0        0    0    0      0       inf    0.000000    7294.438965        inf
 ...    ...  ...  ...    ...       ...         ...            ...        ...
-1469  1469  244    5      5       inf  273.894381          62.84        inf
+1463  1463  243    5      5       inf  271.629075      62.844059        inf
 
-          size  size_type  ...   log  new_cash  new_shares  res_size  \\
+          size  size_type  ...   log  new_cash  new_shares  res_size  \
 0          NaN          0  ...  True       inf    0.000000       NaN
 ...        ...        ...  ...   ...       ...         ...       ...
-1469  7.956715          0  ...  True       inf  281.851096  7.956715
+1463  7.956202          0  ...  True       inf  279.585277  7.956202
 
-       res_price  res_fees  res_side  res_status  res_status_info  order_id
-0            NaN       NaN        -1           1                0        -1
-...          ...       ...       ...         ...              ...       ...
-1469    62.90284    0.5005         0           0               -1      1054
+        res_price  res_fees  res_side  res_status  res_status_info  order_id
+0             NaN       NaN        -1           1                0        -1
+...           ...       ...       ...         ...              ...       ...
+1463    62.906903    0.5005         0           0               -1      1075
 
-[1470 rows x 31 columns]
+[1464 rows x 30 columns]
 ```
 
 Just as orders, logs are also records and thus can be easily analyzed:
@@ -478,9 +487,9 @@ Just as orders, logs are also records and thus can be easily analyzed:
 &gt;&gt;&gt; from vectorbt.portfolio.enums import OrderStatus
 
 &gt;&gt;&gt; portfolio.logs.map_field(&#39;res_status&#39;, value_map=OrderStatus).value_counts()
-         BTC-USD  ETH-USD  XRP-USD  BNB-USD  BCH-USD  LTC-USD
-Ignored       59       76       73       74       68       65
-Filled       186      169      172      171      177      180
+symbol   BTC-USD  ETH-USD  XRP-USD  BNB-USD  BCH-USD  LTC-USD
+Ignored       59       72       66       66       66       59
+Filled       185      172      178      178      178      185
 ```
 
 Logging can also be turned on just for one order, row, or column, since as many other
@@ -502,7 +511,7 @@ respectively. Caching can be disabled globally via `vectorbt.settings`.
 If you&#39;re running out of memory when working with large arrays, make sure to disable caching
 and then store most important time series manually. For example, if you&#39;re interested in Sharpe
 ratio or other metrics based on returns, run and save `Portfolio.returns` and then use the
-`vectorbt.returns.accessors.Returns_Accessor` to analyze them. Do not use methods akin to
+`vectorbt.returns.accessors.ReturnsAccessor` to analyze them. Do not use methods akin to
 `Portfolio.sharpe_ratio` because they will re-calculate returns each time.
 
 Alternatively, you can precisely point at attributes and methods that should or shouldn&#39;t
@@ -550,11 +559,12 @@ from vectorbt.utils.enum import convert_str_enum_value
 from vectorbt.utils.config import merge_dicts
 from vectorbt.utils.random import set_seed
 from vectorbt.utils.colors import adjust_opacity
-from vectorbt.utils.widgets import CustomFigureWidget
+from vectorbt.utils.widgets import FigureWidget
 from vectorbt.base.reshape_fns import to_1d, to_2d, broadcast, broadcast_to
 from vectorbt.base.array_wrapper import ArrayWrapper, Wrapping
 from vectorbt.generic import nb as generic_nb
 from vectorbt.generic.drawdowns import Drawdowns
+from vectorbt.signals.basic import RAND, RPROB
 from vectorbt.portfolio import nb
 from vectorbt.portfolio.orders import Orders
 from vectorbt.portfolio.trades import Trades, Positions
@@ -569,7 +579,7 @@ from vectorbt.portfolio.enums import (
 
 
 def add_returns_methods(func_names):
-    &#34;&#34;&#34;Class decorator to add `vectorbt.returns.accessors.Returns_Accessor` methods to `Portfolio`.&#34;&#34;&#34;
+    &#34;&#34;&#34;Class decorator to add `vectorbt.returns.accessors.ReturnsAccessor` methods to `Portfolio`.&#34;&#34;&#34;
 
     def wrapper(cls):
         for func_name in func_names:
@@ -611,7 +621,7 @@ def add_returns_methods(func_names):
                 func_name = func_name[1]
             returns_method.__name__ = func_name
             returns_method.__qualname__ = f&#34;Portfolio.{func_name}&#34;
-            returns_method.__doc__ = f&#34;See `vectorbt.returns.accessors.Returns_Accessor.{ret_func_name}`.&#34;
+            returns_method.__doc__ = f&#34;See `vectorbt.returns.accessors.ReturnsAccessor.{ret_func_name}`.&#34;
             setattr(cls, func_name, cached_method(returns_method))
         return cls
 
@@ -724,6 +734,63 @@ class Portfolio(Wrapping):
         )
 
     # ############# Class methods ############# #
+
+    @classmethod
+    def from_holding(cls, close, **kwargs):
+        &#34;&#34;&#34;Simulate portfolio from holding.
+
+        Based on `Portfolio.from_signals`.&#34;&#34;&#34;
+        return cls.from_signals(close, True, False, accumulate=False, **kwargs)
+
+    @classmethod
+    def from_random(cls, close, n=None, prob=None, entry_prob=None, exit_prob=None,
+                    param_product=False, seed=None, **kwargs):
+        &#34;&#34;&#34;Simulate portfolio from random entry and exit signals.
+
+        Generates signals based either on the number of signals `n` or the probability
+        of encountering a signal `prob`.
+
+        If `n` is set, see `vectorbt.signals.basic.RAND`.
+        If `prob` is set, see `vectorbt.signals.basic.RPROB`.
+
+        Based on `Portfolio.from_signals`.&#34;&#34;&#34;
+        from vectorbt import settings
+
+        if entry_prob is None:
+            entry_prob = prob
+        if exit_prob is None:
+            exit_prob = prob
+        if seed is None:
+            seed = settings.portfolio[&#39;seed&#39;]
+
+        if n is not None and (entry_prob is not None or exit_prob is not None):
+            raise ValueError(&#34;Either n or entry_prob and exit_prob should be set&#34;)
+        if n is not None:
+            rand = RAND.run(
+                n=n,
+                input_shape=close.shape,
+                input_index=close.vbt.wrapper.index,
+                input_columns=close.vbt.wrapper.columns,
+                seed=seed
+            )
+            entries = rand.entries
+            exits = rand.exits
+        elif entry_prob is not None and exit_prob is not None:
+            rprob = RPROB.run(
+                entry_prob=entry_prob,
+                exit_prob=exit_prob,
+                param_product=param_product,
+                input_shape=close.shape,
+                input_index=close.vbt.wrapper.index,
+                input_columns=close.vbt.wrapper.columns,
+                seed=seed
+            )
+            entries = rprob.entries
+            exits = rprob.exits
+        else:
+            raise ValueError(&#34;At least n or entry_prob and exit_prob should be set&#34;)
+
+        return cls.from_signals(close, entries, exits, seed=seed, **kwargs)
 
     @classmethod
     def from_signals(cls, close, entries, exits, size=None, size_type=None, direction=None, price=None,
@@ -1329,7 +1396,7 @@ class Portfolio(Wrapping):
         ...     fees=0.001, fixed_fees=1., slippage=0.001  # costs
         ... )
 
-        &gt;&gt;&gt; portfolio.holding_value(group_by=False).vbt.scatter()
+        &gt;&gt;&gt; portfolio.holding_value(group_by=False).vbt.plot()
         ```
 
         ![](/vectorbt/docs/img/simulate_nb.png)
@@ -1698,7 +1765,7 @@ class Portfolio(Wrapping):
         ...     cash_sharing=True, group_by=True,  # one group with cash sharing
         ... )
 
-        &gt;&gt;&gt; portfolio.holding_value(group_by=False).vbt.scatter()
+        &gt;&gt;&gt; portfolio.holding_value(group_by=False).vbt.plot()
         ```
 
         ![](/vectorbt/docs/img/simulate_nb.png)
@@ -2283,7 +2350,7 @@ class Portfolio(Wrapping):
               in_sim_order=False, agg_func=lambda x: x.mean(axis=0), **kwargs):
         &#34;&#34;&#34;Compute various statistics on this portfolio.
 
-        `kwargs` will be passed to each `vectorbt.returns.accessors.Returns_Accessor` method.
+        `kwargs` will be passed to each `vectorbt.returns.accessors.ReturnsAccessor` method.
 
         Can either return aggregated statistics by reducing metrics of all columns with
         `agg_func` (mean by default) or return statistics for a single column if `column`
@@ -2352,7 +2419,7 @@ class Portfolio(Wrapping):
 
         For keyword arguments and notes, see `Portfolio.stats`.
 
-        `kwargs` will be passed to `vectorbt.returns.accessors.Returns_Accessor.stats` method.
+        `kwargs` will be passed to `vectorbt.returns.accessors.ReturnsAccessor.stats` method.
         If `benchmark_rets` is not set, uses `Portfolio.market_returns`.&#34;&#34;&#34;
         # Pre-calculate
         if active_returns:
@@ -2485,13 +2552,12 @@ class Portfolio(Wrapping):
         ```python-repl
         &gt;&gt;&gt; import numpy as np
         &gt;&gt;&gt; import pandas as pd
-        &gt;&gt;&gt; import yfinance as yf
         &gt;&gt;&gt; from datetime import datetime
         &gt;&gt;&gt; import vectorbt as vbt
 
         &gt;&gt;&gt; start = datetime(2020, 1, 1)
         &gt;&gt;&gt; end = datetime(2020, 9, 1)
-        &gt;&gt;&gt; close = yf.Ticker(&#34;BTC-USD&#34;).history(start=start, end=end)[&#39;Close&#39;]
+        &gt;&gt;&gt; close = vbt.utils.data.download(&#34;BTC-USD&#34;, start=start, end=end)[&#39;Close&#39;]
 
         &gt;&gt;&gt; np.random.seed(42)
         &gt;&gt;&gt; size = pd.Series.vbt.empty_like(close, fill_value=0.)
@@ -2537,7 +2603,7 @@ class Portfolio(Wrapping):
         ...     ))  # placeholder
         ... ])
 
-        &gt;&gt;&gt; size.vbt.plot(name=&#39;Order Size&#39;, row=2, col=1, fig=fig)
+        &gt;&gt;&gt; size.vbt.plot(name=&#39;Order Size&#39;, add_trace_kwargs=dict(row=2, col=1), fig=fig)
         ```
 
         ![](/vectorbt/docs/img/portfolio_plot_custom.png)
@@ -2609,7 +2675,7 @@ class Portfolio(Wrapping):
                     _subplot_titles.append(self_col.subplot_settings[name][&#39;title&#39;])
         else:
             _subplot_titles = None
-        fig = CustomFigureWidget(make_subplots(
+        fig = FigureWidget(make_subplots(
             rows=rows,
             cols=cols,
             specs=specs,
@@ -2678,10 +2744,8 @@ class Portfolio(Wrapping):
                 if plot_func is not None:
                     arg_names = _get_arg_names(plot_func)
                     custom_kwargs = dict()
-                    if &#39;row&#39; in arg_names:
-                        custom_kwargs[&#39;row&#39;] = row
-                    if &#39;col&#39; in arg_names:
-                        custom_kwargs[&#39;col&#39;] = col
+                    if &#39;add_trace_kwargs&#39; in arg_names:
+                        custom_kwargs[&#39;add_trace_kwargs&#39;] = dict(row=row, col=col)
                     if &#39;xref&#39; in arg_names:
                         custom_kwargs[&#39;xref&#39;] = xref
                     if &#39;yref&#39; in arg_names:
@@ -2708,7 +2772,7 @@ class Portfolio(Wrapping):
                     method_kwargs = _extract_method_kwargs(self_col.get_orders, orders_kwargs)
                     self_col.get_orders(**method_kwargs).plot(
                         **orders_kwargs,
-                        row=row, col=col, fig=fig)
+                        add_trace_kwargs=dict(row=row, col=col), fig=fig)
                     fig.layout[xaxis][&#39;title&#39;] = &#39;Date&#39;
                     fig.layout[yaxis][&#39;title&#39;] = &#39;Price&#39;
     
@@ -2717,7 +2781,7 @@ class Portfolio(Wrapping):
                     method_kwargs = _extract_method_kwargs(self_col.get_trades, trades_kwargs)
                     self_col.get_trades(**method_kwargs).plot(
                         **trades_kwargs,
-                        row=row, col=col, xref=xref, yref=yref, fig=fig)
+                        add_trace_kwargs=dict(row=row, col=col), xref=xref, yref=yref, fig=fig)
                     fig.layout[xaxis][&#39;title&#39;] = &#39;Date&#39;
                     fig.layout[yaxis][&#39;title&#39;] = &#39;Price&#39;
     
@@ -2726,7 +2790,7 @@ class Portfolio(Wrapping):
                     method_kwargs = _extract_method_kwargs(self_col.get_positions, positions_kwargs)
                     self_col.get_positions(**method_kwargs).plot(
                         **positions_kwargs,
-                        row=row, col=col, xref=xref, yref=yref, fig=fig)
+                        add_trace_kwargs=dict(row=row, col=col), xref=xref, yref=yref, fig=fig)
                     fig.layout[xaxis][&#39;title&#39;] = &#39;Date&#39;
                     fig.layout[yaxis][&#39;title&#39;] = &#39;Price&#39;
     
@@ -2737,7 +2801,7 @@ class Portfolio(Wrapping):
                     method_kwargs = _extract_method_kwargs(self_col.get_trades, trade_pnl_kwargs)
                     self_col.get_trades(**method_kwargs).plot_pnl(
                         **trade_pnl_kwargs,
-                        row=row, col=col, xref=xref, yref=yref, fig=fig)
+                        add_trace_kwargs=dict(row=row, col=col), xref=xref, yref=yref, fig=fig)
                     fig.layout[xaxis][&#39;title&#39;] = &#39;Date&#39;
                     fig.layout[yaxis][&#39;title&#39;] = &#39;PnL&#39;
     
@@ -2746,7 +2810,7 @@ class Portfolio(Wrapping):
                     method_kwargs = _extract_method_kwargs(self_col.get_positions, position_pnl_kwargs)
                     self_col.get_positions(**method_kwargs).plot_pnl(
                         **position_pnl_kwargs,
-                        row=row, col=col, xref=xref, yref=yref, fig=fig)
+                        add_trace_kwargs=dict(row=row, col=col), xref=xref, yref=yref, fig=fig)
                     fig.layout[xaxis][&#39;title&#39;] = &#39;Date&#39;
                     fig.layout[yaxis][&#39;title&#39;] = &#39;PnL&#39;
     
@@ -2769,7 +2833,7 @@ class Portfolio(Wrapping):
                         returns = self_col.returns(in_sim_order=in_sim_order)
                     returns.vbt.returns.plot_cum_returns(
                         **cum_returns_kwargs,
-                        row=row, col=col, xref=xref, yref=yref, fig=fig)
+                        add_trace_kwargs=dict(row=row, col=col), xref=xref, yref=yref, fig=fig)
                     fig.layout[xaxis][&#39;title&#39;] = &#39;Date&#39;
                     fig.layout[yaxis][&#39;title&#39;] = &#39;Cumulative Returns&#39;
     
@@ -2783,7 +2847,7 @@ class Portfolio(Wrapping):
                     method_kwargs = _extract_method_kwargs(self_col.get_drawdowns, drawdowns_kwargs)
                     self_col.get_drawdowns(**method_kwargs).plot(
                         **drawdowns_kwargs,
-                        row=row, col=col, xref=xref, yref=yref, fig=fig)
+                        add_trace_kwargs=dict(row=row, col=col), xref=xref, yref=yref, fig=fig)
                     fig.layout[xaxis][&#39;title&#39;] = &#39;Date&#39;
                     fig.layout[yaxis][&#39;title&#39;] = &#39;Value&#39;
     
@@ -2799,7 +2863,7 @@ class Portfolio(Wrapping):
                     method_kwargs = _extract_method_kwargs(self_col.drawdown, underwater_kwargs)
                     self_col.drawdown(**method_kwargs).vbt.plot(
                         **underwater_kwargs,
-                        row=row, col=col, fig=fig)
+                        add_trace_kwargs=dict(row=row, col=col), fig=fig)
                     _add_hline(0, x_domain, yref)
                     fig.layout[xaxis][&#39;title&#39;] = &#39;Date&#39;
                     fig.layout[yaxis][&#39;title&#39;] = &#39;Drawdown&#39;
@@ -2815,7 +2879,7 @@ class Portfolio(Wrapping):
                     method_kwargs = _extract_method_kwargs(self_col.share_flow, share_flow_kwargs)
                     self_col.share_flow(**method_kwargs).vbt.plot(
                         **share_flow_kwargs,
-                        row=row, col=col, fig=fig)
+                        add_trace_kwargs=dict(row=row, col=col), fig=fig)
                     _add_hline(0, x_domain, yref)
                     fig.layout[xaxis][&#39;title&#39;] = &#39;Date&#39;
                     fig.layout[yaxis][&#39;title&#39;] = &#39;Share Flow&#39;
@@ -2830,7 +2894,7 @@ class Portfolio(Wrapping):
                     method_kwargs = _extract_method_kwargs(self_col.cash_flow, cash_flow_kwargs)
                     self_col.cash_flow(**method_kwargs).vbt.plot(
                         **cash_flow_kwargs,
-                        row=row, col=col, fig=fig)
+                        add_trace_kwargs=dict(row=row, col=col), fig=fig)
                     _add_hline(0, x_domain, yref)
                     fig.layout[xaxis][&#39;title&#39;] = &#39;Date&#39;
                     fig.layout[yaxis][&#39;title&#39;] = &#39;Cash Flow&#39;
@@ -2852,7 +2916,7 @@ class Portfolio(Wrapping):
                     method_kwargs = _extract_method_kwargs(self_col.shares, shares_kwargs)
                     self_col.shares(**method_kwargs).vbt.plot_against(
                         0, **shares_kwargs,
-                        row=row, col=col, fig=fig)
+                        add_trace_kwargs=dict(row=row, col=col), fig=fig)
                     _add_hline(0, x_domain, yref)
                     fig.layout[xaxis][&#39;title&#39;] = &#39;Date&#39;
                     fig.layout[yaxis][&#39;title&#39;] = &#39;Shares&#39;
@@ -2874,7 +2938,7 @@ class Portfolio(Wrapping):
                     method_kwargs = _extract_method_kwargs(self_col.cash, cash_kwargs)
                     self_col.cash(**method_kwargs).vbt.plot_against(
                         0, **cash_kwargs,
-                        row=row, col=col, fig=fig)
+                        add_trace_kwargs=dict(row=row, col=col), fig=fig)
                     _add_hline(self_col.init_cash, x_domain, yref)
                     fig.layout[xaxis][&#39;title&#39;] = &#39;Date&#39;
                     fig.layout[yaxis][&#39;title&#39;] = &#39;Cash&#39;
@@ -2896,7 +2960,7 @@ class Portfolio(Wrapping):
                     method_kwargs = _extract_method_kwargs(self_col.holding_value, holding_value_kwargs)
                     self_col.holding_value(**method_kwargs).vbt.plot_against(
                         0, **holding_value_kwargs,
-                        row=row, col=col, fig=fig)
+                        add_trace_kwargs=dict(row=row, col=col), fig=fig)
                     _add_hline(0, x_domain, yref)
                     fig.layout[xaxis][&#39;title&#39;] = &#39;Date&#39;
                     fig.layout[yaxis][&#39;title&#39;] = &#39;Holding Value&#39;
@@ -2912,7 +2976,7 @@ class Portfolio(Wrapping):
                     method_kwargs = _extract_method_kwargs(self_col.value, value_kwargs)
                     self_col.value(**method_kwargs).vbt.plot_against(
                         self_col.init_cash, **value_kwargs,
-                        row=row, col=col, fig=fig)
+                        add_trace_kwargs=dict(row=row, col=col), fig=fig)
                     _add_hline(self_col.init_cash, x_domain, yref)
                     fig.layout[xaxis][&#39;title&#39;] = &#39;Date&#39;
                     fig.layout[yaxis][&#39;title&#39;] = &#39;Value&#39;
@@ -2934,7 +2998,7 @@ class Portfolio(Wrapping):
                     method_kwargs = _extract_method_kwargs(self_col.gross_exposure, gross_exposure_kwargs)
                     self_col.gross_exposure(**method_kwargs).vbt.plot_against(
                         1, **gross_exposure_kwargs,
-                        row=row, col=col, fig=fig)
+                        add_trace_kwargs=dict(row=row, col=col), fig=fig)
                     _add_hline(1, x_domain, yref)
                     fig.layout[xaxis][&#39;title&#39;] = &#39;Date&#39;
                     fig.layout[yaxis][&#39;title&#39;] = &#39;Gross Exposure&#39;
@@ -2956,7 +3020,7 @@ class Portfolio(Wrapping):
                     method_kwargs = _extract_method_kwargs(self_col.net_exposure, net_exposure_kwargs)
                     self_col.net_exposure(**method_kwargs).vbt.plot_against(
                         0, **net_exposure_kwargs,
-                        row=row, col=col, fig=fig)
+                        add_trace_kwargs=dict(row=row, col=col), fig=fig)
                     _add_hline(0, x_domain, yref)
                     fig.layout[xaxis][&#39;title&#39;] = &#39;Date&#39;
                     fig.layout[yaxis][&#39;title&#39;] = &#39;Net Exposure&#39;
@@ -3041,13 +3105,13 @@ class Portfolio(Wrapping):
 <span>def <span class="ident fname">add_returns_methods</span></span>(<span>func_names)</span>
 </code></dt>
 <dd>
-<div class="desc"><p>Class decorator to add <code><a title="vectorbt.returns.accessors.Returns_Accessor" href="../returns/accessors.html#vectorbt.returns.accessors.Returns_Accessor">Returns_Accessor</a></code> methods to <code><a title="vectorbt.portfolio.base.Portfolio" href="#vectorbt.portfolio.base.Portfolio">Portfolio</a></code>.</p></div>
+<div class="desc"><p>Class decorator to add <code><a title="vectorbt.returns.accessors.ReturnsAccessor" href="../returns/accessors.html#vectorbt.returns.accessors.ReturnsAccessor">ReturnsAccessor</a></code> methods to <code><a title="vectorbt.portfolio.base.Portfolio" href="#vectorbt.portfolio.base.Portfolio">Portfolio</a></code>.</p></div>
 <details class="source">
 <summary>
 <span>Expand source code</span>
 </summary>
 <pre><code class="python">def add_returns_methods(func_names):
-    &#34;&#34;&#34;Class decorator to add `vectorbt.returns.accessors.Returns_Accessor` methods to `Portfolio`.&#34;&#34;&#34;
+    &#34;&#34;&#34;Class decorator to add `vectorbt.returns.accessors.ReturnsAccessor` methods to `Portfolio`.&#34;&#34;&#34;
 
     def wrapper(cls):
         for func_name in func_names:
@@ -3089,7 +3153,7 @@ class Portfolio(Wrapping):
                 func_name = func_name[1]
             returns_method.__name__ = func_name
             returns_method.__qualname__ = f&#34;Portfolio.{func_name}&#34;
-            returns_method.__doc__ = f&#34;See `vectorbt.returns.accessors.Returns_Accessor.{ret_func_name}`.&#34;
+            returns_method.__doc__ = f&#34;See `vectorbt.returns.accessors.ReturnsAccessor.{ret_func_name}`.&#34;
             setattr(cls, func_name, cached_method(returns_method))
         return cls
 
@@ -3232,6 +3296,63 @@ The <code>__init__</code> method is reserved for indexing purposes.</p>
     # ############# Class methods ############# #
 
     @classmethod
+    def from_holding(cls, close, **kwargs):
+        &#34;&#34;&#34;Simulate portfolio from holding.
+
+        Based on `Portfolio.from_signals`.&#34;&#34;&#34;
+        return cls.from_signals(close, True, False, accumulate=False, **kwargs)
+
+    @classmethod
+    def from_random(cls, close, n=None, prob=None, entry_prob=None, exit_prob=None,
+                    param_product=False, seed=None, **kwargs):
+        &#34;&#34;&#34;Simulate portfolio from random entry and exit signals.
+
+        Generates signals based either on the number of signals `n` or the probability
+        of encountering a signal `prob`.
+
+        If `n` is set, see `vectorbt.signals.basic.RAND`.
+        If `prob` is set, see `vectorbt.signals.basic.RPROB`.
+
+        Based on `Portfolio.from_signals`.&#34;&#34;&#34;
+        from vectorbt import settings
+
+        if entry_prob is None:
+            entry_prob = prob
+        if exit_prob is None:
+            exit_prob = prob
+        if seed is None:
+            seed = settings.portfolio[&#39;seed&#39;]
+
+        if n is not None and (entry_prob is not None or exit_prob is not None):
+            raise ValueError(&#34;Either n or entry_prob and exit_prob should be set&#34;)
+        if n is not None:
+            rand = RAND.run(
+                n=n,
+                input_shape=close.shape,
+                input_index=close.vbt.wrapper.index,
+                input_columns=close.vbt.wrapper.columns,
+                seed=seed
+            )
+            entries = rand.entries
+            exits = rand.exits
+        elif entry_prob is not None and exit_prob is not None:
+            rprob = RPROB.run(
+                entry_prob=entry_prob,
+                exit_prob=exit_prob,
+                param_product=param_product,
+                input_shape=close.shape,
+                input_index=close.vbt.wrapper.index,
+                input_columns=close.vbt.wrapper.columns,
+                seed=seed
+            )
+            entries = rprob.entries
+            exits = rprob.exits
+        else:
+            raise ValueError(&#34;At least n or entry_prob and exit_prob should be set&#34;)
+
+        return cls.from_signals(close, entries, exits, seed=seed, **kwargs)
+
+    @classmethod
     def from_signals(cls, close, entries, exits, size=None, size_type=None, direction=None, price=None,
                      fees=None, fixed_fees=None, slippage=None, min_size=None, max_size=None,
                      reject_prob=None, allow_partial=None, raise_reject=None, accumulate=None, log=None,
@@ -3835,7 +3956,7 @@ The <code>__init__</code> method is reserved for indexing purposes.</p>
         ...     fees=0.001, fixed_fees=1., slippage=0.001  # costs
         ... )
 
-        &gt;&gt;&gt; portfolio.holding_value(group_by=False).vbt.scatter()
+        &gt;&gt;&gt; portfolio.holding_value(group_by=False).vbt.plot()
         ```
 
         ![](/vectorbt/docs/img/simulate_nb.png)
@@ -4204,7 +4325,7 @@ The <code>__init__</code> method is reserved for indexing purposes.</p>
         ...     cash_sharing=True, group_by=True,  # one group with cash sharing
         ... )
 
-        &gt;&gt;&gt; portfolio.holding_value(group_by=False).vbt.scatter()
+        &gt;&gt;&gt; portfolio.holding_value(group_by=False).vbt.plot()
         ```
 
         ![](/vectorbt/docs/img/simulate_nb.png)
@@ -4789,7 +4910,7 @@ The <code>__init__</code> method is reserved for indexing purposes.</p>
               in_sim_order=False, agg_func=lambda x: x.mean(axis=0), **kwargs):
         &#34;&#34;&#34;Compute various statistics on this portfolio.
 
-        `kwargs` will be passed to each `vectorbt.returns.accessors.Returns_Accessor` method.
+        `kwargs` will be passed to each `vectorbt.returns.accessors.ReturnsAccessor` method.
 
         Can either return aggregated statistics by reducing metrics of all columns with
         `agg_func` (mean by default) or return statistics for a single column if `column`
@@ -4858,7 +4979,7 @@ The <code>__init__</code> method is reserved for indexing purposes.</p>
 
         For keyword arguments and notes, see `Portfolio.stats`.
 
-        `kwargs` will be passed to `vectorbt.returns.accessors.Returns_Accessor.stats` method.
+        `kwargs` will be passed to `vectorbt.returns.accessors.ReturnsAccessor.stats` method.
         If `benchmark_rets` is not set, uses `Portfolio.market_returns`.&#34;&#34;&#34;
         # Pre-calculate
         if active_returns:
@@ -4991,13 +5112,12 @@ The <code>__init__</code> method is reserved for indexing purposes.</p>
         ```python-repl
         &gt;&gt;&gt; import numpy as np
         &gt;&gt;&gt; import pandas as pd
-        &gt;&gt;&gt; import yfinance as yf
         &gt;&gt;&gt; from datetime import datetime
         &gt;&gt;&gt; import vectorbt as vbt
 
         &gt;&gt;&gt; start = datetime(2020, 1, 1)
         &gt;&gt;&gt; end = datetime(2020, 9, 1)
-        &gt;&gt;&gt; close = yf.Ticker(&#34;BTC-USD&#34;).history(start=start, end=end)[&#39;Close&#39;]
+        &gt;&gt;&gt; close = vbt.utils.data.download(&#34;BTC-USD&#34;, start=start, end=end)[&#39;Close&#39;]
 
         &gt;&gt;&gt; np.random.seed(42)
         &gt;&gt;&gt; size = pd.Series.vbt.empty_like(close, fill_value=0.)
@@ -5043,7 +5163,7 @@ The <code>__init__</code> method is reserved for indexing purposes.</p>
         ...     ))  # placeholder
         ... ])
 
-        &gt;&gt;&gt; size.vbt.plot(name=&#39;Order Size&#39;, row=2, col=1, fig=fig)
+        &gt;&gt;&gt; size.vbt.plot(name=&#39;Order Size&#39;, add_trace_kwargs=dict(row=2, col=1), fig=fig)
         ```
 
         ![](/vectorbt/docs/img/portfolio_plot_custom.png)
@@ -5115,7 +5235,7 @@ The <code>__init__</code> method is reserved for indexing purposes.</p>
                     _subplot_titles.append(self_col.subplot_settings[name][&#39;title&#39;])
         else:
             _subplot_titles = None
-        fig = CustomFigureWidget(make_subplots(
+        fig = FigureWidget(make_subplots(
             rows=rows,
             cols=cols,
             specs=specs,
@@ -5184,10 +5304,8 @@ The <code>__init__</code> method is reserved for indexing purposes.</p>
                 if plot_func is not None:
                     arg_names = _get_arg_names(plot_func)
                     custom_kwargs = dict()
-                    if &#39;row&#39; in arg_names:
-                        custom_kwargs[&#39;row&#39;] = row
-                    if &#39;col&#39; in arg_names:
-                        custom_kwargs[&#39;col&#39;] = col
+                    if &#39;add_trace_kwargs&#39; in arg_names:
+                        custom_kwargs[&#39;add_trace_kwargs&#39;] = dict(row=row, col=col)
                     if &#39;xref&#39; in arg_names:
                         custom_kwargs[&#39;xref&#39;] = xref
                     if &#39;yref&#39; in arg_names:
@@ -5214,7 +5332,7 @@ The <code>__init__</code> method is reserved for indexing purposes.</p>
                     method_kwargs = _extract_method_kwargs(self_col.get_orders, orders_kwargs)
                     self_col.get_orders(**method_kwargs).plot(
                         **orders_kwargs,
-                        row=row, col=col, fig=fig)
+                        add_trace_kwargs=dict(row=row, col=col), fig=fig)
                     fig.layout[xaxis][&#39;title&#39;] = &#39;Date&#39;
                     fig.layout[yaxis][&#39;title&#39;] = &#39;Price&#39;
     
@@ -5223,7 +5341,7 @@ The <code>__init__</code> method is reserved for indexing purposes.</p>
                     method_kwargs = _extract_method_kwargs(self_col.get_trades, trades_kwargs)
                     self_col.get_trades(**method_kwargs).plot(
                         **trades_kwargs,
-                        row=row, col=col, xref=xref, yref=yref, fig=fig)
+                        add_trace_kwargs=dict(row=row, col=col), xref=xref, yref=yref, fig=fig)
                     fig.layout[xaxis][&#39;title&#39;] = &#39;Date&#39;
                     fig.layout[yaxis][&#39;title&#39;] = &#39;Price&#39;
     
@@ -5232,7 +5350,7 @@ The <code>__init__</code> method is reserved for indexing purposes.</p>
                     method_kwargs = _extract_method_kwargs(self_col.get_positions, positions_kwargs)
                     self_col.get_positions(**method_kwargs).plot(
                         **positions_kwargs,
-                        row=row, col=col, xref=xref, yref=yref, fig=fig)
+                        add_trace_kwargs=dict(row=row, col=col), xref=xref, yref=yref, fig=fig)
                     fig.layout[xaxis][&#39;title&#39;] = &#39;Date&#39;
                     fig.layout[yaxis][&#39;title&#39;] = &#39;Price&#39;
     
@@ -5243,7 +5361,7 @@ The <code>__init__</code> method is reserved for indexing purposes.</p>
                     method_kwargs = _extract_method_kwargs(self_col.get_trades, trade_pnl_kwargs)
                     self_col.get_trades(**method_kwargs).plot_pnl(
                         **trade_pnl_kwargs,
-                        row=row, col=col, xref=xref, yref=yref, fig=fig)
+                        add_trace_kwargs=dict(row=row, col=col), xref=xref, yref=yref, fig=fig)
                     fig.layout[xaxis][&#39;title&#39;] = &#39;Date&#39;
                     fig.layout[yaxis][&#39;title&#39;] = &#39;PnL&#39;
     
@@ -5252,7 +5370,7 @@ The <code>__init__</code> method is reserved for indexing purposes.</p>
                     method_kwargs = _extract_method_kwargs(self_col.get_positions, position_pnl_kwargs)
                     self_col.get_positions(**method_kwargs).plot_pnl(
                         **position_pnl_kwargs,
-                        row=row, col=col, xref=xref, yref=yref, fig=fig)
+                        add_trace_kwargs=dict(row=row, col=col), xref=xref, yref=yref, fig=fig)
                     fig.layout[xaxis][&#39;title&#39;] = &#39;Date&#39;
                     fig.layout[yaxis][&#39;title&#39;] = &#39;PnL&#39;
     
@@ -5275,7 +5393,7 @@ The <code>__init__</code> method is reserved for indexing purposes.</p>
                         returns = self_col.returns(in_sim_order=in_sim_order)
                     returns.vbt.returns.plot_cum_returns(
                         **cum_returns_kwargs,
-                        row=row, col=col, xref=xref, yref=yref, fig=fig)
+                        add_trace_kwargs=dict(row=row, col=col), xref=xref, yref=yref, fig=fig)
                     fig.layout[xaxis][&#39;title&#39;] = &#39;Date&#39;
                     fig.layout[yaxis][&#39;title&#39;] = &#39;Cumulative Returns&#39;
     
@@ -5289,7 +5407,7 @@ The <code>__init__</code> method is reserved for indexing purposes.</p>
                     method_kwargs = _extract_method_kwargs(self_col.get_drawdowns, drawdowns_kwargs)
                     self_col.get_drawdowns(**method_kwargs).plot(
                         **drawdowns_kwargs,
-                        row=row, col=col, xref=xref, yref=yref, fig=fig)
+                        add_trace_kwargs=dict(row=row, col=col), xref=xref, yref=yref, fig=fig)
                     fig.layout[xaxis][&#39;title&#39;] = &#39;Date&#39;
                     fig.layout[yaxis][&#39;title&#39;] = &#39;Value&#39;
     
@@ -5305,7 +5423,7 @@ The <code>__init__</code> method is reserved for indexing purposes.</p>
                     method_kwargs = _extract_method_kwargs(self_col.drawdown, underwater_kwargs)
                     self_col.drawdown(**method_kwargs).vbt.plot(
                         **underwater_kwargs,
-                        row=row, col=col, fig=fig)
+                        add_trace_kwargs=dict(row=row, col=col), fig=fig)
                     _add_hline(0, x_domain, yref)
                     fig.layout[xaxis][&#39;title&#39;] = &#39;Date&#39;
                     fig.layout[yaxis][&#39;title&#39;] = &#39;Drawdown&#39;
@@ -5321,7 +5439,7 @@ The <code>__init__</code> method is reserved for indexing purposes.</p>
                     method_kwargs = _extract_method_kwargs(self_col.share_flow, share_flow_kwargs)
                     self_col.share_flow(**method_kwargs).vbt.plot(
                         **share_flow_kwargs,
-                        row=row, col=col, fig=fig)
+                        add_trace_kwargs=dict(row=row, col=col), fig=fig)
                     _add_hline(0, x_domain, yref)
                     fig.layout[xaxis][&#39;title&#39;] = &#39;Date&#39;
                     fig.layout[yaxis][&#39;title&#39;] = &#39;Share Flow&#39;
@@ -5336,7 +5454,7 @@ The <code>__init__</code> method is reserved for indexing purposes.</p>
                     method_kwargs = _extract_method_kwargs(self_col.cash_flow, cash_flow_kwargs)
                     self_col.cash_flow(**method_kwargs).vbt.plot(
                         **cash_flow_kwargs,
-                        row=row, col=col, fig=fig)
+                        add_trace_kwargs=dict(row=row, col=col), fig=fig)
                     _add_hline(0, x_domain, yref)
                     fig.layout[xaxis][&#39;title&#39;] = &#39;Date&#39;
                     fig.layout[yaxis][&#39;title&#39;] = &#39;Cash Flow&#39;
@@ -5358,7 +5476,7 @@ The <code>__init__</code> method is reserved for indexing purposes.</p>
                     method_kwargs = _extract_method_kwargs(self_col.shares, shares_kwargs)
                     self_col.shares(**method_kwargs).vbt.plot_against(
                         0, **shares_kwargs,
-                        row=row, col=col, fig=fig)
+                        add_trace_kwargs=dict(row=row, col=col), fig=fig)
                     _add_hline(0, x_domain, yref)
                     fig.layout[xaxis][&#39;title&#39;] = &#39;Date&#39;
                     fig.layout[yaxis][&#39;title&#39;] = &#39;Shares&#39;
@@ -5380,7 +5498,7 @@ The <code>__init__</code> method is reserved for indexing purposes.</p>
                     method_kwargs = _extract_method_kwargs(self_col.cash, cash_kwargs)
                     self_col.cash(**method_kwargs).vbt.plot_against(
                         0, **cash_kwargs,
-                        row=row, col=col, fig=fig)
+                        add_trace_kwargs=dict(row=row, col=col), fig=fig)
                     _add_hline(self_col.init_cash, x_domain, yref)
                     fig.layout[xaxis][&#39;title&#39;] = &#39;Date&#39;
                     fig.layout[yaxis][&#39;title&#39;] = &#39;Cash&#39;
@@ -5402,7 +5520,7 @@ The <code>__init__</code> method is reserved for indexing purposes.</p>
                     method_kwargs = _extract_method_kwargs(self_col.holding_value, holding_value_kwargs)
                     self_col.holding_value(**method_kwargs).vbt.plot_against(
                         0, **holding_value_kwargs,
-                        row=row, col=col, fig=fig)
+                        add_trace_kwargs=dict(row=row, col=col), fig=fig)
                     _add_hline(0, x_domain, yref)
                     fig.layout[xaxis][&#39;title&#39;] = &#39;Date&#39;
                     fig.layout[yaxis][&#39;title&#39;] = &#39;Holding Value&#39;
@@ -5418,7 +5536,7 @@ The <code>__init__</code> method is reserved for indexing purposes.</p>
                     method_kwargs = _extract_method_kwargs(self_col.value, value_kwargs)
                     self_col.value(**method_kwargs).vbt.plot_against(
                         self_col.init_cash, **value_kwargs,
-                        row=row, col=col, fig=fig)
+                        add_trace_kwargs=dict(row=row, col=col), fig=fig)
                     _add_hline(self_col.init_cash, x_domain, yref)
                     fig.layout[xaxis][&#39;title&#39;] = &#39;Date&#39;
                     fig.layout[yaxis][&#39;title&#39;] = &#39;Value&#39;
@@ -5440,7 +5558,7 @@ The <code>__init__</code> method is reserved for indexing purposes.</p>
                     method_kwargs = _extract_method_kwargs(self_col.gross_exposure, gross_exposure_kwargs)
                     self_col.gross_exposure(**method_kwargs).vbt.plot_against(
                         1, **gross_exposure_kwargs,
-                        row=row, col=col, fig=fig)
+                        add_trace_kwargs=dict(row=row, col=col), fig=fig)
                     _add_hline(1, x_domain, yref)
                     fig.layout[xaxis][&#39;title&#39;] = &#39;Date&#39;
                     fig.layout[yaxis][&#39;title&#39;] = &#39;Gross Exposure&#39;
@@ -5462,7 +5580,7 @@ The <code>__init__</code> method is reserved for indexing purposes.</p>
                     method_kwargs = _extract_method_kwargs(self_col.net_exposure, net_exposure_kwargs)
                     self_col.net_exposure(**method_kwargs).vbt.plot_against(
                         0, **net_exposure_kwargs,
-                        row=row, col=col, fig=fig)
+                        add_trace_kwargs=dict(row=row, col=col), fig=fig)
                     _add_hline(0, x_domain, yref)
                     fig.layout[xaxis][&#39;title&#39;] = &#39;Date&#39;
                     fig.layout[yaxis][&#39;title&#39;] = &#39;Net Exposure&#39;
@@ -5550,6 +5668,24 @@ The <code>__init__</code> method is reserved for indexing purposes.</p>
 </dl>
 <h3 class="section-subtitle">Static methods</h3>
 <dl>
+<dt id="vectorbt.portfolio.base.Portfolio.from_holding"><code class="name flex">
+<span>def <span class="ident fname">from_holding</span></span>(<span>close, **kwargs)</span>
+</code></dt>
+<dd>
+<div class="desc"><p>Simulate portfolio from holding.</p>
+<p>Based on <code><a title="vectorbt.portfolio.base.Portfolio.from_signals" href="#vectorbt.portfolio.base.Portfolio.from_signals">Portfolio.from_signals()</a></code>.</p></div>
+<details class="source">
+<summary>
+<span>Expand source code</span>
+</summary>
+<pre><code class="python">@classmethod
+def from_holding(cls, close, **kwargs):
+    &#34;&#34;&#34;Simulate portfolio from holding.
+
+    Based on `Portfolio.from_signals`.&#34;&#34;&#34;
+    return cls.from_signals(close, True, False, accumulate=False, **kwargs)</code></pre>
+</details>
+</dd>
 <dt id="vectorbt.portfolio.base.Portfolio.from_order_func"><code class="name flex">
 <span>def <span class="ident fname">from_order_func</span></span>(<span>close, order_func_nb, *order_args, target_shape=None, keys=None, init_cash=None, cash_sharing=None, call_seq=None, active_mask=None, prep_func_nb=None, prep_args=None, group_prep_func_nb=None, group_prep_args=None, row_prep_func_nb=None, row_prep_args=None, segment_prep_func_nb=None, segment_prep_args=None, row_wise=None, max_orders=None, max_logs=None, seed=None, group_by=None, broadcast_kwargs=None, wrapper_kwargs=None, freq=None, **kwargs)</span>
 </code></dt>
@@ -5819,7 +5955,7 @@ dtype: float64
 ...     cash_sharing=True, group_by=True,  # one group with cash sharing
 ... )
 
-&gt;&gt;&gt; portfolio.holding_value(group_by=False).vbt.scatter()
+&gt;&gt;&gt; portfolio.holding_value(group_by=False).vbt.plot()
 </code></pre>
 <p><img alt="" src="/vectorbt/docs/img/simulate_nb.png"></p></div>
 <details class="source">
@@ -6060,7 +6196,7 @@ def from_order_func(cls, close, order_func_nb, *order_args, target_shape=None, k
     ...     cash_sharing=True, group_by=True,  # one group with cash sharing
     ... )
 
-    &gt;&gt;&gt; portfolio.holding_value(group_by=False).vbt.scatter()
+    &gt;&gt;&gt; portfolio.holding_value(group_by=False).vbt.plot()
     ```
 
     ![](/vectorbt/docs/img/simulate_nb.png)
@@ -6472,7 +6608,7 @@ It's more compact but has less control over execution:</p>
 ...     fees=0.001, fixed_fees=1., slippage=0.001  # costs
 ... )
 
-&gt;&gt;&gt; portfolio.holding_value(group_by=False).vbt.scatter()
+&gt;&gt;&gt; portfolio.holding_value(group_by=False).vbt.plot()
 </code></pre>
 <p><img alt="" src="/vectorbt/docs/img/simulate_nb.png"></p></div>
 <details class="source">
@@ -6700,7 +6836,7 @@ def from_orders(cls, close, size, size_type=None, direction=None, price=None, fe
     ...     fees=0.001, fixed_fees=1., slippage=0.001  # costs
     ... )
 
-    &gt;&gt;&gt; portfolio.holding_value(group_by=False).vbt.scatter()
+    &gt;&gt;&gt; portfolio.holding_value(group_by=False).vbt.plot()
     ```
 
     ![](/vectorbt/docs/img/simulate_nb.png)
@@ -6834,6 +6970,71 @@ def from_orders(cls, close, size, size_type=None, direction=None, price=None, fe
         call_seq,
         **kwargs
     )</code></pre>
+</details>
+</dd>
+<dt id="vectorbt.portfolio.base.Portfolio.from_random"><code class="name flex">
+<span>def <span class="ident fname">from_random</span></span>(<span>close, n=None, prob=None, entry_prob=None, exit_prob=None, param_product=False, seed=None, **kwargs)</span>
+</code></dt>
+<dd>
+<div class="desc"><p>Simulate portfolio from random entry and exit signals.</p>
+<p>Generates signals based either on the number of signals <code>n</code> or the probability
+of encountering a signal <code>prob</code>.</p>
+<p>If <code>n</code> is set, see <code><a title="vectorbt.signals.basic.RAND" href="../signals/basic.html#vectorbt.signals.basic.RAND">RAND</a></code>.
+If <code>prob</code> is set, see <code><a title="vectorbt.signals.basic.RPROB" href="../signals/basic.html#vectorbt.signals.basic.RPROB">RPROB</a></code>.</p>
+<p>Based on <code><a title="vectorbt.portfolio.base.Portfolio.from_signals" href="#vectorbt.portfolio.base.Portfolio.from_signals">Portfolio.from_signals()</a></code>.</p></div>
+<details class="source">
+<summary>
+<span>Expand source code</span>
+</summary>
+<pre><code class="python">@classmethod
+def from_random(cls, close, n=None, prob=None, entry_prob=None, exit_prob=None,
+                param_product=False, seed=None, **kwargs):
+    &#34;&#34;&#34;Simulate portfolio from random entry and exit signals.
+
+    Generates signals based either on the number of signals `n` or the probability
+    of encountering a signal `prob`.
+
+    If `n` is set, see `vectorbt.signals.basic.RAND`.
+    If `prob` is set, see `vectorbt.signals.basic.RPROB`.
+
+    Based on `Portfolio.from_signals`.&#34;&#34;&#34;
+    from vectorbt import settings
+
+    if entry_prob is None:
+        entry_prob = prob
+    if exit_prob is None:
+        exit_prob = prob
+    if seed is None:
+        seed = settings.portfolio[&#39;seed&#39;]
+
+    if n is not None and (entry_prob is not None or exit_prob is not None):
+        raise ValueError(&#34;Either n or entry_prob and exit_prob should be set&#34;)
+    if n is not None:
+        rand = RAND.run(
+            n=n,
+            input_shape=close.shape,
+            input_index=close.vbt.wrapper.index,
+            input_columns=close.vbt.wrapper.columns,
+            seed=seed
+        )
+        entries = rand.entries
+        exits = rand.exits
+    elif entry_prob is not None and exit_prob is not None:
+        rprob = RPROB.run(
+            entry_prob=entry_prob,
+            exit_prob=exit_prob,
+            param_product=param_product,
+            input_shape=close.shape,
+            input_index=close.vbt.wrapper.index,
+            input_columns=close.vbt.wrapper.columns,
+            seed=seed
+        )
+        entries = rprob.entries
+        exits = rprob.exits
+    else:
+        raise ValueError(&#34;At least n or entry_prob and exit_prob should be set&#34;)
+
+    return cls.from_signals(close, entries, exits, seed=seed, **kwargs)</code></pre>
 </details>
 </dd>
 <dt id="vectorbt.portfolio.base.Portfolio.from_signals"><code class="name flex">
@@ -7768,7 +7969,7 @@ def active_returns(self, group_by=None):
 <span>def <span class="ident fname">alpha</span></span>(<span>self, *args, group_by=None, year_freq=None, ret_func_name='alpha', active_returns=False, in_sim_order=False, reuse_returns=None, **kwargs)</span>
 </code></dt>
 <dd>
-<div class="desc"><p>See <code><a title="vectorbt.returns.accessors.Returns_Accessor.alpha" href="../returns/accessors.html#vectorbt.returns.accessors.Returns_Accessor.alpha">Returns_Accessor.alpha()</a></code>.</p></div>
+<div class="desc"><p>See <code><a title="vectorbt.returns.accessors.ReturnsAccessor.alpha" href="../returns/accessors.html#vectorbt.returns.accessors.ReturnsAccessor.alpha">ReturnsAccessor.alpha()</a></code>.</p></div>
 <details class="source">
 <summary>
 <span>Expand source code</span>
@@ -7807,7 +8008,7 @@ def active_returns(self, group_by=None):
 <span>def <span class="ident fname">annual_returns</span></span>(<span>self, *args, group_by=None, year_freq=None, ret_func_name='annual', active_returns=False, in_sim_order=False, reuse_returns=None, **kwargs)</span>
 </code></dt>
 <dd>
-<div class="desc"><p>See <code><a title="vectorbt.returns.accessors.Returns_Accessor.annual" href="../returns/accessors.html#vectorbt.returns.accessors.Returns_Accessor.annual">Returns_Accessor.annual()</a></code>.</p></div>
+<div class="desc"><p>See <code><a title="vectorbt.returns.accessors.ReturnsAccessor.annual" href="../returns/accessors.html#vectorbt.returns.accessors.ReturnsAccessor.annual">ReturnsAccessor.annual()</a></code>.</p></div>
 <details class="source">
 <summary>
 <span>Expand source code</span>
@@ -7846,7 +8047,7 @@ def active_returns(self, group_by=None):
 <span>def <span class="ident fname">annualized_return</span></span>(<span>self, *args, group_by=None, year_freq=None, ret_func_name='annualized', active_returns=False, in_sim_order=False, reuse_returns=None, **kwargs)</span>
 </code></dt>
 <dd>
-<div class="desc"><p>See <code><a title="vectorbt.returns.accessors.Returns_Accessor.annualized" href="../returns/accessors.html#vectorbt.returns.accessors.Returns_Accessor.annualized">Returns_Accessor.annualized()</a></code>.</p></div>
+<div class="desc"><p>See <code><a title="vectorbt.returns.accessors.ReturnsAccessor.annualized" href="../returns/accessors.html#vectorbt.returns.accessors.ReturnsAccessor.annualized">ReturnsAccessor.annualized()</a></code>.</p></div>
 <details class="source">
 <summary>
 <span>Expand source code</span>
@@ -7885,7 +8086,7 @@ def active_returns(self, group_by=None):
 <span>def <span class="ident fname">annualized_volatility</span></span>(<span>self, *args, group_by=None, year_freq=None, ret_func_name='annualized_volatility', active_returns=False, in_sim_order=False, reuse_returns=None, **kwargs)</span>
 </code></dt>
 <dd>
-<div class="desc"><p>See <code><a title="vectorbt.returns.accessors.Returns_Accessor.annualized_volatility" href="../returns/accessors.html#vectorbt.returns.accessors.Returns_Accessor.annualized_volatility">Returns_Accessor.annualized_volatility()</a></code>.</p></div>
+<div class="desc"><p>See <code><a title="vectorbt.returns.accessors.ReturnsAccessor.annualized_volatility" href="../returns/accessors.html#vectorbt.returns.accessors.ReturnsAccessor.annualized_volatility">ReturnsAccessor.annualized_volatility()</a></code>.</p></div>
 <details class="source">
 <summary>
 <span>Expand source code</span>
@@ -7924,7 +8125,7 @@ def active_returns(self, group_by=None):
 <span>def <span class="ident fname">beta</span></span>(<span>self, *args, group_by=None, year_freq=None, ret_func_name='beta', active_returns=False, in_sim_order=False, reuse_returns=None, **kwargs)</span>
 </code></dt>
 <dd>
-<div class="desc"><p>See <code><a title="vectorbt.returns.accessors.Returns_Accessor.beta" href="../returns/accessors.html#vectorbt.returns.accessors.Returns_Accessor.beta">Returns_Accessor.beta()</a></code>.</p></div>
+<div class="desc"><p>See <code><a title="vectorbt.returns.accessors.ReturnsAccessor.beta" href="../returns/accessors.html#vectorbt.returns.accessors.ReturnsAccessor.beta">ReturnsAccessor.beta()</a></code>.</p></div>
 <details class="source">
 <summary>
 <span>Expand source code</span>
@@ -7963,7 +8164,7 @@ def active_returns(self, group_by=None):
 <span>def <span class="ident fname">calmar_ratio</span></span>(<span>self, *args, group_by=None, year_freq=None, ret_func_name='calmar_ratio', active_returns=False, in_sim_order=False, reuse_returns=None, **kwargs)</span>
 </code></dt>
 <dd>
-<div class="desc"><p>See <code><a title="vectorbt.returns.accessors.Returns_Accessor.calmar_ratio" href="../returns/accessors.html#vectorbt.returns.accessors.Returns_Accessor.calmar_ratio">Returns_Accessor.calmar_ratio()</a></code>.</p></div>
+<div class="desc"><p>See <code><a title="vectorbt.returns.accessors.ReturnsAccessor.calmar_ratio" href="../returns/accessors.html#vectorbt.returns.accessors.ReturnsAccessor.calmar_ratio">ReturnsAccessor.calmar_ratio()</a></code>.</p></div>
 <details class="source">
 <summary>
 <span>Expand source code</span>
@@ -8002,7 +8203,7 @@ def active_returns(self, group_by=None):
 <span>def <span class="ident fname">capture</span></span>(<span>self, *args, group_by=None, year_freq=None, ret_func_name='capture', active_returns=False, in_sim_order=False, reuse_returns=None, **kwargs)</span>
 </code></dt>
 <dd>
-<div class="desc"><p>See <code><a title="vectorbt.returns.accessors.Returns_Accessor.capture" href="../returns/accessors.html#vectorbt.returns.accessors.Returns_Accessor.capture">Returns_Accessor.capture()</a></code>.</p></div>
+<div class="desc"><p>See <code><a title="vectorbt.returns.accessors.ReturnsAccessor.capture" href="../returns/accessors.html#vectorbt.returns.accessors.ReturnsAccessor.capture">ReturnsAccessor.capture()</a></code>.</p></div>
 <details class="source">
 <summary>
 <span>Expand source code</span>
@@ -8109,7 +8310,7 @@ def cash_flow(self, group_by=None, short_cash=True):
 <span>def <span class="ident fname">conditional_value_at_risk</span></span>(<span>self, *args, group_by=None, year_freq=None, ret_func_name='conditional_value_at_risk', active_returns=False, in_sim_order=False, reuse_returns=None, **kwargs)</span>
 </code></dt>
 <dd>
-<div class="desc"><p>See <code><a title="vectorbt.returns.accessors.Returns_Accessor.conditional_value_at_risk" href="../returns/accessors.html#vectorbt.returns.accessors.Returns_Accessor.conditional_value_at_risk">Returns_Accessor.conditional_value_at_risk()</a></code>.</p></div>
+<div class="desc"><p>See <code><a title="vectorbt.returns.accessors.ReturnsAccessor.conditional_value_at_risk" href="../returns/accessors.html#vectorbt.returns.accessors.ReturnsAccessor.conditional_value_at_risk">ReturnsAccessor.conditional_value_at_risk()</a></code>.</p></div>
 <details class="source">
 <summary>
 <span>Expand source code</span>
@@ -8148,7 +8349,7 @@ def cash_flow(self, group_by=None, short_cash=True):
 <span>def <span class="ident fname">cumulative_returns</span></span>(<span>self, *args, group_by=None, year_freq=None, ret_func_name='cumulative', active_returns=False, in_sim_order=False, reuse_returns=None, **kwargs)</span>
 </code></dt>
 <dd>
-<div class="desc"><p>See <code><a title="vectorbt.returns.accessors.Returns_Accessor.cumulative" href="../returns/accessors.html#vectorbt.returns.accessors.Returns_Accessor.cumulative">Returns_Accessor.cumulative()</a></code>.</p></div>
+<div class="desc"><p>See <code><a title="vectorbt.returns.accessors.ReturnsAccessor.cumulative" href="../returns/accessors.html#vectorbt.returns.accessors.ReturnsAccessor.cumulative">ReturnsAccessor.cumulative()</a></code>.</p></div>
 <details class="source">
 <summary>
 <span>Expand source code</span>
@@ -8187,7 +8388,7 @@ def cash_flow(self, group_by=None, short_cash=True):
 <span>def <span class="ident fname">daily_returns</span></span>(<span>self, *args, group_by=None, year_freq=None, ret_func_name='daily', active_returns=False, in_sim_order=False, reuse_returns=None, **kwargs)</span>
 </code></dt>
 <dd>
-<div class="desc"><p>See <code><a title="vectorbt.returns.accessors.Returns_Accessor.daily" href="../returns/accessors.html#vectorbt.returns.accessors.Returns_Accessor.daily">Returns_Accessor.daily()</a></code>.</p></div>
+<div class="desc"><p>See <code><a title="vectorbt.returns.accessors.ReturnsAccessor.daily" href="../returns/accessors.html#vectorbt.returns.accessors.ReturnsAccessor.daily">ReturnsAccessor.daily()</a></code>.</p></div>
 <details class="source">
 <summary>
 <span>Expand source code</span>
@@ -8226,7 +8427,7 @@ def cash_flow(self, group_by=None, short_cash=True):
 <span>def <span class="ident fname">deflated_sharpe_ratio</span></span>(<span>self, *args, group_by=None, year_freq=None, ret_func_name='deflated_sharpe_ratio', active_returns=False, in_sim_order=False, reuse_returns=None, **kwargs)</span>
 </code></dt>
 <dd>
-<div class="desc"><p>See <code><a title="vectorbt.returns.accessors.Returns_Accessor.deflated_sharpe_ratio" href="../returns/accessors.html#vectorbt.returns.accessors.Returns_Accessor.deflated_sharpe_ratio">Returns_Accessor.deflated_sharpe_ratio()</a></code>.</p></div>
+<div class="desc"><p>See <code><a title="vectorbt.returns.accessors.ReturnsAccessor.deflated_sharpe_ratio" href="../returns/accessors.html#vectorbt.returns.accessors.ReturnsAccessor.deflated_sharpe_ratio">ReturnsAccessor.deflated_sharpe_ratio()</a></code>.</p></div>
 <details class="source">
 <summary>
 <span>Expand source code</span>
@@ -8265,7 +8466,7 @@ def cash_flow(self, group_by=None, short_cash=True):
 <span>def <span class="ident fname">down_capture</span></span>(<span>self, *args, group_by=None, year_freq=None, ret_func_name='down_capture', active_returns=False, in_sim_order=False, reuse_returns=None, **kwargs)</span>
 </code></dt>
 <dd>
-<div class="desc"><p>See <code><a title="vectorbt.returns.accessors.Returns_Accessor.down_capture" href="../returns/accessors.html#vectorbt.returns.accessors.Returns_Accessor.down_capture">Returns_Accessor.down_capture()</a></code>.</p></div>
+<div class="desc"><p>See <code><a title="vectorbt.returns.accessors.ReturnsAccessor.down_capture" href="../returns/accessors.html#vectorbt.returns.accessors.ReturnsAccessor.down_capture">ReturnsAccessor.down_capture()</a></code>.</p></div>
 <details class="source">
 <summary>
 <span>Expand source code</span>
@@ -8304,7 +8505,7 @@ def cash_flow(self, group_by=None, short_cash=True):
 <span>def <span class="ident fname">downside_risk</span></span>(<span>self, *args, group_by=None, year_freq=None, ret_func_name='downside_risk', active_returns=False, in_sim_order=False, reuse_returns=None, **kwargs)</span>
 </code></dt>
 <dd>
-<div class="desc"><p>See <code><a title="vectorbt.returns.accessors.Returns_Accessor.downside_risk" href="../returns/accessors.html#vectorbt.returns.accessors.Returns_Accessor.downside_risk">Returns_Accessor.downside_risk()</a></code>.</p></div>
+<div class="desc"><p>See <code><a title="vectorbt.returns.accessors.ReturnsAccessor.downside_risk" href="../returns/accessors.html#vectorbt.returns.accessors.ReturnsAccessor.downside_risk">ReturnsAccessor.downside_risk()</a></code>.</p></div>
 <details class="source">
 <summary>
 <span>Expand source code</span>
@@ -8343,7 +8544,7 @@ def cash_flow(self, group_by=None, short_cash=True):
 <span>def <span class="ident fname">drawdown</span></span>(<span>self, *args, group_by=None, year_freq=None, ret_func_name='drawdown', active_returns=False, in_sim_order=False, reuse_returns=None, **kwargs)</span>
 </code></dt>
 <dd>
-<div class="desc"><p>See <code><a title="vectorbt.returns.accessors.Returns_Accessor.drawdown" href="../returns/accessors.html#vectorbt.returns.accessors.Returns_Accessor.drawdown">Returns_Accessor.drawdown()</a></code>.</p></div>
+<div class="desc"><p>See <code><a title="vectorbt.returns.accessors.ReturnsAccessor.drawdown" href="../returns/accessors.html#vectorbt.returns.accessors.ReturnsAccessor.drawdown">ReturnsAccessor.drawdown()</a></code>.</p></div>
 <details class="source">
 <summary>
 <span>Expand source code</span>
@@ -8594,7 +8795,7 @@ def holding_value(self, direction=&#39;all&#39;, group_by=None):
 <span>def <span class="ident fname">information_ratio</span></span>(<span>self, *args, group_by=None, year_freq=None, ret_func_name='information_ratio', active_returns=False, in_sim_order=False, reuse_returns=None, **kwargs)</span>
 </code></dt>
 <dd>
-<div class="desc"><p>See <code><a title="vectorbt.returns.accessors.Returns_Accessor.information_ratio" href="../returns/accessors.html#vectorbt.returns.accessors.Returns_Accessor.information_ratio">Returns_Accessor.information_ratio()</a></code>.</p></div>
+<div class="desc"><p>See <code><a title="vectorbt.returns.accessors.ReturnsAccessor.information_ratio" href="../returns/accessors.html#vectorbt.returns.accessors.ReturnsAccessor.information_ratio">ReturnsAccessor.information_ratio()</a></code>.</p></div>
 <details class="source">
 <summary>
 <span>Expand source code</span>
@@ -8690,7 +8891,7 @@ def market_value(self, group_by=None):
 <span>def <span class="ident fname">max_drawdown</span></span>(<span>self, *args, group_by=None, year_freq=None, ret_func_name='max_drawdown', active_returns=False, in_sim_order=False, reuse_returns=None, **kwargs)</span>
 </code></dt>
 <dd>
-<div class="desc"><p>See <code><a title="vectorbt.returns.accessors.Returns_Accessor.max_drawdown" href="../returns/accessors.html#vectorbt.returns.accessors.Returns_Accessor.max_drawdown">Returns_Accessor.max_drawdown()</a></code>.</p></div>
+<div class="desc"><p>See <code><a title="vectorbt.returns.accessors.ReturnsAccessor.max_drawdown" href="../returns/accessors.html#vectorbt.returns.accessors.ReturnsAccessor.max_drawdown">ReturnsAccessor.max_drawdown()</a></code>.</p></div>
 <details class="source">
 <summary>
 <span>Expand source code</span>
@@ -8747,7 +8948,7 @@ def net_exposure(self, group_by=None):
 <span>def <span class="ident fname">omega_ratio</span></span>(<span>self, *args, group_by=None, year_freq=None, ret_func_name='omega_ratio', active_returns=False, in_sim_order=False, reuse_returns=None, **kwargs)</span>
 </code></dt>
 <dd>
-<div class="desc"><p>See <code><a title="vectorbt.returns.accessors.Returns_Accessor.omega_ratio" href="../returns/accessors.html#vectorbt.returns.accessors.Returns_Accessor.omega_ratio">Returns_Accessor.omega_ratio()</a></code>.</p></div>
+<div class="desc"><p>See <code><a title="vectorbt.returns.accessors.ReturnsAccessor.omega_ratio" href="../returns/accessors.html#vectorbt.returns.accessors.ReturnsAccessor.omega_ratio">ReturnsAccessor.omega_ratio()</a></code>.</p></div>
 <details class="source">
 <summary>
 <span>Expand source code</span>
@@ -8836,13 +9037,12 @@ Other keyword arguments are used to update layout of the figure.</p>
 <p>Plot portfolio of a random strategy:</p>
 <pre><code class="language-python-repl">&gt;&gt;&gt; import numpy as np
 &gt;&gt;&gt; import pandas as pd
-&gt;&gt;&gt; import yfinance as yf
 &gt;&gt;&gt; from datetime import datetime
 &gt;&gt;&gt; import vectorbt as vbt
 
 &gt;&gt;&gt; start = datetime(2020, 1, 1)
 &gt;&gt;&gt; end = datetime(2020, 9, 1)
-&gt;&gt;&gt; close = yf.Ticker(&quot;BTC-USD&quot;).history(start=start, end=end)['Close']
+&gt;&gt;&gt; close = vbt.utils.data.download(&quot;BTC-USD&quot;, start=start, end=end)['Close']
 
 &gt;&gt;&gt; np.random.seed(42)
 &gt;&gt;&gt; size = pd.Series.vbt.empty_like(close, fill_value=0.)
@@ -8880,7 +9080,7 @@ by creating a placeholder that can be written later:</p>
 ...     ))  # placeholder
 ... ])
 
-&gt;&gt;&gt; size.vbt.plot(name='Order Size', row=2, col=1, fig=fig)
+&gt;&gt;&gt; size.vbt.plot(name='Order Size', add_trace_kwargs=dict(row=2, col=1), fig=fig)
 </code></pre>
 <p><img alt="" src="/vectorbt/docs/img/portfolio_plot_custom.png"></p></div>
 <details class="source">
@@ -8934,13 +9134,12 @@ by creating a placeholder that can be written later:</p>
     ```python-repl
     &gt;&gt;&gt; import numpy as np
     &gt;&gt;&gt; import pandas as pd
-    &gt;&gt;&gt; import yfinance as yf
     &gt;&gt;&gt; from datetime import datetime
     &gt;&gt;&gt; import vectorbt as vbt
 
     &gt;&gt;&gt; start = datetime(2020, 1, 1)
     &gt;&gt;&gt; end = datetime(2020, 9, 1)
-    &gt;&gt;&gt; close = yf.Ticker(&#34;BTC-USD&#34;).history(start=start, end=end)[&#39;Close&#39;]
+    &gt;&gt;&gt; close = vbt.utils.data.download(&#34;BTC-USD&#34;, start=start, end=end)[&#39;Close&#39;]
 
     &gt;&gt;&gt; np.random.seed(42)
     &gt;&gt;&gt; size = pd.Series.vbt.empty_like(close, fill_value=0.)
@@ -8986,7 +9185,7 @@ by creating a placeholder that can be written later:</p>
     ...     ))  # placeholder
     ... ])
 
-    &gt;&gt;&gt; size.vbt.plot(name=&#39;Order Size&#39;, row=2, col=1, fig=fig)
+    &gt;&gt;&gt; size.vbt.plot(name=&#39;Order Size&#39;, add_trace_kwargs=dict(row=2, col=1), fig=fig)
     ```
 
     ![](/vectorbt/docs/img/portfolio_plot_custom.png)
@@ -9058,7 +9257,7 @@ by creating a placeholder that can be written later:</p>
                 _subplot_titles.append(self_col.subplot_settings[name][&#39;title&#39;])
     else:
         _subplot_titles = None
-    fig = CustomFigureWidget(make_subplots(
+    fig = FigureWidget(make_subplots(
         rows=rows,
         cols=cols,
         specs=specs,
@@ -9127,10 +9326,8 @@ by creating a placeholder that can be written later:</p>
             if plot_func is not None:
                 arg_names = _get_arg_names(plot_func)
                 custom_kwargs = dict()
-                if &#39;row&#39; in arg_names:
-                    custom_kwargs[&#39;row&#39;] = row
-                if &#39;col&#39; in arg_names:
-                    custom_kwargs[&#39;col&#39;] = col
+                if &#39;add_trace_kwargs&#39; in arg_names:
+                    custom_kwargs[&#39;add_trace_kwargs&#39;] = dict(row=row, col=col)
                 if &#39;xref&#39; in arg_names:
                     custom_kwargs[&#39;xref&#39;] = xref
                 if &#39;yref&#39; in arg_names:
@@ -9157,7 +9354,7 @@ by creating a placeholder that can be written later:</p>
                 method_kwargs = _extract_method_kwargs(self_col.get_orders, orders_kwargs)
                 self_col.get_orders(**method_kwargs).plot(
                     **orders_kwargs,
-                    row=row, col=col, fig=fig)
+                    add_trace_kwargs=dict(row=row, col=col), fig=fig)
                 fig.layout[xaxis][&#39;title&#39;] = &#39;Date&#39;
                 fig.layout[yaxis][&#39;title&#39;] = &#39;Price&#39;
 
@@ -9166,7 +9363,7 @@ by creating a placeholder that can be written later:</p>
                 method_kwargs = _extract_method_kwargs(self_col.get_trades, trades_kwargs)
                 self_col.get_trades(**method_kwargs).plot(
                     **trades_kwargs,
-                    row=row, col=col, xref=xref, yref=yref, fig=fig)
+                    add_trace_kwargs=dict(row=row, col=col), xref=xref, yref=yref, fig=fig)
                 fig.layout[xaxis][&#39;title&#39;] = &#39;Date&#39;
                 fig.layout[yaxis][&#39;title&#39;] = &#39;Price&#39;
 
@@ -9175,7 +9372,7 @@ by creating a placeholder that can be written later:</p>
                 method_kwargs = _extract_method_kwargs(self_col.get_positions, positions_kwargs)
                 self_col.get_positions(**method_kwargs).plot(
                     **positions_kwargs,
-                    row=row, col=col, xref=xref, yref=yref, fig=fig)
+                    add_trace_kwargs=dict(row=row, col=col), xref=xref, yref=yref, fig=fig)
                 fig.layout[xaxis][&#39;title&#39;] = &#39;Date&#39;
                 fig.layout[yaxis][&#39;title&#39;] = &#39;Price&#39;
 
@@ -9186,7 +9383,7 @@ by creating a placeholder that can be written later:</p>
                 method_kwargs = _extract_method_kwargs(self_col.get_trades, trade_pnl_kwargs)
                 self_col.get_trades(**method_kwargs).plot_pnl(
                     **trade_pnl_kwargs,
-                    row=row, col=col, xref=xref, yref=yref, fig=fig)
+                    add_trace_kwargs=dict(row=row, col=col), xref=xref, yref=yref, fig=fig)
                 fig.layout[xaxis][&#39;title&#39;] = &#39;Date&#39;
                 fig.layout[yaxis][&#39;title&#39;] = &#39;PnL&#39;
 
@@ -9195,7 +9392,7 @@ by creating a placeholder that can be written later:</p>
                 method_kwargs = _extract_method_kwargs(self_col.get_positions, position_pnl_kwargs)
                 self_col.get_positions(**method_kwargs).plot_pnl(
                     **position_pnl_kwargs,
-                    row=row, col=col, xref=xref, yref=yref, fig=fig)
+                    add_trace_kwargs=dict(row=row, col=col), xref=xref, yref=yref, fig=fig)
                 fig.layout[xaxis][&#39;title&#39;] = &#39;Date&#39;
                 fig.layout[yaxis][&#39;title&#39;] = &#39;PnL&#39;
 
@@ -9218,7 +9415,7 @@ by creating a placeholder that can be written later:</p>
                     returns = self_col.returns(in_sim_order=in_sim_order)
                 returns.vbt.returns.plot_cum_returns(
                     **cum_returns_kwargs,
-                    row=row, col=col, xref=xref, yref=yref, fig=fig)
+                    add_trace_kwargs=dict(row=row, col=col), xref=xref, yref=yref, fig=fig)
                 fig.layout[xaxis][&#39;title&#39;] = &#39;Date&#39;
                 fig.layout[yaxis][&#39;title&#39;] = &#39;Cumulative Returns&#39;
 
@@ -9232,7 +9429,7 @@ by creating a placeholder that can be written later:</p>
                 method_kwargs = _extract_method_kwargs(self_col.get_drawdowns, drawdowns_kwargs)
                 self_col.get_drawdowns(**method_kwargs).plot(
                     **drawdowns_kwargs,
-                    row=row, col=col, xref=xref, yref=yref, fig=fig)
+                    add_trace_kwargs=dict(row=row, col=col), xref=xref, yref=yref, fig=fig)
                 fig.layout[xaxis][&#39;title&#39;] = &#39;Date&#39;
                 fig.layout[yaxis][&#39;title&#39;] = &#39;Value&#39;
 
@@ -9248,7 +9445,7 @@ by creating a placeholder that can be written later:</p>
                 method_kwargs = _extract_method_kwargs(self_col.drawdown, underwater_kwargs)
                 self_col.drawdown(**method_kwargs).vbt.plot(
                     **underwater_kwargs,
-                    row=row, col=col, fig=fig)
+                    add_trace_kwargs=dict(row=row, col=col), fig=fig)
                 _add_hline(0, x_domain, yref)
                 fig.layout[xaxis][&#39;title&#39;] = &#39;Date&#39;
                 fig.layout[yaxis][&#39;title&#39;] = &#39;Drawdown&#39;
@@ -9264,7 +9461,7 @@ by creating a placeholder that can be written later:</p>
                 method_kwargs = _extract_method_kwargs(self_col.share_flow, share_flow_kwargs)
                 self_col.share_flow(**method_kwargs).vbt.plot(
                     **share_flow_kwargs,
-                    row=row, col=col, fig=fig)
+                    add_trace_kwargs=dict(row=row, col=col), fig=fig)
                 _add_hline(0, x_domain, yref)
                 fig.layout[xaxis][&#39;title&#39;] = &#39;Date&#39;
                 fig.layout[yaxis][&#39;title&#39;] = &#39;Share Flow&#39;
@@ -9279,7 +9476,7 @@ by creating a placeholder that can be written later:</p>
                 method_kwargs = _extract_method_kwargs(self_col.cash_flow, cash_flow_kwargs)
                 self_col.cash_flow(**method_kwargs).vbt.plot(
                     **cash_flow_kwargs,
-                    row=row, col=col, fig=fig)
+                    add_trace_kwargs=dict(row=row, col=col), fig=fig)
                 _add_hline(0, x_domain, yref)
                 fig.layout[xaxis][&#39;title&#39;] = &#39;Date&#39;
                 fig.layout[yaxis][&#39;title&#39;] = &#39;Cash Flow&#39;
@@ -9301,7 +9498,7 @@ by creating a placeholder that can be written later:</p>
                 method_kwargs = _extract_method_kwargs(self_col.shares, shares_kwargs)
                 self_col.shares(**method_kwargs).vbt.plot_against(
                     0, **shares_kwargs,
-                    row=row, col=col, fig=fig)
+                    add_trace_kwargs=dict(row=row, col=col), fig=fig)
                 _add_hline(0, x_domain, yref)
                 fig.layout[xaxis][&#39;title&#39;] = &#39;Date&#39;
                 fig.layout[yaxis][&#39;title&#39;] = &#39;Shares&#39;
@@ -9323,7 +9520,7 @@ by creating a placeholder that can be written later:</p>
                 method_kwargs = _extract_method_kwargs(self_col.cash, cash_kwargs)
                 self_col.cash(**method_kwargs).vbt.plot_against(
                     0, **cash_kwargs,
-                    row=row, col=col, fig=fig)
+                    add_trace_kwargs=dict(row=row, col=col), fig=fig)
                 _add_hline(self_col.init_cash, x_domain, yref)
                 fig.layout[xaxis][&#39;title&#39;] = &#39;Date&#39;
                 fig.layout[yaxis][&#39;title&#39;] = &#39;Cash&#39;
@@ -9345,7 +9542,7 @@ by creating a placeholder that can be written later:</p>
                 method_kwargs = _extract_method_kwargs(self_col.holding_value, holding_value_kwargs)
                 self_col.holding_value(**method_kwargs).vbt.plot_against(
                     0, **holding_value_kwargs,
-                    row=row, col=col, fig=fig)
+                    add_trace_kwargs=dict(row=row, col=col), fig=fig)
                 _add_hline(0, x_domain, yref)
                 fig.layout[xaxis][&#39;title&#39;] = &#39;Date&#39;
                 fig.layout[yaxis][&#39;title&#39;] = &#39;Holding Value&#39;
@@ -9361,7 +9558,7 @@ by creating a placeholder that can be written later:</p>
                 method_kwargs = _extract_method_kwargs(self_col.value, value_kwargs)
                 self_col.value(**method_kwargs).vbt.plot_against(
                     self_col.init_cash, **value_kwargs,
-                    row=row, col=col, fig=fig)
+                    add_trace_kwargs=dict(row=row, col=col), fig=fig)
                 _add_hline(self_col.init_cash, x_domain, yref)
                 fig.layout[xaxis][&#39;title&#39;] = &#39;Date&#39;
                 fig.layout[yaxis][&#39;title&#39;] = &#39;Value&#39;
@@ -9383,7 +9580,7 @@ by creating a placeholder that can be written later:</p>
                 method_kwargs = _extract_method_kwargs(self_col.gross_exposure, gross_exposure_kwargs)
                 self_col.gross_exposure(**method_kwargs).vbt.plot_against(
                     1, **gross_exposure_kwargs,
-                    row=row, col=col, fig=fig)
+                    add_trace_kwargs=dict(row=row, col=col), fig=fig)
                 _add_hline(1, x_domain, yref)
                 fig.layout[xaxis][&#39;title&#39;] = &#39;Date&#39;
                 fig.layout[yaxis][&#39;title&#39;] = &#39;Gross Exposure&#39;
@@ -9405,7 +9602,7 @@ by creating a placeholder that can be written later:</p>
                 method_kwargs = _extract_method_kwargs(self_col.net_exposure, net_exposure_kwargs)
                 self_col.net_exposure(**method_kwargs).vbt.plot_against(
                     0, **net_exposure_kwargs,
-                    row=row, col=col, fig=fig)
+                    add_trace_kwargs=dict(row=row, col=col), fig=fig)
                 _add_hline(0, x_domain, yref)
                 fig.layout[xaxis][&#39;title&#39;] = &#39;Date&#39;
                 fig.layout[yaxis][&#39;title&#39;] = &#39;Net Exposure&#39;
@@ -9575,7 +9772,7 @@ def returns(self, group_by=None, in_sim_order=False):
 <dd>
 <div class="desc"><p>Compute various statistics on returns of this portfolio.</p>
 <p>For keyword arguments and notes, see <code><a title="vectorbt.portfolio.base.Portfolio.stats" href="#vectorbt.portfolio.base.Portfolio.stats">Portfolio.stats()</a></code>.</p>
-<p><code>kwargs</code> will be passed to <code><a title="vectorbt.returns.accessors.Returns_Accessor.stats" href="../returns/accessors.html#vectorbt.returns.accessors.Returns_Accessor.stats">Returns_Accessor.stats()</a></code> method.
+<p><code>kwargs</code> will be passed to <code><a title="vectorbt.returns.accessors.ReturnsAccessor.stats" href="../returns/accessors.html#vectorbt.returns.accessors.ReturnsAccessor.stats">ReturnsAccessor.stats()</a></code> method.
 If <code>benchmark_rets</code> is not set, uses <code><a title="vectorbt.portfolio.base.Portfolio.market_returns" href="#vectorbt.portfolio.base.Portfolio.market_returns">Portfolio.market_returns()</a></code>.</p></div>
 <details class="source">
 <summary>
@@ -9587,7 +9784,7 @@ If <code>benchmark_rets</code> is not set, uses <code><a title="vectorbt.portfol
 
     For keyword arguments and notes, see `Portfolio.stats`.
 
-    `kwargs` will be passed to `vectorbt.returns.accessors.Returns_Accessor.stats` method.
+    `kwargs` will be passed to `vectorbt.returns.accessors.ReturnsAccessor.stats` method.
     If `benchmark_rets` is not set, uses `Portfolio.market_returns`.&#34;&#34;&#34;
     # Pre-calculate
     if active_returns:
@@ -9661,7 +9858,7 @@ def shares(self, direction=&#39;all&#39;):
 <span>def <span class="ident fname">sharpe_ratio</span></span>(<span>self, *args, group_by=None, year_freq=None, ret_func_name='sharpe_ratio', active_returns=False, in_sim_order=False, reuse_returns=None, **kwargs)</span>
 </code></dt>
 <dd>
-<div class="desc"><p>See <code><a title="vectorbt.returns.accessors.Returns_Accessor.sharpe_ratio" href="../returns/accessors.html#vectorbt.returns.accessors.Returns_Accessor.sharpe_ratio">Returns_Accessor.sharpe_ratio()</a></code>.</p></div>
+<div class="desc"><p>See <code><a title="vectorbt.returns.accessors.ReturnsAccessor.sharpe_ratio" href="../returns/accessors.html#vectorbt.returns.accessors.ReturnsAccessor.sharpe_ratio">ReturnsAccessor.sharpe_ratio()</a></code>.</p></div>
 <details class="source">
 <summary>
 <span>Expand source code</span>
@@ -9700,7 +9897,7 @@ def shares(self, direction=&#39;all&#39;):
 <span>def <span class="ident fname">sortino_ratio</span></span>(<span>self, *args, group_by=None, year_freq=None, ret_func_name='sortino_ratio', active_returns=False, in_sim_order=False, reuse_returns=None, **kwargs)</span>
 </code></dt>
 <dd>
-<div class="desc"><p>See <code><a title="vectorbt.returns.accessors.Returns_Accessor.sortino_ratio" href="../returns/accessors.html#vectorbt.returns.accessors.Returns_Accessor.sortino_ratio">Returns_Accessor.sortino_ratio()</a></code>.</p></div>
+<div class="desc"><p>See <code><a title="vectorbt.returns.accessors.ReturnsAccessor.sortino_ratio" href="../returns/accessors.html#vectorbt.returns.accessors.ReturnsAccessor.sortino_ratio">ReturnsAccessor.sortino_ratio()</a></code>.</p></div>
 <details class="source">
 <summary>
 <span>Expand source code</span>
@@ -9740,7 +9937,7 @@ def shares(self, direction=&#39;all&#39;):
 </code></dt>
 <dd>
 <div class="desc"><p>Compute various statistics on this portfolio.</p>
-<p><code>kwargs</code> will be passed to each <code><a title="vectorbt.returns.accessors.Returns_Accessor" href="../returns/accessors.html#vectorbt.returns.accessors.Returns_Accessor">Returns_Accessor</a></code> method.</p>
+<p><code>kwargs</code> will be passed to each <code><a title="vectorbt.returns.accessors.ReturnsAccessor" href="../returns/accessors.html#vectorbt.returns.accessors.ReturnsAccessor">ReturnsAccessor</a></code> method.</p>
 <p>Can either return aggregated statistics by reducing metrics of all columns with
 <code>agg_func</code> (mean by default) or return statistics for a single column if <code>column</code>
 was specified or portfolio contains only one column of data. To display rich data types
@@ -9759,7 +9956,7 @@ def stats(self, column=None, group_by=None, incl_unrealized=None, active_returns
           in_sim_order=False, agg_func=lambda x: x.mean(axis=0), **kwargs):
     &#34;&#34;&#34;Compute various statistics on this portfolio.
 
-    `kwargs` will be passed to each `vectorbt.returns.accessors.Returns_Accessor` method.
+    `kwargs` will be passed to each `vectorbt.returns.accessors.ReturnsAccessor` method.
 
     Can either return aggregated statistics by reducing metrics of all columns with
     `agg_func` (mean by default) or return statistics for a single column if `column`
@@ -9827,7 +10024,7 @@ def stats(self, column=None, group_by=None, incl_unrealized=None, active_returns
 <span>def <span class="ident fname">tail_ratio</span></span>(<span>self, *args, group_by=None, year_freq=None, ret_func_name='tail_ratio', active_returns=False, in_sim_order=False, reuse_returns=None, **kwargs)</span>
 </code></dt>
 <dd>
-<div class="desc"><p>See <code><a title="vectorbt.returns.accessors.Returns_Accessor.tail_ratio" href="../returns/accessors.html#vectorbt.returns.accessors.Returns_Accessor.tail_ratio">Returns_Accessor.tail_ratio()</a></code>.</p></div>
+<div class="desc"><p>See <code><a title="vectorbt.returns.accessors.ReturnsAccessor.tail_ratio" href="../returns/accessors.html#vectorbt.returns.accessors.ReturnsAccessor.tail_ratio">ReturnsAccessor.tail_ratio()</a></code>.</p></div>
 <details class="source">
 <summary>
 <span>Expand source code</span>
@@ -9940,7 +10137,7 @@ def total_return(self, group_by=None):
 <span>def <span class="ident fname">up_capture</span></span>(<span>self, *args, group_by=None, year_freq=None, ret_func_name='up_capture', active_returns=False, in_sim_order=False, reuse_returns=None, **kwargs)</span>
 </code></dt>
 <dd>
-<div class="desc"><p>See <code><a title="vectorbt.returns.accessors.Returns_Accessor.up_capture" href="../returns/accessors.html#vectorbt.returns.accessors.Returns_Accessor.up_capture">Returns_Accessor.up_capture()</a></code>.</p></div>
+<div class="desc"><p>See <code><a title="vectorbt.returns.accessors.ReturnsAccessor.up_capture" href="../returns/accessors.html#vectorbt.returns.accessors.ReturnsAccessor.up_capture">ReturnsAccessor.up_capture()</a></code>.</p></div>
 <details class="source">
 <summary>
 <span>Expand source code</span>
@@ -10019,7 +10216,7 @@ def value(self, group_by=None, in_sim_order=False):
 <span>def <span class="ident fname">value_at_risk</span></span>(<span>self, *args, group_by=None, year_freq=None, ret_func_name='value_at_risk', active_returns=False, in_sim_order=False, reuse_returns=None, **kwargs)</span>
 </code></dt>
 <dd>
-<div class="desc"><p>See <code><a title="vectorbt.returns.accessors.Returns_Accessor.value_at_risk" href="../returns/accessors.html#vectorbt.returns.accessors.Returns_Accessor.value_at_risk">Returns_Accessor.value_at_risk()</a></code>.</p></div>
+<div class="desc"><p>See <code><a title="vectorbt.returns.accessors.ReturnsAccessor.value_at_risk" href="../returns/accessors.html#vectorbt.returns.accessors.ReturnsAccessor.value_at_risk">ReturnsAccessor.value_at_risk()</a></code>.</p></div>
 <details class="source">
 <summary>
 <span>Expand source code</span>
@@ -10141,8 +10338,10 @@ title="Search"
 <li><code><a title="vectorbt.portfolio.base.Portfolio.drawdowns" href="#vectorbt.portfolio.base.Portfolio.drawdowns">drawdowns</a></code></li>
 <li><code><a title="vectorbt.portfolio.base.Portfolio.fill_close" href="#vectorbt.portfolio.base.Portfolio.fill_close">fill_close</a></code></li>
 <li><code><a title="vectorbt.portfolio.base.Portfolio.final_value" href="#vectorbt.portfolio.base.Portfolio.final_value">final_value</a></code></li>
+<li><code><a title="vectorbt.portfolio.base.Portfolio.from_holding" href="#vectorbt.portfolio.base.Portfolio.from_holding">from_holding</a></code></li>
 <li><code><a title="vectorbt.portfolio.base.Portfolio.from_order_func" href="#vectorbt.portfolio.base.Portfolio.from_order_func">from_order_func</a></code></li>
 <li><code><a title="vectorbt.portfolio.base.Portfolio.from_orders" href="#vectorbt.portfolio.base.Portfolio.from_orders">from_orders</a></code></li>
+<li><code><a title="vectorbt.portfolio.base.Portfolio.from_random" href="#vectorbt.portfolio.base.Portfolio.from_random">from_random</a></code></li>
 <li><code><a title="vectorbt.portfolio.base.Portfolio.from_signals" href="#vectorbt.portfolio.base.Portfolio.from_signals">from_signals</a></code></li>
 <li><code><a title="vectorbt.portfolio.base.Portfolio.get_drawdowns" href="#vectorbt.portfolio.base.Portfolio.get_drawdowns">get_drawdowns</a></code></li>
 <li><code><a title="vectorbt.portfolio.base.Portfolio.get_init_cash" href="#vectorbt.portfolio.base.Portfolio.get_init_cash">get_init_cash</a></code></li>
