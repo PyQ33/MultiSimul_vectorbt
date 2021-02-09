@@ -53,7 +53,8 @@ import plotly.graph_objects as go
 
 from vectorbt.root_accessors import register_dataframe_accessor
 from vectorbt.utils import checks
-from vectorbt.utils.widgets import FigureWidget
+from vectorbt.utils.widgets import FigureWidget, make_subplots
+from vectorbt.utils.config import merge_dicts
 from vectorbt.generic.accessors import GenericDFAccessor
 
 
@@ -74,7 +75,9 @@ class OHLCVDFAccessor(GenericDFAccessor):  # pragma: no cover
              plot_type=&#39;OHLC&#39;,
              display_volume=True,
              ohlc_kwargs=None,
-             bar_kwargs=None,
+             volume_kwargs=None,
+             ohlc_add_trace_kwargs=None,
+             volume_add_trace_kwargs=None,
              fig=None,
              **layout_kwargs):
         &#34;&#34;&#34;Plot OHLCV data.
@@ -83,7 +86,9 @@ class OHLCVDFAccessor(GenericDFAccessor):  # pragma: no cover
             plot_type: Either &#39;OHLC&#39; or &#39;Candlestick&#39;.
             display_volume (bool): If True, displays volume as bar chart.
             ohlc_kwargs (dict): Keyword arguments passed to `plot_type`.
-            bar_kwargs (dict): Keyword arguments passed to `plotly.graph_objects.Bar`.
+            volume_kwargs (dict): Keyword arguments passed to `plotly.graph_objects.Bar`.
+            ohlc_add_trace_kwargs (dict): Keyword arguments passed to `add_trace` for OHLC.
+            volume_add_trace_kwargs (dict): Keyword arguments passed to `add_trace` for volume.
             fig (plotly.graph_objects.Figure): Figure to add traces to.
             **layout_kwargs: Keyword arguments for layout.
 
@@ -99,6 +104,18 @@ class OHLCVDFAccessor(GenericDFAccessor):  # pragma: no cover
         &#34;&#34;&#34;
         from vectorbt.settings import ohlcv, color_schema
 
+        if ohlc_kwargs is None:
+            ohlc_kwargs = {}
+        if volume_kwargs is None:
+            volume_kwargs = {}
+        if ohlc_add_trace_kwargs is None:
+            ohlc_add_trace_kwargs = {}
+        if volume_add_trace_kwargs is None:
+            volume_add_trace_kwargs = {}
+        if display_volume:
+            ohlc_add_trace_kwargs = merge_dicts(dict(row=1, col=1), ohlc_add_trace_kwargs)
+            volume_add_trace_kwargs = merge_dicts(dict(row=2, col=1), volume_add_trace_kwargs)
+
         column_names = ohlcv[&#39;column_names&#39;] if self._column_names is None else self._column_names
         open = self._obj[column_names[&#39;open&#39;]]
         high = self._obj[column_names[&#39;high&#39;]]
@@ -107,7 +124,10 @@ class OHLCVDFAccessor(GenericDFAccessor):  # pragma: no cover
 
         # Set up figure
         if fig is None:
-            fig = FigureWidget()
+            if display_volume:
+                fig = make_subplots(rows=2, cols=1, shared_xaxes=True, vertical_spacing=0, row_heights=[0.7, 0.3])
+            else:
+                fig = FigureWidget()
             fig.update_layout(
                 showlegend=True,
                 xaxis=dict(
@@ -120,10 +140,6 @@ class OHLCVDFAccessor(GenericDFAccessor):  # pragma: no cover
                 bargap=0
             )
         fig.update_layout(**layout_kwargs)
-        if ohlc_kwargs is None:
-            ohlc_kwargs = {}
-        if bar_kwargs is None:
-            bar_kwargs = {}
         if plot_type.lower() == &#39;ohlc&#39;:
             plot_type = &#39;OHLC&#39;
             plot_obj = go.Ohlc
@@ -139,13 +155,12 @@ class OHLCVDFAccessor(GenericDFAccessor):  # pragma: no cover
             low=low,
             close=close,
             name=plot_type,
-            yaxis=&#34;y2&#34;,
-            xaxis=&#34;x&#34;,
             increasing_line_color=color_schema[&#39;increasing&#39;],
             decreasing_line_color=color_schema[&#39;decreasing&#39;]
         )
         ohlc.update(**ohlc_kwargs)
-        fig.add_trace(ohlc)
+        fig.add_trace(ohlc, **ohlc_add_trace_kwargs)
+
         if display_volume:
             volume = self._obj[column_names[&#39;volume&#39;]]
 
@@ -153,7 +168,7 @@ class OHLCVDFAccessor(GenericDFAccessor):  # pragma: no cover
             marker_colors[(close.values - open.values) &gt; 0] = color_schema[&#39;increasing&#39;]
             marker_colors[(close.values - open.values) == 0] = color_schema[&#39;gray&#39;]
             marker_colors[(close.values - open.values) &lt; 0] = color_schema[&#39;decreasing&#39;]
-            bar = go.Bar(
+            volume_bar = go.Bar(
                 x=self.wrapper.index,
                 y=volume,
                 marker=dict(
@@ -161,20 +176,11 @@ class OHLCVDFAccessor(GenericDFAccessor):  # pragma: no cover
                     line_width=0
                 ),
                 opacity=0.5,
-                name=&#39;Volume&#39;,
-                yaxis=&#34;y&#34;,
-                xaxis=&#34;x&#34;
+                name=&#39;Volume&#39;
             )
-            bar.update(**bar_kwargs)
-            fig.add_trace(bar)
-            fig.update_layout(
-                yaxis2=dict(
-                    domain=[0.33, 1]
-                ),
-                yaxis=dict(
-                    domain=[0, 0.33]
-                )
-            )
+            volume_bar.update(**volume_kwargs)
+            fig.add_trace(volume_bar, **volume_add_trace_kwargs)
+
         return fig</code></pre>
 </details>
 </section>
@@ -214,7 +220,9 @@ class OHLCVDFAccessor(GenericDFAccessor):  # pragma: no cover
              plot_type=&#39;OHLC&#39;,
              display_volume=True,
              ohlc_kwargs=None,
-             bar_kwargs=None,
+             volume_kwargs=None,
+             ohlc_add_trace_kwargs=None,
+             volume_add_trace_kwargs=None,
              fig=None,
              **layout_kwargs):
         &#34;&#34;&#34;Plot OHLCV data.
@@ -223,7 +231,9 @@ class OHLCVDFAccessor(GenericDFAccessor):  # pragma: no cover
             plot_type: Either &#39;OHLC&#39; or &#39;Candlestick&#39;.
             display_volume (bool): If True, displays volume as bar chart.
             ohlc_kwargs (dict): Keyword arguments passed to `plot_type`.
-            bar_kwargs (dict): Keyword arguments passed to `plotly.graph_objects.Bar`.
+            volume_kwargs (dict): Keyword arguments passed to `plotly.graph_objects.Bar`.
+            ohlc_add_trace_kwargs (dict): Keyword arguments passed to `add_trace` for OHLC.
+            volume_add_trace_kwargs (dict): Keyword arguments passed to `add_trace` for volume.
             fig (plotly.graph_objects.Figure): Figure to add traces to.
             **layout_kwargs: Keyword arguments for layout.
 
@@ -239,6 +249,18 @@ class OHLCVDFAccessor(GenericDFAccessor):  # pragma: no cover
         &#34;&#34;&#34;
         from vectorbt.settings import ohlcv, color_schema
 
+        if ohlc_kwargs is None:
+            ohlc_kwargs = {}
+        if volume_kwargs is None:
+            volume_kwargs = {}
+        if ohlc_add_trace_kwargs is None:
+            ohlc_add_trace_kwargs = {}
+        if volume_add_trace_kwargs is None:
+            volume_add_trace_kwargs = {}
+        if display_volume:
+            ohlc_add_trace_kwargs = merge_dicts(dict(row=1, col=1), ohlc_add_trace_kwargs)
+            volume_add_trace_kwargs = merge_dicts(dict(row=2, col=1), volume_add_trace_kwargs)
+
         column_names = ohlcv[&#39;column_names&#39;] if self._column_names is None else self._column_names
         open = self._obj[column_names[&#39;open&#39;]]
         high = self._obj[column_names[&#39;high&#39;]]
@@ -247,7 +269,10 @@ class OHLCVDFAccessor(GenericDFAccessor):  # pragma: no cover
 
         # Set up figure
         if fig is None:
-            fig = FigureWidget()
+            if display_volume:
+                fig = make_subplots(rows=2, cols=1, shared_xaxes=True, vertical_spacing=0, row_heights=[0.7, 0.3])
+            else:
+                fig = FigureWidget()
             fig.update_layout(
                 showlegend=True,
                 xaxis=dict(
@@ -260,10 +285,6 @@ class OHLCVDFAccessor(GenericDFAccessor):  # pragma: no cover
                 bargap=0
             )
         fig.update_layout(**layout_kwargs)
-        if ohlc_kwargs is None:
-            ohlc_kwargs = {}
-        if bar_kwargs is None:
-            bar_kwargs = {}
         if plot_type.lower() == &#39;ohlc&#39;:
             plot_type = &#39;OHLC&#39;
             plot_obj = go.Ohlc
@@ -279,13 +300,12 @@ class OHLCVDFAccessor(GenericDFAccessor):  # pragma: no cover
             low=low,
             close=close,
             name=plot_type,
-            yaxis=&#34;y2&#34;,
-            xaxis=&#34;x&#34;,
             increasing_line_color=color_schema[&#39;increasing&#39;],
             decreasing_line_color=color_schema[&#39;decreasing&#39;]
         )
         ohlc.update(**ohlc_kwargs)
-        fig.add_trace(ohlc)
+        fig.add_trace(ohlc, **ohlc_add_trace_kwargs)
+
         if display_volume:
             volume = self._obj[column_names[&#39;volume&#39;]]
 
@@ -293,7 +313,7 @@ class OHLCVDFAccessor(GenericDFAccessor):  # pragma: no cover
             marker_colors[(close.values - open.values) &gt; 0] = color_schema[&#39;increasing&#39;]
             marker_colors[(close.values - open.values) == 0] = color_schema[&#39;gray&#39;]
             marker_colors[(close.values - open.values) &lt; 0] = color_schema[&#39;decreasing&#39;]
-            bar = go.Bar(
+            volume_bar = go.Bar(
                 x=self.wrapper.index,
                 y=volume,
                 marker=dict(
@@ -301,20 +321,11 @@ class OHLCVDFAccessor(GenericDFAccessor):  # pragma: no cover
                     line_width=0
                 ),
                 opacity=0.5,
-                name=&#39;Volume&#39;,
-                yaxis=&#34;y&#34;,
-                xaxis=&#34;x&#34;
+                name=&#39;Volume&#39;
             )
-            bar.update(**bar_kwargs)
-            fig.add_trace(bar)
-            fig.update_layout(
-                yaxis2=dict(
-                    domain=[0.33, 1]
-                ),
-                yaxis=dict(
-                    domain=[0, 0.33]
-                )
-            )
+            volume_bar.update(**volume_kwargs)
+            fig.add_trace(volume_bar, **volume_add_trace_kwargs)
+
         return fig</code></pre>
 </details>
 <h3 class="section-subtitle">Ancestors</h3>
@@ -327,7 +338,7 @@ class OHLCVDFAccessor(GenericDFAccessor):  # pragma: no cover
 <h3 class="section-subtitle">Methods</h3>
 <dl>
 <dt id="vectorbt.ohlcv.accessors.OHLCVDFAccessor.plot"><code class="name flex">
-<span>def <span class="ident fname">plot</span></span>(<span>self, plot_type='OHLC', display_volume=True, ohlc_kwargs=None, bar_kwargs=None, fig=None, **layout_kwargs)</span>
+<span>def <span class="ident fname">plot</span></span>(<span>self, plot_type='OHLC', display_volume=True, ohlc_kwargs=None, volume_kwargs=None, ohlc_add_trace_kwargs=None, volume_add_trace_kwargs=None, fig=None, **layout_kwargs)</span>
 </code></dt>
 <dd>
 <div class="desc"><p>Plot OHLCV data.</p>
@@ -339,8 +350,12 @@ class OHLCVDFAccessor(GenericDFAccessor):  # pragma: no cover
 <dd>If True, displays volume as bar chart.</dd>
 <dt><strong><code>ohlc_kwargs</code></strong> :&ensp;<code>dict</code></dt>
 <dd>Keyword arguments passed to <code>plot_type</code>.</dd>
-<dt><strong><code>bar_kwargs</code></strong> :&ensp;<code>dict</code></dt>
+<dt><strong><code>volume_kwargs</code></strong> :&ensp;<code>dict</code></dt>
 <dd>Keyword arguments passed to <code>plotly.graph_objects.Bar</code>.</dd>
+<dt><strong><code>ohlc_add_trace_kwargs</code></strong> :&ensp;<code>dict</code></dt>
+<dd>Keyword arguments passed to <code>add_trace</code> for OHLC.</dd>
+<dt><strong><code>volume_add_trace_kwargs</code></strong> :&ensp;<code>dict</code></dt>
+<dd>Keyword arguments passed to <code>add_trace</code> for volume.</dd>
 <dt><strong><code>fig</code></strong> :&ensp;<code>plotly.graph_objects.Figure</code></dt>
 <dd>Figure to add traces to.</dd>
 <dt><strong><code>**layout_kwargs</code></strong></dt>
@@ -360,7 +375,9 @@ class OHLCVDFAccessor(GenericDFAccessor):  # pragma: no cover
          plot_type=&#39;OHLC&#39;,
          display_volume=True,
          ohlc_kwargs=None,
-         bar_kwargs=None,
+         volume_kwargs=None,
+         ohlc_add_trace_kwargs=None,
+         volume_add_trace_kwargs=None,
          fig=None,
          **layout_kwargs):
     &#34;&#34;&#34;Plot OHLCV data.
@@ -369,7 +386,9 @@ class OHLCVDFAccessor(GenericDFAccessor):  # pragma: no cover
         plot_type: Either &#39;OHLC&#39; or &#39;Candlestick&#39;.
         display_volume (bool): If True, displays volume as bar chart.
         ohlc_kwargs (dict): Keyword arguments passed to `plot_type`.
-        bar_kwargs (dict): Keyword arguments passed to `plotly.graph_objects.Bar`.
+        volume_kwargs (dict): Keyword arguments passed to `plotly.graph_objects.Bar`.
+        ohlc_add_trace_kwargs (dict): Keyword arguments passed to `add_trace` for OHLC.
+        volume_add_trace_kwargs (dict): Keyword arguments passed to `add_trace` for volume.
         fig (plotly.graph_objects.Figure): Figure to add traces to.
         **layout_kwargs: Keyword arguments for layout.
 
@@ -385,6 +404,18 @@ class OHLCVDFAccessor(GenericDFAccessor):  # pragma: no cover
     &#34;&#34;&#34;
     from vectorbt.settings import ohlcv, color_schema
 
+    if ohlc_kwargs is None:
+        ohlc_kwargs = {}
+    if volume_kwargs is None:
+        volume_kwargs = {}
+    if ohlc_add_trace_kwargs is None:
+        ohlc_add_trace_kwargs = {}
+    if volume_add_trace_kwargs is None:
+        volume_add_trace_kwargs = {}
+    if display_volume:
+        ohlc_add_trace_kwargs = merge_dicts(dict(row=1, col=1), ohlc_add_trace_kwargs)
+        volume_add_trace_kwargs = merge_dicts(dict(row=2, col=1), volume_add_trace_kwargs)
+
     column_names = ohlcv[&#39;column_names&#39;] if self._column_names is None else self._column_names
     open = self._obj[column_names[&#39;open&#39;]]
     high = self._obj[column_names[&#39;high&#39;]]
@@ -393,7 +424,10 @@ class OHLCVDFAccessor(GenericDFAccessor):  # pragma: no cover
 
     # Set up figure
     if fig is None:
-        fig = FigureWidget()
+        if display_volume:
+            fig = make_subplots(rows=2, cols=1, shared_xaxes=True, vertical_spacing=0, row_heights=[0.7, 0.3])
+        else:
+            fig = FigureWidget()
         fig.update_layout(
             showlegend=True,
             xaxis=dict(
@@ -406,10 +440,6 @@ class OHLCVDFAccessor(GenericDFAccessor):  # pragma: no cover
             bargap=0
         )
     fig.update_layout(**layout_kwargs)
-    if ohlc_kwargs is None:
-        ohlc_kwargs = {}
-    if bar_kwargs is None:
-        bar_kwargs = {}
     if plot_type.lower() == &#39;ohlc&#39;:
         plot_type = &#39;OHLC&#39;
         plot_obj = go.Ohlc
@@ -425,13 +455,12 @@ class OHLCVDFAccessor(GenericDFAccessor):  # pragma: no cover
         low=low,
         close=close,
         name=plot_type,
-        yaxis=&#34;y2&#34;,
-        xaxis=&#34;x&#34;,
         increasing_line_color=color_schema[&#39;increasing&#39;],
         decreasing_line_color=color_schema[&#39;decreasing&#39;]
     )
     ohlc.update(**ohlc_kwargs)
-    fig.add_trace(ohlc)
+    fig.add_trace(ohlc, **ohlc_add_trace_kwargs)
+
     if display_volume:
         volume = self._obj[column_names[&#39;volume&#39;]]
 
@@ -439,7 +468,7 @@ class OHLCVDFAccessor(GenericDFAccessor):  # pragma: no cover
         marker_colors[(close.values - open.values) &gt; 0] = color_schema[&#39;increasing&#39;]
         marker_colors[(close.values - open.values) == 0] = color_schema[&#39;gray&#39;]
         marker_colors[(close.values - open.values) &lt; 0] = color_schema[&#39;decreasing&#39;]
-        bar = go.Bar(
+        volume_bar = go.Bar(
             x=self.wrapper.index,
             y=volume,
             marker=dict(
@@ -447,20 +476,11 @@ class OHLCVDFAccessor(GenericDFAccessor):  # pragma: no cover
                 line_width=0
             ),
             opacity=0.5,
-            name=&#39;Volume&#39;,
-            yaxis=&#34;y&#34;,
-            xaxis=&#34;x&#34;
+            name=&#39;Volume&#39;
         )
-        bar.update(**bar_kwargs)
-        fig.add_trace(bar)
-        fig.update_layout(
-            yaxis2=dict(
-                domain=[0.33, 1]
-            ),
-            yaxis=dict(
-                domain=[0, 0.33]
-            )
-        )
+        volume_bar.update(**volume_kwargs)
+        fig.add_trace(volume_bar, **volume_add_trace_kwargs)
+
     return fig</code></pre>
 </details>
 </dd>

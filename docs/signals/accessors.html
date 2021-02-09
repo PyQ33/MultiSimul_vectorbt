@@ -937,6 +937,29 @@ class SignalsAccessor(GenericAccessor):
         See `vectorbt.base.accessors.BaseAccessor.combine_with_multiple`.&#34;&#34;&#34;
         return self.combine_with_multiple(others, combine_func=np.logical_xor, **kwargs)
 
+    def plot(self, yref=&#39;y&#39;, **kwargs):  # pragma: no cover
+        &#34;&#34;&#34;Plot signals.
+
+        Args:
+            yref (str): Y coordinate axis.
+            **kwargs: Keyword arguments passed to `vectorbt.generic.accessors.GenericAccessor.lineplot`.
+
+        ## Example
+
+        ```python-repl
+        &gt;&gt;&gt; sig[[&#39;a&#39;, &#39;c&#39;]].vbt.signals.plot()
+        ```
+
+        ![](/vectorbt/docs/img/signals_df_plot.png)
+        &#34;&#34;&#34;
+        default_layout = dict()
+        default_layout[&#39;yaxis&#39; + yref[1:]] = dict(
+            tickmode=&#39;array&#39;,
+            tickvals=[0, 1],
+            ticktext=[&#39;false&#39;, &#39;true&#39;]
+        )
+        return self._obj.vbt.lineplot(**merge_dicts(default_layout, kwargs))
+
 
 @register_series_accessor(&#39;signals&#39;)
 class SignalsSRAccessor(SignalsAccessor, GenericSRAccessor):
@@ -951,78 +974,18 @@ class SignalsSRAccessor(SignalsAccessor, GenericSRAccessor):
         GenericSRAccessor.__init__(self, obj, **kwargs)
         SignalsAccessor.__init__(self, obj, **kwargs)
 
-    def plot(self, trace_kwargs=None, add_trace_kwargs=None, yref=&#39;y&#39;, fig=None, **layout_kwargs):  # pragma: no cover
-        &#34;&#34;&#34;Plot Series as a line.
-
-        Args:
-            trace_kwargs (dict): Keyword arguments passed to `plotly.graph_objects.Scatter`.
-            add_trace_kwargs (dict): Keyword arguments passed to `add_trace`.
-            yref (str): Y coordinate axis.
-            fig (plotly.graph_objects.Figure): Figure to add traces to.
-            **layout_kwargs: Keyword arguments for layout.
-
-        ## Example
-
-        ```python-repl
-        &gt;&gt;&gt; sig[&#39;a&#39;].vbt.signals.plot()
-        ```
-
-        ![](/vectorbt/docs/img/signals_sr_plot.png)
-        &#34;&#34;&#34;
-        if trace_kwargs is None:
-            trace_kwargs = {}
-        if add_trace_kwargs is None:
-            add_trace_kwargs = {}
-
-        # Set up figure
-        if fig is None:
-            fig = FigureWidget()
-        default_layout = dict()
-        default_layout[&#39;yaxis&#39; + yref[1:]] = dict(
-            tickmode=&#39;array&#39;,
-            tickvals=[0, 1],
-            ticktext=[&#39;false&#39;, &#39;true&#39;]
-        )
-        fig.update_layout(**default_layout)
-        fig.update_layout(**layout_kwargs)
-        if &#39;name&#39; in trace_kwargs:
-            name = trace_kwargs.pop(&#39;name&#39;)
-        else:
-            name = self._obj.name
-        if name is not None:
-            name = str(name)
-
-        scatter = go.Scatter(
-            x=self.wrapper.index,
-            y=self._obj.values,
-            mode=&#39;lines&#39;,
-            name=name,
-            showlegend=name is not None
-        )
-        scatter.update(**trace_kwargs)
-        fig.add_trace(scatter, **add_trace_kwargs)
-
-        return fig
-
-    def plot_as_markers(self, y=None, trace_kwargs=None, add_trace_kwargs=None,
-                        fig=None, **layout_kwargs):  # pragma: no cover
+    def plot_as_markers(self, y=None, **kwargs):  # pragma: no cover
         &#34;&#34;&#34;Plot Series as markers.
 
         Args:
             y (array_like): Y-axis values to plot markers on.
-
-                !!! note
-                    Doesn&#39;t plot `y`.
-            trace_kwargs (dict): Keyword arguments passed to `plotly.graph_objects.Scatter`.
-            add_trace_kwargs (dict): Keyword arguments passed to `add_trace`.
-            fig (plotly.graph_objects.Figure): Figure to add traces to.
-            **layout_kwargs: Keyword arguments for layout.
+            **kwargs: Keyword arguments passed to `vectorbt.generic.accessors.GenericAccessor.scatterplot`.
 
         ## Example
 
         ```python-repl
         &gt;&gt;&gt; ts = pd.Series([1, 2, 3, 2, 1], index=sig.index)
-        &gt;&gt;&gt; fig = ts.vbt.plot()
+        &gt;&gt;&gt; fig = ts.vbt.lineplot()
         &gt;&gt;&gt; sig[&#39;b&#39;].vbt.signals.plot_as_entry_markers(y=ts, fig=fig)
         &gt;&gt;&gt; (~sig[&#39;b&#39;]).vbt.signals.plot_as_exit_markers(y=ts, fig=fig)
         ```
@@ -1031,86 +994,64 @@ class SignalsSRAccessor(SignalsAccessor, GenericSRAccessor):
         &#34;&#34;&#34;
         from vectorbt.settings import contrast_color_schema
 
-        if trace_kwargs is None:
-            trace_kwargs = {}
-        if add_trace_kwargs is None:
-            add_trace_kwargs = {}
+        if y is None:
+            y = pd.Series.vbt.empty_like(self._obj, 1)
 
-        if fig is None:
-            fig = FigureWidget()
-        fig.update_layout(**layout_kwargs)
-        if &#39;name&#39; in trace_kwargs:
-            name = trace_kwargs.pop(&#39;name&#39;)
-        else:
-            name = self._obj.name
-        if name is not None:
-            name = str(name)
-
-        # Plot markers
-        _y = 1 if y is None else y
-        scatter = go.Scatter(
-            x=self.wrapper.index,
-            y=np.where(self._obj, _y, np.nan),
-            mode=&#39;markers&#39;,
-            marker=dict(
-                symbol=&#39;circle&#39;,
-                color=contrast_color_schema[&#39;blue&#39;],
-                size=7,
-                line=dict(
-                    width=1,
-                    color=adjust_lightness(contrast_color_schema[&#39;blue&#39;])
+        return y[self._obj].vbt.scatterplot(**merge_dicts(dict(
+            trace_kwargs=dict(
+                marker=dict(
+                    symbol=&#39;circle&#39;,
+                    color=contrast_color_schema[&#39;blue&#39;],
+                    size=7,
+                    line=dict(
+                        width=1,
+                        color=adjust_lightness(contrast_color_schema[&#39;blue&#39;])
+                    )
                 )
-            ),
-            name=name,
-            showlegend=name is not None
-        )
-        scatter.update(**trace_kwargs)
-        fig.add_trace(scatter, **add_trace_kwargs)
-        return fig
+            )
+        ), kwargs))
 
-    def plot_as_entry_markers(self, *args, trace_kwargs=None, **kwargs):  # pragma: no cover
+    def plot_as_entry_markers(self, y=None, **kwargs):  # pragma: no cover
         &#34;&#34;&#34;Plot signals as entry markers.
 
         See `SignalsSRAccessor.plot_as_markers`.&#34;&#34;&#34;
         from vectorbt.settings import contrast_color_schema
 
-        if trace_kwargs is None:
-            trace_kwargs = {}
-        trace_kwargs = merge_dicts(dict(
-            marker=dict(
-                symbol=&#39;triangle-up&#39;,
-                color=contrast_color_schema[&#39;green&#39;],
-                size=8,
-                line=dict(
-                    width=1,
-                    color=adjust_lightness(contrast_color_schema[&#39;green&#39;])
-                )
-            ),
-            name=&#39;Entry&#39;
-        ), trace_kwargs)
-        return self.plot_as_markers(*args, trace_kwargs=trace_kwargs, **kwargs)
+        return self.plot_as_markers(y=y, **merge_dicts(dict(
+            trace_kwargs=dict(
+                marker=dict(
+                    symbol=&#39;triangle-up&#39;,
+                    color=contrast_color_schema[&#39;green&#39;],
+                    size=8,
+                    line=dict(
+                        width=1,
+                        color=adjust_lightness(contrast_color_schema[&#39;green&#39;])
+                    )
+                ),
+                name=&#39;Entry&#39;
+            )
+        ), kwargs))
 
-    def plot_as_exit_markers(self, *args, trace_kwargs=None, **kwargs):  # pragma: no cover
+    def plot_as_exit_markers(self, y=None, **kwargs):  # pragma: no cover
         &#34;&#34;&#34;Plot signals as exit markers.
 
         See `SignalsSRAccessor.plot_as_markers`.&#34;&#34;&#34;
         from vectorbt.settings import contrast_color_schema
 
-        if trace_kwargs is None:
-            trace_kwargs = {}
-        trace_kwargs = merge_dicts(dict(
-            marker=dict(
-                symbol=&#39;triangle-down&#39;,
-                color=contrast_color_schema[&#39;red&#39;],
-                size=8,
-                line=dict(
-                    width=1,
-                    color=adjust_lightness(contrast_color_schema[&#39;red&#39;])
-                )
-            ),
-            name=&#39;Exit&#39;
-        ), trace_kwargs)
-        return self.plot_as_markers(*args, trace_kwargs=trace_kwargs, **kwargs)
+        return self.plot_as_markers(y=y, **merge_dicts(dict(
+            trace_kwargs=dict(
+                marker=dict(
+                    symbol=&#39;triangle-down&#39;,
+                    color=contrast_color_schema[&#39;red&#39;],
+                    size=8,
+                    line=dict(
+                        width=1,
+                        color=adjust_lightness(contrast_color_schema[&#39;red&#39;])
+                    )
+                ),
+                name=&#39;Exit&#39;
+            )
+        ), kwargs))
 
 
 @register_dataframe_accessor(&#39;signals&#39;)
@@ -1124,34 +1065,7 @@ class SignalsDFAccessor(SignalsAccessor, GenericDFAccessor):
             obj = obj._obj
 
         GenericDFAccessor.__init__(self, obj, **kwargs)
-        SignalsAccessor.__init__(self, obj, **kwargs)
-
-    def plot(self, trace_kwargs=None, fig=None, **kwargs):  # pragma: no cover
-        &#34;&#34;&#34;Plot each column in DataFrame as a line.
-
-        Args:
-            trace_kwargs (dict or list of dict): Keyword arguments passed to each `plotly.graph_objects.Scatter`.
-            fig (plotly.graph_objects.Figure): Figure to add traces to.
-            **kwargs: Keyword arguments passed to `SignalsSRAccessor.plot`.
-
-        ## Example
-
-        ```python-repl
-        &gt;&gt;&gt; sig[[&#39;a&#39;, &#39;c&#39;]].vbt.signals.plot()
-        ```
-
-        ![](/vectorbt/docs/img/signals_df_plot.png)
-        &#34;&#34;&#34;
-        if trace_kwargs is None:
-            trace_kwargs = {}
-        for col in range(self._obj.shape[1]):
-            fig = self._obj.iloc[:, col].vbt.signals.plot(
-                trace_kwargs=trace_kwargs,
-                fig=fig,
-                **kwargs
-            )
-
-        return fig</code></pre>
+        SignalsAccessor.__init__(self, obj, **kwargs)</code></pre>
 </details>
 </section>
 <section>
@@ -1988,7 +1902,30 @@ class SignalsDFAccessor(SignalsAccessor, GenericDFAccessor):
         &#34;&#34;&#34;Combine with each in `*others` using logical XOR.
 
         See `vectorbt.base.accessors.BaseAccessor.combine_with_multiple`.&#34;&#34;&#34;
-        return self.combine_with_multiple(others, combine_func=np.logical_xor, **kwargs)</code></pre>
+        return self.combine_with_multiple(others, combine_func=np.logical_xor, **kwargs)
+
+    def plot(self, yref=&#39;y&#39;, **kwargs):  # pragma: no cover
+        &#34;&#34;&#34;Plot signals.
+
+        Args:
+            yref (str): Y coordinate axis.
+            **kwargs: Keyword arguments passed to `vectorbt.generic.accessors.GenericAccessor.lineplot`.
+
+        ## Example
+
+        ```python-repl
+        &gt;&gt;&gt; sig[[&#39;a&#39;, &#39;c&#39;]].vbt.signals.plot()
+        ```
+
+        ![](/vectorbt/docs/img/signals_df_plot.png)
+        &#34;&#34;&#34;
+        default_layout = dict()
+        default_layout[&#39;yaxis&#39; + yref[1:]] = dict(
+            tickmode=&#39;array&#39;,
+            tickvals=[0, 1],
+            ticktext=[&#39;false&#39;, &#39;true&#39;]
+        )
+        return self._obj.vbt.lineplot(**merge_dicts(default_layout, kwargs))</code></pre>
 </details>
 <h3 class="section-subtitle">Ancestors</h3>
 <ul class="hlist">
@@ -3232,6 +3169,50 @@ dtype: float64
     return self.sum()</code></pre>
 </details>
 </dd>
+<dt id="vectorbt.signals.accessors.SignalsAccessor.plot"><code class="name flex">
+<span>def <span class="ident fname">plot</span></span>(<span>self, yref='y', **kwargs)</span>
+</code></dt>
+<dd>
+<div class="desc"><p>Plot signals.</p>
+<h2 id="args">Args</h2>
+<dl>
+<dt><strong><code>yref</code></strong> :&ensp;<code>str</code></dt>
+<dd>Y coordinate axis.</dd>
+<dt><strong><code>**kwargs</code></strong></dt>
+<dd>Keyword arguments passed to <code><a title="vectorbt.generic.accessors.GenericAccessor.lineplot" href="../generic/accessors.html#vectorbt.generic.accessors.GenericAccessor.lineplot">GenericAccessor.lineplot()</a></code>.</dd>
+</dl>
+<h2 id="example">Example</h2>
+<pre><code class="language-python-repl">&gt;&gt;&gt; sig[['a', 'c']].vbt.signals.plot()
+</code></pre>
+<p><img alt="" src="/vectorbt/docs/img/signals_df_plot.png"></p></div>
+<details class="source">
+<summary>
+<span>Expand source code</span>
+</summary>
+<pre><code class="python">def plot(self, yref=&#39;y&#39;, **kwargs):  # pragma: no cover
+    &#34;&#34;&#34;Plot signals.
+
+    Args:
+        yref (str): Y coordinate axis.
+        **kwargs: Keyword arguments passed to `vectorbt.generic.accessors.GenericAccessor.lineplot`.
+
+    ## Example
+
+    ```python-repl
+    &gt;&gt;&gt; sig[[&#39;a&#39;, &#39;c&#39;]].vbt.signals.plot()
+    ```
+
+    ![](/vectorbt/docs/img/signals_df_plot.png)
+    &#34;&#34;&#34;
+    default_layout = dict()
+    default_layout[&#39;yaxis&#39; + yref[1:]] = dict(
+        tickmode=&#39;array&#39;,
+        tickvals=[0, 1],
+        ticktext=[&#39;false&#39;, &#39;true&#39;]
+    )
+    return self._obj.vbt.lineplot(**merge_dicts(default_layout, kwargs))</code></pre>
+</details>
+</dd>
 <dt id="vectorbt.signals.accessors.SignalsAccessor.rank"><code class="name flex">
 <span>def <span class="ident fname">rank</span></span>(<span>self, reset_by=None, after_false=False, allow_gaps=False, broadcast_kwargs=None)</span>
 </code></dt>
@@ -3462,7 +3443,6 @@ dtype: float64
 <li><code><a title="vectorbt.generic.accessors.GenericAccessor.median" href="../generic/accessors.html#vectorbt.generic.accessors.GenericAccessor.median">median</a></code></li>
 <li><code><a title="vectorbt.generic.accessors.GenericAccessor.min" href="../generic/accessors.html#vectorbt.generic.accessors.GenericAccessor.min">min</a></code></li>
 <li><code><a title="vectorbt.generic.accessors.GenericAccessor.pct_change" href="../generic/accessors.html#vectorbt.generic.accessors.GenericAccessor.pct_change">pct_change</a></code></li>
-<li><code><a title="vectorbt.generic.accessors.GenericAccessor.plot" href="../generic/accessors.html#vectorbt.generic.accessors.GenericAccessor.plot">plot</a></code></li>
 <li><code><a title="vectorbt.generic.accessors.GenericAccessor.product" href="../generic/accessors.html#vectorbt.generic.accessors.GenericAccessor.product">product</a></code></li>
 <li><code><a title="vectorbt.generic.accessors.GenericAccessor.reduce" href="../generic/accessors.html#vectorbt.generic.accessors.GenericAccessor.reduce">reduce</a></code></li>
 <li><code><a title="vectorbt.generic.accessors.GenericAccessor.rename_levels" href="../base/accessors.html#vectorbt.base.accessors.BaseAccessor.rename_levels">rename_levels</a></code></li>
@@ -3513,34 +3493,7 @@ dtype: float64
             obj = obj._obj
 
         GenericDFAccessor.__init__(self, obj, **kwargs)
-        SignalsAccessor.__init__(self, obj, **kwargs)
-
-    def plot(self, trace_kwargs=None, fig=None, **kwargs):  # pragma: no cover
-        &#34;&#34;&#34;Plot each column in DataFrame as a line.
-
-        Args:
-            trace_kwargs (dict or list of dict): Keyword arguments passed to each `plotly.graph_objects.Scatter`.
-            fig (plotly.graph_objects.Figure): Figure to add traces to.
-            **kwargs: Keyword arguments passed to `SignalsSRAccessor.plot`.
-
-        ## Example
-
-        ```python-repl
-        &gt;&gt;&gt; sig[[&#39;a&#39;, &#39;c&#39;]].vbt.signals.plot()
-        ```
-
-        ![](/vectorbt/docs/img/signals_df_plot.png)
-        &#34;&#34;&#34;
-        if trace_kwargs is None:
-            trace_kwargs = {}
-        for col in range(self._obj.shape[1]):
-            fig = self._obj.iloc[:, col].vbt.signals.plot(
-                trace_kwargs=trace_kwargs,
-                fig=fig,
-                **kwargs
-            )
-
-        return fig</code></pre>
+        SignalsAccessor.__init__(self, obj, **kwargs)</code></pre>
 </details>
 <h3 class="section-subtitle">Ancestors</h3>
 <ul class="hlist">
@@ -3550,59 +3503,6 @@ dtype: float64
 <li><a title="vectorbt.base.accessors.BaseDFAccessor" href="../base/accessors.html#vectorbt.base.accessors.BaseDFAccessor">BaseDFAccessor</a></li>
 <li><a title="vectorbt.base.accessors.BaseAccessor" href="../base/accessors.html#vectorbt.base.accessors.BaseAccessor">BaseAccessor</a></li>
 </ul>
-<h3 class="section-subtitle">Methods</h3>
-<dl>
-<dt id="vectorbt.signals.accessors.SignalsDFAccessor.plot"><code class="name flex">
-<span>def <span class="ident fname">plot</span></span>(<span>self, trace_kwargs=None, fig=None, **kwargs)</span>
-</code></dt>
-<dd>
-<div class="desc"><p>Plot each column in DataFrame as a line.</p>
-<h2 id="args">Args</h2>
-<dl>
-<dt><strong><code>trace_kwargs</code></strong> :&ensp;<code>dict</code> or <code>list</code> of <code>dict</code></dt>
-<dd>Keyword arguments passed to each <code>plotly.graph_objects.Scatter</code>.</dd>
-<dt><strong><code>fig</code></strong> :&ensp;<code>plotly.graph_objects.Figure</code></dt>
-<dd>Figure to add traces to.</dd>
-<dt><strong><code>**kwargs</code></strong></dt>
-<dd>Keyword arguments passed to <code><a title="vectorbt.signals.accessors.SignalsSRAccessor.plot" href="#vectorbt.signals.accessors.SignalsSRAccessor.plot">SignalsSRAccessor.plot()</a></code>.</dd>
-</dl>
-<h2 id="example">Example</h2>
-<pre><code class="language-python-repl">&gt;&gt;&gt; sig[['a', 'c']].vbt.signals.plot()
-</code></pre>
-<p><img alt="" src="/vectorbt/docs/img/signals_df_plot.png"></p></div>
-<details class="source">
-<summary>
-<span>Expand source code</span>
-</summary>
-<pre><code class="python">def plot(self, trace_kwargs=None, fig=None, **kwargs):  # pragma: no cover
-    &#34;&#34;&#34;Plot each column in DataFrame as a line.
-
-    Args:
-        trace_kwargs (dict or list of dict): Keyword arguments passed to each `plotly.graph_objects.Scatter`.
-        fig (plotly.graph_objects.Figure): Figure to add traces to.
-        **kwargs: Keyword arguments passed to `SignalsSRAccessor.plot`.
-
-    ## Example
-
-    ```python-repl
-    &gt;&gt;&gt; sig[[&#39;a&#39;, &#39;c&#39;]].vbt.signals.plot()
-    ```
-
-    ![](/vectorbt/docs/img/signals_df_plot.png)
-    &#34;&#34;&#34;
-    if trace_kwargs is None:
-        trace_kwargs = {}
-    for col in range(self._obj.shape[1]):
-        fig = self._obj.iloc[:, col].vbt.signals.plot(
-            trace_kwargs=trace_kwargs,
-            fig=fig,
-            **kwargs
-        )
-
-    return fig</code></pre>
-</details>
-</dd>
-</dl>
 <h3 class="section-subtitle">Inherited members</h3>
 <ul class="hlist">
 <li><code><b><a title="vectorbt.signals.accessors.SignalsAccessor" href="#vectorbt.signals.accessors.SignalsAccessor">SignalsAccessor</a></b></code>:
@@ -3674,6 +3574,7 @@ dtype: float64
 <li><code><a title="vectorbt.signals.accessors.SignalsAccessor.nst" href="#vectorbt.signals.accessors.SignalsAccessor.nst">nst</a></code></li>
 <li><code><a title="vectorbt.signals.accessors.SignalsAccessor.num_signals" href="#vectorbt.signals.accessors.SignalsAccessor.num_signals">num_signals</a></code></li>
 <li><code><a title="vectorbt.signals.accessors.SignalsAccessor.pct_change" href="../generic/accessors.html#vectorbt.generic.accessors.GenericAccessor.pct_change">pct_change</a></code></li>
+<li><code><a title="vectorbt.signals.accessors.SignalsAccessor.plot" href="#vectorbt.signals.accessors.SignalsAccessor.plot">plot</a></code></li>
 <li><code><a title="vectorbt.signals.accessors.SignalsAccessor.product" href="../generic/accessors.html#vectorbt.generic.accessors.GenericAccessor.product">product</a></code></li>
 <li><code><a title="vectorbt.signals.accessors.SignalsAccessor.rank" href="#vectorbt.signals.accessors.SignalsAccessor.rank">rank</a></code></li>
 <li><code><a title="vectorbt.signals.accessors.SignalsAccessor.rank_partitions" href="#vectorbt.signals.accessors.SignalsAccessor.rank_partitions">rank_partitions</a></code></li>
@@ -3733,78 +3634,18 @@ dtype: float64
         GenericSRAccessor.__init__(self, obj, **kwargs)
         SignalsAccessor.__init__(self, obj, **kwargs)
 
-    def plot(self, trace_kwargs=None, add_trace_kwargs=None, yref=&#39;y&#39;, fig=None, **layout_kwargs):  # pragma: no cover
-        &#34;&#34;&#34;Plot Series as a line.
-
-        Args:
-            trace_kwargs (dict): Keyword arguments passed to `plotly.graph_objects.Scatter`.
-            add_trace_kwargs (dict): Keyword arguments passed to `add_trace`.
-            yref (str): Y coordinate axis.
-            fig (plotly.graph_objects.Figure): Figure to add traces to.
-            **layout_kwargs: Keyword arguments for layout.
-
-        ## Example
-
-        ```python-repl
-        &gt;&gt;&gt; sig[&#39;a&#39;].vbt.signals.plot()
-        ```
-
-        ![](/vectorbt/docs/img/signals_sr_plot.png)
-        &#34;&#34;&#34;
-        if trace_kwargs is None:
-            trace_kwargs = {}
-        if add_trace_kwargs is None:
-            add_trace_kwargs = {}
-
-        # Set up figure
-        if fig is None:
-            fig = FigureWidget()
-        default_layout = dict()
-        default_layout[&#39;yaxis&#39; + yref[1:]] = dict(
-            tickmode=&#39;array&#39;,
-            tickvals=[0, 1],
-            ticktext=[&#39;false&#39;, &#39;true&#39;]
-        )
-        fig.update_layout(**default_layout)
-        fig.update_layout(**layout_kwargs)
-        if &#39;name&#39; in trace_kwargs:
-            name = trace_kwargs.pop(&#39;name&#39;)
-        else:
-            name = self._obj.name
-        if name is not None:
-            name = str(name)
-
-        scatter = go.Scatter(
-            x=self.wrapper.index,
-            y=self._obj.values,
-            mode=&#39;lines&#39;,
-            name=name,
-            showlegend=name is not None
-        )
-        scatter.update(**trace_kwargs)
-        fig.add_trace(scatter, **add_trace_kwargs)
-
-        return fig
-
-    def plot_as_markers(self, y=None, trace_kwargs=None, add_trace_kwargs=None,
-                        fig=None, **layout_kwargs):  # pragma: no cover
+    def plot_as_markers(self, y=None, **kwargs):  # pragma: no cover
         &#34;&#34;&#34;Plot Series as markers.
 
         Args:
             y (array_like): Y-axis values to plot markers on.
-
-                !!! note
-                    Doesn&#39;t plot `y`.
-            trace_kwargs (dict): Keyword arguments passed to `plotly.graph_objects.Scatter`.
-            add_trace_kwargs (dict): Keyword arguments passed to `add_trace`.
-            fig (plotly.graph_objects.Figure): Figure to add traces to.
-            **layout_kwargs: Keyword arguments for layout.
+            **kwargs: Keyword arguments passed to `vectorbt.generic.accessors.GenericAccessor.scatterplot`.
 
         ## Example
 
         ```python-repl
         &gt;&gt;&gt; ts = pd.Series([1, 2, 3, 2, 1], index=sig.index)
-        &gt;&gt;&gt; fig = ts.vbt.plot()
+        &gt;&gt;&gt; fig = ts.vbt.lineplot()
         &gt;&gt;&gt; sig[&#39;b&#39;].vbt.signals.plot_as_entry_markers(y=ts, fig=fig)
         &gt;&gt;&gt; (~sig[&#39;b&#39;]).vbt.signals.plot_as_exit_markers(y=ts, fig=fig)
         ```
@@ -3813,86 +3654,64 @@ dtype: float64
         &#34;&#34;&#34;
         from vectorbt.settings import contrast_color_schema
 
-        if trace_kwargs is None:
-            trace_kwargs = {}
-        if add_trace_kwargs is None:
-            add_trace_kwargs = {}
+        if y is None:
+            y = pd.Series.vbt.empty_like(self._obj, 1)
 
-        if fig is None:
-            fig = FigureWidget()
-        fig.update_layout(**layout_kwargs)
-        if &#39;name&#39; in trace_kwargs:
-            name = trace_kwargs.pop(&#39;name&#39;)
-        else:
-            name = self._obj.name
-        if name is not None:
-            name = str(name)
-
-        # Plot markers
-        _y = 1 if y is None else y
-        scatter = go.Scatter(
-            x=self.wrapper.index,
-            y=np.where(self._obj, _y, np.nan),
-            mode=&#39;markers&#39;,
-            marker=dict(
-                symbol=&#39;circle&#39;,
-                color=contrast_color_schema[&#39;blue&#39;],
-                size=7,
-                line=dict(
-                    width=1,
-                    color=adjust_lightness(contrast_color_schema[&#39;blue&#39;])
+        return y[self._obj].vbt.scatterplot(**merge_dicts(dict(
+            trace_kwargs=dict(
+                marker=dict(
+                    symbol=&#39;circle&#39;,
+                    color=contrast_color_schema[&#39;blue&#39;],
+                    size=7,
+                    line=dict(
+                        width=1,
+                        color=adjust_lightness(contrast_color_schema[&#39;blue&#39;])
+                    )
                 )
-            ),
-            name=name,
-            showlegend=name is not None
-        )
-        scatter.update(**trace_kwargs)
-        fig.add_trace(scatter, **add_trace_kwargs)
-        return fig
+            )
+        ), kwargs))
 
-    def plot_as_entry_markers(self, *args, trace_kwargs=None, **kwargs):  # pragma: no cover
+    def plot_as_entry_markers(self, y=None, **kwargs):  # pragma: no cover
         &#34;&#34;&#34;Plot signals as entry markers.
 
         See `SignalsSRAccessor.plot_as_markers`.&#34;&#34;&#34;
         from vectorbt.settings import contrast_color_schema
 
-        if trace_kwargs is None:
-            trace_kwargs = {}
-        trace_kwargs = merge_dicts(dict(
-            marker=dict(
-                symbol=&#39;triangle-up&#39;,
-                color=contrast_color_schema[&#39;green&#39;],
-                size=8,
-                line=dict(
-                    width=1,
-                    color=adjust_lightness(contrast_color_schema[&#39;green&#39;])
-                )
-            ),
-            name=&#39;Entry&#39;
-        ), trace_kwargs)
-        return self.plot_as_markers(*args, trace_kwargs=trace_kwargs, **kwargs)
+        return self.plot_as_markers(y=y, **merge_dicts(dict(
+            trace_kwargs=dict(
+                marker=dict(
+                    symbol=&#39;triangle-up&#39;,
+                    color=contrast_color_schema[&#39;green&#39;],
+                    size=8,
+                    line=dict(
+                        width=1,
+                        color=adjust_lightness(contrast_color_schema[&#39;green&#39;])
+                    )
+                ),
+                name=&#39;Entry&#39;
+            )
+        ), kwargs))
 
-    def plot_as_exit_markers(self, *args, trace_kwargs=None, **kwargs):  # pragma: no cover
+    def plot_as_exit_markers(self, y=None, **kwargs):  # pragma: no cover
         &#34;&#34;&#34;Plot signals as exit markers.
 
         See `SignalsSRAccessor.plot_as_markers`.&#34;&#34;&#34;
         from vectorbt.settings import contrast_color_schema
 
-        if trace_kwargs is None:
-            trace_kwargs = {}
-        trace_kwargs = merge_dicts(dict(
-            marker=dict(
-                symbol=&#39;triangle-down&#39;,
-                color=contrast_color_schema[&#39;red&#39;],
-                size=8,
-                line=dict(
-                    width=1,
-                    color=adjust_lightness(contrast_color_schema[&#39;red&#39;])
-                )
-            ),
-            name=&#39;Exit&#39;
-        ), trace_kwargs)
-        return self.plot_as_markers(*args, trace_kwargs=trace_kwargs, **kwargs)</code></pre>
+        return self.plot_as_markers(y=y, **merge_dicts(dict(
+            trace_kwargs=dict(
+                marker=dict(
+                    symbol=&#39;triangle-down&#39;,
+                    color=contrast_color_schema[&#39;red&#39;],
+                    size=8,
+                    line=dict(
+                        width=1,
+                        color=adjust_lightness(contrast_color_schema[&#39;red&#39;])
+                    )
+                ),
+                name=&#39;Exit&#39;
+            )
+        ), kwargs))</code></pre>
 </details>
 <h3 class="section-subtitle">Ancestors</h3>
 <ul class="hlist">
@@ -3904,88 +3723,8 @@ dtype: float64
 </ul>
 <h3 class="section-subtitle">Methods</h3>
 <dl>
-<dt id="vectorbt.signals.accessors.SignalsSRAccessor.plot"><code class="name flex">
-<span>def <span class="ident fname">plot</span></span>(<span>self, trace_kwargs=None, add_trace_kwargs=None, yref='y', fig=None, **layout_kwargs)</span>
-</code></dt>
-<dd>
-<div class="desc"><p>Plot Series as a line.</p>
-<h2 id="args">Args</h2>
-<dl>
-<dt><strong><code>trace_kwargs</code></strong> :&ensp;<code>dict</code></dt>
-<dd>Keyword arguments passed to <code>plotly.graph_objects.Scatter</code>.</dd>
-<dt><strong><code>add_trace_kwargs</code></strong> :&ensp;<code>dict</code></dt>
-<dd>Keyword arguments passed to <code>add_trace</code>.</dd>
-<dt><strong><code>yref</code></strong> :&ensp;<code>str</code></dt>
-<dd>Y coordinate axis.</dd>
-<dt><strong><code>fig</code></strong> :&ensp;<code>plotly.graph_objects.Figure</code></dt>
-<dd>Figure to add traces to.</dd>
-<dt><strong><code>**layout_kwargs</code></strong></dt>
-<dd>Keyword arguments for layout.</dd>
-</dl>
-<h2 id="example">Example</h2>
-<pre><code class="language-python-repl">&gt;&gt;&gt; sig['a'].vbt.signals.plot()
-</code></pre>
-<p><img alt="" src="/vectorbt/docs/img/signals_sr_plot.png"></p></div>
-<details class="source">
-<summary>
-<span>Expand source code</span>
-</summary>
-<pre><code class="python">def plot(self, trace_kwargs=None, add_trace_kwargs=None, yref=&#39;y&#39;, fig=None, **layout_kwargs):  # pragma: no cover
-    &#34;&#34;&#34;Plot Series as a line.
-
-    Args:
-        trace_kwargs (dict): Keyword arguments passed to `plotly.graph_objects.Scatter`.
-        add_trace_kwargs (dict): Keyword arguments passed to `add_trace`.
-        yref (str): Y coordinate axis.
-        fig (plotly.graph_objects.Figure): Figure to add traces to.
-        **layout_kwargs: Keyword arguments for layout.
-
-    ## Example
-
-    ```python-repl
-    &gt;&gt;&gt; sig[&#39;a&#39;].vbt.signals.plot()
-    ```
-
-    ![](/vectorbt/docs/img/signals_sr_plot.png)
-    &#34;&#34;&#34;
-    if trace_kwargs is None:
-        trace_kwargs = {}
-    if add_trace_kwargs is None:
-        add_trace_kwargs = {}
-
-    # Set up figure
-    if fig is None:
-        fig = FigureWidget()
-    default_layout = dict()
-    default_layout[&#39;yaxis&#39; + yref[1:]] = dict(
-        tickmode=&#39;array&#39;,
-        tickvals=[0, 1],
-        ticktext=[&#39;false&#39;, &#39;true&#39;]
-    )
-    fig.update_layout(**default_layout)
-    fig.update_layout(**layout_kwargs)
-    if &#39;name&#39; in trace_kwargs:
-        name = trace_kwargs.pop(&#39;name&#39;)
-    else:
-        name = self._obj.name
-    if name is not None:
-        name = str(name)
-
-    scatter = go.Scatter(
-        x=self.wrapper.index,
-        y=self._obj.values,
-        mode=&#39;lines&#39;,
-        name=name,
-        showlegend=name is not None
-    )
-    scatter.update(**trace_kwargs)
-    fig.add_trace(scatter, **add_trace_kwargs)
-
-    return fig</code></pre>
-</details>
-</dd>
 <dt id="vectorbt.signals.accessors.SignalsSRAccessor.plot_as_entry_markers"><code class="name flex">
-<span>def <span class="ident fname">plot_as_entry_markers</span></span>(<span>self, *args, trace_kwargs=None, **kwargs)</span>
+<span>def <span class="ident fname">plot_as_entry_markers</span></span>(<span>self, y=None, **kwargs)</span>
 </code></dt>
 <dd>
 <div class="desc"><p>Plot signals as entry markers.</p>
@@ -3994,31 +3733,30 @@ dtype: float64
 <summary>
 <span>Expand source code</span>
 </summary>
-<pre><code class="python">def plot_as_entry_markers(self, *args, trace_kwargs=None, **kwargs):  # pragma: no cover
+<pre><code class="python">def plot_as_entry_markers(self, y=None, **kwargs):  # pragma: no cover
     &#34;&#34;&#34;Plot signals as entry markers.
 
     See `SignalsSRAccessor.plot_as_markers`.&#34;&#34;&#34;
     from vectorbt.settings import contrast_color_schema
 
-    if trace_kwargs is None:
-        trace_kwargs = {}
-    trace_kwargs = merge_dicts(dict(
-        marker=dict(
-            symbol=&#39;triangle-up&#39;,
-            color=contrast_color_schema[&#39;green&#39;],
-            size=8,
-            line=dict(
-                width=1,
-                color=adjust_lightness(contrast_color_schema[&#39;green&#39;])
-            )
-        ),
-        name=&#39;Entry&#39;
-    ), trace_kwargs)
-    return self.plot_as_markers(*args, trace_kwargs=trace_kwargs, **kwargs)</code></pre>
+    return self.plot_as_markers(y=y, **merge_dicts(dict(
+        trace_kwargs=dict(
+            marker=dict(
+                symbol=&#39;triangle-up&#39;,
+                color=contrast_color_schema[&#39;green&#39;],
+                size=8,
+                line=dict(
+                    width=1,
+                    color=adjust_lightness(contrast_color_schema[&#39;green&#39;])
+                )
+            ),
+            name=&#39;Entry&#39;
+        )
+    ), kwargs))</code></pre>
 </details>
 </dd>
 <dt id="vectorbt.signals.accessors.SignalsSRAccessor.plot_as_exit_markers"><code class="name flex">
-<span>def <span class="ident fname">plot_as_exit_markers</span></span>(<span>self, *args, trace_kwargs=None, **kwargs)</span>
+<span>def <span class="ident fname">plot_as_exit_markers</span></span>(<span>self, y=None, **kwargs)</span>
 </code></dt>
 <dd>
 <div class="desc"><p>Plot signals as exit markers.</p>
@@ -4027,56 +3765,43 @@ dtype: float64
 <summary>
 <span>Expand source code</span>
 </summary>
-<pre><code class="python">def plot_as_exit_markers(self, *args, trace_kwargs=None, **kwargs):  # pragma: no cover
+<pre><code class="python">def plot_as_exit_markers(self, y=None, **kwargs):  # pragma: no cover
     &#34;&#34;&#34;Plot signals as exit markers.
 
     See `SignalsSRAccessor.plot_as_markers`.&#34;&#34;&#34;
     from vectorbt.settings import contrast_color_schema
 
-    if trace_kwargs is None:
-        trace_kwargs = {}
-    trace_kwargs = merge_dicts(dict(
-        marker=dict(
-            symbol=&#39;triangle-down&#39;,
-            color=contrast_color_schema[&#39;red&#39;],
-            size=8,
-            line=dict(
-                width=1,
-                color=adjust_lightness(contrast_color_schema[&#39;red&#39;])
-            )
-        ),
-        name=&#39;Exit&#39;
-    ), trace_kwargs)
-    return self.plot_as_markers(*args, trace_kwargs=trace_kwargs, **kwargs)</code></pre>
+    return self.plot_as_markers(y=y, **merge_dicts(dict(
+        trace_kwargs=dict(
+            marker=dict(
+                symbol=&#39;triangle-down&#39;,
+                color=contrast_color_schema[&#39;red&#39;],
+                size=8,
+                line=dict(
+                    width=1,
+                    color=adjust_lightness(contrast_color_schema[&#39;red&#39;])
+                )
+            ),
+            name=&#39;Exit&#39;
+        )
+    ), kwargs))</code></pre>
 </details>
 </dd>
 <dt id="vectorbt.signals.accessors.SignalsSRAccessor.plot_as_markers"><code class="name flex">
-<span>def <span class="ident fname">plot_as_markers</span></span>(<span>self, y=None, trace_kwargs=None, add_trace_kwargs=None, fig=None, **layout_kwargs)</span>
+<span>def <span class="ident fname">plot_as_markers</span></span>(<span>self, y=None, **kwargs)</span>
 </code></dt>
 <dd>
 <div class="desc"><p>Plot Series as markers.</p>
 <h2 id="args">Args</h2>
 <dl>
 <dt><strong><code>y</code></strong> :&ensp;<code>array_like</code></dt>
-<dd>
-<p>Y-axis values to plot markers on.</p>
-<div class="admonition note">
-<p class="admonition-title">Note</p>
-<p>Doesn't plot <code>y</code>.</p>
-</div>
-</dd>
-<dt><strong><code>trace_kwargs</code></strong> :&ensp;<code>dict</code></dt>
-<dd>Keyword arguments passed to <code>plotly.graph_objects.Scatter</code>.</dd>
-<dt><strong><code>add_trace_kwargs</code></strong> :&ensp;<code>dict</code></dt>
-<dd>Keyword arguments passed to <code>add_trace</code>.</dd>
-<dt><strong><code>fig</code></strong> :&ensp;<code>plotly.graph_objects.Figure</code></dt>
-<dd>Figure to add traces to.</dd>
-<dt><strong><code>**layout_kwargs</code></strong></dt>
-<dd>Keyword arguments for layout.</dd>
+<dd>Y-axis values to plot markers on.</dd>
+<dt><strong><code>**kwargs</code></strong></dt>
+<dd>Keyword arguments passed to <code><a title="vectorbt.generic.accessors.GenericAccessor.scatterplot" href="../generic/accessors.html#vectorbt.generic.accessors.GenericAccessor.scatterplot">GenericAccessor.scatterplot()</a></code>.</dd>
 </dl>
 <h2 id="example">Example</h2>
 <pre><code class="language-python-repl">&gt;&gt;&gt; ts = pd.Series([1, 2, 3, 2, 1], index=sig.index)
-&gt;&gt;&gt; fig = ts.vbt.plot()
+&gt;&gt;&gt; fig = ts.vbt.lineplot()
 &gt;&gt;&gt; sig['b'].vbt.signals.plot_as_entry_markers(y=ts, fig=fig)
 &gt;&gt;&gt; (~sig['b']).vbt.signals.plot_as_exit_markers(y=ts, fig=fig)
 </code></pre>
@@ -4085,25 +3810,18 @@ dtype: float64
 <summary>
 <span>Expand source code</span>
 </summary>
-<pre><code class="python">def plot_as_markers(self, y=None, trace_kwargs=None, add_trace_kwargs=None,
-                    fig=None, **layout_kwargs):  # pragma: no cover
+<pre><code class="python">def plot_as_markers(self, y=None, **kwargs):  # pragma: no cover
     &#34;&#34;&#34;Plot Series as markers.
 
     Args:
         y (array_like): Y-axis values to plot markers on.
-
-            !!! note
-                Doesn&#39;t plot `y`.
-        trace_kwargs (dict): Keyword arguments passed to `plotly.graph_objects.Scatter`.
-        add_trace_kwargs (dict): Keyword arguments passed to `add_trace`.
-        fig (plotly.graph_objects.Figure): Figure to add traces to.
-        **layout_kwargs: Keyword arguments for layout.
+        **kwargs: Keyword arguments passed to `vectorbt.generic.accessors.GenericAccessor.scatterplot`.
 
     ## Example
 
     ```python-repl
     &gt;&gt;&gt; ts = pd.Series([1, 2, 3, 2, 1], index=sig.index)
-    &gt;&gt;&gt; fig = ts.vbt.plot()
+    &gt;&gt;&gt; fig = ts.vbt.lineplot()
     &gt;&gt;&gt; sig[&#39;b&#39;].vbt.signals.plot_as_entry_markers(y=ts, fig=fig)
     &gt;&gt;&gt; (~sig[&#39;b&#39;]).vbt.signals.plot_as_exit_markers(y=ts, fig=fig)
     ```
@@ -4112,42 +3830,22 @@ dtype: float64
     &#34;&#34;&#34;
     from vectorbt.settings import contrast_color_schema
 
-    if trace_kwargs is None:
-        trace_kwargs = {}
-    if add_trace_kwargs is None:
-        add_trace_kwargs = {}
+    if y is None:
+        y = pd.Series.vbt.empty_like(self._obj, 1)
 
-    if fig is None:
-        fig = FigureWidget()
-    fig.update_layout(**layout_kwargs)
-    if &#39;name&#39; in trace_kwargs:
-        name = trace_kwargs.pop(&#39;name&#39;)
-    else:
-        name = self._obj.name
-    if name is not None:
-        name = str(name)
-
-    # Plot markers
-    _y = 1 if y is None else y
-    scatter = go.Scatter(
-        x=self.wrapper.index,
-        y=np.where(self._obj, _y, np.nan),
-        mode=&#39;markers&#39;,
-        marker=dict(
-            symbol=&#39;circle&#39;,
-            color=contrast_color_schema[&#39;blue&#39;],
-            size=7,
-            line=dict(
-                width=1,
-                color=adjust_lightness(contrast_color_schema[&#39;blue&#39;])
+    return y[self._obj].vbt.scatterplot(**merge_dicts(dict(
+        trace_kwargs=dict(
+            marker=dict(
+                symbol=&#39;circle&#39;,
+                color=contrast_color_schema[&#39;blue&#39;],
+                size=7,
+                line=dict(
+                    width=1,
+                    color=adjust_lightness(contrast_color_schema[&#39;blue&#39;])
+                )
             )
-        ),
-        name=name,
-        showlegend=name is not None
-    )
-    scatter.update(**trace_kwargs)
-    fig.add_trace(scatter, **add_trace_kwargs)
-    return fig</code></pre>
+        )
+    ), kwargs))</code></pre>
 </details>
 </dd>
 </dl>
@@ -4222,6 +3920,7 @@ dtype: float64
 <li><code><a title="vectorbt.signals.accessors.SignalsAccessor.nst" href="#vectorbt.signals.accessors.SignalsAccessor.nst">nst</a></code></li>
 <li><code><a title="vectorbt.signals.accessors.SignalsAccessor.num_signals" href="#vectorbt.signals.accessors.SignalsAccessor.num_signals">num_signals</a></code></li>
 <li><code><a title="vectorbt.signals.accessors.SignalsAccessor.pct_change" href="../generic/accessors.html#vectorbt.generic.accessors.GenericAccessor.pct_change">pct_change</a></code></li>
+<li><code><a title="vectorbt.signals.accessors.SignalsAccessor.plot" href="#vectorbt.signals.accessors.SignalsAccessor.plot">plot</a></code></li>
 <li><code><a title="vectorbt.signals.accessors.SignalsAccessor.product" href="../generic/accessors.html#vectorbt.generic.accessors.GenericAccessor.product">product</a></code></li>
 <li><code><a title="vectorbt.signals.accessors.SignalsAccessor.rank" href="#vectorbt.signals.accessors.SignalsAccessor.rank">rank</a></code></li>
 <li><code><a title="vectorbt.signals.accessors.SignalsAccessor.rank_partitions" href="#vectorbt.signals.accessors.SignalsAccessor.rank_partitions">rank_partitions</a></code></li>
@@ -4316,20 +4015,17 @@ title="Search"
 <li><code><a title="vectorbt.signals.accessors.SignalsAccessor.map_reduce_partitions" href="#vectorbt.signals.accessors.SignalsAccessor.map_reduce_partitions">map_reduce_partitions</a></code></li>
 <li><code><a title="vectorbt.signals.accessors.SignalsAccessor.nst" href="#vectorbt.signals.accessors.SignalsAccessor.nst">nst</a></code></li>
 <li><code><a title="vectorbt.signals.accessors.SignalsAccessor.num_signals" href="#vectorbt.signals.accessors.SignalsAccessor.num_signals">num_signals</a></code></li>
+<li><code><a title="vectorbt.signals.accessors.SignalsAccessor.plot" href="#vectorbt.signals.accessors.SignalsAccessor.plot">plot</a></code></li>
 <li><code><a title="vectorbt.signals.accessors.SignalsAccessor.rank" href="#vectorbt.signals.accessors.SignalsAccessor.rank">rank</a></code></li>
 <li><code><a title="vectorbt.signals.accessors.SignalsAccessor.rank_partitions" href="#vectorbt.signals.accessors.SignalsAccessor.rank_partitions">rank_partitions</a></code></li>
 </ul>
 </li>
 <li>
 <h4><code><a title="vectorbt.signals.accessors.SignalsDFAccessor" href="#vectorbt.signals.accessors.SignalsDFAccessor">SignalsDFAccessor</a></code></h4>
-<ul class="">
-<li><code><a title="vectorbt.signals.accessors.SignalsDFAccessor.plot" href="#vectorbt.signals.accessors.SignalsDFAccessor.plot">plot</a></code></li>
-</ul>
 </li>
 <li>
 <h4><code><a title="vectorbt.signals.accessors.SignalsSRAccessor" href="#vectorbt.signals.accessors.SignalsSRAccessor">SignalsSRAccessor</a></code></h4>
 <ul class="">
-<li><code><a title="vectorbt.signals.accessors.SignalsSRAccessor.plot" href="#vectorbt.signals.accessors.SignalsSRAccessor.plot">plot</a></code></li>
 <li><code><a title="vectorbt.signals.accessors.SignalsSRAccessor.plot_as_entry_markers" href="#vectorbt.signals.accessors.SignalsSRAccessor.plot_as_entry_markers">plot_as_entry_markers</a></code></li>
 <li><code><a title="vectorbt.signals.accessors.SignalsSRAccessor.plot_as_exit_markers" href="#vectorbt.signals.accessors.SignalsSRAccessor.plot_as_exit_markers">plot_as_exit_markers</a></code></li>
 <li><code><a title="vectorbt.signals.accessors.SignalsSRAccessor.plot_as_markers" href="#vectorbt.signals.accessors.SignalsSRAccessor.plot_as_markers">plot_as_markers</a></code></li>
