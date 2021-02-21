@@ -551,6 +551,7 @@ import numpy as np
 import pandas as pd
 from inspect import signature
 from collections import OrderedDict
+import warnings
 
 from vectorbt.utils import checks
 from vectorbt.utils.decorators import cached_property, cached_method
@@ -563,7 +564,7 @@ from vectorbt.base.reshape_fns import to_1d, to_2d, broadcast, broadcast_to
 from vectorbt.base.array_wrapper import ArrayWrapper, Wrapping
 from vectorbt.generic import nb as generic_nb
 from vectorbt.generic.drawdowns import Drawdowns
-from vectorbt.signals.basic import RAND, RPROB
+from vectorbt.signals.generators import RAND, RPROB
 from vectorbt.portfolio import nb
 from vectorbt.portfolio.orders import Orders
 from vectorbt.portfolio.trades import Trades, Positions
@@ -575,6 +576,11 @@ from vectorbt.portfolio.enums import (
     ConflictMode,
     Direction
 )
+
+
+def _mean_agg_func(df):
+    &#34;&#34;&#34;Compute mean for `Portfolio.stats`.&#34;&#34;&#34;
+    return df.mean(axis=0)
 
 
 def add_returns_methods(func_names):
@@ -749,8 +755,8 @@ class Portfolio(Wrapping):
         Generates signals based either on the number of signals `n` or the probability
         of encountering a signal `prob`.
 
-        If `n` is set, see `vectorbt.signals.basic.RAND`.
-        If `prob` is set, see `vectorbt.signals.basic.RPROB`.
+        If `n` is set, see `vectorbt.signals.generators.RAND`.
+        If `prob` is set, see `vectorbt.signals.generators.RPROB`.
 
         Based on `Portfolio.from_signals`.&#34;&#34;&#34;
         from vectorbt import settings
@@ -1949,9 +1955,9 @@ class Portfolio(Wrapping):
         return self._cash_sharing
 
     @property
-    def call_seq(self):
+    def call_seq(self, wrap_kwargs=None):
         &#34;&#34;&#34;Sequence of calls per row and group.&#34;&#34;&#34;
-        return self.wrapper.wrap(self._call_seq, group_by=False)
+        return self.wrapper.wrap(self._call_seq, group_by=False, **merge_dicts({}, wrap_kwargs))
 
     @property
     def incl_unrealized(self):
@@ -1971,7 +1977,7 @@ class Portfolio(Wrapping):
         return self._close
 
     @cached_method
-    def fill_close(self, ffill=True, bfill=True):
+    def fill_close(self, ffill=True, bfill=True, wrap_kwargs=None):
         &#34;&#34;&#34;Fill NaN values of `Portfolio.close`.
         Use `ffill` and `bfill` to fill forwards and backwards respectively.&#34;&#34;&#34;
         close = to_2d(self.close, raw=True)
@@ -1979,7 +1985,7 @@ class Portfolio(Wrapping):
             close = generic_nb.ffill_nb(close)
         if bfill and np.any(np.isnan(close[0, :])):
             close = generic_nb.ffill_nb(close[::-1, :])[::-1, :]
-        return self.wrapper.wrap(close, group_by=False)
+        return self.wrapper.wrap(close, group_by=False, **merge_dicts({}, wrap_kwargs))
 
     # ############# Records ############# #
 
@@ -2054,7 +2060,7 @@ class Portfolio(Wrapping):
     # ############# Shares ############# #
 
     @cached_method
-    def share_flow(self, direction=&#39;all&#39;):
+    def share_flow(self, direction=&#39;all&#39;, wrap_kwargs=None):
         &#34;&#34;&#34;Get share flow series per column.&#34;&#34;&#34;
         direction = convert_str_enum_value(Direction, direction)
         share_flow = nb.share_flow_nb(
@@ -2063,10 +2069,10 @@ class Portfolio(Wrapping):
             self.orders.col_mapper.col_map,
             direction
         )
-        return self.wrapper.wrap(share_flow, group_by=False)
+        return self.wrapper.wrap(share_flow, group_by=False, **merge_dicts({}, wrap_kwargs))
 
     @cached_method
-    def shares(self, direction=&#39;all&#39;):
+    def shares(self, direction=&#39;all&#39;, wrap_kwargs=None):
         &#34;&#34;&#34;Get share series per column.&#34;&#34;&#34;
         direction = convert_str_enum_value(Direction, direction)
         share_flow = to_2d(self.share_flow(direction=&#39;all&#39;), raw=True)
@@ -2075,10 +2081,10 @@ class Portfolio(Wrapping):
             shares = np.where(shares &gt; 0, shares, 0.)
         if direction == Direction.ShortOnly:
             shares = np.where(shares &lt; 0, -shares, 0.)
-        return self.wrapper.wrap(shares, group_by=False)
+        return self.wrapper.wrap(shares, group_by=False, **merge_dicts({}, wrap_kwargs))
 
     @cached_method
-    def pos_mask(self, direction=&#39;all&#39;, group_by=None):
+    def pos_mask(self, direction=&#39;all&#39;, group_by=None, wrap_kwargs=None):
         &#34;&#34;&#34;Get position mask per column/group.&#34;&#34;&#34;
         direction = convert_str_enum_value(Direction, direction)
         shares = to_2d(self.shares(direction=direction), raw=True)
@@ -2088,10 +2094,10 @@ class Portfolio(Wrapping):
             pos_mask = nb.pos_mask_grouped_nb(pos_mask, group_lens)
         else:
             pos_mask = shares != 0
-        return self.wrapper.wrap(pos_mask, group_by=group_by)
+        return self.wrapper.wrap(pos_mask, group_by=group_by, **merge_dicts({}, wrap_kwargs))
 
     @cached_method
-    def pos_coverage(self, direction=&#39;all&#39;, group_by=None):
+    def pos_coverage(self, direction=&#39;all&#39;, group_by=None, wrap_kwargs=None):
         &#34;&#34;&#34;Get position coverage per column/group.&#34;&#34;&#34;
         direction = convert_str_enum_value(Direction, direction)
         shares = to_2d(self.shares(direction=direction), raw=True)
@@ -2101,12 +2107,13 @@ class Portfolio(Wrapping):
             pos_coverage = nb.pos_coverage_grouped_nb(pos_mask, group_lens)
         else:
             pos_coverage = np.mean(shares != 0, axis=0)
-        return self.wrapper.wrap_reduced(pos_coverage, group_by=group_by)
+        wrap_kwargs = merge_dicts(dict(name_or_index=&#39;pos_coverage&#39;), wrap_kwargs)
+        return self.wrapper.wrap_reduced(pos_coverage, group_by=group_by, **wrap_kwargs)
 
     # ############# Cash ############# #
 
     @cached_method
-    def cash_flow(self, group_by=None, short_cash=True):
+    def cash_flow(self, group_by=None, short_cash=True, wrap_kwargs=None):
         &#34;&#34;&#34;Get cash flow series per column/group.
 
         When `short_cash` is set to False, cash never goes above the initial level,
@@ -2122,7 +2129,7 @@ class Portfolio(Wrapping):
                 self.orders.col_mapper.col_map,
                 short_cash
             )
-        return self.wrapper.wrap(cash_flow, group_by=group_by)
+        return self.wrapper.wrap(cash_flow, group_by=group_by, **merge_dicts({}, wrap_kwargs))
 
     @cached_property
     def init_cash(self):
@@ -2130,7 +2137,7 @@ class Portfolio(Wrapping):
         return self.get_init_cash()
 
     @cached_method
-    def get_init_cash(self, group_by=None):
+    def get_init_cash(self, group_by=None, wrap_kwargs=None):
         &#34;&#34;&#34;Initial amount of cash per column/group with default arguments.
 
         !!! note
@@ -2151,10 +2158,11 @@ class Portfolio(Wrapping):
             else:
                 group_lens = self.wrapper.grouper.get_group_lens()
                 init_cash = nb.init_cash_nb(init_cash, group_lens, self.cash_sharing)
-        return self.wrapper.wrap_reduced(init_cash, group_by=group_by)
+        wrap_kwargs = merge_dicts(dict(name_or_index=&#39;init_cash&#39;), wrap_kwargs)
+        return self.wrapper.wrap_reduced(init_cash, group_by=group_by, **wrap_kwargs)
 
     @cached_method
-    def cash(self, group_by=None, in_sim_order=False, short_cash=True):
+    def cash(self, group_by=None, in_sim_order=False, short_cash=True, wrap_kwargs=None):
         &#34;&#34;&#34;Get cash balance series per column/group.&#34;&#34;&#34;
         if in_sim_order and not self.cash_sharing:
             raise ValueError(&#34;Cash sharing must be enabled for in_sim_order=True&#34;)
@@ -2178,12 +2186,12 @@ class Portfolio(Wrapping):
             else:
                 init_cash = to_1d(self.get_init_cash(group_by=False), raw=True)
                 cash = nb.cash_nb(cash_flow, group_lens, init_cash)
-        return self.wrapper.wrap(cash, group_by=group_by)
+        return self.wrapper.wrap(cash, group_by=group_by, **merge_dicts({}, wrap_kwargs))
 
     # ############# Performance ############# #
 
     @cached_method
-    def holding_value(self, direction=&#39;all&#39;, group_by=None):
+    def holding_value(self, direction=&#39;all&#39;, group_by=None, wrap_kwargs=None):
         &#34;&#34;&#34;Get holding value series per column/group.&#34;&#34;&#34;
         direction = convert_str_enum_value(Direction, direction)
         close = to_2d(self.close, raw=True).copy()
@@ -2195,26 +2203,26 @@ class Portfolio(Wrapping):
             holding_value = nb.holding_value_grouped_nb(holding_value, group_lens)
         else:
             holding_value = nb.holding_value_nb(close, shares)
-        return self.wrapper.wrap(holding_value, group_by=group_by)
+        return self.wrapper.wrap(holding_value, group_by=group_by, **merge_dicts({}, wrap_kwargs))
 
     @cached_method
-    def gross_exposure(self, direction=&#39;all&#39;, group_by=None):
+    def gross_exposure(self, direction=&#39;all&#39;, group_by=None, wrap_kwargs=None):
         &#34;&#34;&#34;Get gross exposure.&#34;&#34;&#34;
         holding_value = to_2d(self.holding_value(group_by=group_by, direction=direction), raw=True)
         cash = to_2d(self.cash(group_by=group_by, short_cash=False), raw=True)
         gross_exposure = nb.gross_exposure_nb(holding_value, cash)
-        return self.wrapper.wrap(gross_exposure, group_by=group_by)
+        return self.wrapper.wrap(gross_exposure, group_by=group_by, **merge_dicts({}, wrap_kwargs))
 
     @cached_method
-    def net_exposure(self, group_by=None):
+    def net_exposure(self, group_by=None, wrap_kwargs=None):
         &#34;&#34;&#34;Get net exposure.&#34;&#34;&#34;
         long_exposure = to_2d(self.gross_exposure(direction=&#39;longonly&#39;, group_by=group_by), raw=True)
         short_exposure = to_2d(self.gross_exposure(direction=&#39;shortonly&#39;, group_by=group_by), raw=True)
         net_exposure = long_exposure - short_exposure
-        return self.wrapper.wrap(net_exposure, group_by=group_by)
+        return self.wrapper.wrap(net_exposure, group_by=group_by, **merge_dicts({}, wrap_kwargs))
 
     @cached_method
-    def value(self, group_by=None, in_sim_order=False):
+    def value(self, group_by=None, in_sim_order=False, wrap_kwargs=None):
         &#34;&#34;&#34;Get portfolio value series per column/group.
 
         By default, will generate portfolio value for each asset based on cash flows and thus
@@ -2234,10 +2242,10 @@ class Portfolio(Wrapping):
             # price of NaN is already addressed by ungrouped_value_nb
         else:
             value = nb.value_nb(cash, holding_value)
-        return self.wrapper.wrap(value, group_by=group_by)
+        return self.wrapper.wrap(value, group_by=group_by, **merge_dicts({}, wrap_kwargs))
 
     @cached_method
-    def total_profit(self, group_by=None):
+    def total_profit(self, group_by=None, wrap_kwargs=None):
         &#34;&#34;&#34;Get total profit per column/group.
 
         Calculated directly from order records (fast).
@@ -2261,26 +2269,29 @@ class Portfolio(Wrapping):
                 self.orders.values,
                 self.orders.col_mapper.col_map
             )
-        return self.wrapper.wrap_reduced(total_profit, group_by=group_by)
+        wrap_kwargs = merge_dicts(dict(name_or_index=&#39;total_profit&#39;), wrap_kwargs)
+        return self.wrapper.wrap_reduced(total_profit, group_by=group_by, **wrap_kwargs)
 
     @cached_method
-    def final_value(self, group_by=None):
+    def final_value(self, group_by=None, wrap_kwargs=None):
         &#34;&#34;&#34;Get total profit per column/group.&#34;&#34;&#34;
         init_cash = to_1d(self.get_init_cash(group_by=group_by), raw=True)
         total_profit = to_1d(self.total_profit(group_by=group_by), raw=True)
         final_value = nb.final_value_nb(total_profit, init_cash)
-        return self.wrapper.wrap_reduced(final_value, group_by=group_by)
+        wrap_kwargs = merge_dicts(dict(name_or_index=&#39;final_value&#39;), wrap_kwargs)
+        return self.wrapper.wrap_reduced(final_value, group_by=group_by, **wrap_kwargs)
 
     @cached_method
-    def total_return(self, group_by=None):
+    def total_return(self, group_by=None, wrap_kwargs=None):
         &#34;&#34;&#34;Get total profit per column/group.&#34;&#34;&#34;
         init_cash = to_1d(self.get_init_cash(group_by=group_by), raw=True)
         total_profit = to_1d(self.total_profit(group_by=group_by), raw=True)
         total_return = nb.total_return_nb(total_profit, init_cash)
-        return self.wrapper.wrap_reduced(total_return, group_by=group_by)
+        wrap_kwargs = merge_dicts(dict(name_or_index=&#39;total_return&#39;), wrap_kwargs)
+        return self.wrapper.wrap_reduced(total_return, group_by=group_by, **wrap_kwargs)
 
     @cached_method
-    def returns(self, group_by=None, in_sim_order=False):
+    def returns(self, group_by=None, in_sim_order=False, wrap_kwargs=None):
         &#34;&#34;&#34;Get return series per column/group based on portfolio value.&#34;&#34;&#34;
         value = to_2d(self.value(group_by=group_by, in_sim_order=in_sim_order), raw=True)
         if self.wrapper.grouper.is_grouping_disabled(group_by=group_by) and in_sim_order:
@@ -2291,10 +2302,10 @@ class Portfolio(Wrapping):
         else:
             init_cash = to_1d(self.get_init_cash(group_by=group_by), raw=True)
             returns = nb.returns_nb(value, init_cash)
-        return self.wrapper.wrap(returns, group_by=group_by)
+        return self.wrapper.wrap(returns, group_by=group_by, **merge_dicts({}, wrap_kwargs))
 
     @cached_method
-    def active_returns(self, group_by=None):
+    def active_returns(self, group_by=None, wrap_kwargs=None):
         &#34;&#34;&#34;Get active return series per column/group.
 
         This type of returns is based solely on cash flows and holding value rather than portfolio value.
@@ -2304,10 +2315,10 @@ class Portfolio(Wrapping):
         cash_flow = to_2d(self.cash_flow(group_by=group_by), raw=True)
         holding_value = to_2d(self.holding_value(group_by=group_by), raw=True)
         active_returns = nb.active_returns_nb(cash_flow, holding_value)
-        return self.wrapper.wrap(active_returns, group_by=group_by)
+        return self.wrapper.wrap(active_returns, group_by=group_by, **merge_dicts({}, wrap_kwargs))
 
     @cached_method
-    def market_value(self, group_by=None):
+    def market_value(self, group_by=None, wrap_kwargs=None):
         &#34;&#34;&#34;Get market (benchmark) value series per column/group.
 
         If grouped, evenly distributes initial cash among assets in the group.
@@ -2327,26 +2338,27 @@ class Portfolio(Wrapping):
         else:
             init_cash = to_1d(self.get_init_cash(group_by=False), raw=True)
             market_value = nb.market_value_nb(close, init_cash)
-        return self.wrapper.wrap(market_value, group_by=group_by)
+        return self.wrapper.wrap(market_value, group_by=group_by, **merge_dicts({}, wrap_kwargs))
 
     @cached_method
-    def market_returns(self, group_by=None):
+    def market_returns(self, group_by=None, wrap_kwargs=None):
         &#34;&#34;&#34;Get return series per column/group based on market (benchmark) value.&#34;&#34;&#34;
         market_value = to_2d(self.market_value(group_by=group_by), raw=True)
         init_cash = to_1d(self.get_init_cash(group_by=group_by), raw=True)
         market_returns = nb.returns_nb(market_value, init_cash)
-        return self.wrapper.wrap(market_returns, group_by=group_by)
+        return self.wrapper.wrap(market_returns, group_by=group_by, **merge_dicts({}, wrap_kwargs))
 
     @cached_method
-    def total_market_return(self, group_by=None):
+    def total_market_return(self, group_by=None, wrap_kwargs=None):
         &#34;&#34;&#34;Get total market (benchmark) return.&#34;&#34;&#34;
         market_value = to_2d(self.market_value(group_by=group_by), raw=True)
         total_market_return = nb.total_market_return_nb(market_value)
-        return self.wrapper.wrap_reduced(total_market_return, group_by=group_by)
+        wrap_kwargs = merge_dicts(dict(name_or_index=&#39;total_market_return&#39;), wrap_kwargs)
+        return self.wrapper.wrap_reduced(total_market_return, group_by=group_by, **wrap_kwargs)
 
     @cached_method
     def stats(self, column=None, group_by=None, incl_unrealized=None, active_returns=False,
-              in_sim_order=False, agg_func=lambda x: x.mean(axis=0), **kwargs):
+              in_sim_order=False, agg_func=_mean_agg_func, wrap_kwargs=None, **kwargs):
         &#34;&#34;&#34;Compute various statistics on this portfolio.
 
         `kwargs` will be passed to each `vectorbt.returns.accessors.ReturnsAccessor` method.
@@ -2359,6 +2371,9 @@ class Portfolio(Wrapping):
         !!! note
             Use `column` only if caching is enabled, otherwise it may re-compute the same
             objects multiple times.&#34;&#34;&#34;
+        if self.wrapper.freq is None:
+            raise ValueError(&#34;Couldn&#39;t parse the frequency of index. You must set `freq`.&#34;)
+
         # Pre-calculate
         trades = self.get_trades(group_by=group_by)
         if incl_unrealized is None:
@@ -2390,8 +2405,8 @@ class Portfolio(Wrapping):
             &#39;Best Trade [%]&#39;: trades.returns.max() * 100,
             &#39;Worst Trade [%]&#39;: trades.returns.min() * 100,
             &#39;Avg. Trade [%]&#39;: trades.returns.mean() * 100,
-            &#39;Max. Trade Duration&#39;: trades.duration.max(time_units=True),
-            &#39;Avg. Trade Duration&#39;: trades.duration.mean(time_units=True),
+            &#39;Max. Trade Duration&#39;: trades.duration.max(wrap_kwargs=dict(time_units=True)),
+            &#39;Avg. Trade Duration&#39;: trades.duration.mean(wrap_kwargs=dict(time_units=True)),
             &#39;Expectancy&#39;: trades.expectancy(),
             &#39;SQN&#39;: trades.sqn(),
             &#39;Gross Exposure&#39;: self.gross_exposure(group_by=group_by).mean(),
@@ -2401,19 +2416,25 @@ class Portfolio(Wrapping):
         }, index=self.wrapper.grouper.get_columns(group_by=group_by))
 
         # Select columns or reduce
-        if stats_df.shape[0] == 1:
-            return self.wrapper.wrap_reduced(stats_df.iloc[0], index=stats_df.columns)
+        if self.wrapper.get_ndim(group_by=group_by) == 1:
+            wrap_kwargs = merge_dicts(dict(name_or_index=stats_df.columns), wrap_kwargs)
+            return self.wrapper.wrap_reduced(stats_df.iloc[0], group_by=group_by, **wrap_kwargs)
         if column is not None:
             return stats_df.loc[column]
         if agg_func is not None:
-            agg_stats_sr = pd.Series(index=stats_df.columns, name=agg_func.__name__)
+            if agg_func == _mean_agg_func:
+                warnings.warn(&#34;Taking mean across columns. To return a DataFrame, pass agg_func=None.&#34;, stacklevel=2)
+                func_name = &#39;stats_mean&#39;
+            else:
+                func_name = &#39;stats_&#39; + agg_func.__name__
+            agg_stats_sr = pd.Series(index=stats_df.columns, name=func_name)
             agg_stats_sr.iloc[:3] = stats_df.iloc[0, :3]
             agg_stats_sr.iloc[3:] = agg_func(stats_df.iloc[:, 3:])
             return agg_stats_sr
         return stats_df
 
     def returns_stats(self, column=None, group_by=None, active_returns=False, in_sim_order=False,
-                      agg_func=lambda x: x.mean(axis=0), year_freq=None, **kwargs):
+                      agg_func=_mean_agg_func, year_freq=None, **kwargs):
         &#34;&#34;&#34;Compute various statistics on returns of this portfolio.
 
         For keyword arguments and notes, see `Portfolio.stats`.
@@ -2437,7 +2458,12 @@ class Portfolio(Wrapping):
         if column is not None:
             return stats_obj.loc[column]
         if agg_func is not None:
-            agg_stats_sr = pd.Series(index=stats_obj.columns, name=agg_func.__name__)
+            if agg_func == _mean_agg_func:
+                warnings.warn(&#34;Taking mean across columns. To return a DataFrame, pass agg_func=None.&#34;, stacklevel=2)
+                func_name = &#39;stats_mean&#39;
+            else:
+                func_name = &#39;stats_&#39; + agg_func.__name__
+            agg_stats_sr = pd.Series(index=stats_obj.columns, name=func_name)
             agg_stats_sr.iloc[:3] = stats_obj.iloc[0, :3]
             agg_stats_sr.iloc[3:] = agg_func(stats_obj.iloc[:, 3:])
             return agg_stats_sr
@@ -2524,9 +2550,17 @@ class Portfolio(Wrapping):
                 * a subplot name, as listed in `Portfolio.subplot_settings`
                 * a tuple of a subplot name and a dict as in `Portfolio.subplot_settings` but with an
                     additional optional key `plot_func`. The plot function should accept current portfolio
-                    object (with column already selected) and optionally other keyword arguments.
-                    Will pass `row`, `col`, and other subplot-dependent arguments if they can be found
-                    in the function&#39;s signature.
+                    object (with column already selected), other keyword arguments (optionally), and
+                    the figure object `fig` as the last keyword argument. It will also pass the following
+                    arguments if any of them can be found in the function&#39;s signature:
+
+                    * `add_trace_kwargs`
+                    * `xref`
+                    * `yref`
+                    * `xaxis`
+                    * `yaxis`
+                    * `x_domain`
+                    * `y_domain`
             column (str): Name of the column/group to plot.
 
                 Takes effect if portfolio contains multiple columns.
@@ -2590,8 +2624,7 @@ class Portfolio(Wrapping):
 
         ![](/vectorbt/docs/img/portfolio_plot_drawdowns.png)
 
-        You can also create a custom subplot, either by providing a function or
-        by creating a placeholder that can be written later:
+        You can also create a custom subplot by creating a placeholder that can be written later:
 
         ```python-repl
         &gt;&gt;&gt; fig = portfolio.plot(subplots=[
@@ -2603,6 +2636,22 @@ class Portfolio(Wrapping):
         ... ])
 
         &gt;&gt;&gt; size.rename(&#39;Order Size&#39;).vbt.plot(add_trace_kwargs=dict(row=2, col=1), fig=fig)
+        ```
+
+        Alternatively, you can pass a plot function:
+
+        ```python-repl
+        &gt;&gt;&gt; def plot_order_size(portfolio, add_trace_kwargs=None, fig=None):
+        ...     size.rename(&#39;Order Size&#39;).vbt.plot(add_trace_kwargs=add_trace_kwargs, fig=fig)
+
+        &gt;&gt;&gt; portfolio.plot(subplots=[
+        ...     &#39;orders&#39;,
+        ...     (&#39;order_size&#39;, dict(
+        ...         title=&#39;Order Size&#39;,
+        ...         can_plot_groups=False,
+        ...         plot_func=plot_order_size
+        ...     ))
+        ... ])
         ```
 
         ![](/vectorbt/docs/img/portfolio_plot_custom.png)
@@ -2711,9 +2760,10 @@ class Portfolio(Wrapping):
             ), hline_shape_kwargs))
 
         def _get_arg_names(method):
-            sig = signature(method)
-            arg_names = [p.name for p in sig.parameters.values() if p.kind == p.POSITIONAL_OR_KEYWORD]
-            return arg_names
+            return [
+                p.name for p in signature(method).parameters.values()
+                if p.kind != p.VAR_POSITIONAL and p.kind != p.VAR_KEYWORD
+            ]
 
         def _extract_method_kwargs(method, kwargs):
             arg_names = _get_arg_names(method)
@@ -3312,8 +3362,8 @@ The <code>__init__</code> method is reserved for indexing purposes.</p>
         Generates signals based either on the number of signals `n` or the probability
         of encountering a signal `prob`.
 
-        If `n` is set, see `vectorbt.signals.basic.RAND`.
-        If `prob` is set, see `vectorbt.signals.basic.RPROB`.
+        If `n` is set, see `vectorbt.signals.generators.RAND`.
+        If `prob` is set, see `vectorbt.signals.generators.RPROB`.
 
         Based on `Portfolio.from_signals`.&#34;&#34;&#34;
         from vectorbt import settings
@@ -4512,9 +4562,9 @@ The <code>__init__</code> method is reserved for indexing purposes.</p>
         return self._cash_sharing
 
     @property
-    def call_seq(self):
+    def call_seq(self, wrap_kwargs=None):
         &#34;&#34;&#34;Sequence of calls per row and group.&#34;&#34;&#34;
-        return self.wrapper.wrap(self._call_seq, group_by=False)
+        return self.wrapper.wrap(self._call_seq, group_by=False, **merge_dicts({}, wrap_kwargs))
 
     @property
     def incl_unrealized(self):
@@ -4534,7 +4584,7 @@ The <code>__init__</code> method is reserved for indexing purposes.</p>
         return self._close
 
     @cached_method
-    def fill_close(self, ffill=True, bfill=True):
+    def fill_close(self, ffill=True, bfill=True, wrap_kwargs=None):
         &#34;&#34;&#34;Fill NaN values of `Portfolio.close`.
         Use `ffill` and `bfill` to fill forwards and backwards respectively.&#34;&#34;&#34;
         close = to_2d(self.close, raw=True)
@@ -4542,7 +4592,7 @@ The <code>__init__</code> method is reserved for indexing purposes.</p>
             close = generic_nb.ffill_nb(close)
         if bfill and np.any(np.isnan(close[0, :])):
             close = generic_nb.ffill_nb(close[::-1, :])[::-1, :]
-        return self.wrapper.wrap(close, group_by=False)
+        return self.wrapper.wrap(close, group_by=False, **merge_dicts({}, wrap_kwargs))
 
     # ############# Records ############# #
 
@@ -4617,7 +4667,7 @@ The <code>__init__</code> method is reserved for indexing purposes.</p>
     # ############# Shares ############# #
 
     @cached_method
-    def share_flow(self, direction=&#39;all&#39;):
+    def share_flow(self, direction=&#39;all&#39;, wrap_kwargs=None):
         &#34;&#34;&#34;Get share flow series per column.&#34;&#34;&#34;
         direction = convert_str_enum_value(Direction, direction)
         share_flow = nb.share_flow_nb(
@@ -4626,10 +4676,10 @@ The <code>__init__</code> method is reserved for indexing purposes.</p>
             self.orders.col_mapper.col_map,
             direction
         )
-        return self.wrapper.wrap(share_flow, group_by=False)
+        return self.wrapper.wrap(share_flow, group_by=False, **merge_dicts({}, wrap_kwargs))
 
     @cached_method
-    def shares(self, direction=&#39;all&#39;):
+    def shares(self, direction=&#39;all&#39;, wrap_kwargs=None):
         &#34;&#34;&#34;Get share series per column.&#34;&#34;&#34;
         direction = convert_str_enum_value(Direction, direction)
         share_flow = to_2d(self.share_flow(direction=&#39;all&#39;), raw=True)
@@ -4638,10 +4688,10 @@ The <code>__init__</code> method is reserved for indexing purposes.</p>
             shares = np.where(shares &gt; 0, shares, 0.)
         if direction == Direction.ShortOnly:
             shares = np.where(shares &lt; 0, -shares, 0.)
-        return self.wrapper.wrap(shares, group_by=False)
+        return self.wrapper.wrap(shares, group_by=False, **merge_dicts({}, wrap_kwargs))
 
     @cached_method
-    def pos_mask(self, direction=&#39;all&#39;, group_by=None):
+    def pos_mask(self, direction=&#39;all&#39;, group_by=None, wrap_kwargs=None):
         &#34;&#34;&#34;Get position mask per column/group.&#34;&#34;&#34;
         direction = convert_str_enum_value(Direction, direction)
         shares = to_2d(self.shares(direction=direction), raw=True)
@@ -4651,10 +4701,10 @@ The <code>__init__</code> method is reserved for indexing purposes.</p>
             pos_mask = nb.pos_mask_grouped_nb(pos_mask, group_lens)
         else:
             pos_mask = shares != 0
-        return self.wrapper.wrap(pos_mask, group_by=group_by)
+        return self.wrapper.wrap(pos_mask, group_by=group_by, **merge_dicts({}, wrap_kwargs))
 
     @cached_method
-    def pos_coverage(self, direction=&#39;all&#39;, group_by=None):
+    def pos_coverage(self, direction=&#39;all&#39;, group_by=None, wrap_kwargs=None):
         &#34;&#34;&#34;Get position coverage per column/group.&#34;&#34;&#34;
         direction = convert_str_enum_value(Direction, direction)
         shares = to_2d(self.shares(direction=direction), raw=True)
@@ -4664,12 +4714,13 @@ The <code>__init__</code> method is reserved for indexing purposes.</p>
             pos_coverage = nb.pos_coverage_grouped_nb(pos_mask, group_lens)
         else:
             pos_coverage = np.mean(shares != 0, axis=0)
-        return self.wrapper.wrap_reduced(pos_coverage, group_by=group_by)
+        wrap_kwargs = merge_dicts(dict(name_or_index=&#39;pos_coverage&#39;), wrap_kwargs)
+        return self.wrapper.wrap_reduced(pos_coverage, group_by=group_by, **wrap_kwargs)
 
     # ############# Cash ############# #
 
     @cached_method
-    def cash_flow(self, group_by=None, short_cash=True):
+    def cash_flow(self, group_by=None, short_cash=True, wrap_kwargs=None):
         &#34;&#34;&#34;Get cash flow series per column/group.
 
         When `short_cash` is set to False, cash never goes above the initial level,
@@ -4685,7 +4736,7 @@ The <code>__init__</code> method is reserved for indexing purposes.</p>
                 self.orders.col_mapper.col_map,
                 short_cash
             )
-        return self.wrapper.wrap(cash_flow, group_by=group_by)
+        return self.wrapper.wrap(cash_flow, group_by=group_by, **merge_dicts({}, wrap_kwargs))
 
     @cached_property
     def init_cash(self):
@@ -4693,7 +4744,7 @@ The <code>__init__</code> method is reserved for indexing purposes.</p>
         return self.get_init_cash()
 
     @cached_method
-    def get_init_cash(self, group_by=None):
+    def get_init_cash(self, group_by=None, wrap_kwargs=None):
         &#34;&#34;&#34;Initial amount of cash per column/group with default arguments.
 
         !!! note
@@ -4714,10 +4765,11 @@ The <code>__init__</code> method is reserved for indexing purposes.</p>
             else:
                 group_lens = self.wrapper.grouper.get_group_lens()
                 init_cash = nb.init_cash_nb(init_cash, group_lens, self.cash_sharing)
-        return self.wrapper.wrap_reduced(init_cash, group_by=group_by)
+        wrap_kwargs = merge_dicts(dict(name_or_index=&#39;init_cash&#39;), wrap_kwargs)
+        return self.wrapper.wrap_reduced(init_cash, group_by=group_by, **wrap_kwargs)
 
     @cached_method
-    def cash(self, group_by=None, in_sim_order=False, short_cash=True):
+    def cash(self, group_by=None, in_sim_order=False, short_cash=True, wrap_kwargs=None):
         &#34;&#34;&#34;Get cash balance series per column/group.&#34;&#34;&#34;
         if in_sim_order and not self.cash_sharing:
             raise ValueError(&#34;Cash sharing must be enabled for in_sim_order=True&#34;)
@@ -4741,12 +4793,12 @@ The <code>__init__</code> method is reserved for indexing purposes.</p>
             else:
                 init_cash = to_1d(self.get_init_cash(group_by=False), raw=True)
                 cash = nb.cash_nb(cash_flow, group_lens, init_cash)
-        return self.wrapper.wrap(cash, group_by=group_by)
+        return self.wrapper.wrap(cash, group_by=group_by, **merge_dicts({}, wrap_kwargs))
 
     # ############# Performance ############# #
 
     @cached_method
-    def holding_value(self, direction=&#39;all&#39;, group_by=None):
+    def holding_value(self, direction=&#39;all&#39;, group_by=None, wrap_kwargs=None):
         &#34;&#34;&#34;Get holding value series per column/group.&#34;&#34;&#34;
         direction = convert_str_enum_value(Direction, direction)
         close = to_2d(self.close, raw=True).copy()
@@ -4758,26 +4810,26 @@ The <code>__init__</code> method is reserved for indexing purposes.</p>
             holding_value = nb.holding_value_grouped_nb(holding_value, group_lens)
         else:
             holding_value = nb.holding_value_nb(close, shares)
-        return self.wrapper.wrap(holding_value, group_by=group_by)
+        return self.wrapper.wrap(holding_value, group_by=group_by, **merge_dicts({}, wrap_kwargs))
 
     @cached_method
-    def gross_exposure(self, direction=&#39;all&#39;, group_by=None):
+    def gross_exposure(self, direction=&#39;all&#39;, group_by=None, wrap_kwargs=None):
         &#34;&#34;&#34;Get gross exposure.&#34;&#34;&#34;
         holding_value = to_2d(self.holding_value(group_by=group_by, direction=direction), raw=True)
         cash = to_2d(self.cash(group_by=group_by, short_cash=False), raw=True)
         gross_exposure = nb.gross_exposure_nb(holding_value, cash)
-        return self.wrapper.wrap(gross_exposure, group_by=group_by)
+        return self.wrapper.wrap(gross_exposure, group_by=group_by, **merge_dicts({}, wrap_kwargs))
 
     @cached_method
-    def net_exposure(self, group_by=None):
+    def net_exposure(self, group_by=None, wrap_kwargs=None):
         &#34;&#34;&#34;Get net exposure.&#34;&#34;&#34;
         long_exposure = to_2d(self.gross_exposure(direction=&#39;longonly&#39;, group_by=group_by), raw=True)
         short_exposure = to_2d(self.gross_exposure(direction=&#39;shortonly&#39;, group_by=group_by), raw=True)
         net_exposure = long_exposure - short_exposure
-        return self.wrapper.wrap(net_exposure, group_by=group_by)
+        return self.wrapper.wrap(net_exposure, group_by=group_by, **merge_dicts({}, wrap_kwargs))
 
     @cached_method
-    def value(self, group_by=None, in_sim_order=False):
+    def value(self, group_by=None, in_sim_order=False, wrap_kwargs=None):
         &#34;&#34;&#34;Get portfolio value series per column/group.
 
         By default, will generate portfolio value for each asset based on cash flows and thus
@@ -4797,10 +4849,10 @@ The <code>__init__</code> method is reserved for indexing purposes.</p>
             # price of NaN is already addressed by ungrouped_value_nb
         else:
             value = nb.value_nb(cash, holding_value)
-        return self.wrapper.wrap(value, group_by=group_by)
+        return self.wrapper.wrap(value, group_by=group_by, **merge_dicts({}, wrap_kwargs))
 
     @cached_method
-    def total_profit(self, group_by=None):
+    def total_profit(self, group_by=None, wrap_kwargs=None):
         &#34;&#34;&#34;Get total profit per column/group.
 
         Calculated directly from order records (fast).
@@ -4824,26 +4876,29 @@ The <code>__init__</code> method is reserved for indexing purposes.</p>
                 self.orders.values,
                 self.orders.col_mapper.col_map
             )
-        return self.wrapper.wrap_reduced(total_profit, group_by=group_by)
+        wrap_kwargs = merge_dicts(dict(name_or_index=&#39;total_profit&#39;), wrap_kwargs)
+        return self.wrapper.wrap_reduced(total_profit, group_by=group_by, **wrap_kwargs)
 
     @cached_method
-    def final_value(self, group_by=None):
+    def final_value(self, group_by=None, wrap_kwargs=None):
         &#34;&#34;&#34;Get total profit per column/group.&#34;&#34;&#34;
         init_cash = to_1d(self.get_init_cash(group_by=group_by), raw=True)
         total_profit = to_1d(self.total_profit(group_by=group_by), raw=True)
         final_value = nb.final_value_nb(total_profit, init_cash)
-        return self.wrapper.wrap_reduced(final_value, group_by=group_by)
+        wrap_kwargs = merge_dicts(dict(name_or_index=&#39;final_value&#39;), wrap_kwargs)
+        return self.wrapper.wrap_reduced(final_value, group_by=group_by, **wrap_kwargs)
 
     @cached_method
-    def total_return(self, group_by=None):
+    def total_return(self, group_by=None, wrap_kwargs=None):
         &#34;&#34;&#34;Get total profit per column/group.&#34;&#34;&#34;
         init_cash = to_1d(self.get_init_cash(group_by=group_by), raw=True)
         total_profit = to_1d(self.total_profit(group_by=group_by), raw=True)
         total_return = nb.total_return_nb(total_profit, init_cash)
-        return self.wrapper.wrap_reduced(total_return, group_by=group_by)
+        wrap_kwargs = merge_dicts(dict(name_or_index=&#39;total_return&#39;), wrap_kwargs)
+        return self.wrapper.wrap_reduced(total_return, group_by=group_by, **wrap_kwargs)
 
     @cached_method
-    def returns(self, group_by=None, in_sim_order=False):
+    def returns(self, group_by=None, in_sim_order=False, wrap_kwargs=None):
         &#34;&#34;&#34;Get return series per column/group based on portfolio value.&#34;&#34;&#34;
         value = to_2d(self.value(group_by=group_by, in_sim_order=in_sim_order), raw=True)
         if self.wrapper.grouper.is_grouping_disabled(group_by=group_by) and in_sim_order:
@@ -4854,10 +4909,10 @@ The <code>__init__</code> method is reserved for indexing purposes.</p>
         else:
             init_cash = to_1d(self.get_init_cash(group_by=group_by), raw=True)
             returns = nb.returns_nb(value, init_cash)
-        return self.wrapper.wrap(returns, group_by=group_by)
+        return self.wrapper.wrap(returns, group_by=group_by, **merge_dicts({}, wrap_kwargs))
 
     @cached_method
-    def active_returns(self, group_by=None):
+    def active_returns(self, group_by=None, wrap_kwargs=None):
         &#34;&#34;&#34;Get active return series per column/group.
 
         This type of returns is based solely on cash flows and holding value rather than portfolio value.
@@ -4867,10 +4922,10 @@ The <code>__init__</code> method is reserved for indexing purposes.</p>
         cash_flow = to_2d(self.cash_flow(group_by=group_by), raw=True)
         holding_value = to_2d(self.holding_value(group_by=group_by), raw=True)
         active_returns = nb.active_returns_nb(cash_flow, holding_value)
-        return self.wrapper.wrap(active_returns, group_by=group_by)
+        return self.wrapper.wrap(active_returns, group_by=group_by, **merge_dicts({}, wrap_kwargs))
 
     @cached_method
-    def market_value(self, group_by=None):
+    def market_value(self, group_by=None, wrap_kwargs=None):
         &#34;&#34;&#34;Get market (benchmark) value series per column/group.
 
         If grouped, evenly distributes initial cash among assets in the group.
@@ -4890,26 +4945,27 @@ The <code>__init__</code> method is reserved for indexing purposes.</p>
         else:
             init_cash = to_1d(self.get_init_cash(group_by=False), raw=True)
             market_value = nb.market_value_nb(close, init_cash)
-        return self.wrapper.wrap(market_value, group_by=group_by)
+        return self.wrapper.wrap(market_value, group_by=group_by, **merge_dicts({}, wrap_kwargs))
 
     @cached_method
-    def market_returns(self, group_by=None):
+    def market_returns(self, group_by=None, wrap_kwargs=None):
         &#34;&#34;&#34;Get return series per column/group based on market (benchmark) value.&#34;&#34;&#34;
         market_value = to_2d(self.market_value(group_by=group_by), raw=True)
         init_cash = to_1d(self.get_init_cash(group_by=group_by), raw=True)
         market_returns = nb.returns_nb(market_value, init_cash)
-        return self.wrapper.wrap(market_returns, group_by=group_by)
+        return self.wrapper.wrap(market_returns, group_by=group_by, **merge_dicts({}, wrap_kwargs))
 
     @cached_method
-    def total_market_return(self, group_by=None):
+    def total_market_return(self, group_by=None, wrap_kwargs=None):
         &#34;&#34;&#34;Get total market (benchmark) return.&#34;&#34;&#34;
         market_value = to_2d(self.market_value(group_by=group_by), raw=True)
         total_market_return = nb.total_market_return_nb(market_value)
-        return self.wrapper.wrap_reduced(total_market_return, group_by=group_by)
+        wrap_kwargs = merge_dicts(dict(name_or_index=&#39;total_market_return&#39;), wrap_kwargs)
+        return self.wrapper.wrap_reduced(total_market_return, group_by=group_by, **wrap_kwargs)
 
     @cached_method
     def stats(self, column=None, group_by=None, incl_unrealized=None, active_returns=False,
-              in_sim_order=False, agg_func=lambda x: x.mean(axis=0), **kwargs):
+              in_sim_order=False, agg_func=_mean_agg_func, wrap_kwargs=None, **kwargs):
         &#34;&#34;&#34;Compute various statistics on this portfolio.
 
         `kwargs` will be passed to each `vectorbt.returns.accessors.ReturnsAccessor` method.
@@ -4922,6 +4978,9 @@ The <code>__init__</code> method is reserved for indexing purposes.</p>
         !!! note
             Use `column` only if caching is enabled, otherwise it may re-compute the same
             objects multiple times.&#34;&#34;&#34;
+        if self.wrapper.freq is None:
+            raise ValueError(&#34;Couldn&#39;t parse the frequency of index. You must set `freq`.&#34;)
+
         # Pre-calculate
         trades = self.get_trades(group_by=group_by)
         if incl_unrealized is None:
@@ -4953,8 +5012,8 @@ The <code>__init__</code> method is reserved for indexing purposes.</p>
             &#39;Best Trade [%]&#39;: trades.returns.max() * 100,
             &#39;Worst Trade [%]&#39;: trades.returns.min() * 100,
             &#39;Avg. Trade [%]&#39;: trades.returns.mean() * 100,
-            &#39;Max. Trade Duration&#39;: trades.duration.max(time_units=True),
-            &#39;Avg. Trade Duration&#39;: trades.duration.mean(time_units=True),
+            &#39;Max. Trade Duration&#39;: trades.duration.max(wrap_kwargs=dict(time_units=True)),
+            &#39;Avg. Trade Duration&#39;: trades.duration.mean(wrap_kwargs=dict(time_units=True)),
             &#39;Expectancy&#39;: trades.expectancy(),
             &#39;SQN&#39;: trades.sqn(),
             &#39;Gross Exposure&#39;: self.gross_exposure(group_by=group_by).mean(),
@@ -4964,19 +5023,25 @@ The <code>__init__</code> method is reserved for indexing purposes.</p>
         }, index=self.wrapper.grouper.get_columns(group_by=group_by))
 
         # Select columns or reduce
-        if stats_df.shape[0] == 1:
-            return self.wrapper.wrap_reduced(stats_df.iloc[0], index=stats_df.columns)
+        if self.wrapper.get_ndim(group_by=group_by) == 1:
+            wrap_kwargs = merge_dicts(dict(name_or_index=stats_df.columns), wrap_kwargs)
+            return self.wrapper.wrap_reduced(stats_df.iloc[0], group_by=group_by, **wrap_kwargs)
         if column is not None:
             return stats_df.loc[column]
         if agg_func is not None:
-            agg_stats_sr = pd.Series(index=stats_df.columns, name=agg_func.__name__)
+            if agg_func == _mean_agg_func:
+                warnings.warn(&#34;Taking mean across columns. To return a DataFrame, pass agg_func=None.&#34;, stacklevel=2)
+                func_name = &#39;stats_mean&#39;
+            else:
+                func_name = &#39;stats_&#39; + agg_func.__name__
+            agg_stats_sr = pd.Series(index=stats_df.columns, name=func_name)
             agg_stats_sr.iloc[:3] = stats_df.iloc[0, :3]
             agg_stats_sr.iloc[3:] = agg_func(stats_df.iloc[:, 3:])
             return agg_stats_sr
         return stats_df
 
     def returns_stats(self, column=None, group_by=None, active_returns=False, in_sim_order=False,
-                      agg_func=lambda x: x.mean(axis=0), year_freq=None, **kwargs):
+                      agg_func=_mean_agg_func, year_freq=None, **kwargs):
         &#34;&#34;&#34;Compute various statistics on returns of this portfolio.
 
         For keyword arguments and notes, see `Portfolio.stats`.
@@ -5000,7 +5065,12 @@ The <code>__init__</code> method is reserved for indexing purposes.</p>
         if column is not None:
             return stats_obj.loc[column]
         if agg_func is not None:
-            agg_stats_sr = pd.Series(index=stats_obj.columns, name=agg_func.__name__)
+            if agg_func == _mean_agg_func:
+                warnings.warn(&#34;Taking mean across columns. To return a DataFrame, pass agg_func=None.&#34;, stacklevel=2)
+                func_name = &#39;stats_mean&#39;
+            else:
+                func_name = &#39;stats_&#39; + agg_func.__name__
+            agg_stats_sr = pd.Series(index=stats_obj.columns, name=func_name)
             agg_stats_sr.iloc[:3] = stats_obj.iloc[0, :3]
             agg_stats_sr.iloc[3:] = agg_func(stats_obj.iloc[:, 3:])
             return agg_stats_sr
@@ -5087,9 +5157,17 @@ The <code>__init__</code> method is reserved for indexing purposes.</p>
                 * a subplot name, as listed in `Portfolio.subplot_settings`
                 * a tuple of a subplot name and a dict as in `Portfolio.subplot_settings` but with an
                     additional optional key `plot_func`. The plot function should accept current portfolio
-                    object (with column already selected) and optionally other keyword arguments.
-                    Will pass `row`, `col`, and other subplot-dependent arguments if they can be found
-                    in the function&#39;s signature.
+                    object (with column already selected), other keyword arguments (optionally), and
+                    the figure object `fig` as the last keyword argument. It will also pass the following
+                    arguments if any of them can be found in the function&#39;s signature:
+
+                    * `add_trace_kwargs`
+                    * `xref`
+                    * `yref`
+                    * `xaxis`
+                    * `yaxis`
+                    * `x_domain`
+                    * `y_domain`
             column (str): Name of the column/group to plot.
 
                 Takes effect if portfolio contains multiple columns.
@@ -5153,8 +5231,7 @@ The <code>__init__</code> method is reserved for indexing purposes.</p>
 
         ![](/vectorbt/docs/img/portfolio_plot_drawdowns.png)
 
-        You can also create a custom subplot, either by providing a function or
-        by creating a placeholder that can be written later:
+        You can also create a custom subplot by creating a placeholder that can be written later:
 
         ```python-repl
         &gt;&gt;&gt; fig = portfolio.plot(subplots=[
@@ -5166,6 +5243,22 @@ The <code>__init__</code> method is reserved for indexing purposes.</p>
         ... ])
 
         &gt;&gt;&gt; size.rename(&#39;Order Size&#39;).vbt.plot(add_trace_kwargs=dict(row=2, col=1), fig=fig)
+        ```
+
+        Alternatively, you can pass a plot function:
+
+        ```python-repl
+        &gt;&gt;&gt; def plot_order_size(portfolio, add_trace_kwargs=None, fig=None):
+        ...     size.rename(&#39;Order Size&#39;).vbt.plot(add_trace_kwargs=add_trace_kwargs, fig=fig)
+
+        &gt;&gt;&gt; portfolio.plot(subplots=[
+        ...     &#39;orders&#39;,
+        ...     (&#39;order_size&#39;, dict(
+        ...         title=&#39;Order Size&#39;,
+        ...         can_plot_groups=False,
+        ...         plot_func=plot_order_size
+        ...     ))
+        ... ])
         ```
 
         ![](/vectorbt/docs/img/portfolio_plot_custom.png)
@@ -5274,9 +5367,10 @@ The <code>__init__</code> method is reserved for indexing purposes.</p>
             ), hline_shape_kwargs))
 
         def _get_arg_names(method):
-            sig = signature(method)
-            arg_names = [p.name for p in sig.parameters.values() if p.kind == p.POSITIONAL_OR_KEYWORD]
-            return arg_names
+            return [
+                p.name for p in signature(method).parameters.values()
+                if p.kind != p.VAR_POSITIONAL and p.kind != p.VAR_KEYWORD
+            ]
 
         def _extract_method_kwargs(method, kwargs):
             arg_names = _get_arg_names(method)
@@ -6984,8 +7078,8 @@ def from_orders(cls, close, size, size_type=None, direction=None, price=None, fe
 <div class="desc"><p>Simulate portfolio from random entry and exit signals.</p>
 <p>Generates signals based either on the number of signals <code>n</code> or the probability
 of encountering a signal <code>prob</code>.</p>
-<p>If <code>n</code> is set, see <code><a title="vectorbt.signals.basic.RAND" href="../signals/basic.html#vectorbt.signals.basic.RAND">RAND</a></code>.
-If <code>prob</code> is set, see <code><a title="vectorbt.signals.basic.RPROB" href="../signals/basic.html#vectorbt.signals.basic.RPROB">RPROB</a></code>.</p>
+<p>If <code>n</code> is set, see <code><a title="vectorbt.signals.generators.RAND" href="../signals/generators.html#vectorbt.signals.generators.RAND">RAND</a></code>.
+If <code>prob</code> is set, see <code><a title="vectorbt.signals.generators.RPROB" href="../signals/generators.html#vectorbt.signals.generators.RPROB">RPROB</a></code>.</p>
 <p>Based on <code><a title="vectorbt.portfolio.base.Portfolio.from_signals" href="#vectorbt.portfolio.base.Portfolio.from_signals">Portfolio.from_signals()</a></code>.</p></div>
 <details class="source">
 <summary>
@@ -6999,8 +7093,8 @@ def from_random(cls, close, n=None, prob=None, entry_prob=None, exit_prob=None,
     Generates signals based either on the number of signals `n` or the probability
     of encountering a signal `prob`.
 
-    If `n` is set, see `vectorbt.signals.basic.RAND`.
-    If `prob` is set, see `vectorbt.signals.basic.RPROB`.
+    If `n` is set, see `vectorbt.signals.generators.RAND`.
+    If `prob` is set, see `vectorbt.signals.generators.RPROB`.
 
     Based on `Portfolio.from_signals`.&#34;&#34;&#34;
     from vectorbt import settings
@@ -7713,9 +7807,9 @@ def from_signals(cls, close, entries, exits, size=None, size_type=None, directio
 <span>Expand source code</span>
 </summary>
 <pre><code class="python">@property
-def call_seq(self):
+def call_seq(self, wrap_kwargs=None):
     &#34;&#34;&#34;Sequence of calls per row and group.&#34;&#34;&#34;
-    return self.wrapper.wrap(self._call_seq, group_by=False)</code></pre>
+    return self.wrapper.wrap(self._call_seq, group_by=False, **merge_dicts({}, wrap_kwargs))</code></pre>
 </details>
 </dd>
 <dt id="vectorbt.portfolio.base.Portfolio.cash_sharing"><code class="name">var <span class="ident fname">cash_sharing</span></code></dt>
@@ -7944,7 +8038,7 @@ def use_filled_close(self):
 <h3 class="section-subtitle">Methods</h3>
 <dl>
 <dt id="vectorbt.portfolio.base.Portfolio.active_returns"><code class="name flex">
-<span>def <span class="ident fname">active_returns</span></span>(<span>self, group_by=None)</span>
+<span>def <span class="ident fname">active_returns</span></span>(<span>self, group_by=None, wrap_kwargs=None)</span>
 </code></dt>
 <dd>
 <div class="desc"><p>Get active return series per column/group.</p>
@@ -7957,7 +8051,7 @@ all in and keeping available cash at zero.</p></div>
 <span>Expand source code</span>
 </summary>
 <pre><code class="python">@cached_method
-def active_returns(self, group_by=None):
+def active_returns(self, group_by=None, wrap_kwargs=None):
     &#34;&#34;&#34;Get active return series per column/group.
 
     This type of returns is based solely on cash flows and holding value rather than portfolio value.
@@ -7967,7 +8061,7 @@ def active_returns(self, group_by=None):
     cash_flow = to_2d(self.cash_flow(group_by=group_by), raw=True)
     holding_value = to_2d(self.holding_value(group_by=group_by), raw=True)
     active_returns = nb.active_returns_nb(cash_flow, holding_value)
-    return self.wrapper.wrap(active_returns, group_by=group_by)</code></pre>
+    return self.wrapper.wrap(active_returns, group_by=group_by, **merge_dicts({}, wrap_kwargs))</code></pre>
 </details>
 </dd>
 <dt id="vectorbt.portfolio.base.Portfolio.alpha"><code class="name flex">
@@ -8244,7 +8338,7 @@ def active_returns(self, group_by=None):
 </details>
 </dd>
 <dt id="vectorbt.portfolio.base.Portfolio.cash"><code class="name flex">
-<span>def <span class="ident fname">cash</span></span>(<span>self, group_by=None, in_sim_order=False, short_cash=True)</span>
+<span>def <span class="ident fname">cash</span></span>(<span>self, group_by=None, in_sim_order=False, short_cash=True, wrap_kwargs=None)</span>
 </code></dt>
 <dd>
 <div class="desc"><p>Get cash balance series per column/group.</p></div>
@@ -8253,7 +8347,7 @@ def active_returns(self, group_by=None):
 <span>Expand source code</span>
 </summary>
 <pre><code class="python">@cached_method
-def cash(self, group_by=None, in_sim_order=False, short_cash=True):
+def cash(self, group_by=None, in_sim_order=False, short_cash=True, wrap_kwargs=None):
     &#34;&#34;&#34;Get cash balance series per column/group.&#34;&#34;&#34;
     if in_sim_order and not self.cash_sharing:
         raise ValueError(&#34;Cash sharing must be enabled for in_sim_order=True&#34;)
@@ -8277,11 +8371,11 @@ def cash(self, group_by=None, in_sim_order=False, short_cash=True):
         else:
             init_cash = to_1d(self.get_init_cash(group_by=False), raw=True)
             cash = nb.cash_nb(cash_flow, group_lens, init_cash)
-    return self.wrapper.wrap(cash, group_by=group_by)</code></pre>
+    return self.wrapper.wrap(cash, group_by=group_by, **merge_dicts({}, wrap_kwargs))</code></pre>
 </details>
 </dd>
 <dt id="vectorbt.portfolio.base.Portfolio.cash_flow"><code class="name flex">
-<span>def <span class="ident fname">cash_flow</span></span>(<span>self, group_by=None, short_cash=True)</span>
+<span>def <span class="ident fname">cash_flow</span></span>(<span>self, group_by=None, short_cash=True, wrap_kwargs=None)</span>
 </code></dt>
 <dd>
 <div class="desc"><p>Get cash flow series per column/group.</p>
@@ -8292,7 +8386,7 @@ because an operation always costs money.</p></div>
 <span>Expand source code</span>
 </summary>
 <pre><code class="python">@cached_method
-def cash_flow(self, group_by=None, short_cash=True):
+def cash_flow(self, group_by=None, short_cash=True, wrap_kwargs=None):
     &#34;&#34;&#34;Get cash flow series per column/group.
 
     When `short_cash` is set to False, cash never goes above the initial level,
@@ -8308,7 +8402,7 @@ def cash_flow(self, group_by=None, short_cash=True):
             self.orders.col_mapper.col_map,
             short_cash
         )
-    return self.wrapper.wrap(cash_flow, group_by=group_by)</code></pre>
+    return self.wrapper.wrap(cash_flow, group_by=group_by, **merge_dicts({}, wrap_kwargs))</code></pre>
 </details>
 </dd>
 <dt id="vectorbt.portfolio.base.Portfolio.conditional_value_at_risk"><code class="name flex">
@@ -8585,7 +8679,7 @@ def cash_flow(self, group_by=None, short_cash=True):
 </details>
 </dd>
 <dt id="vectorbt.portfolio.base.Portfolio.fill_close"><code class="name flex">
-<span>def <span class="ident fname">fill_close</span></span>(<span>self, ffill=True, bfill=True)</span>
+<span>def <span class="ident fname">fill_close</span></span>(<span>self, ffill=True, bfill=True, wrap_kwargs=None)</span>
 </code></dt>
 <dd>
 <div class="desc"><p>Fill NaN values of <code><a title="vectorbt.portfolio.base.Portfolio.close" href="#vectorbt.portfolio.base.Portfolio.close">Portfolio.close</a></code>.
@@ -8595,7 +8689,7 @@ Use <code>ffill</code> and <code>bfill</code> to fill forwards and backwards res
 <span>Expand source code</span>
 </summary>
 <pre><code class="python">@cached_method
-def fill_close(self, ffill=True, bfill=True):
+def fill_close(self, ffill=True, bfill=True, wrap_kwargs=None):
     &#34;&#34;&#34;Fill NaN values of `Portfolio.close`.
     Use `ffill` and `bfill` to fill forwards and backwards respectively.&#34;&#34;&#34;
     close = to_2d(self.close, raw=True)
@@ -8603,11 +8697,11 @@ def fill_close(self, ffill=True, bfill=True):
         close = generic_nb.ffill_nb(close)
     if bfill and np.any(np.isnan(close[0, :])):
         close = generic_nb.ffill_nb(close[::-1, :])[::-1, :]
-    return self.wrapper.wrap(close, group_by=False)</code></pre>
+    return self.wrapper.wrap(close, group_by=False, **merge_dicts({}, wrap_kwargs))</code></pre>
 </details>
 </dd>
 <dt id="vectorbt.portfolio.base.Portfolio.final_value"><code class="name flex">
-<span>def <span class="ident fname">final_value</span></span>(<span>self, group_by=None)</span>
+<span>def <span class="ident fname">final_value</span></span>(<span>self, group_by=None, wrap_kwargs=None)</span>
 </code></dt>
 <dd>
 <div class="desc"><p>Get total profit per column/group.</p></div>
@@ -8616,12 +8710,13 @@ def fill_close(self, ffill=True, bfill=True):
 <span>Expand source code</span>
 </summary>
 <pre><code class="python">@cached_method
-def final_value(self, group_by=None):
+def final_value(self, group_by=None, wrap_kwargs=None):
     &#34;&#34;&#34;Get total profit per column/group.&#34;&#34;&#34;
     init_cash = to_1d(self.get_init_cash(group_by=group_by), raw=True)
     total_profit = to_1d(self.total_profit(group_by=group_by), raw=True)
     final_value = nb.final_value_nb(total_profit, init_cash)
-    return self.wrapper.wrap_reduced(final_value, group_by=group_by)</code></pre>
+    wrap_kwargs = merge_dicts(dict(name_or_index=&#39;final_value&#39;), wrap_kwargs)
+    return self.wrapper.wrap_reduced(final_value, group_by=group_by, **wrap_kwargs)</code></pre>
 </details>
 </dd>
 <dt id="vectorbt.portfolio.base.Portfolio.get_drawdowns"><code class="name flex">
@@ -8646,7 +8741,7 @@ def get_drawdowns(self, **kwargs):
 </details>
 </dd>
 <dt id="vectorbt.portfolio.base.Portfolio.get_init_cash"><code class="name flex">
-<span>def <span class="ident fname">get_init_cash</span></span>(<span>self, group_by=None)</span>
+<span>def <span class="ident fname">get_init_cash</span></span>(<span>self, group_by=None, wrap_kwargs=None)</span>
 </code></dt>
 <dd>
 <div class="desc"><p>Initial amount of cash per column/group with default arguments.</p>
@@ -8661,7 +8756,7 @@ enable smooth calculation of returns.</p>
 <span>Expand source code</span>
 </summary>
 <pre><code class="python">@cached_method
-def get_init_cash(self, group_by=None):
+def get_init_cash(self, group_by=None, wrap_kwargs=None):
     &#34;&#34;&#34;Initial amount of cash per column/group with default arguments.
 
     !!! note
@@ -8682,7 +8777,8 @@ def get_init_cash(self, group_by=None):
         else:
             group_lens = self.wrapper.grouper.get_group_lens()
             init_cash = nb.init_cash_nb(init_cash, group_lens, self.cash_sharing)
-    return self.wrapper.wrap_reduced(init_cash, group_by=group_by)</code></pre>
+    wrap_kwargs = merge_dicts(dict(name_or_index=&#39;init_cash&#39;), wrap_kwargs)
+    return self.wrapper.wrap_reduced(init_cash, group_by=group_by, **wrap_kwargs)</code></pre>
 </details>
 </dd>
 <dt id="vectorbt.portfolio.base.Portfolio.get_logs"><code class="name flex">
@@ -8754,7 +8850,7 @@ def get_init_cash(self, group_by=None):
 </details>
 </dd>
 <dt id="vectorbt.portfolio.base.Portfolio.gross_exposure"><code class="name flex">
-<span>def <span class="ident fname">gross_exposure</span></span>(<span>self, direction='all', group_by=None)</span>
+<span>def <span class="ident fname">gross_exposure</span></span>(<span>self, direction='all', group_by=None, wrap_kwargs=None)</span>
 </code></dt>
 <dd>
 <div class="desc"><p>Get gross exposure.</p></div>
@@ -8763,16 +8859,16 @@ def get_init_cash(self, group_by=None):
 <span>Expand source code</span>
 </summary>
 <pre><code class="python">@cached_method
-def gross_exposure(self, direction=&#39;all&#39;, group_by=None):
+def gross_exposure(self, direction=&#39;all&#39;, group_by=None, wrap_kwargs=None):
     &#34;&#34;&#34;Get gross exposure.&#34;&#34;&#34;
     holding_value = to_2d(self.holding_value(group_by=group_by, direction=direction), raw=True)
     cash = to_2d(self.cash(group_by=group_by, short_cash=False), raw=True)
     gross_exposure = nb.gross_exposure_nb(holding_value, cash)
-    return self.wrapper.wrap(gross_exposure, group_by=group_by)</code></pre>
+    return self.wrapper.wrap(gross_exposure, group_by=group_by, **merge_dicts({}, wrap_kwargs))</code></pre>
 </details>
 </dd>
 <dt id="vectorbt.portfolio.base.Portfolio.holding_value"><code class="name flex">
-<span>def <span class="ident fname">holding_value</span></span>(<span>self, direction='all', group_by=None)</span>
+<span>def <span class="ident fname">holding_value</span></span>(<span>self, direction='all', group_by=None, wrap_kwargs=None)</span>
 </code></dt>
 <dd>
 <div class="desc"><p>Get holding value series per column/group.</p></div>
@@ -8781,7 +8877,7 @@ def gross_exposure(self, direction=&#39;all&#39;, group_by=None):
 <span>Expand source code</span>
 </summary>
 <pre><code class="python">@cached_method
-def holding_value(self, direction=&#39;all&#39;, group_by=None):
+def holding_value(self, direction=&#39;all&#39;, group_by=None, wrap_kwargs=None):
     &#34;&#34;&#34;Get holding value series per column/group.&#34;&#34;&#34;
     direction = convert_str_enum_value(Direction, direction)
     close = to_2d(self.close, raw=True).copy()
@@ -8793,7 +8889,7 @@ def holding_value(self, direction=&#39;all&#39;, group_by=None):
         holding_value = nb.holding_value_grouped_nb(holding_value, group_lens)
     else:
         holding_value = nb.holding_value_nb(close, shares)
-    return self.wrapper.wrap(holding_value, group_by=group_by)</code></pre>
+    return self.wrapper.wrap(holding_value, group_by=group_by, **merge_dicts({}, wrap_kwargs))</code></pre>
 </details>
 </dd>
 <dt id="vectorbt.portfolio.base.Portfolio.information_ratio"><code class="name flex">
@@ -8836,7 +8932,7 @@ def holding_value(self, direction=&#39;all&#39;, group_by=None):
 </details>
 </dd>
 <dt id="vectorbt.portfolio.base.Portfolio.market_returns"><code class="name flex">
-<span>def <span class="ident fname">market_returns</span></span>(<span>self, group_by=None)</span>
+<span>def <span class="ident fname">market_returns</span></span>(<span>self, group_by=None, wrap_kwargs=None)</span>
 </code></dt>
 <dd>
 <div class="desc"><p>Get return series per column/group based on market (benchmark) value.</p></div>
@@ -8845,16 +8941,16 @@ def holding_value(self, direction=&#39;all&#39;, group_by=None):
 <span>Expand source code</span>
 </summary>
 <pre><code class="python">@cached_method
-def market_returns(self, group_by=None):
+def market_returns(self, group_by=None, wrap_kwargs=None):
     &#34;&#34;&#34;Get return series per column/group based on market (benchmark) value.&#34;&#34;&#34;
     market_value = to_2d(self.market_value(group_by=group_by), raw=True)
     init_cash = to_1d(self.get_init_cash(group_by=group_by), raw=True)
     market_returns = nb.returns_nb(market_value, init_cash)
-    return self.wrapper.wrap(market_returns, group_by=group_by)</code></pre>
+    return self.wrapper.wrap(market_returns, group_by=group_by, **merge_dicts({}, wrap_kwargs))</code></pre>
 </details>
 </dd>
 <dt id="vectorbt.portfolio.base.Portfolio.market_value"><code class="name flex">
-<span>def <span class="ident fname">market_value</span></span>(<span>self, group_by=None)</span>
+<span>def <span class="ident fname">market_value</span></span>(<span>self, group_by=None, wrap_kwargs=None)</span>
 </code></dt>
 <dd>
 <div class="desc"><p>Get market (benchmark) value series per column/group.</p>
@@ -8869,7 +8965,7 @@ def market_returns(self, group_by=None):
 <span>Expand source code</span>
 </summary>
 <pre><code class="python">@cached_method
-def market_value(self, group_by=None):
+def market_value(self, group_by=None, wrap_kwargs=None):
     &#34;&#34;&#34;Get market (benchmark) value series per column/group.
 
     If grouped, evenly distributes initial cash among assets in the group.
@@ -8889,7 +8985,7 @@ def market_value(self, group_by=None):
     else:
         init_cash = to_1d(self.get_init_cash(group_by=False), raw=True)
         market_value = nb.market_value_nb(close, init_cash)
-    return self.wrapper.wrap(market_value, group_by=group_by)</code></pre>
+    return self.wrapper.wrap(market_value, group_by=group_by, **merge_dicts({}, wrap_kwargs))</code></pre>
 </details>
 </dd>
 <dt id="vectorbt.portfolio.base.Portfolio.max_drawdown"><code class="name flex">
@@ -8932,7 +9028,7 @@ def market_value(self, group_by=None):
 </details>
 </dd>
 <dt id="vectorbt.portfolio.base.Portfolio.net_exposure"><code class="name flex">
-<span>def <span class="ident fname">net_exposure</span></span>(<span>self, group_by=None)</span>
+<span>def <span class="ident fname">net_exposure</span></span>(<span>self, group_by=None, wrap_kwargs=None)</span>
 </code></dt>
 <dd>
 <div class="desc"><p>Get net exposure.</p></div>
@@ -8941,12 +9037,12 @@ def market_value(self, group_by=None):
 <span>Expand source code</span>
 </summary>
 <pre><code class="python">@cached_method
-def net_exposure(self, group_by=None):
+def net_exposure(self, group_by=None, wrap_kwargs=None):
     &#34;&#34;&#34;Get net exposure.&#34;&#34;&#34;
     long_exposure = to_2d(self.gross_exposure(direction=&#39;longonly&#39;, group_by=group_by), raw=True)
     short_exposure = to_2d(self.gross_exposure(direction=&#39;shortonly&#39;, group_by=group_by), raw=True)
     net_exposure = long_exposure - short_exposure
-    return self.wrapper.wrap(net_exposure, group_by=group_by)</code></pre>
+    return self.wrapper.wrap(net_exposure, group_by=group_by, **merge_dicts({}, wrap_kwargs))</code></pre>
 </details>
 </dd>
 <dt id="vectorbt.portfolio.base.Portfolio.omega_ratio"><code class="name flex">
@@ -9001,11 +9097,22 @@ def net_exposure(self, group_by=None):
 <p>Each element can be either:</p>
 <ul>
 <li>a subplot name, as listed in <code><a title="vectorbt.portfolio.base.Portfolio.subplot_settings" href="#vectorbt.portfolio.base.Portfolio.subplot_settings">Portfolio.subplot_settings</a></code></li>
-<li>a tuple of a subplot name and a dict as in <code><a title="vectorbt.portfolio.base.Portfolio.subplot_settings" href="#vectorbt.portfolio.base.Portfolio.subplot_settings">Portfolio.subplot_settings</a></code> but with an
+<li>
+<p>a tuple of a subplot name and a dict as in <code><a title="vectorbt.portfolio.base.Portfolio.subplot_settings" href="#vectorbt.portfolio.base.Portfolio.subplot_settings">Portfolio.subplot_settings</a></code> but with an
 additional optional key <code>plot_func</code>. The plot function should accept current portfolio
-object (with column already selected) and optionally other keyword arguments.
-Will pass <code>row</code>, <code>col</code>, and other subplot-dependent arguments if they can be found
-in the function's signature.</li>
+object (with column already selected), other keyword arguments (optionally), and
+the figure object <code>fig</code> as the last keyword argument. It will also pass the following
+arguments if any of them can be found in the function's signature:</p>
+<ul>
+<li><code>add_trace_kwargs</code></li>
+<li><code>xref</code></li>
+<li><code>yref</code></li>
+<li><code>xaxis</code></li>
+<li><code>yaxis</code></li>
+<li><code>x_domain</code></li>
+<li><code>y_domain</code></li>
+</ul>
+</li>
 </ul>
 </dd>
 <dt><strong><code>column</code></strong> :&ensp;<code>str</code></dt>
@@ -9075,8 +9182,7 @@ Other keyword arguments are used to update layout of the figure.</p>
 ... )
 </code></pre>
 <p><img alt="" src="/vectorbt/docs/img/portfolio_plot_drawdowns.png"></p>
-<p>You can also create a custom subplot, either by providing a function or
-by creating a placeholder that can be written later:</p>
+<p>You can also create a custom subplot by creating a placeholder that can be written later:</p>
 <pre><code class="language-python-repl">&gt;&gt;&gt; fig = portfolio.plot(subplots=[
 ...     'orders',
 ...     ('order_size', dict(
@@ -9086,6 +9192,19 @@ by creating a placeholder that can be written later:</p>
 ... ])
 
 &gt;&gt;&gt; size.rename('Order Size').vbt.plot(add_trace_kwargs=dict(row=2, col=1), fig=fig)
+</code></pre>
+<p>Alternatively, you can pass a plot function:</p>
+<pre><code class="language-python-repl">&gt;&gt;&gt; def plot_order_size(portfolio, add_trace_kwargs=None, fig=None):
+...     size.rename('Order Size').vbt.plot(add_trace_kwargs=add_trace_kwargs, fig=fig)
+
+&gt;&gt;&gt; portfolio.plot(subplots=[
+...     'orders',
+...     ('order_size', dict(
+...         title='Order Size',
+...         can_plot_groups=False,
+...         plot_func=plot_order_size
+...     ))
+... ])
 </code></pre>
 <p><img alt="" src="/vectorbt/docs/img/portfolio_plot_custom.png"></p></div>
 <details class="source">
@@ -9112,9 +9231,17 @@ by creating a placeholder that can be written later:</p>
             * a subplot name, as listed in `Portfolio.subplot_settings`
             * a tuple of a subplot name and a dict as in `Portfolio.subplot_settings` but with an
                 additional optional key `plot_func`. The plot function should accept current portfolio
-                object (with column already selected) and optionally other keyword arguments.
-                Will pass `row`, `col`, and other subplot-dependent arguments if they can be found
-                in the function&#39;s signature.
+                object (with column already selected), other keyword arguments (optionally), and
+                the figure object `fig` as the last keyword argument. It will also pass the following
+                arguments if any of them can be found in the function&#39;s signature:
+
+                * `add_trace_kwargs`
+                * `xref`
+                * `yref`
+                * `xaxis`
+                * `yaxis`
+                * `x_domain`
+                * `y_domain`
         column (str): Name of the column/group to plot.
 
             Takes effect if portfolio contains multiple columns.
@@ -9178,8 +9305,7 @@ by creating a placeholder that can be written later:</p>
 
     ![](/vectorbt/docs/img/portfolio_plot_drawdowns.png)
 
-    You can also create a custom subplot, either by providing a function or
-    by creating a placeholder that can be written later:
+    You can also create a custom subplot by creating a placeholder that can be written later:
 
     ```python-repl
     &gt;&gt;&gt; fig = portfolio.plot(subplots=[
@@ -9191,6 +9317,22 @@ by creating a placeholder that can be written later:</p>
     ... ])
 
     &gt;&gt;&gt; size.rename(&#39;Order Size&#39;).vbt.plot(add_trace_kwargs=dict(row=2, col=1), fig=fig)
+    ```
+
+    Alternatively, you can pass a plot function:
+
+    ```python-repl
+    &gt;&gt;&gt; def plot_order_size(portfolio, add_trace_kwargs=None, fig=None):
+    ...     size.rename(&#39;Order Size&#39;).vbt.plot(add_trace_kwargs=add_trace_kwargs, fig=fig)
+
+    &gt;&gt;&gt; portfolio.plot(subplots=[
+    ...     &#39;orders&#39;,
+    ...     (&#39;order_size&#39;, dict(
+    ...         title=&#39;Order Size&#39;,
+    ...         can_plot_groups=False,
+    ...         plot_func=plot_order_size
+    ...     ))
+    ... ])
     ```
 
     ![](/vectorbt/docs/img/portfolio_plot_custom.png)
@@ -9299,9 +9441,10 @@ by creating a placeholder that can be written later:</p>
         ), hline_shape_kwargs))
 
     def _get_arg_names(method):
-        sig = signature(method)
-        arg_names = [p.name for p in sig.parameters.values() if p.kind == p.POSITIONAL_OR_KEYWORD]
-        return arg_names
+        return [
+            p.name for p in signature(method).parameters.values()
+            if p.kind != p.VAR_POSITIONAL and p.kind != p.VAR_KEYWORD
+        ]
 
     def _extract_method_kwargs(method, kwargs):
         arg_names = _get_arg_names(method)
@@ -9685,7 +9828,7 @@ by creating a placeholder that can be written later:</p>
 </details>
 </dd>
 <dt id="vectorbt.portfolio.base.Portfolio.pos_coverage"><code class="name flex">
-<span>def <span class="ident fname">pos_coverage</span></span>(<span>self, direction='all', group_by=None)</span>
+<span>def <span class="ident fname">pos_coverage</span></span>(<span>self, direction='all', group_by=None, wrap_kwargs=None)</span>
 </code></dt>
 <dd>
 <div class="desc"><p>Get position coverage per column/group.</p></div>
@@ -9694,7 +9837,7 @@ by creating a placeholder that can be written later:</p>
 <span>Expand source code</span>
 </summary>
 <pre><code class="python">@cached_method
-def pos_coverage(self, direction=&#39;all&#39;, group_by=None):
+def pos_coverage(self, direction=&#39;all&#39;, group_by=None, wrap_kwargs=None):
     &#34;&#34;&#34;Get position coverage per column/group.&#34;&#34;&#34;
     direction = convert_str_enum_value(Direction, direction)
     shares = to_2d(self.shares(direction=direction), raw=True)
@@ -9704,11 +9847,12 @@ def pos_coverage(self, direction=&#39;all&#39;, group_by=None):
         pos_coverage = nb.pos_coverage_grouped_nb(pos_mask, group_lens)
     else:
         pos_coverage = np.mean(shares != 0, axis=0)
-    return self.wrapper.wrap_reduced(pos_coverage, group_by=group_by)</code></pre>
+    wrap_kwargs = merge_dicts(dict(name_or_index=&#39;pos_coverage&#39;), wrap_kwargs)
+    return self.wrapper.wrap_reduced(pos_coverage, group_by=group_by, **wrap_kwargs)</code></pre>
 </details>
 </dd>
 <dt id="vectorbt.portfolio.base.Portfolio.pos_mask"><code class="name flex">
-<span>def <span class="ident fname">pos_mask</span></span>(<span>self, direction='all', group_by=None)</span>
+<span>def <span class="ident fname">pos_mask</span></span>(<span>self, direction='all', group_by=None, wrap_kwargs=None)</span>
 </code></dt>
 <dd>
 <div class="desc"><p>Get position mask per column/group.</p></div>
@@ -9717,7 +9861,7 @@ def pos_coverage(self, direction=&#39;all&#39;, group_by=None):
 <span>Expand source code</span>
 </summary>
 <pre><code class="python">@cached_method
-def pos_mask(self, direction=&#39;all&#39;, group_by=None):
+def pos_mask(self, direction=&#39;all&#39;, group_by=None, wrap_kwargs=None):
     &#34;&#34;&#34;Get position mask per column/group.&#34;&#34;&#34;
     direction = convert_str_enum_value(Direction, direction)
     shares = to_2d(self.shares(direction=direction), raw=True)
@@ -9727,7 +9871,7 @@ def pos_mask(self, direction=&#39;all&#39;, group_by=None):
         pos_mask = nb.pos_mask_grouped_nb(pos_mask, group_lens)
     else:
         pos_mask = shares != 0
-    return self.wrapper.wrap(pos_mask, group_by=group_by)</code></pre>
+    return self.wrapper.wrap(pos_mask, group_by=group_by, **merge_dicts({}, wrap_kwargs))</code></pre>
 </details>
 </dd>
 <dt id="vectorbt.portfolio.base.Portfolio.regroup"><code class="name flex">
@@ -9751,7 +9895,7 @@ def pos_mask(self, direction=&#39;all&#39;, group_by=None):
 </details>
 </dd>
 <dt id="vectorbt.portfolio.base.Portfolio.returns"><code class="name flex">
-<span>def <span class="ident fname">returns</span></span>(<span>self, group_by=None, in_sim_order=False)</span>
+<span>def <span class="ident fname">returns</span></span>(<span>self, group_by=None, in_sim_order=False, wrap_kwargs=None)</span>
 </code></dt>
 <dd>
 <div class="desc"><p>Get return series per column/group based on portfolio value.</p></div>
@@ -9760,7 +9904,7 @@ def pos_mask(self, direction=&#39;all&#39;, group_by=None):
 <span>Expand source code</span>
 </summary>
 <pre><code class="python">@cached_method
-def returns(self, group_by=None, in_sim_order=False):
+def returns(self, group_by=None, in_sim_order=False, wrap_kwargs=None):
     &#34;&#34;&#34;Get return series per column/group based on portfolio value.&#34;&#34;&#34;
     value = to_2d(self.value(group_by=group_by, in_sim_order=in_sim_order), raw=True)
     if self.wrapper.grouper.is_grouping_disabled(group_by=group_by) and in_sim_order:
@@ -9771,11 +9915,11 @@ def returns(self, group_by=None, in_sim_order=False):
     else:
         init_cash = to_1d(self.get_init_cash(group_by=group_by), raw=True)
         returns = nb.returns_nb(value, init_cash)
-    return self.wrapper.wrap(returns, group_by=group_by)</code></pre>
+    return self.wrapper.wrap(returns, group_by=group_by, **merge_dicts({}, wrap_kwargs))</code></pre>
 </details>
 </dd>
 <dt id="vectorbt.portfolio.base.Portfolio.returns_stats"><code class="name flex">
-<span>def <span class="ident fname">returns_stats</span></span>(<span>self, column=None, group_by=None, active_returns=False, in_sim_order=False, agg_func=&lt;function Portfolio.&lt;lambda&gt;&gt;, year_freq=None, **kwargs)</span>
+<span>def <span class="ident fname">returns_stats</span></span>(<span>self, column=None, group_by=None, active_returns=False, in_sim_order=False, agg_func=&lt;function _mean_agg_func&gt;, year_freq=None, **kwargs)</span>
 </code></dt>
 <dd>
 <div class="desc"><p>Compute various statistics on returns of this portfolio.</p>
@@ -9787,7 +9931,7 @@ If <code>benchmark_rets</code> is not set, uses <code><a title="vectorbt.portfol
 <span>Expand source code</span>
 </summary>
 <pre><code class="python">def returns_stats(self, column=None, group_by=None, active_returns=False, in_sim_order=False,
-                  agg_func=lambda x: x.mean(axis=0), year_freq=None, **kwargs):
+                  agg_func=_mean_agg_func, year_freq=None, **kwargs):
     &#34;&#34;&#34;Compute various statistics on returns of this portfolio.
 
     For keyword arguments and notes, see `Portfolio.stats`.
@@ -9811,7 +9955,12 @@ If <code>benchmark_rets</code> is not set, uses <code><a title="vectorbt.portfol
     if column is not None:
         return stats_obj.loc[column]
     if agg_func is not None:
-        agg_stats_sr = pd.Series(index=stats_obj.columns, name=agg_func.__name__)
+        if agg_func == _mean_agg_func:
+            warnings.warn(&#34;Taking mean across columns. To return a DataFrame, pass agg_func=None.&#34;, stacklevel=2)
+            func_name = &#39;stats_mean&#39;
+        else:
+            func_name = &#39;stats_&#39; + agg_func.__name__
+        agg_stats_sr = pd.Series(index=stats_obj.columns, name=func_name)
         agg_stats_sr.iloc[:3] = stats_obj.iloc[0, :3]
         agg_stats_sr.iloc[3:] = agg_func(stats_obj.iloc[:, 3:])
         return agg_stats_sr
@@ -9819,7 +9968,7 @@ If <code>benchmark_rets</code> is not set, uses <code><a title="vectorbt.portfol
 </details>
 </dd>
 <dt id="vectorbt.portfolio.base.Portfolio.share_flow"><code class="name flex">
-<span>def <span class="ident fname">share_flow</span></span>(<span>self, direction='all')</span>
+<span>def <span class="ident fname">share_flow</span></span>(<span>self, direction='all', wrap_kwargs=None)</span>
 </code></dt>
 <dd>
 <div class="desc"><p>Get share flow series per column.</p></div>
@@ -9828,7 +9977,7 @@ If <code>benchmark_rets</code> is not set, uses <code><a title="vectorbt.portfol
 <span>Expand source code</span>
 </summary>
 <pre><code class="python">@cached_method
-def share_flow(self, direction=&#39;all&#39;):
+def share_flow(self, direction=&#39;all&#39;, wrap_kwargs=None):
     &#34;&#34;&#34;Get share flow series per column.&#34;&#34;&#34;
     direction = convert_str_enum_value(Direction, direction)
     share_flow = nb.share_flow_nb(
@@ -9837,11 +9986,11 @@ def share_flow(self, direction=&#39;all&#39;):
         self.orders.col_mapper.col_map,
         direction
     )
-    return self.wrapper.wrap(share_flow, group_by=False)</code></pre>
+    return self.wrapper.wrap(share_flow, group_by=False, **merge_dicts({}, wrap_kwargs))</code></pre>
 </details>
 </dd>
 <dt id="vectorbt.portfolio.base.Portfolio.shares"><code class="name flex">
-<span>def <span class="ident fname">shares</span></span>(<span>self, direction='all')</span>
+<span>def <span class="ident fname">shares</span></span>(<span>self, direction='all', wrap_kwargs=None)</span>
 </code></dt>
 <dd>
 <div class="desc"><p>Get share series per column.</p></div>
@@ -9850,7 +9999,7 @@ def share_flow(self, direction=&#39;all&#39;):
 <span>Expand source code</span>
 </summary>
 <pre><code class="python">@cached_method
-def shares(self, direction=&#39;all&#39;):
+def shares(self, direction=&#39;all&#39;, wrap_kwargs=None):
     &#34;&#34;&#34;Get share series per column.&#34;&#34;&#34;
     direction = convert_str_enum_value(Direction, direction)
     share_flow = to_2d(self.share_flow(direction=&#39;all&#39;), raw=True)
@@ -9859,7 +10008,7 @@ def shares(self, direction=&#39;all&#39;):
         shares = np.where(shares &gt; 0, shares, 0.)
     if direction == Direction.ShortOnly:
         shares = np.where(shares &lt; 0, -shares, 0.)
-    return self.wrapper.wrap(shares, group_by=False)</code></pre>
+    return self.wrapper.wrap(shares, group_by=False, **merge_dicts({}, wrap_kwargs))</code></pre>
 </details>
 </dd>
 <dt id="vectorbt.portfolio.base.Portfolio.sharpe_ratio"><code class="name flex">
@@ -9941,7 +10090,7 @@ def shares(self, direction=&#39;all&#39;):
 </details>
 </dd>
 <dt id="vectorbt.portfolio.base.Portfolio.stats"><code class="name flex">
-<span>def <span class="ident fname">stats</span></span>(<span>self, column=None, group_by=None, incl_unrealized=None, active_returns=False, in_sim_order=False, agg_func=&lt;function Portfolio.&lt;lambda&gt;&gt;, **kwargs)</span>
+<span>def <span class="ident fname">stats</span></span>(<span>self, column=None, group_by=None, incl_unrealized=None, active_returns=False, in_sim_order=False, agg_func=&lt;function _mean_agg_func&gt;, wrap_kwargs=None, **kwargs)</span>
 </code></dt>
 <dd>
 <div class="desc"><p>Compute various statistics on this portfolio.</p>
@@ -9961,7 +10110,7 @@ objects multiple times.</p>
 </summary>
 <pre><code class="python">@cached_method
 def stats(self, column=None, group_by=None, incl_unrealized=None, active_returns=False,
-          in_sim_order=False, agg_func=lambda x: x.mean(axis=0), **kwargs):
+          in_sim_order=False, agg_func=_mean_agg_func, wrap_kwargs=None, **kwargs):
     &#34;&#34;&#34;Compute various statistics on this portfolio.
 
     `kwargs` will be passed to each `vectorbt.returns.accessors.ReturnsAccessor` method.
@@ -9974,6 +10123,9 @@ def stats(self, column=None, group_by=None, incl_unrealized=None, active_returns
     !!! note
         Use `column` only if caching is enabled, otherwise it may re-compute the same
         objects multiple times.&#34;&#34;&#34;
+    if self.wrapper.freq is None:
+        raise ValueError(&#34;Couldn&#39;t parse the frequency of index. You must set `freq`.&#34;)
+
     # Pre-calculate
     trades = self.get_trades(group_by=group_by)
     if incl_unrealized is None:
@@ -10005,8 +10157,8 @@ def stats(self, column=None, group_by=None, incl_unrealized=None, active_returns
         &#39;Best Trade [%]&#39;: trades.returns.max() * 100,
         &#39;Worst Trade [%]&#39;: trades.returns.min() * 100,
         &#39;Avg. Trade [%]&#39;: trades.returns.mean() * 100,
-        &#39;Max. Trade Duration&#39;: trades.duration.max(time_units=True),
-        &#39;Avg. Trade Duration&#39;: trades.duration.mean(time_units=True),
+        &#39;Max. Trade Duration&#39;: trades.duration.max(wrap_kwargs=dict(time_units=True)),
+        &#39;Avg. Trade Duration&#39;: trades.duration.mean(wrap_kwargs=dict(time_units=True)),
         &#39;Expectancy&#39;: trades.expectancy(),
         &#39;SQN&#39;: trades.sqn(),
         &#39;Gross Exposure&#39;: self.gross_exposure(group_by=group_by).mean(),
@@ -10016,12 +10168,18 @@ def stats(self, column=None, group_by=None, incl_unrealized=None, active_returns
     }, index=self.wrapper.grouper.get_columns(group_by=group_by))
 
     # Select columns or reduce
-    if stats_df.shape[0] == 1:
-        return self.wrapper.wrap_reduced(stats_df.iloc[0], index=stats_df.columns)
+    if self.wrapper.get_ndim(group_by=group_by) == 1:
+        wrap_kwargs = merge_dicts(dict(name_or_index=stats_df.columns), wrap_kwargs)
+        return self.wrapper.wrap_reduced(stats_df.iloc[0], group_by=group_by, **wrap_kwargs)
     if column is not None:
         return stats_df.loc[column]
     if agg_func is not None:
-        agg_stats_sr = pd.Series(index=stats_df.columns, name=agg_func.__name__)
+        if agg_func == _mean_agg_func:
+            warnings.warn(&#34;Taking mean across columns. To return a DataFrame, pass agg_func=None.&#34;, stacklevel=2)
+            func_name = &#39;stats_mean&#39;
+        else:
+            func_name = &#39;stats_&#39; + agg_func.__name__
+        agg_stats_sr = pd.Series(index=stats_df.columns, name=func_name)
         agg_stats_sr.iloc[:3] = stats_df.iloc[0, :3]
         agg_stats_sr.iloc[3:] = agg_func(stats_df.iloc[:, 3:])
         return agg_stats_sr
@@ -10068,7 +10226,7 @@ def stats(self, column=None, group_by=None, incl_unrealized=None, active_returns
 </details>
 </dd>
 <dt id="vectorbt.portfolio.base.Portfolio.total_market_return"><code class="name flex">
-<span>def <span class="ident fname">total_market_return</span></span>(<span>self, group_by=None)</span>
+<span>def <span class="ident fname">total_market_return</span></span>(<span>self, group_by=None, wrap_kwargs=None)</span>
 </code></dt>
 <dd>
 <div class="desc"><p>Get total market (benchmark) return.</p></div>
@@ -10077,15 +10235,16 @@ def stats(self, column=None, group_by=None, incl_unrealized=None, active_returns
 <span>Expand source code</span>
 </summary>
 <pre><code class="python">@cached_method
-def total_market_return(self, group_by=None):
+def total_market_return(self, group_by=None, wrap_kwargs=None):
     &#34;&#34;&#34;Get total market (benchmark) return.&#34;&#34;&#34;
     market_value = to_2d(self.market_value(group_by=group_by), raw=True)
     total_market_return = nb.total_market_return_nb(market_value)
-    return self.wrapper.wrap_reduced(total_market_return, group_by=group_by)</code></pre>
+    wrap_kwargs = merge_dicts(dict(name_or_index=&#39;total_market_return&#39;), wrap_kwargs)
+    return self.wrapper.wrap_reduced(total_market_return, group_by=group_by, **wrap_kwargs)</code></pre>
 </details>
 </dd>
 <dt id="vectorbt.portfolio.base.Portfolio.total_profit"><code class="name flex">
-<span>def <span class="ident fname">total_profit</span></span>(<span>self, group_by=None)</span>
+<span>def <span class="ident fname">total_profit</span></span>(<span>self, group_by=None, wrap_kwargs=None)</span>
 </code></dt>
 <dd>
 <div class="desc"><p>Get total profit per column/group.</p>
@@ -10096,7 +10255,7 @@ def total_market_return(self, group_by=None):
 <span>Expand source code</span>
 </summary>
 <pre><code class="python">@cached_method
-def total_profit(self, group_by=None):
+def total_profit(self, group_by=None, wrap_kwargs=None):
     &#34;&#34;&#34;Get total profit per column/group.
 
     Calculated directly from order records (fast).
@@ -10120,11 +10279,12 @@ def total_profit(self, group_by=None):
             self.orders.values,
             self.orders.col_mapper.col_map
         )
-    return self.wrapper.wrap_reduced(total_profit, group_by=group_by)</code></pre>
+    wrap_kwargs = merge_dicts(dict(name_or_index=&#39;total_profit&#39;), wrap_kwargs)
+    return self.wrapper.wrap_reduced(total_profit, group_by=group_by, **wrap_kwargs)</code></pre>
 </details>
 </dd>
 <dt id="vectorbt.portfolio.base.Portfolio.total_return"><code class="name flex">
-<span>def <span class="ident fname">total_return</span></span>(<span>self, group_by=None)</span>
+<span>def <span class="ident fname">total_return</span></span>(<span>self, group_by=None, wrap_kwargs=None)</span>
 </code></dt>
 <dd>
 <div class="desc"><p>Get total profit per column/group.</p></div>
@@ -10133,12 +10293,13 @@ def total_profit(self, group_by=None):
 <span>Expand source code</span>
 </summary>
 <pre><code class="python">@cached_method
-def total_return(self, group_by=None):
+def total_return(self, group_by=None, wrap_kwargs=None):
     &#34;&#34;&#34;Get total profit per column/group.&#34;&#34;&#34;
     init_cash = to_1d(self.get_init_cash(group_by=group_by), raw=True)
     total_profit = to_1d(self.total_profit(group_by=group_by), raw=True)
     total_return = nb.total_return_nb(total_profit, init_cash)
-    return self.wrapper.wrap_reduced(total_return, group_by=group_by)</code></pre>
+    wrap_kwargs = merge_dicts(dict(name_or_index=&#39;total_return&#39;), wrap_kwargs)
+    return self.wrapper.wrap_reduced(total_return, group_by=group_by, **wrap_kwargs)</code></pre>
 </details>
 </dd>
 <dt id="vectorbt.portfolio.base.Portfolio.up_capture"><code class="name flex">
@@ -10181,7 +10342,7 @@ def total_return(self, group_by=None):
 </details>
 </dd>
 <dt id="vectorbt.portfolio.base.Portfolio.value"><code class="name flex">
-<span>def <span class="ident fname">value</span></span>(<span>self, group_by=None, in_sim_order=False)</span>
+<span>def <span class="ident fname">value</span></span>(<span>self, group_by=None, in_sim_order=False, wrap_kwargs=None)</span>
 </code></dt>
 <dd>
 <div class="desc"><p>Get portfolio value series per column/group.</p>
@@ -10197,7 +10358,7 @@ evolved throughout simulation.</p></div>
 <span>Expand source code</span>
 </summary>
 <pre><code class="python">@cached_method
-def value(self, group_by=None, in_sim_order=False):
+def value(self, group_by=None, in_sim_order=False, wrap_kwargs=None):
     &#34;&#34;&#34;Get portfolio value series per column/group.
 
     By default, will generate portfolio value for each asset based on cash flows and thus
@@ -10217,7 +10378,7 @@ def value(self, group_by=None, in_sim_order=False):
         # price of NaN is already addressed by ungrouped_value_nb
     else:
         value = nb.value_nb(cash, holding_value)
-    return self.wrapper.wrap(value, group_by=group_by)</code></pre>
+    return self.wrapper.wrap(value, group_by=group_by, **merge_dicts({}, wrap_kwargs))</code></pre>
 </details>
 </dd>
 <dt id="vectorbt.portfolio.base.Portfolio.value_at_risk"><code class="name flex">

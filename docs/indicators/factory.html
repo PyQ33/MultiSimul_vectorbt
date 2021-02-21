@@ -255,7 +255,7 @@ myma_window               2             3             2             3
 </code></pre>
 <p>This makes accessing rows and columns by labels, integer positions, and parameters much easier.</p>
 <pre><code class="language-python-repl">&gt;&gt;&gt; myma[(2, 'b')]
-&lt;vectorbt.indicators.factory.CustomIndicator at 0x7fa4b3e0c4e0&gt;
+&lt;vectorbt.indicators.factory.Indicator at 0x7fa4b3e0c4e0&gt;
 
 &gt;&gt;&gt; myma[(2, 'b')].ma
 2020-01-01    NaN
@@ -532,7 +532,7 @@ This makes accessing rows and columns by labels, integer positions, and paramete
 
 ```python-repl
 &gt;&gt;&gt; myma[(2, &#39;b&#39;)]
-&lt;vectorbt.indicators.factory.CustomIndicator at 0x7fa4b3e0c4e0&gt;
+&lt;vectorbt.indicators.factory.Indicator at 0x7fa4b3e0c4e0&gt;
 
 &gt;&gt;&gt; myma[(2, &#39;b&#39;)].ma
 2020-01-01    NaN
@@ -555,89 +555,16 @@ from vectorbt.utils import checks
 from vectorbt.utils.decorators import classproperty, cached_property
 from vectorbt.utils.config import merge_dicts
 from vectorbt.utils.random import set_seed
+from vectorbt.utils.params import (
+    to_typed_list,
+    broadcast_params,
+    create_param_product,
+    Default
+)
+from vectorbt.utils.enum import convert_str_enum_value
 from vectorbt.base import index_fns, reshape_fns, combine_fns
 from vectorbt.base.indexing import ParamIndexerFactory
 from vectorbt.base.array_wrapper import ArrayWrapper, Wrapping
-
-
-def to_typed_list(lst):
-    &#34;&#34;&#34;Cast Python list to typed list.
-
-    Direct construction is flawed in Numba 0.52.0.
-    See https://github.com/numba/numba/issues/6651.&#34;&#34;&#34;
-    nb_lst = List()
-    for elem in lst:
-        nb_lst.append(elem)
-    return nb_lst
-
-
-def flatten_param_tuples(param_tuples):
-    &#34;&#34;&#34;Flattens a nested list of tuples using unzipping.&#34;&#34;&#34;
-    param_list = []
-    unzipped_tuples = zip(*param_tuples)
-    for i, unzipped in enumerate(unzipped_tuples):
-        unzipped = list(unzipped)
-        if isinstance(unzipped[0], tuple):
-            param_list.extend(flatten_param_tuples(unzipped))
-        else:
-            param_list.append(unzipped)
-    return param_list
-
-
-def create_param_combs(op_tree, depth=0):
-    &#34;&#34;&#34;Create arbitrary parameter combinations from the operation tree `op_tree`.
-
-    `op_tree` must be a tuple of tuples, each being an instruction to generate parameters.
-    The first element of each tuple should a function that takes remaining elements as arguments.
-    If one of the elements is a tuple, it will be unfolded in the same way.
-
-    ## Example
-
-    ```python-repl
-    &gt;&gt;&gt; import numpy as np
-    &gt;&gt;&gt; from itertools import combinations, product
-
-    &gt;&gt;&gt; create_param_combs((product, (combinations, [0, 1, 2, 3], 2), [4, 5]))
-    [[0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 2, 2],
-     [1, 1, 2, 2, 3, 3, 2, 2, 3, 3, 3, 3],
-     [4, 5, 4, 5, 4, 5, 4, 5, 4, 5, 4, 5]]
-    ```
-    &#34;&#34;&#34;
-    checks.assert_type(op_tree, tuple)
-    new_op_tree = (op_tree[0],)
-    for elem in op_tree[1:]:
-        if isinstance(elem, tuple):
-            new_op_tree += (create_param_combs(elem, depth=depth + 1),)
-        else:
-            new_op_tree += (elem,)
-    out = list(new_op_tree[0](*new_op_tree[1:]))
-    if depth == 0:
-        # do something
-        return flatten_param_tuples(out)
-    return out
-
-
-def broadcast_params(param_list):
-    &#34;&#34;&#34;Broadcast parameters in `param_list`.&#34;&#34;&#34;
-    max_len = max(list(map(len, param_list)))
-    new_param_list = []
-    for i in range(len(param_list)):
-        params = param_list[i]
-        if len(params) &lt; max_len:
-            if len(params) &gt; 1:
-                raise ValueError(&#34;shape mismatch: objects cannot be broadcast to a single shape&#34;)
-            new_params = []
-            for j in range(max_len):
-                new_params.append(params[0])
-            new_param_list.append(list(new_params))
-        else:
-            new_param_list.append(list(params))
-    return new_param_list
-
-
-def create_param_product(param_list):
-    &#34;&#34;&#34;Make Cartesian product out of all params in `param_list`.&#34;&#34;&#34;
-    return list(map(list, zip(*list(itertools.product(*param_list)))))
 
 
 def prepare_params(param_list, param_settings, input_shape=None, to_2d=False):
@@ -645,7 +572,15 @@ def prepare_params(param_list, param_settings, input_shape=None, to_2d=False):
     new_param_list = []
     for i, params in enumerate(param_list):
         _param_settings = param_settings if isinstance(param_settings, dict) else param_settings[i]
-        checks.assert_dict_valid(_param_settings, [[&#39;array_like&#39;, &#39;bc_to_input&#39;, &#39;broadcast_kwargs&#39;]])
+        checks.assert_dict_valid(_param_settings, [[
+            &#39;dtype&#39;,
+            &#39;array_like&#39;,
+            &#39;bc_to_input&#39;,
+            &#39;broadcast_kwargs&#39;
+        ]])
+        dtype = _param_settings.get(&#39;dtype&#39;, None)
+        if checks.is_namedtuple(dtype):
+            params = convert_str_enum_value(dtype, params)
         is_array_like = _param_settings.get(&#39;array_like&#39;, False)
         bc_to_input = _param_settings.get(&#39;bc_to_input&#39;, False)
         broadcast_kwargs = _param_settings.get(&#39;broadcast_kwargs&#39;, dict(require_kwargs=dict(requirements=&#39;W&#39;)))
@@ -703,7 +638,7 @@ def reindex_outputs(new_params, from_params, n_ts_cols):
 
 
 def build_column_hierarchy(param_list, level_names, input_columns, hide_levels=None):
-    &#34;&#34;&#34;For each parameter in `param_list`, create a new column level with parameter values. 
+    &#34;&#34;&#34;For each parameter in `param_list`, create a new column level with parameter values.
     Combine this level with columns `input_columns` using Cartesian product.&#34;&#34;&#34;
     checks.assert_len_equal(param_list, level_names)
     if hide_levels is None:
@@ -1128,16 +1063,6 @@ def run_pipeline(
     return wrapper, input_list, input_mapper, output_list, param_list, mapper_list, other_list
 
 
-class Default:
-    &#34;&#34;&#34;Class for wrapping default values.&#34;&#34;&#34;
-
-    def __repr__(self):
-        return self.value.__repr__()
-
-    def __init__(self, value):
-        self.value = value
-
-
 def perform_init_checks(wrapper, input_list, input_mapper, output_list, param_list,
                         mapper_list, short_name, level_names):
     &#34;&#34;&#34;Perform checks on objects created by running or slicing an indicator.&#34;&#34;&#34;
@@ -1171,10 +1096,10 @@ def combine_objs(obj, other, combine_func, multiple=False, level_name=None, keys
 
 class IndicatorFactory:
     def __init__(self,
-                 class_name=&#39;CustomIndicator&#39;,
+                 class_name=&#39;Custom&#39;,
                  class_docstring=&#39;&#39;,
                  module_name=__name__,
-                 short_name=&#39;custom&#39;,
+                 short_name=None,
                  prepend_name=True,
                  input_names=None,
                  param_names=None,
@@ -1193,6 +1118,8 @@ class IndicatorFactory:
             class_docstring (str): Docstring for the created Python class.
             module_name (str): Specify the module the class originates from.
             short_name (str): A short name of the indicator.
+
+                Defaults to lower-case `class_name`.
             prepend_name (bool): Whether to prepend `short_name` to each parameter level.
             input_names (list of str): A list of names of input time series objects.
             param_names (list of str): A list of names of parameters.
@@ -1238,6 +1165,8 @@ class IndicatorFactory:
         self.module_name = module_name
         checks.assert_type(module_name, str)
 
+        if short_name is None:
+            short_name = class_name.lower()
         self.short_name = short_name
         checks.assert_type(short_name, str)
 
@@ -1289,9 +1218,9 @@ class IndicatorFactory:
 
         # Set up class
         ParamIndexer = ParamIndexerFactory(param_names + ([&#39;tuple&#39;] if len(param_names) &gt; 1 else []))
-        CustomIndicator = type(self.class_name, (Wrapping, ParamIndexer), {})
-        CustomIndicator.__module__ = self.module_name
-        CustomIndicator.__doc__ = self.class_docstring
+        Indicator = type(self.class_name, (Wrapping, ParamIndexer), {})
+        Indicator.__module__ = self.module_name
+        Indicator.__doc__ = self.class_docstring
 
         # Add indexing methods
         def _indexing_func(obj, pd_indexing_func):
@@ -1329,37 +1258,37 @@ class IndicatorFactory:
                 mapper_list=mapper_list
             )
 
-        setattr(CustomIndicator, &#39;_indexing_func&#39;, _indexing_func)
+        setattr(Indicator, &#39;_indexing_func&#39;, _indexing_func)
 
         # Create read-only properties
         prop = property(lambda _self: _self._short_name)
         prop.__doc__ = &#34;Name of the indicator (read-only).&#34;
-        setattr(CustomIndicator, &#39;short_name&#39;, prop)
+        setattr(Indicator, &#39;short_name&#39;, prop)
 
         prop = property(lambda _self: _self._level_names)
         prop.__doc__ = &#34;Column level names corresponding to each parameter (read-only).&#34;
-        setattr(CustomIndicator, &#39;level_names&#39;, prop)
+        setattr(Indicator, &#39;level_names&#39;, prop)
 
         prop = classproperty(lambda _self: input_names)
         prop.__doc__ = &#34;Names of the input time series (read-only).&#34;
-        setattr(CustomIndicator, &#39;input_names&#39;, prop)
+        setattr(Indicator, &#39;input_names&#39;, prop)
 
         prop = classproperty(lambda _self: param_names)
         prop.__doc__ = &#34;Names of the parameters (read-only).&#34;
-        setattr(CustomIndicator, &#39;param_names&#39;, prop)
+        setattr(Indicator, &#39;param_names&#39;, prop)
 
         prop = classproperty(lambda _self: output_names)
         prop.__doc__ = &#34;Names of the output time series (read-only).&#34;
-        setattr(CustomIndicator, &#39;output_names&#39;, prop)
+        setattr(Indicator, &#39;output_names&#39;, prop)
 
         prop = classproperty(lambda _self: output_flags)
         prop.__doc__ = &#34;Dictionary of output flags (read-only).&#34;
-        setattr(CustomIndicator, &#39;output_flags&#39;, prop)
+        setattr(Indicator, &#39;output_flags&#39;, prop)
 
         for param_name in param_names:
             prop = property(lambda _self, param_name=param_name: getattr(_self, f&#39;_{param_name}_array&#39;))
             prop.__doc__ = f&#34;Array of `{param_name}` combinations (read-only).&#34;
-            setattr(CustomIndicator, f&#39;{param_name}_array&#39;, prop)
+            setattr(Indicator, f&#39;{param_name}_array&#39;, prop)
 
         for input_name in input_names:
             def input_prop(_self, input_name=input_name):
@@ -1373,7 +1302,7 @@ class IndicatorFactory:
                 return _self.wrapper.wrap(old_input[:, input_mapper])
 
             input_prop.__name__ = input_name
-            setattr(CustomIndicator, input_name, cached_property(input_prop))
+            setattr(Indicator, input_name, cached_property(input_prop))
 
         for output_name in output_names:
             def output_prop(_self, output_name=output_name):
@@ -1386,7 +1315,7 @@ class IndicatorFactory:
                 if isinstance(_output_flags, (tuple, list)):
                     _output_flags = &#39;, &#39;.join(_output_flags)
                 output_prop.__doc__ += &#34;\n\n&#34; + _output_flags
-            setattr(CustomIndicator, output_name, property(output_prop))
+            setattr(Indicator, output_name, property(output_prop))
 
         # Add __init__ method
         def __init__(_self, wrapper, input_list, input_mapper, output_list, param_list,
@@ -1440,7 +1369,7 @@ class IndicatorFactory:
                 level_names=[*level_names, tuple(level_names)]
             )
 
-        setattr(CustomIndicator, &#39;__init__&#39;, __init__)
+        setattr(Indicator, &#39;__init__&#39;, __init__)
 
         # Add user-defined outputs
         for prop_name, prop in custom_output_funcs.items():
@@ -1449,7 +1378,7 @@ class IndicatorFactory:
             if not isinstance(prop, (property, cached_property)):
                 prop.__name__ = prop_name
                 prop = cached_property(prop)
-            setattr(CustomIndicator, prop_name, prop)
+            setattr(Indicator, prop_name, prop)
 
         # Add comparison &amp; combination methods for all inputs, outputs, and user-defined properties
         for attr_name in all_attr_names:
@@ -1457,22 +1386,15 @@ class IndicatorFactory:
             checks.assert_dict_valid(_attr_settings, [[&#39;dtype&#39;]])
             dtype = _attr_settings.get(&#39;dtype&#39;, np.float_)
 
-            def _isinstance_namedtuple(obj) -&gt; bool:
-                return (
-                        isinstance(obj, tuple) and
-                        hasattr(obj, &#39;_asdict&#39;) and
-                        hasattr(obj, &#39;_fields&#39;)
-                )
-
-            if _isinstance_namedtuple(dtype):
+            if checks.is_namedtuple(dtype):
                 def attr_readable(_self, attr_name=attr_name, enum=dtype):
                     if _self.wrapper.ndim == 1:
                         return getattr(_self, attr_name).map(lambda x: &#39;&#39; if x == -1 else enum._fields[x])
                     return getattr(_self, attr_name).applymap(lambda x: &#39;&#39; if x == -1 else enum._fields[x])
 
-                attr_readable.__qualname__ = f&#39;{CustomIndicator.__name__}.{attr_name}_readable&#39;
+                attr_readable.__qualname__ = f&#39;{Indicator.__name__}.{attr_name}_readable&#39;
                 attr_readable.__doc__ = f&#34;&#34;&#34;{attr_name} in readable format based on enum {dtype}.&#34;&#34;&#34;
-                setattr(CustomIndicator, f&#39;{attr_name}_readable&#39;, property(attr_readable))
+                setattr(Indicator, f&#39;{attr_name}_readable&#39;, property(attr_readable))
 
             elif np.issubdtype(dtype, np.number):
                 def assign_numeric_method(func_name, combine_func, attr_name=attr_name):
@@ -1499,14 +1421,14 @@ class IndicatorFactory:
                             return out.vbt.signals.nst(wait + 1, after_false=after_false)
                         return out
 
-                    numeric_method.__qualname__ = f&#39;{CustomIndicator.__name__}.{attr_name}_{func_name}&#39;
+                    numeric_method.__qualname__ = f&#39;{Indicator.__name__}.{attr_name}_{func_name}&#39;
                     numeric_method.__doc__ = f&#34;&#34;&#34;Return True for each element where `{attr_name}` is {func_name} `other`. 
     
                     Set `crossover` to True to return the first True after crossover. Specify `wait` to return 
                     True only when `{attr_name}` is {func_name} for a number of time steps in a row after crossover.
                 
                     See `vectorbt.indicators.factory.combine_objs`.&#34;&#34;&#34;
-                    setattr(CustomIndicator, f&#39;{attr_name}_{func_name}&#39;, numeric_method)
+                    setattr(Indicator, f&#39;{attr_name}_{func_name}&#39;, numeric_method)
 
                 assign_numeric_method(&#39;above&#39;, np.greater)
                 assign_numeric_method(&#39;below&#39;, np.less)
@@ -1533,17 +1455,17 @@ class IndicatorFactory:
                             **kwargs
                         )
 
-                    bool_method.__qualname__ = f&#39;{CustomIndicator.__name__}.{attr_name}_{func_name}&#39;
+                    bool_method.__qualname__ = f&#39;{Indicator.__name__}.{attr_name}_{func_name}&#39;
                     bool_method.__doc__ = f&#34;&#34;&#34;Return `{attr_name} {func_name.upper()} other`. 
 
                         See `vectorbt.indicators.factory.combine_objs`.&#34;&#34;&#34;
-                    setattr(CustomIndicator, f&#39;{attr_name}_{func_name}&#39;, bool_method)
+                    setattr(Indicator, f&#39;{attr_name}_{func_name}&#39;, bool_method)
 
                 assign_bool_method(&#39;and&#39;, np.logical_and)
                 assign_bool_method(&#39;or&#39;, np.logical_or)
                 assign_bool_method(&#39;xor&#39;, np.logical_xor)
 
-            self.CustomIndicator = CustomIndicator
+            self.Indicator = Indicator
 
     def from_custom_func(self,
                          custom_func,
@@ -1595,7 +1517,7 @@ class IndicatorFactory:
                     Default parameters should be on the right in `param_names`.
 
         Returns:
-            `CustomIndicator`, and optionally other objects that are returned by `custom_func`
+            `Indicator`, and optionally other objects that are returned by `custom_func`
             and exceed `output_names`.
 
         ## Example
@@ -1639,7 +1561,7 @@ class IndicatorFactory:
         2020-01-05  130.0  106.0  140.0  108.0
         ```
         &#34;&#34;&#34;
-        CustomIndicator = self.CustomIndicator
+        Indicator = self.Indicator
 
         short_name = self.short_name
         prepend_name = self.prepend_name
@@ -1749,7 +1671,7 @@ class IndicatorFactory:
                 return (obj, *tuple(other_list))
             return obj
 
-        setattr(CustomIndicator, &#39;_run&#39;, _run)
+        setattr(Indicator, &#39;_run&#39;, _run)
 
         # Add public run method
         # Create function dynamically to provide user with a proper signature
@@ -1822,7 +1744,7 @@ class IndicatorFactory:
 
         run_docstring = create_run_docstring(run_docstring_func)
         run = compile_run_function(&#39;run&#39;, run_docstring, def_run_kwargs)
-        setattr(CustomIndicator, &#39;run&#39;, run)
+        setattr(Indicator, &#39;run&#39;, run)
 
         if len(param_names) &gt; 0:
             # Add private run_combs method
@@ -1922,7 +1844,7 @@ class IndicatorFactory:
                     ))
                 return tuple(instances)
 
-            setattr(CustomIndicator, &#39;_run_combs&#39;, _run_combs)
+            setattr(Indicator, &#39;_run_combs&#39;, _run_combs)
 
             # Add public run_combs method
             def run_combs_docstring_func(class_name, in_ts_str, param_str, out_ts_str):
@@ -1945,9 +1867,9 @@ class IndicatorFactory:
 
             run_combs_docstring = create_run_docstring(run_combs_docstring_func)
             run_combs = compile_run_function(&#39;run_combs&#39;, run_combs_docstring, def_run_combs_kwargs)
-            setattr(CustomIndicator, &#39;run_combs&#39;, run_combs)
+            setattr(Indicator, &#39;run_combs&#39;, run_combs)
 
-        return CustomIndicator
+        return Indicator
 
     def from_apply_func(self, apply_func, cache_func=None, pass_kwargs=None, **kwargs):
         &#34;&#34;&#34;Build indicator class around a custom apply function.
@@ -1993,7 +1915,7 @@ class IndicatorFactory:
             **kwargs: Keyword arguments passed to `IndicatorFactory.from_custom_func`.
 
         Returns:
-            CustomIndicator
+            Indicator
 
         ## Example
 
@@ -2166,7 +2088,7 @@ class IndicatorFactory:
             **kwargs: Keyword arguments passed to `IndicatorFactory.from_apply_func`.
 
         Returns:
-            CustomIndicator
+            Indicator
 
         ## Example
 
@@ -2266,33 +2188,6 @@ class IndicatorFactory:
 <section>
 <h2 class="section-title" id="header-functions">Functions</h2>
 <dl>
-<dt id="vectorbt.indicators.factory.broadcast_params"><code class="name flex">
-<span>def <span class="ident fname">broadcast_params</span></span>(<span>param_list)</span>
-</code></dt>
-<dd>
-<div class="desc"><p>Broadcast parameters in <code>param_list</code>.</p></div>
-<details class="source">
-<summary>
-<span>Expand source code</span>
-</summary>
-<pre><code class="python">def broadcast_params(param_list):
-    &#34;&#34;&#34;Broadcast parameters in `param_list`.&#34;&#34;&#34;
-    max_len = max(list(map(len, param_list)))
-    new_param_list = []
-    for i in range(len(param_list)):
-        params = param_list[i]
-        if len(params) &lt; max_len:
-            if len(params) &gt; 1:
-                raise ValueError(&#34;shape mismatch: objects cannot be broadcast to a single shape&#34;)
-            new_params = []
-            for j in range(max_len):
-                new_params.append(params[0])
-            new_param_list.append(list(new_params))
-        else:
-            new_param_list.append(list(params))
-    return new_param_list</code></pre>
-</details>
-</dd>
 <dt id="vectorbt.indicators.factory.build_column_hierarchy"><code class="name flex">
 <span>def <span class="ident fname">build_column_hierarchy</span></span>(<span>param_list, level_names, input_columns, hide_levels=None)</span>
 </code></dt>
@@ -2304,7 +2199,7 @@ Combine this level with columns <code>input_columns</code> using Cartesian produ
 <span>Expand source code</span>
 </summary>
 <pre><code class="python">def build_column_hierarchy(param_list, level_names, input_columns, hide_levels=None):
-    &#34;&#34;&#34;For each parameter in `param_list`, create a new column level with parameter values. 
+    &#34;&#34;&#34;For each parameter in `param_list`, create a new column level with parameter values.
     Combine this level with columns `input_columns` using Cartesian product.&#34;&#34;&#34;
     checks.assert_len_equal(param_list, level_names)
     if hide_levels is None:
@@ -2352,96 +2247,6 @@ In this case, a new column level will be created with the name <code>level_name<
     return obj.vbt.combine_with(other, combine_func=combine_func, **kwargs)</code></pre>
 </details>
 </dd>
-<dt id="vectorbt.indicators.factory.create_param_combs"><code class="name flex">
-<span>def <span class="ident fname">create_param_combs</span></span>(<span>op_tree, depth=0)</span>
-</code></dt>
-<dd>
-<div class="desc"><p>Create arbitrary parameter combinations from the operation tree <code>op_tree</code>.</p>
-<p><code>op_tree</code> must be a tuple of tuples, each being an instruction to generate parameters.
-The first element of each tuple should a function that takes remaining elements as arguments.
-If one of the elements is a tuple, it will be unfolded in the same way.</p>
-<h2 id="example">Example</h2>
-<pre><code class="language-python-repl">&gt;&gt;&gt; import numpy as np
-&gt;&gt;&gt; from itertools import combinations, product
-
-&gt;&gt;&gt; create_param_combs((product, (combinations, [0, 1, 2, 3], 2), [4, 5]))
-[[0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 2, 2],
- [1, 1, 2, 2, 3, 3, 2, 2, 3, 3, 3, 3],
- [4, 5, 4, 5, 4, 5, 4, 5, 4, 5, 4, 5]]
-</code></pre></div>
-<details class="source">
-<summary>
-<span>Expand source code</span>
-</summary>
-<pre><code class="python">def create_param_combs(op_tree, depth=0):
-    &#34;&#34;&#34;Create arbitrary parameter combinations from the operation tree `op_tree`.
-
-    `op_tree` must be a tuple of tuples, each being an instruction to generate parameters.
-    The first element of each tuple should a function that takes remaining elements as arguments.
-    If one of the elements is a tuple, it will be unfolded in the same way.
-
-    ## Example
-
-    ```python-repl
-    &gt;&gt;&gt; import numpy as np
-    &gt;&gt;&gt; from itertools import combinations, product
-
-    &gt;&gt;&gt; create_param_combs((product, (combinations, [0, 1, 2, 3], 2), [4, 5]))
-    [[0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 2, 2],
-     [1, 1, 2, 2, 3, 3, 2, 2, 3, 3, 3, 3],
-     [4, 5, 4, 5, 4, 5, 4, 5, 4, 5, 4, 5]]
-    ```
-    &#34;&#34;&#34;
-    checks.assert_type(op_tree, tuple)
-    new_op_tree = (op_tree[0],)
-    for elem in op_tree[1:]:
-        if isinstance(elem, tuple):
-            new_op_tree += (create_param_combs(elem, depth=depth + 1),)
-        else:
-            new_op_tree += (elem,)
-    out = list(new_op_tree[0](*new_op_tree[1:]))
-    if depth == 0:
-        # do something
-        return flatten_param_tuples(out)
-    return out</code></pre>
-</details>
-</dd>
-<dt id="vectorbt.indicators.factory.create_param_product"><code class="name flex">
-<span>def <span class="ident fname">create_param_product</span></span>(<span>param_list)</span>
-</code></dt>
-<dd>
-<div class="desc"><p>Make Cartesian product out of all params in <code>param_list</code>.</p></div>
-<details class="source">
-<summary>
-<span>Expand source code</span>
-</summary>
-<pre><code class="python">def create_param_product(param_list):
-    &#34;&#34;&#34;Make Cartesian product out of all params in `param_list`.&#34;&#34;&#34;
-    return list(map(list, zip(*list(itertools.product(*param_list)))))</code></pre>
-</details>
-</dd>
-<dt id="vectorbt.indicators.factory.flatten_param_tuples"><code class="name flex">
-<span>def <span class="ident fname">flatten_param_tuples</span></span>(<span>param_tuples)</span>
-</code></dt>
-<dd>
-<div class="desc"><p>Flattens a nested list of tuples using unzipping.</p></div>
-<details class="source">
-<summary>
-<span>Expand source code</span>
-</summary>
-<pre><code class="python">def flatten_param_tuples(param_tuples):
-    &#34;&#34;&#34;Flattens a nested list of tuples using unzipping.&#34;&#34;&#34;
-    param_list = []
-    unzipped_tuples = zip(*param_tuples)
-    for i, unzipped in enumerate(unzipped_tuples):
-        unzipped = list(unzipped)
-        if isinstance(unzipped[0], tuple):
-            param_list.extend(flatten_param_tuples(unzipped))
-        else:
-            param_list.append(unzipped)
-    return param_list</code></pre>
-</details>
-</dd>
 <dt id="vectorbt.indicators.factory.perform_init_checks"><code class="name flex">
 <span>def <span class="ident fname">perform_init_checks</span></span>(<span>wrapper, input_list, input_mapper, output_list, param_list, mapper_list, short_name, level_names)</span>
 </code></dt>
@@ -2482,7 +2287,15 @@ If one of the elements is a tuple, it will be unfolded in the same way.</p>
     new_param_list = []
     for i, params in enumerate(param_list):
         _param_settings = param_settings if isinstance(param_settings, dict) else param_settings[i]
-        checks.assert_dict_valid(_param_settings, [[&#39;array_like&#39;, &#39;bc_to_input&#39;, &#39;broadcast_kwargs&#39;]])
+        checks.assert_dict_valid(_param_settings, [[
+            &#39;dtype&#39;,
+            &#39;array_like&#39;,
+            &#39;bc_to_input&#39;,
+            &#39;broadcast_kwargs&#39;
+        ]])
+        dtype = _param_settings.get(&#39;dtype&#39;, None)
+        if checks.is_namedtuple(dtype):
+            params = convert_str_enum_value(dtype, params)
         is_array_like = _param_settings.get(&#39;array_like&#39;, False)
         bc_to_input = _param_settings.get(&#39;bc_to_input&#39;, False)
         broadcast_kwargs = _param_settings.get(&#39;broadcast_kwargs&#39;, dict(require_kwargs=dict(requirements=&#39;W&#39;)))
@@ -3153,56 +2966,14 @@ p3  False  False  False  False  False  False
     return wrapper, input_list, input_mapper, output_list, param_list, mapper_list, other_list</code></pre>
 </details>
 </dd>
-<dt id="vectorbt.indicators.factory.to_typed_list"><code class="name flex">
-<span>def <span class="ident fname">to_typed_list</span></span>(<span>lst)</span>
-</code></dt>
-<dd>
-<div class="desc"><p>Cast Python list to typed list.</p>
-<p>Direct construction is flawed in Numba 0.52.0.
-See <a href="https://github.com/numba/numba/issues/6651.">https://github.com/numba/numba/issues/6651.</a></p></div>
-<details class="source">
-<summary>
-<span>Expand source code</span>
-</summary>
-<pre><code class="python">def to_typed_list(lst):
-    &#34;&#34;&#34;Cast Python list to typed list.
-
-    Direct construction is flawed in Numba 0.52.0.
-    See https://github.com/numba/numba/issues/6651.&#34;&#34;&#34;
-    nb_lst = List()
-    for elem in lst:
-        nb_lst.append(elem)
-    return nb_lst</code></pre>
-</details>
-</dd>
 </dl>
 </section>
 <section>
 <h2 class="section-title" id="header-classes">Classes</h2>
 <dl>
-<dt id="vectorbt.indicators.factory.Default"><code class="flex name class">
-<span>class <span class="ident parent-fname">Default</span></span>
-<span>(</span><span>value)</span>
-</code></dt>
-<dd>
-<div class="desc"><p>Class for wrapping default values.</p></div>
-<details class="source">
-<summary>
-<span>Expand source code</span>
-</summary>
-<pre><code class="python">class Default:
-    &#34;&#34;&#34;Class for wrapping default values.&#34;&#34;&#34;
-
-    def __repr__(self):
-        return self.value.__repr__()
-
-    def __init__(self, value):
-        self.value = value</code></pre>
-</details>
-</dd>
 <dt id="vectorbt.indicators.factory.IndicatorFactory"><code class="flex name class">
 <span>class <span class="ident parent-fname">IndicatorFactory</span></span>
-<span>(</span><span>class_name='CustomIndicator', class_docstring='', module_name='vectorbt.indicators.factory', short_name='custom', prepend_name=True, input_names=None, param_names=None, in_output_names=None, output_names=None, output_flags=None, custom_output_funcs=None, attr_settings=None)</span>
+<span>(</span><span>class_name='Custom', class_docstring='', module_name='vectorbt.indicators.factory', short_name=None, prepend_name=True, input_names=None, param_names=None, in_output_names=None, output_names=None, output_flags=None, custom_output_funcs=None, attr_settings=None)</span>
 </code></dt>
 <dd>
 <div class="desc"><p>A factory for creating new indicators.</p>
@@ -3217,7 +2988,10 @@ to finish building the indicator class.</p>
 <dt><strong><code>module_name</code></strong> :&ensp;<code>str</code></dt>
 <dd>Specify the module the class originates from.</dd>
 <dt><strong><code>short_name</code></strong> :&ensp;<code>str</code></dt>
-<dd>A short name of the indicator.</dd>
+<dd>
+<p>A short name of the indicator.</p>
+<p>Defaults to lower-case <code>class_name</code>.</p>
+</dd>
 <dt><strong><code>prepend_name</code></strong> :&ensp;<code>bool</code></dt>
 <dd>Whether to prepend <code>short_name</code> to each parameter level.</dd>
 <dt><strong><code>input_names</code></strong> :&ensp;<code>list</code> of <code>str</code></dt>
@@ -3272,10 +3046,10 @@ a new indicator object with newly indexed attributes.</p>
 </summary>
 <pre><code class="python">class IndicatorFactory:
     def __init__(self,
-                 class_name=&#39;CustomIndicator&#39;,
+                 class_name=&#39;Custom&#39;,
                  class_docstring=&#39;&#39;,
                  module_name=__name__,
-                 short_name=&#39;custom&#39;,
+                 short_name=None,
                  prepend_name=True,
                  input_names=None,
                  param_names=None,
@@ -3294,6 +3068,8 @@ a new indicator object with newly indexed attributes.</p>
             class_docstring (str): Docstring for the created Python class.
             module_name (str): Specify the module the class originates from.
             short_name (str): A short name of the indicator.
+
+                Defaults to lower-case `class_name`.
             prepend_name (bool): Whether to prepend `short_name` to each parameter level.
             input_names (list of str): A list of names of input time series objects.
             param_names (list of str): A list of names of parameters.
@@ -3339,6 +3115,8 @@ a new indicator object with newly indexed attributes.</p>
         self.module_name = module_name
         checks.assert_type(module_name, str)
 
+        if short_name is None:
+            short_name = class_name.lower()
         self.short_name = short_name
         checks.assert_type(short_name, str)
 
@@ -3390,9 +3168,9 @@ a new indicator object with newly indexed attributes.</p>
 
         # Set up class
         ParamIndexer = ParamIndexerFactory(param_names + ([&#39;tuple&#39;] if len(param_names) &gt; 1 else []))
-        CustomIndicator = type(self.class_name, (Wrapping, ParamIndexer), {})
-        CustomIndicator.__module__ = self.module_name
-        CustomIndicator.__doc__ = self.class_docstring
+        Indicator = type(self.class_name, (Wrapping, ParamIndexer), {})
+        Indicator.__module__ = self.module_name
+        Indicator.__doc__ = self.class_docstring
 
         # Add indexing methods
         def _indexing_func(obj, pd_indexing_func):
@@ -3430,37 +3208,37 @@ a new indicator object with newly indexed attributes.</p>
                 mapper_list=mapper_list
             )
 
-        setattr(CustomIndicator, &#39;_indexing_func&#39;, _indexing_func)
+        setattr(Indicator, &#39;_indexing_func&#39;, _indexing_func)
 
         # Create read-only properties
         prop = property(lambda _self: _self._short_name)
         prop.__doc__ = &#34;Name of the indicator (read-only).&#34;
-        setattr(CustomIndicator, &#39;short_name&#39;, prop)
+        setattr(Indicator, &#39;short_name&#39;, prop)
 
         prop = property(lambda _self: _self._level_names)
         prop.__doc__ = &#34;Column level names corresponding to each parameter (read-only).&#34;
-        setattr(CustomIndicator, &#39;level_names&#39;, prop)
+        setattr(Indicator, &#39;level_names&#39;, prop)
 
         prop = classproperty(lambda _self: input_names)
         prop.__doc__ = &#34;Names of the input time series (read-only).&#34;
-        setattr(CustomIndicator, &#39;input_names&#39;, prop)
+        setattr(Indicator, &#39;input_names&#39;, prop)
 
         prop = classproperty(lambda _self: param_names)
         prop.__doc__ = &#34;Names of the parameters (read-only).&#34;
-        setattr(CustomIndicator, &#39;param_names&#39;, prop)
+        setattr(Indicator, &#39;param_names&#39;, prop)
 
         prop = classproperty(lambda _self: output_names)
         prop.__doc__ = &#34;Names of the output time series (read-only).&#34;
-        setattr(CustomIndicator, &#39;output_names&#39;, prop)
+        setattr(Indicator, &#39;output_names&#39;, prop)
 
         prop = classproperty(lambda _self: output_flags)
         prop.__doc__ = &#34;Dictionary of output flags (read-only).&#34;
-        setattr(CustomIndicator, &#39;output_flags&#39;, prop)
+        setattr(Indicator, &#39;output_flags&#39;, prop)
 
         for param_name in param_names:
             prop = property(lambda _self, param_name=param_name: getattr(_self, f&#39;_{param_name}_array&#39;))
             prop.__doc__ = f&#34;Array of `{param_name}` combinations (read-only).&#34;
-            setattr(CustomIndicator, f&#39;{param_name}_array&#39;, prop)
+            setattr(Indicator, f&#39;{param_name}_array&#39;, prop)
 
         for input_name in input_names:
             def input_prop(_self, input_name=input_name):
@@ -3474,7 +3252,7 @@ a new indicator object with newly indexed attributes.</p>
                 return _self.wrapper.wrap(old_input[:, input_mapper])
 
             input_prop.__name__ = input_name
-            setattr(CustomIndicator, input_name, cached_property(input_prop))
+            setattr(Indicator, input_name, cached_property(input_prop))
 
         for output_name in output_names:
             def output_prop(_self, output_name=output_name):
@@ -3487,7 +3265,7 @@ a new indicator object with newly indexed attributes.</p>
                 if isinstance(_output_flags, (tuple, list)):
                     _output_flags = &#39;, &#39;.join(_output_flags)
                 output_prop.__doc__ += &#34;\n\n&#34; + _output_flags
-            setattr(CustomIndicator, output_name, property(output_prop))
+            setattr(Indicator, output_name, property(output_prop))
 
         # Add __init__ method
         def __init__(_self, wrapper, input_list, input_mapper, output_list, param_list,
@@ -3541,7 +3319,7 @@ a new indicator object with newly indexed attributes.</p>
                 level_names=[*level_names, tuple(level_names)]
             )
 
-        setattr(CustomIndicator, &#39;__init__&#39;, __init__)
+        setattr(Indicator, &#39;__init__&#39;, __init__)
 
         # Add user-defined outputs
         for prop_name, prop in custom_output_funcs.items():
@@ -3550,7 +3328,7 @@ a new indicator object with newly indexed attributes.</p>
             if not isinstance(prop, (property, cached_property)):
                 prop.__name__ = prop_name
                 prop = cached_property(prop)
-            setattr(CustomIndicator, prop_name, prop)
+            setattr(Indicator, prop_name, prop)
 
         # Add comparison &amp; combination methods for all inputs, outputs, and user-defined properties
         for attr_name in all_attr_names:
@@ -3558,22 +3336,15 @@ a new indicator object with newly indexed attributes.</p>
             checks.assert_dict_valid(_attr_settings, [[&#39;dtype&#39;]])
             dtype = _attr_settings.get(&#39;dtype&#39;, np.float_)
 
-            def _isinstance_namedtuple(obj) -&gt; bool:
-                return (
-                        isinstance(obj, tuple) and
-                        hasattr(obj, &#39;_asdict&#39;) and
-                        hasattr(obj, &#39;_fields&#39;)
-                )
-
-            if _isinstance_namedtuple(dtype):
+            if checks.is_namedtuple(dtype):
                 def attr_readable(_self, attr_name=attr_name, enum=dtype):
                     if _self.wrapper.ndim == 1:
                         return getattr(_self, attr_name).map(lambda x: &#39;&#39; if x == -1 else enum._fields[x])
                     return getattr(_self, attr_name).applymap(lambda x: &#39;&#39; if x == -1 else enum._fields[x])
 
-                attr_readable.__qualname__ = f&#39;{CustomIndicator.__name__}.{attr_name}_readable&#39;
+                attr_readable.__qualname__ = f&#39;{Indicator.__name__}.{attr_name}_readable&#39;
                 attr_readable.__doc__ = f&#34;&#34;&#34;{attr_name} in readable format based on enum {dtype}.&#34;&#34;&#34;
-                setattr(CustomIndicator, f&#39;{attr_name}_readable&#39;, property(attr_readable))
+                setattr(Indicator, f&#39;{attr_name}_readable&#39;, property(attr_readable))
 
             elif np.issubdtype(dtype, np.number):
                 def assign_numeric_method(func_name, combine_func, attr_name=attr_name):
@@ -3600,14 +3371,14 @@ a new indicator object with newly indexed attributes.</p>
                             return out.vbt.signals.nst(wait + 1, after_false=after_false)
                         return out
 
-                    numeric_method.__qualname__ = f&#39;{CustomIndicator.__name__}.{attr_name}_{func_name}&#39;
+                    numeric_method.__qualname__ = f&#39;{Indicator.__name__}.{attr_name}_{func_name}&#39;
                     numeric_method.__doc__ = f&#34;&#34;&#34;Return True for each element where `{attr_name}` is {func_name} `other`. 
     
                     Set `crossover` to True to return the first True after crossover. Specify `wait` to return 
                     True only when `{attr_name}` is {func_name} for a number of time steps in a row after crossover.
                 
                     See `vectorbt.indicators.factory.combine_objs`.&#34;&#34;&#34;
-                    setattr(CustomIndicator, f&#39;{attr_name}_{func_name}&#39;, numeric_method)
+                    setattr(Indicator, f&#39;{attr_name}_{func_name}&#39;, numeric_method)
 
                 assign_numeric_method(&#39;above&#39;, np.greater)
                 assign_numeric_method(&#39;below&#39;, np.less)
@@ -3634,17 +3405,17 @@ a new indicator object with newly indexed attributes.</p>
                             **kwargs
                         )
 
-                    bool_method.__qualname__ = f&#39;{CustomIndicator.__name__}.{attr_name}_{func_name}&#39;
+                    bool_method.__qualname__ = f&#39;{Indicator.__name__}.{attr_name}_{func_name}&#39;
                     bool_method.__doc__ = f&#34;&#34;&#34;Return `{attr_name} {func_name.upper()} other`. 
 
                         See `vectorbt.indicators.factory.combine_objs`.&#34;&#34;&#34;
-                    setattr(CustomIndicator, f&#39;{attr_name}_{func_name}&#39;, bool_method)
+                    setattr(Indicator, f&#39;{attr_name}_{func_name}&#39;, bool_method)
 
                 assign_bool_method(&#39;and&#39;, np.logical_and)
                 assign_bool_method(&#39;or&#39;, np.logical_or)
                 assign_bool_method(&#39;xor&#39;, np.logical_xor)
 
-            self.CustomIndicator = CustomIndicator
+            self.Indicator = Indicator
 
     def from_custom_func(self,
                          custom_func,
@@ -3696,7 +3467,7 @@ a new indicator object with newly indexed attributes.</p>
                     Default parameters should be on the right in `param_names`.
 
         Returns:
-            `CustomIndicator`, and optionally other objects that are returned by `custom_func`
+            `Indicator`, and optionally other objects that are returned by `custom_func`
             and exceed `output_names`.
 
         ## Example
@@ -3740,7 +3511,7 @@ a new indicator object with newly indexed attributes.</p>
         2020-01-05  130.0  106.0  140.0  108.0
         ```
         &#34;&#34;&#34;
-        CustomIndicator = self.CustomIndicator
+        Indicator = self.Indicator
 
         short_name = self.short_name
         prepend_name = self.prepend_name
@@ -3850,7 +3621,7 @@ a new indicator object with newly indexed attributes.</p>
                 return (obj, *tuple(other_list))
             return obj
 
-        setattr(CustomIndicator, &#39;_run&#39;, _run)
+        setattr(Indicator, &#39;_run&#39;, _run)
 
         # Add public run method
         # Create function dynamically to provide user with a proper signature
@@ -3923,7 +3694,7 @@ a new indicator object with newly indexed attributes.</p>
 
         run_docstring = create_run_docstring(run_docstring_func)
         run = compile_run_function(&#39;run&#39;, run_docstring, def_run_kwargs)
-        setattr(CustomIndicator, &#39;run&#39;, run)
+        setattr(Indicator, &#39;run&#39;, run)
 
         if len(param_names) &gt; 0:
             # Add private run_combs method
@@ -4023,7 +3794,7 @@ a new indicator object with newly indexed attributes.</p>
                     ))
                 return tuple(instances)
 
-            setattr(CustomIndicator, &#39;_run_combs&#39;, _run_combs)
+            setattr(Indicator, &#39;_run_combs&#39;, _run_combs)
 
             # Add public run_combs method
             def run_combs_docstring_func(class_name, in_ts_str, param_str, out_ts_str):
@@ -4046,9 +3817,9 @@ a new indicator object with newly indexed attributes.</p>
 
             run_combs_docstring = create_run_docstring(run_combs_docstring_func)
             run_combs = compile_run_function(&#39;run_combs&#39;, run_combs_docstring, def_run_combs_kwargs)
-            setattr(CustomIndicator, &#39;run_combs&#39;, run_combs)
+            setattr(Indicator, &#39;run_combs&#39;, run_combs)
 
-        return CustomIndicator
+        return Indicator
 
     def from_apply_func(self, apply_func, cache_func=None, pass_kwargs=None, **kwargs):
         &#34;&#34;&#34;Build indicator class around a custom apply function.
@@ -4094,7 +3865,7 @@ a new indicator object with newly indexed attributes.</p>
             **kwargs: Keyword arguments passed to `IndicatorFactory.from_custom_func`.
 
         Returns:
-            CustomIndicator
+            Indicator
 
         ## Example
 
@@ -4267,7 +4038,7 @@ a new indicator object with newly indexed attributes.</p>
             **kwargs: Keyword arguments passed to `IndicatorFactory.from_apply_func`.
 
         Returns:
-            CustomIndicator
+            Indicator
 
         ## Example
 
@@ -4380,7 +4151,7 @@ a new indicator object with newly indexed attributes.</p>
 <dd>Keyword arguments passed to <code><a title="vectorbt.indicators.factory.IndicatorFactory.from_apply_func" href="#vectorbt.indicators.factory.IndicatorFactory.from_apply_func">IndicatorFactory.from_apply_func()</a></code>.</dd>
 </dl>
 <h2 id="returns">Returns</h2>
-<p>CustomIndicator</p>
+<p>Indicator</p>
 <h2 id="example">Example</h2>
 <pre><code class="language-python-repl">&gt;&gt;&gt; SMA = vbt.IndicatorFactory.from_talib('SMA')
 
@@ -4424,7 +4195,7 @@ def from_talib(cls, func_name, module_name=__name__, **kwargs):
         **kwargs: Keyword arguments passed to `IndicatorFactory.from_apply_func`.
 
     Returns:
-        CustomIndicator
+        Indicator
 
     ## Example
 
@@ -4570,7 +4341,7 @@ Default is provided by the pipeline if <code>forward_flex_2d</code> is True.</li
 <dd>Keyword arguments passed to <code><a title="vectorbt.indicators.factory.IndicatorFactory.from_custom_func" href="#vectorbt.indicators.factory.IndicatorFactory.from_custom_func">IndicatorFactory.from_custom_func()</a></code>.</dd>
 </dl>
 <h2 id="returns">Returns</h2>
-<p>CustomIndicator</p>
+<p>Indicator</p>
 <h2 id="example">Example</h2>
 <pre><code class="language-python-repl">&gt;&gt;&gt; @njit
 ... def apply_func_nb(ts1, ts2, p1, p2, arg1):
@@ -4650,7 +4421,7 @@ custom_p2              3             4
         **kwargs: Keyword arguments passed to `IndicatorFactory.from_custom_func`.
 
     Returns:
-        CustomIndicator
+        Indicator
 
     ## Example
 
@@ -4870,7 +4641,7 @@ arguments passed to the <code>custom_func</code>.</p>
 </dd>
 </dl>
 <h2 id="returns">Returns</h2>
-<p><code>CustomIndicator</code>, and optionally other objects that are returned by <code>custom_func</code>
+<p><code>Indicator</code>, and optionally other objects that are returned by <code>custom_func</code>
 and exceed <code>output_names</code>.</p>
 <h2 id="example">Example</h2>
 <p>The following example does the same as the example in <code><a title="vectorbt.indicators.factory.IndicatorFactory.from_apply_func" href="#vectorbt.indicators.factory.IndicatorFactory.from_apply_func">IndicatorFactory.from_apply_func()</a></code>.</p>
@@ -4963,7 +4734,7 @@ custom_p2              3             4
                 Default parameters should be on the right in `param_names`.
 
     Returns:
-        `CustomIndicator`, and optionally other objects that are returned by `custom_func`
+        `Indicator`, and optionally other objects that are returned by `custom_func`
         and exceed `output_names`.
 
     ## Example
@@ -5007,7 +4778,7 @@ custom_p2              3             4
     2020-01-05  130.0  106.0  140.0  108.0
     ```
     &#34;&#34;&#34;
-    CustomIndicator = self.CustomIndicator
+    Indicator = self.Indicator
 
     short_name = self.short_name
     prepend_name = self.prepend_name
@@ -5117,7 +4888,7 @@ custom_p2              3             4
             return (obj, *tuple(other_list))
         return obj
 
-    setattr(CustomIndicator, &#39;_run&#39;, _run)
+    setattr(Indicator, &#39;_run&#39;, _run)
 
     # Add public run method
     # Create function dynamically to provide user with a proper signature
@@ -5190,7 +4961,7 @@ custom_p2              3             4
 
     run_docstring = create_run_docstring(run_docstring_func)
     run = compile_run_function(&#39;run&#39;, run_docstring, def_run_kwargs)
-    setattr(CustomIndicator, &#39;run&#39;, run)
+    setattr(Indicator, &#39;run&#39;, run)
 
     if len(param_names) &gt; 0:
         # Add private run_combs method
@@ -5290,7 +5061,7 @@ custom_p2              3             4
                 ))
             return tuple(instances)
 
-        setattr(CustomIndicator, &#39;_run_combs&#39;, _run_combs)
+        setattr(Indicator, &#39;_run_combs&#39;, _run_combs)
 
         # Add public run_combs method
         def run_combs_docstring_func(class_name, in_ts_str, param_str, out_ts_str):
@@ -5313,9 +5084,9 @@ custom_p2              3             4
 
         run_combs_docstring = create_run_docstring(run_combs_docstring_func)
         run_combs = compile_run_function(&#39;run_combs&#39;, run_combs_docstring, def_run_combs_kwargs)
-        setattr(CustomIndicator, &#39;run_combs&#39;, run_combs)
+        setattr(Indicator, &#39;run_combs&#39;, run_combs)
 
-    return CustomIndicator</code></pre>
+    return Indicator</code></pre>
 </details>
 </dd>
 </dl>
@@ -5359,24 +5130,16 @@ title="Search"
 </li>
 <li><h3><a href="#header-functions">Functions</a></h3>
 <ul class="">
-<li><code><a title="vectorbt.indicators.factory.broadcast_params" href="#vectorbt.indicators.factory.broadcast_params">broadcast_params</a></code></li>
 <li><code><a title="vectorbt.indicators.factory.build_column_hierarchy" href="#vectorbt.indicators.factory.build_column_hierarchy">build_column_hierarchy</a></code></li>
 <li><code><a title="vectorbt.indicators.factory.combine_objs" href="#vectorbt.indicators.factory.combine_objs">combine_objs</a></code></li>
-<li><code><a title="vectorbt.indicators.factory.create_param_combs" href="#vectorbt.indicators.factory.create_param_combs">create_param_combs</a></code></li>
-<li><code><a title="vectorbt.indicators.factory.create_param_product" href="#vectorbt.indicators.factory.create_param_product">create_param_product</a></code></li>
-<li><code><a title="vectorbt.indicators.factory.flatten_param_tuples" href="#vectorbt.indicators.factory.flatten_param_tuples">flatten_param_tuples</a></code></li>
 <li><code><a title="vectorbt.indicators.factory.perform_init_checks" href="#vectorbt.indicators.factory.perform_init_checks">perform_init_checks</a></code></li>
 <li><code><a title="vectorbt.indicators.factory.prepare_params" href="#vectorbt.indicators.factory.prepare_params">prepare_params</a></code></li>
 <li><code><a title="vectorbt.indicators.factory.reindex_outputs" href="#vectorbt.indicators.factory.reindex_outputs">reindex_outputs</a></code></li>
 <li><code><a title="vectorbt.indicators.factory.run_pipeline" href="#vectorbt.indicators.factory.run_pipeline">run_pipeline</a></code></li>
-<li><code><a title="vectorbt.indicators.factory.to_typed_list" href="#vectorbt.indicators.factory.to_typed_list">to_typed_list</a></code></li>
 </ul>
 </li>
 <li><h3><a href="#header-classes">Classes</a></h3>
 <ul>
-<li>
-<h4><code><a title="vectorbt.indicators.factory.Default" href="#vectorbt.indicators.factory.Default">Default</a></code></h4>
-</li>
 <li>
 <h4><code><a title="vectorbt.indicators.factory.IndicatorFactory" href="#vectorbt.indicators.factory.IndicatorFactory">IndicatorFactory</a></code></h4>
 <ul class="">

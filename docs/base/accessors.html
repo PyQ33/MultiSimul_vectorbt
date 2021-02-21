@@ -222,7 +222,7 @@ class BaseAccessor:
         See `vectorbt.base.reshape_fns.to_2d`.&#34;&#34;&#34;
         return reshape_fns.to_2d(self._obj, raw=True)
 
-    def tile(self, n, keys=None, axis=1):
+    def tile(self, n, keys=None, axis=1, wrap_kwargs=None):
         &#34;&#34;&#34;See `vectorbt.base.reshape_fns.tile`.
 
         Set `axis` to 1 for columns and 0 for index.
@@ -231,13 +231,15 @@ class BaseAccessor:
         if keys is not None:
             if axis == 1:
                 new_columns = index_fns.combine_indexes(keys, self.wrapper.columns)
-                return tiled.vbt.wrapper.wrap(tiled.values, columns=new_columns)
+                return tiled.vbt.wrapper.wrap(
+                    tiled.values, **merge_dicts(dict(columns=new_columns), wrap_kwargs))
             else:
                 new_index = index_fns.combine_indexes(keys, self.wrapper.index)
-                return tiled.vbt.wrapper.wrap(tiled.values, index=new_index)
+                return tiled.vbt.wrapper.wrap(
+                    tiled.values, **merge_dicts(dict(index=new_index), wrap_kwargs))
         return tiled
 
-    def repeat(self, n, keys=None, axis=1):
+    def repeat(self, n, keys=None, axis=1, wrap_kwargs=None):
         &#34;&#34;&#34;See `vectorbt.base.reshape_fns.repeat`.
 
         Set `axis` to 1 for columns and 0 for index.
@@ -246,13 +248,15 @@ class BaseAccessor:
         if keys is not None:
             if axis == 1:
                 new_columns = index_fns.combine_indexes(self.wrapper.columns, keys)
-                return repeated.vbt.wrapper.wrap(repeated.values, columns=new_columns)
+                return repeated.vbt.wrapper.wrap(
+                    repeated.values, **merge_dicts(dict(columns=new_columns), wrap_kwargs))
             else:
                 new_index = index_fns.combine_indexes(self.wrapper.index, keys)
-                return repeated.vbt.wrapper.wrap(repeated.values, index=new_index)
+                return repeated.vbt.wrapper.wrap(
+                    repeated.values, **merge_dicts(dict(index=new_index), wrap_kwargs))
         return repeated
 
-    def align_to(self, other):
+    def align_to(self, other, wrap_kwargs=None):
         &#34;&#34;&#34;Align to `other` on their axes.
 
         ## Example
@@ -289,7 +293,9 @@ class BaseAccessor:
         aligned_index = index_fns.align_index_to(obj.index, other.index)
         aligned_columns = index_fns.align_index_to(obj.columns, other.columns)
         obj = obj.iloc[aligned_index, aligned_columns]
-        return self.wrapper.wrap(obj.values, index=other.index, columns=other.columns, group_by=False)
+        return self.wrapper.wrap(
+            obj.values, group_by=False,
+            **merge_dicts(dict(index=other.index, columns=other.columns), wrap_kwargs))
 
     @class_or_instancemethod
     def broadcast(self_or_cls, *others, **kwargs):
@@ -319,7 +325,7 @@ class BaseAccessor:
 
     # ############# Combining ############# #
 
-    def apply(self, *args, apply_func=None, to_2d=False, **kwargs):
+    def apply(self, *args, apply_func=None, to_2d=False, wrap_kwargs=None, **kwargs):
         &#34;&#34;&#34;Apply a function `apply_func`.
 
         Arguments `*args` and `**kwargs` will be directly passed to `apply_func`.
@@ -350,10 +356,10 @@ class BaseAccessor:
         else:
             obj = np.asarray(self._obj)
         result = apply_func(obj, *args, **kwargs)
-        return self.wrapper.wrap(result, group_by=False)
+        return self.wrapper.wrap(result, group_by=False, **merge_dicts({}, wrap_kwargs))
 
     @class_or_instancemethod
-    def concat(self_or_cls, *others, keys=None, broadcast_kwargs={}):
+    def concat(self_or_cls, *others, keys=None, broadcast_kwargs=None):
         &#34;&#34;&#34;Concatenate with `others` along columns.
 
         All arguments will be broadcast using `vectorbt.base.reshape_fns.broadcast`
@@ -379,6 +385,8 @@ class BaseAccessor:
             objs = others
         else:
             objs = (self_or_cls._obj,) + others
+        if broadcast_kwargs is None:
+            broadcast_kwargs = {}
         broadcasted = reshape_fns.broadcast(*objs, **broadcast_kwargs)
         broadcasted = tuple(map(reshape_fns.to_2d, broadcasted))
         out = pd.concat(broadcasted, axis=1, keys=keys)
@@ -386,7 +394,7 @@ class BaseAccessor:
             out.columns = pd.RangeIndex(start=0, stop=len(out.columns), step=1)
         return out
 
-    def apply_and_concat(self, ntimes, *args, apply_func=None, to_2d=False, keys=None, **kwargs):
+    def apply_and_concat(self, ntimes, *args, apply_func=None, to_2d=False, keys=None, wrap_kwargs=None, **kwargs):
         &#34;&#34;&#34;Apply `apply_func` `ntimes` times and concatenate the results along columns.
         See `vectorbt.base.combine_fns.apply_and_concat_one`.
 
@@ -428,9 +436,10 @@ class BaseAccessor:
         else:
             top_columns = pd.Index(np.arange(ntimes), name=&#39;apply_idx&#39;)
             new_columns = index_fns.combine_indexes(top_columns, self.wrapper.columns)
-        return self.wrapper.wrap(result, columns=new_columns, group_by=False)
+        return self.wrapper.wrap(result, group_by=False, **merge_dicts(dict(columns=new_columns), wrap_kwargs))
 
-    def combine_with(self, other, *args, combine_func=None, to_2d=False, broadcast_kwargs={}, **kwargs):
+    def combine_with(self, other, *args, combine_func=None, to_2d=False,
+                     broadcast_kwargs=None, wrap_kwargs=None, **kwargs):
         &#34;&#34;&#34;Combine both using `combine_func` into a Series/DataFrame of the same shape.
 
         All arguments will be broadcast using `vectorbt.base.reshape_fns.broadcast`
@@ -459,6 +468,8 @@ class BaseAccessor:
         if isinstance(other, BaseAccessor):
             other = other._obj
         checks.assert_not_none(combine_func)
+        if broadcast_kwargs is None:
+            broadcast_kwargs = {}
         if checks.is_numba_func(combine_func):
             # Numba requires writable arrays
             broadcast_kwargs = merge_dicts(dict(require_kwargs=dict(requirements=&#39;W&#39;)), broadcast_kwargs)
@@ -471,10 +482,10 @@ class BaseAccessor:
             new_obj_arr = np.asarray(new_obj)
             new_other_arr = np.asarray(new_other)
         result = combine_func(new_obj_arr, new_other_arr, *args, **kwargs)
-        return new_obj.vbt.wrapper.wrap(result)
+        return new_obj.vbt.wrapper.wrap(result, **merge_dicts({}, wrap_kwargs))
 
     def combine_with_multiple(self, others, *args, combine_func=None, to_2d=False,
-                              concat=False, broadcast_kwargs={}, keys=None, **kwargs):
+                              concat=False, broadcast_kwargs=None, keys=None, wrap_kwargs=None, **kwargs):
         &#34;&#34;&#34;Combine with `others` using `combine_func`.
 
         All arguments will be broadcast using `vectorbt.base.reshape_fns.broadcast`
@@ -523,6 +534,8 @@ class BaseAccessor:
         checks.assert_not_none(combine_func)
         checks.assert_type(others, Iterable)
         # Broadcast arguments
+        if broadcast_kwargs is None:
+            broadcast_kwargs = {}
         if checks.is_numba_func(combine_func):
             # Numba requires writeable arrays
             # Plus all of our arrays must be in the same order
@@ -547,7 +560,7 @@ class BaseAccessor:
             else:
                 top_columns = pd.Index(np.arange(len(new_others)), name=&#39;combine_idx&#39;)
                 new_columns = index_fns.combine_indexes(top_columns, columns)
-            return new_obj.vbt.wrapper.wrap(result, columns=new_columns)
+            return new_obj.vbt.wrapper.wrap(result, **merge_dicts(dict(columns=new_columns), wrap_kwargs))
         else:
             # Combine arguments pairwise into one object
             if checks.is_numba_func(combine_func):
@@ -556,7 +569,7 @@ class BaseAccessor:
                 result = combine_fns.combine_multiple_nb(bc_arrays, combine_func, *args, **kwargs)
             else:
                 result = combine_fns.combine_multiple(bc_arrays, combine_func, *args, **kwargs)
-            return new_obj.vbt.wrapper.wrap(result)
+            return new_obj.vbt.wrapper.wrap(result, **merge_dicts({}, wrap_kwargs))
 
 
 class BaseSRAccessor(BaseAccessor):
@@ -774,7 +787,7 @@ by using <code><a title="vectorbt.base.accessors.BaseAccessor.wrapper" href="#ve
         See `vectorbt.base.reshape_fns.to_2d`.&#34;&#34;&#34;
         return reshape_fns.to_2d(self._obj, raw=True)
 
-    def tile(self, n, keys=None, axis=1):
+    def tile(self, n, keys=None, axis=1, wrap_kwargs=None):
         &#34;&#34;&#34;See `vectorbt.base.reshape_fns.tile`.
 
         Set `axis` to 1 for columns and 0 for index.
@@ -783,13 +796,15 @@ by using <code><a title="vectorbt.base.accessors.BaseAccessor.wrapper" href="#ve
         if keys is not None:
             if axis == 1:
                 new_columns = index_fns.combine_indexes(keys, self.wrapper.columns)
-                return tiled.vbt.wrapper.wrap(tiled.values, columns=new_columns)
+                return tiled.vbt.wrapper.wrap(
+                    tiled.values, **merge_dicts(dict(columns=new_columns), wrap_kwargs))
             else:
                 new_index = index_fns.combine_indexes(keys, self.wrapper.index)
-                return tiled.vbt.wrapper.wrap(tiled.values, index=new_index)
+                return tiled.vbt.wrapper.wrap(
+                    tiled.values, **merge_dicts(dict(index=new_index), wrap_kwargs))
         return tiled
 
-    def repeat(self, n, keys=None, axis=1):
+    def repeat(self, n, keys=None, axis=1, wrap_kwargs=None):
         &#34;&#34;&#34;See `vectorbt.base.reshape_fns.repeat`.
 
         Set `axis` to 1 for columns and 0 for index.
@@ -798,13 +813,15 @@ by using <code><a title="vectorbt.base.accessors.BaseAccessor.wrapper" href="#ve
         if keys is not None:
             if axis == 1:
                 new_columns = index_fns.combine_indexes(self.wrapper.columns, keys)
-                return repeated.vbt.wrapper.wrap(repeated.values, columns=new_columns)
+                return repeated.vbt.wrapper.wrap(
+                    repeated.values, **merge_dicts(dict(columns=new_columns), wrap_kwargs))
             else:
                 new_index = index_fns.combine_indexes(self.wrapper.index, keys)
-                return repeated.vbt.wrapper.wrap(repeated.values, index=new_index)
+                return repeated.vbt.wrapper.wrap(
+                    repeated.values, **merge_dicts(dict(index=new_index), wrap_kwargs))
         return repeated
 
-    def align_to(self, other):
+    def align_to(self, other, wrap_kwargs=None):
         &#34;&#34;&#34;Align to `other` on their axes.
 
         ## Example
@@ -841,7 +858,9 @@ by using <code><a title="vectorbt.base.accessors.BaseAccessor.wrapper" href="#ve
         aligned_index = index_fns.align_index_to(obj.index, other.index)
         aligned_columns = index_fns.align_index_to(obj.columns, other.columns)
         obj = obj.iloc[aligned_index, aligned_columns]
-        return self.wrapper.wrap(obj.values, index=other.index, columns=other.columns, group_by=False)
+        return self.wrapper.wrap(
+            obj.values, group_by=False,
+            **merge_dicts(dict(index=other.index, columns=other.columns), wrap_kwargs))
 
     @class_or_instancemethod
     def broadcast(self_or_cls, *others, **kwargs):
@@ -871,7 +890,7 @@ by using <code><a title="vectorbt.base.accessors.BaseAccessor.wrapper" href="#ve
 
     # ############# Combining ############# #
 
-    def apply(self, *args, apply_func=None, to_2d=False, **kwargs):
+    def apply(self, *args, apply_func=None, to_2d=False, wrap_kwargs=None, **kwargs):
         &#34;&#34;&#34;Apply a function `apply_func`.
 
         Arguments `*args` and `**kwargs` will be directly passed to `apply_func`.
@@ -902,10 +921,10 @@ by using <code><a title="vectorbt.base.accessors.BaseAccessor.wrapper" href="#ve
         else:
             obj = np.asarray(self._obj)
         result = apply_func(obj, *args, **kwargs)
-        return self.wrapper.wrap(result, group_by=False)
+        return self.wrapper.wrap(result, group_by=False, **merge_dicts({}, wrap_kwargs))
 
     @class_or_instancemethod
-    def concat(self_or_cls, *others, keys=None, broadcast_kwargs={}):
+    def concat(self_or_cls, *others, keys=None, broadcast_kwargs=None):
         &#34;&#34;&#34;Concatenate with `others` along columns.
 
         All arguments will be broadcast using `vectorbt.base.reshape_fns.broadcast`
@@ -931,6 +950,8 @@ by using <code><a title="vectorbt.base.accessors.BaseAccessor.wrapper" href="#ve
             objs = others
         else:
             objs = (self_or_cls._obj,) + others
+        if broadcast_kwargs is None:
+            broadcast_kwargs = {}
         broadcasted = reshape_fns.broadcast(*objs, **broadcast_kwargs)
         broadcasted = tuple(map(reshape_fns.to_2d, broadcasted))
         out = pd.concat(broadcasted, axis=1, keys=keys)
@@ -938,7 +959,7 @@ by using <code><a title="vectorbt.base.accessors.BaseAccessor.wrapper" href="#ve
             out.columns = pd.RangeIndex(start=0, stop=len(out.columns), step=1)
         return out
 
-    def apply_and_concat(self, ntimes, *args, apply_func=None, to_2d=False, keys=None, **kwargs):
+    def apply_and_concat(self, ntimes, *args, apply_func=None, to_2d=False, keys=None, wrap_kwargs=None, **kwargs):
         &#34;&#34;&#34;Apply `apply_func` `ntimes` times and concatenate the results along columns.
         See `vectorbt.base.combine_fns.apply_and_concat_one`.
 
@@ -980,9 +1001,10 @@ by using <code><a title="vectorbt.base.accessors.BaseAccessor.wrapper" href="#ve
         else:
             top_columns = pd.Index(np.arange(ntimes), name=&#39;apply_idx&#39;)
             new_columns = index_fns.combine_indexes(top_columns, self.wrapper.columns)
-        return self.wrapper.wrap(result, columns=new_columns, group_by=False)
+        return self.wrapper.wrap(result, group_by=False, **merge_dicts(dict(columns=new_columns), wrap_kwargs))
 
-    def combine_with(self, other, *args, combine_func=None, to_2d=False, broadcast_kwargs={}, **kwargs):
+    def combine_with(self, other, *args, combine_func=None, to_2d=False,
+                     broadcast_kwargs=None, wrap_kwargs=None, **kwargs):
         &#34;&#34;&#34;Combine both using `combine_func` into a Series/DataFrame of the same shape.
 
         All arguments will be broadcast using `vectorbt.base.reshape_fns.broadcast`
@@ -1011,6 +1033,8 @@ by using <code><a title="vectorbt.base.accessors.BaseAccessor.wrapper" href="#ve
         if isinstance(other, BaseAccessor):
             other = other._obj
         checks.assert_not_none(combine_func)
+        if broadcast_kwargs is None:
+            broadcast_kwargs = {}
         if checks.is_numba_func(combine_func):
             # Numba requires writable arrays
             broadcast_kwargs = merge_dicts(dict(require_kwargs=dict(requirements=&#39;W&#39;)), broadcast_kwargs)
@@ -1023,10 +1047,10 @@ by using <code><a title="vectorbt.base.accessors.BaseAccessor.wrapper" href="#ve
             new_obj_arr = np.asarray(new_obj)
             new_other_arr = np.asarray(new_other)
         result = combine_func(new_obj_arr, new_other_arr, *args, **kwargs)
-        return new_obj.vbt.wrapper.wrap(result)
+        return new_obj.vbt.wrapper.wrap(result, **merge_dicts({}, wrap_kwargs))
 
     def combine_with_multiple(self, others, *args, combine_func=None, to_2d=False,
-                              concat=False, broadcast_kwargs={}, keys=None, **kwargs):
+                              concat=False, broadcast_kwargs=None, keys=None, wrap_kwargs=None, **kwargs):
         &#34;&#34;&#34;Combine with `others` using `combine_func`.
 
         All arguments will be broadcast using `vectorbt.base.reshape_fns.broadcast`
@@ -1075,6 +1099,8 @@ by using <code><a title="vectorbt.base.accessors.BaseAccessor.wrapper" href="#ve
         checks.assert_not_none(combine_func)
         checks.assert_type(others, Iterable)
         # Broadcast arguments
+        if broadcast_kwargs is None:
+            broadcast_kwargs = {}
         if checks.is_numba_func(combine_func):
             # Numba requires writeable arrays
             # Plus all of our arrays must be in the same order
@@ -1099,7 +1125,7 @@ by using <code><a title="vectorbt.base.accessors.BaseAccessor.wrapper" href="#ve
             else:
                 top_columns = pd.Index(np.arange(len(new_others)), name=&#39;combine_idx&#39;)
                 new_columns = index_fns.combine_indexes(top_columns, columns)
-            return new_obj.vbt.wrapper.wrap(result, columns=new_columns)
+            return new_obj.vbt.wrapper.wrap(result, **merge_dicts(dict(columns=new_columns), wrap_kwargs))
         else:
             # Combine arguments pairwise into one object
             if checks.is_numba_func(combine_func):
@@ -1108,13 +1134,14 @@ by using <code><a title="vectorbt.base.accessors.BaseAccessor.wrapper" href="#ve
                 result = combine_fns.combine_multiple_nb(bc_arrays, combine_func, *args, **kwargs)
             else:
                 result = combine_fns.combine_multiple(bc_arrays, combine_func, *args, **kwargs)
-            return new_obj.vbt.wrapper.wrap(result)</code></pre>
+            return new_obj.vbt.wrapper.wrap(result, **merge_dicts({}, wrap_kwargs))</code></pre>
 </details>
 <h3 class="section-subtitle">Subclasses</h3>
 <ul class="hlist">
 <li><a title="vectorbt.base.accessors.BaseDFAccessor" href="#vectorbt.base.accessors.BaseDFAccessor">BaseDFAccessor</a></li>
 <li><a title="vectorbt.base.accessors.BaseSRAccessor" href="#vectorbt.base.accessors.BaseSRAccessor">BaseSRAccessor</a></li>
 <li><a title="vectorbt.generic.accessors.GenericAccessor" href="../generic/accessors.html#vectorbt.generic.accessors.GenericAccessor">GenericAccessor</a></li>
+<li><a title="vectorbt.px_accessors.PXAccessor" href="../px_accessors.html#vectorbt.px_accessors.PXAccessor">PXAccessor</a></li>
 </ul>
 <h3 class="section-subtitle">Static methods</h3>
 <dl>
@@ -1137,7 +1164,7 @@ def broadcast(self_or_cls, *others, **kwargs):
 </details>
 </dd>
 <dt id="vectorbt.base.accessors.BaseAccessor.concat"><code class="name flex">
-<span>def <span class="ident fname">concat</span></span>(<span>*others, keys=None, broadcast_kwargs={})</span>
+<span>def <span class="ident fname">concat</span></span>(<span>*others, keys=None, broadcast_kwargs=None)</span>
 </code></dt>
 <dd>
 <div class="desc"><p>Concatenate with <code>others</code> along columns.</p>
@@ -1160,7 +1187,7 @@ y  2  2  5  6
 <span>Expand source code</span>
 </summary>
 <pre><code class="python">@class_or_instancemethod
-def concat(self_or_cls, *others, keys=None, broadcast_kwargs={}):
+def concat(self_or_cls, *others, keys=None, broadcast_kwargs=None):
     &#34;&#34;&#34;Concatenate with `others` along columns.
 
     All arguments will be broadcast using `vectorbt.base.reshape_fns.broadcast`
@@ -1186,6 +1213,8 @@ def concat(self_or_cls, *others, keys=None, broadcast_kwargs={}):
         objs = others
     else:
         objs = (self_or_cls._obj,) + others
+    if broadcast_kwargs is None:
+        broadcast_kwargs = {}
     broadcasted = reshape_fns.broadcast(*objs, **broadcast_kwargs)
     broadcasted = tuple(map(reshape_fns.to_2d, broadcasted))
     out = pd.concat(broadcasted, axis=1, keys=keys)
@@ -1248,7 +1277,7 @@ def wrapper(self):
 <h3 class="section-subtitle">Methods</h3>
 <dl>
 <dt id="vectorbt.base.accessors.BaseAccessor.align_to"><code class="name flex">
-<span>def <span class="ident fname">align_to</span></span>(<span>self, other)</span>
+<span>def <span class="ident fname">align_to</span></span>(<span>self, other, wrap_kwargs=None)</span>
 </code></dt>
 <dd>
 <div class="desc"><p>Align to <code>other</code> on their axes.</p>
@@ -1280,7 +1309,7 @@ y  3  4  3  4
 <summary>
 <span>Expand source code</span>
 </summary>
-<pre><code class="python">def align_to(self, other):
+<pre><code class="python">def align_to(self, other, wrap_kwargs=None):
     &#34;&#34;&#34;Align to `other` on their axes.
 
     ## Example
@@ -1317,11 +1346,13 @@ y  3  4  3  4
     aligned_index = index_fns.align_index_to(obj.index, other.index)
     aligned_columns = index_fns.align_index_to(obj.columns, other.columns)
     obj = obj.iloc[aligned_index, aligned_columns]
-    return self.wrapper.wrap(obj.values, index=other.index, columns=other.columns, group_by=False)</code></pre>
+    return self.wrapper.wrap(
+        obj.values, group_by=False,
+        **merge_dicts(dict(index=other.index, columns=other.columns), wrap_kwargs))</code></pre>
 </details>
 </dd>
 <dt id="vectorbt.base.accessors.BaseAccessor.apply"><code class="name flex">
-<span>def <span class="ident fname">apply</span></span>(<span>self, *args, apply_func=None, to_2d=False, **kwargs)</span>
+<span>def <span class="ident fname">apply</span></span>(<span>self, *args, apply_func=None, to_2d=False, wrap_kwargs=None, **kwargs)</span>
 </code></dt>
 <dd>
 <div class="desc"><p>Apply a function <code>apply_func</code>.</p>
@@ -1347,7 +1378,7 @@ Name: a2, dtype: int64
 <summary>
 <span>Expand source code</span>
 </summary>
-<pre><code class="python">def apply(self, *args, apply_func=None, to_2d=False, **kwargs):
+<pre><code class="python">def apply(self, *args, apply_func=None, to_2d=False, wrap_kwargs=None, **kwargs):
     &#34;&#34;&#34;Apply a function `apply_func`.
 
     Arguments `*args` and `**kwargs` will be directly passed to `apply_func`.
@@ -1378,11 +1409,11 @@ Name: a2, dtype: int64
     else:
         obj = np.asarray(self._obj)
     result = apply_func(obj, *args, **kwargs)
-    return self.wrapper.wrap(result, group_by=False)</code></pre>
+    return self.wrapper.wrap(result, group_by=False, **merge_dicts({}, wrap_kwargs))</code></pre>
 </details>
 </dd>
 <dt id="vectorbt.base.accessors.BaseAccessor.apply_and_concat"><code class="name flex">
-<span>def <span class="ident fname">apply_and_concat</span></span>(<span>self, ntimes, *args, apply_func=None, to_2d=False, keys=None, **kwargs)</span>
+<span>def <span class="ident fname">apply_and_concat</span></span>(<span>self, ntimes, *args, apply_func=None, to_2d=False, keys=None, wrap_kwargs=None, **kwargs)</span>
 </code></dt>
 <dd>
 <div class="desc"><p>Apply <code>apply_func</code> <code>ntimes</code> times and concatenate the results along columns.
@@ -1410,7 +1441,7 @@ y  5  6  10  12  15  18
 <summary>
 <span>Expand source code</span>
 </summary>
-<pre><code class="python">def apply_and_concat(self, ntimes, *args, apply_func=None, to_2d=False, keys=None, **kwargs):
+<pre><code class="python">def apply_and_concat(self, ntimes, *args, apply_func=None, to_2d=False, keys=None, wrap_kwargs=None, **kwargs):
     &#34;&#34;&#34;Apply `apply_func` `ntimes` times and concatenate the results along columns.
     See `vectorbt.base.combine_fns.apply_and_concat_one`.
 
@@ -1452,7 +1483,7 @@ y  5  6  10  12  15  18
     else:
         top_columns = pd.Index(np.arange(ntimes), name=&#39;apply_idx&#39;)
         new_columns = index_fns.combine_indexes(top_columns, self.wrapper.columns)
-    return self.wrapper.wrap(result, columns=new_columns, group_by=False)</code></pre>
+    return self.wrapper.wrap(result, group_by=False, **merge_dicts(dict(columns=new_columns), wrap_kwargs))</code></pre>
 </details>
 </dd>
 <dt id="vectorbt.base.accessors.BaseAccessor.apply_on_index"><code class="name flex">
@@ -1510,7 +1541,7 @@ If <code>inplace</code> is True, modifies the pandas object. Otherwise, returns 
 </details>
 </dd>
 <dt id="vectorbt.base.accessors.BaseAccessor.combine_with"><code class="name flex">
-<span>def <span class="ident fname">combine_with</span></span>(<span>self, other, *args, combine_func=None, to_2d=False, broadcast_kwargs={}, **kwargs)</span>
+<span>def <span class="ident fname">combine_with</span></span>(<span>self, other, *args, combine_func=None, to_2d=False, broadcast_kwargs=None, wrap_kwargs=None, **kwargs)</span>
 </code></dt>
 <dd>
 <div class="desc"><p>Combine both using <code>combine_func</code> into a Series/DataFrame of the same shape.</p>
@@ -1537,7 +1568,8 @@ y  7  8
 <summary>
 <span>Expand source code</span>
 </summary>
-<pre><code class="python">def combine_with(self, other, *args, combine_func=None, to_2d=False, broadcast_kwargs={}, **kwargs):
+<pre><code class="python">def combine_with(self, other, *args, combine_func=None, to_2d=False,
+                 broadcast_kwargs=None, wrap_kwargs=None, **kwargs):
     &#34;&#34;&#34;Combine both using `combine_func` into a Series/DataFrame of the same shape.
 
     All arguments will be broadcast using `vectorbt.base.reshape_fns.broadcast`
@@ -1566,6 +1598,8 @@ y  7  8
     if isinstance(other, BaseAccessor):
         other = other._obj
     checks.assert_not_none(combine_func)
+    if broadcast_kwargs is None:
+        broadcast_kwargs = {}
     if checks.is_numba_func(combine_func):
         # Numba requires writable arrays
         broadcast_kwargs = merge_dicts(dict(require_kwargs=dict(requirements=&#39;W&#39;)), broadcast_kwargs)
@@ -1578,11 +1612,11 @@ y  7  8
         new_obj_arr = np.asarray(new_obj)
         new_other_arr = np.asarray(new_other)
     result = combine_func(new_obj_arr, new_other_arr, *args, **kwargs)
-    return new_obj.vbt.wrapper.wrap(result)</code></pre>
+    return new_obj.vbt.wrapper.wrap(result, **merge_dicts({}, wrap_kwargs))</code></pre>
 </details>
 </dd>
 <dt id="vectorbt.base.accessors.BaseAccessor.combine_with_multiple"><code class="name flex">
-<span>def <span class="ident fname">combine_with_multiple</span></span>(<span>self, others, *args, combine_func=None, to_2d=False, concat=False, broadcast_kwargs={}, keys=None, **kwargs)</span>
+<span>def <span class="ident fname">combine_with_multiple</span></span>(<span>self, others, *args, combine_func=None, to_2d=False, concat=False, broadcast_kwargs=None, keys=None, wrap_kwargs=None, **kwargs)</span>
 </code></dt>
 <dd>
 <div class="desc"><p>Combine with <code>others</code> using <code>combine_func</code>.</p>
@@ -1627,7 +1661,7 @@ y  7  8  12  14
 <span>Expand source code</span>
 </summary>
 <pre><code class="python">def combine_with_multiple(self, others, *args, combine_func=None, to_2d=False,
-                          concat=False, broadcast_kwargs={}, keys=None, **kwargs):
+                          concat=False, broadcast_kwargs=None, keys=None, wrap_kwargs=None, **kwargs):
     &#34;&#34;&#34;Combine with `others` using `combine_func`.
 
     All arguments will be broadcast using `vectorbt.base.reshape_fns.broadcast`
@@ -1676,6 +1710,8 @@ y  7  8  12  14
     checks.assert_not_none(combine_func)
     checks.assert_type(others, Iterable)
     # Broadcast arguments
+    if broadcast_kwargs is None:
+        broadcast_kwargs = {}
     if checks.is_numba_func(combine_func):
         # Numba requires writeable arrays
         # Plus all of our arrays must be in the same order
@@ -1700,7 +1736,7 @@ y  7  8  12  14
         else:
             top_columns = pd.Index(np.arange(len(new_others)), name=&#39;combine_idx&#39;)
             new_columns = index_fns.combine_indexes(top_columns, columns)
-        return new_obj.vbt.wrapper.wrap(result, columns=new_columns)
+        return new_obj.vbt.wrapper.wrap(result, **merge_dicts(dict(columns=new_columns), wrap_kwargs))
     else:
         # Combine arguments pairwise into one object
         if checks.is_numba_func(combine_func):
@@ -1709,7 +1745,7 @@ y  7  8  12  14
             result = combine_fns.combine_multiple_nb(bc_arrays, combine_func, *args, **kwargs)
         else:
             result = combine_fns.combine_multiple(bc_arrays, combine_func, *args, **kwargs)
-        return new_obj.vbt.wrapper.wrap(result)</code></pre>
+        return new_obj.vbt.wrapper.wrap(result, **merge_dicts({}, wrap_kwargs))</code></pre>
 </details>
 </dd>
 <dt id="vectorbt.base.accessors.BaseAccessor.drop_duplicate_levels"><code class="name flex">
@@ -1811,7 +1847,7 @@ y  7  8  12  14
 </details>
 </dd>
 <dt id="vectorbt.base.accessors.BaseAccessor.repeat"><code class="name flex">
-<span>def <span class="ident fname">repeat</span></span>(<span>self, n, keys=None, axis=1)</span>
+<span>def <span class="ident fname">repeat</span></span>(<span>self, n, keys=None, axis=1, wrap_kwargs=None)</span>
 </code></dt>
 <dd>
 <div class="desc"><p>See <code><a title="vectorbt.base.reshape_fns.repeat" href="reshape_fns.html#vectorbt.base.reshape_fns.repeat">repeat()</a></code>.</p>
@@ -1821,7 +1857,7 @@ Use <code>keys</code> as the outermost level.</p></div>
 <summary>
 <span>Expand source code</span>
 </summary>
-<pre><code class="python">def repeat(self, n, keys=None, axis=1):
+<pre><code class="python">def repeat(self, n, keys=None, axis=1, wrap_kwargs=None):
     &#34;&#34;&#34;See `vectorbt.base.reshape_fns.repeat`.
 
     Set `axis` to 1 for columns and 0 for index.
@@ -1830,10 +1866,12 @@ Use <code>keys</code> as the outermost level.</p></div>
     if keys is not None:
         if axis == 1:
             new_columns = index_fns.combine_indexes(self.wrapper.columns, keys)
-            return repeated.vbt.wrapper.wrap(repeated.values, columns=new_columns)
+            return repeated.vbt.wrapper.wrap(
+                repeated.values, **merge_dicts(dict(columns=new_columns), wrap_kwargs))
         else:
             new_index = index_fns.combine_indexes(self.wrapper.index, keys)
-            return repeated.vbt.wrapper.wrap(repeated.values, index=new_index)
+            return repeated.vbt.wrapper.wrap(
+                repeated.values, **merge_dicts(dict(index=new_index), wrap_kwargs))
     return repeated</code></pre>
 </details>
 </dd>
@@ -1885,7 +1923,7 @@ Use <code>keys</code> as the outermost level.</p></div>
 </details>
 </dd>
 <dt id="vectorbt.base.accessors.BaseAccessor.tile"><code class="name flex">
-<span>def <span class="ident fname">tile</span></span>(<span>self, n, keys=None, axis=1)</span>
+<span>def <span class="ident fname">tile</span></span>(<span>self, n, keys=None, axis=1, wrap_kwargs=None)</span>
 </code></dt>
 <dd>
 <div class="desc"><p>See <code><a title="vectorbt.base.reshape_fns.tile" href="reshape_fns.html#vectorbt.base.reshape_fns.tile">tile()</a></code>.</p>
@@ -1895,7 +1933,7 @@ Use <code>keys</code> as the outermost level.</p></div>
 <summary>
 <span>Expand source code</span>
 </summary>
-<pre><code class="python">def tile(self, n, keys=None, axis=1):
+<pre><code class="python">def tile(self, n, keys=None, axis=1, wrap_kwargs=None):
     &#34;&#34;&#34;See `vectorbt.base.reshape_fns.tile`.
 
     Set `axis` to 1 for columns and 0 for index.
@@ -1904,10 +1942,12 @@ Use <code>keys</code> as the outermost level.</p></div>
     if keys is not None:
         if axis == 1:
             new_columns = index_fns.combine_indexes(keys, self.wrapper.columns)
-            return tiled.vbt.wrapper.wrap(tiled.values, columns=new_columns)
+            return tiled.vbt.wrapper.wrap(
+                tiled.values, **merge_dicts(dict(columns=new_columns), wrap_kwargs))
         else:
             new_index = index_fns.combine_indexes(keys, self.wrapper.index)
-            return tiled.vbt.wrapper.wrap(tiled.values, index=new_index)
+            return tiled.vbt.wrapper.wrap(
+                tiled.values, **merge_dicts(dict(index=new_index), wrap_kwargs))
     return tiled</code></pre>
 </details>
 </dd>
@@ -2013,6 +2053,7 @@ Use <code>keys</code> as the outermost level.</p></div>
 <h3 class="section-subtitle">Subclasses</h3>
 <ul class="hlist">
 <li><a title="vectorbt.generic.accessors.GenericDFAccessor" href="../generic/accessors.html#vectorbt.generic.accessors.GenericDFAccessor">GenericDFAccessor</a></li>
+<li><a title="vectorbt.px_accessors.PXDFAccessor" href="../px_accessors.html#vectorbt.px_accessors.PXDFAccessor">PXDFAccessor</a></li>
 </ul>
 <h3 class="section-subtitle">Static methods</h3>
 <dl>
@@ -2116,6 +2157,7 @@ def is_series(self_or_cls):
 <h3 class="section-subtitle">Subclasses</h3>
 <ul class="hlist">
 <li><a title="vectorbt.generic.accessors.GenericSRAccessor" href="../generic/accessors.html#vectorbt.generic.accessors.GenericSRAccessor">GenericSRAccessor</a></li>
+<li><a title="vectorbt.px_accessors.PXSRAccessor" href="../px_accessors.html#vectorbt.px_accessors.PXSRAccessor">PXSRAccessor</a></li>
 </ul>
 <h3 class="section-subtitle">Static methods</h3>
 <dl>

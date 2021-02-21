@@ -104,56 +104,68 @@ class ReturnsAccessor(GenericAccessor):
             raise ValueError(&#34;Couldn&#39;t parse the frequency of index. You must set `freq`.&#34;)
         return self.year_freq / self.wrapper.freq
 
-    def daily(self):
+    def daily(self, **kwargs):
         &#34;&#34;&#34;Daily returns.&#34;&#34;&#34;
         checks.assert_type(self.wrapper.index, DatetimeTypes)
 
         if self.wrapper.freq == pd.Timedelta(&#39;1D&#39;):
             return self._obj
-        return self.resample_apply(&#39;1D&#39;, nb.total_return_apply_nb)
+        return self.resample_apply(&#39;1D&#39;, nb.total_return_apply_nb, **kwargs)
 
-    def annual(self):
+    def annual(self, **kwargs):
         &#34;&#34;&#34;Annual returns.&#34;&#34;&#34;
         checks.assert_type(self._obj.index, DatetimeTypes)
 
         if self.wrapper.freq == self.year_freq:
             return self._obj
-        return self.resample_apply(self.year_freq, nb.total_return_apply_nb)
+        return self.resample_apply(self.year_freq, nb.total_return_apply_nb, **kwargs)
 
-    def cumulative(self, start_value=0.):
+    def cumulative(self, start_value=0., wrap_kwargs=None):
         &#34;&#34;&#34;Cumulative returns.
 
         Args:
             start_value (float or array_like): The starting returns.
                 Will broadcast per column.&#34;&#34;&#34;
         start_value = np.broadcast_to(start_value, (len(self.wrapper.columns),))
-        return self.wrapper.wrap(nb.cum_returns_nb(self.to_2d_array(), start_value))
+        cumulative = nb.cum_returns_nb(self.to_2d_array(), start_value)
+        return self.wrapper.wrap(cumulative, **merge_dicts({}, wrap_kwargs))
 
-    def total(self):
+    def total(self, wrap_kwargs=None):
         &#34;&#34;&#34;Total return.&#34;&#34;&#34;
+        wrap_kwargs = merge_dicts(dict(name_or_index=&#39;total_return&#39;), wrap_kwargs)
         return self.wrapper.wrap_reduced(nb.cum_returns_final_nb(
-            self.to_2d_array(), np.full(len(self.wrapper.columns), 0.)))
+            self.to_2d_array(), np.full(len(self.wrapper.columns), 0.)
+        ), **wrap_kwargs)
 
-    def annualized(self):
+    def annualized(self, wrap_kwargs=None):
         &#34;&#34;&#34;Mean annual growth rate of returns.
 
         This is equivalent to the compound annual growth rate.&#34;&#34;&#34;
-        return self.wrapper.wrap_reduced(nb.annualized_return_nb(self.to_2d_array(), self.ann_factor))
+        wrap_kwargs = merge_dicts(dict(name_or_index=&#39;annualized_return&#39;), wrap_kwargs)
+        return self.wrapper.wrap_reduced(nb.annualized_return_nb(
+            self.to_2d_array(), self.ann_factor
+        ), **wrap_kwargs)
 
-    def annualized_volatility(self, levy_alpha=2.0):
+    def annualized_volatility(self, levy_alpha=2.0, wrap_kwargs=None):
         &#34;&#34;&#34;Annualized volatility of a strategy.
 
         Args:
             levy_alpha (float or array_like): Scaling relation (Levy stability exponent).
                 Will broadcast per column.&#34;&#34;&#34;
         levy_alpha = np.broadcast_to(levy_alpha, (len(self.wrapper.columns),))
-        return self.wrapper.wrap_reduced(nb.annualized_volatility_nb(self.to_2d_array(), self.ann_factor, levy_alpha))
+        wrap_kwargs = merge_dicts(dict(name_or_index=&#39;annualized_volatility&#39;), wrap_kwargs)
+        return self.wrapper.wrap_reduced(nb.annualized_volatility_nb(
+            self.to_2d_array(), self.ann_factor, levy_alpha
+        ), **wrap_kwargs)
 
-    def calmar_ratio(self):
+    def calmar_ratio(self, wrap_kwargs=None):
         &#34;&#34;&#34;Calmar ratio, or drawdown ratio, of a strategy.&#34;&#34;&#34;
-        return self.wrapper.wrap_reduced(nb.calmar_ratio_nb(self.to_2d_array(), self.ann_factor))
+        wrap_kwargs = merge_dicts(dict(name_or_index=&#39;calmar_ratio&#39;), wrap_kwargs)
+        return self.wrapper.wrap_reduced(nb.calmar_ratio_nb(
+            self.to_2d_array(), self.ann_factor
+        ), **wrap_kwargs)
 
-    def omega_ratio(self, risk_free=0., required_return=0.):
+    def omega_ratio(self, risk_free=0., required_return=0., wrap_kwargs=None):
         &#34;&#34;&#34;Omega ratio of a strategy.
 
         Args:
@@ -163,19 +175,25 @@ class ReturnsAccessor(GenericAccessor):
                 Will broadcast per column.&#34;&#34;&#34;
         risk_free = np.broadcast_to(risk_free, (len(self.wrapper.columns),))
         required_return = np.broadcast_to(required_return, (len(self.wrapper.columns),))
+        wrap_kwargs = merge_dicts(dict(name_or_index=&#39;omega_ratio&#39;), wrap_kwargs)
         return self.wrapper.wrap_reduced(nb.omega_ratio_nb(
-            self.to_2d_array(), self.ann_factor, risk_free, required_return))
+            self.to_2d_array(), self.ann_factor, risk_free, required_return
+        ), **wrap_kwargs)
 
-    def sharpe_ratio(self, risk_free=0.):
+    def sharpe_ratio(self, risk_free=0., wrap_kwargs=None):
         &#34;&#34;&#34;Sharpe ratio of a strategy.
 
         Args:
             risk_free (float or array_like): Constant risk-free return throughout the period.
                 Will broadcast per column.&#34;&#34;&#34;
         risk_free = np.broadcast_to(risk_free, (len(self.wrapper.columns),))
-        return self.wrapper.wrap_reduced(nb.sharpe_ratio_nb(self.to_2d_array(), self.ann_factor, risk_free))
+        wrap_kwargs = merge_dicts(dict(name_or_index=&#39;sharpe_ratio&#39;), wrap_kwargs)
+        return self.wrapper.wrap_reduced(nb.sharpe_ratio_nb(
+            self.to_2d_array(), self.ann_factor, risk_free
+        ), **wrap_kwargs)
 
-    def deflated_sharpe_ratio(self, risk_free=0., var_sharpe=None, nb_trials=None, ddof=0, bias=True):
+    def deflated_sharpe_ratio(self, risk_free=0., var_sharpe=None, nb_trials=None,
+                              ddof=0, bias=True, wrap_kwargs=None):
         &#34;&#34;&#34;Deflated Sharpe Ratio (DSR).
 
         Expresses the chance that the advertized strategy has a positive Sharpe ratio.
@@ -192,6 +210,7 @@ class ReturnsAccessor(GenericAccessor):
         if nanmask.any():
             returns = returns.copy()
             returns[nanmask] = 0.
+        wrap_kwargs = merge_dicts(dict(name_or_index=&#39;deflated_sharpe_ratio&#39;), wrap_kwargs)
         return self.wrapper.wrap_reduced(metrics.deflated_sharpe_ratio(
             est_sharpe=sharpe_ratio / np.sqrt(self.ann_factor),
             var_sharpe=var_sharpe / self.ann_factor,
@@ -199,27 +218,33 @@ class ReturnsAccessor(GenericAccessor):
             backtest_horizon=self.wrapper.shape_2d[0],
             skew=skew(returns, axis=0, bias=bias),
             kurtosis=kurtosis(returns, axis=0, bias=bias)
-        ))
+        ), **wrap_kwargs)
 
-    def downside_risk(self, required_return=0.):
+    def downside_risk(self, required_return=0., wrap_kwargs=None):
         &#34;&#34;&#34;Downside deviation below a threshold.
 
         Args:
             required_return (float or array_like): Minimum acceptance return of the investor.
                 Will broadcast per column.&#34;&#34;&#34;
         required_return = np.broadcast_to(required_return, (len(self.wrapper.columns),))
-        return self.wrapper.wrap_reduced(nb.downside_risk_nb(self.to_2d_array(), self.ann_factor, required_return))
+        wrap_kwargs = merge_dicts(dict(name_or_index=&#39;downside_risk&#39;), wrap_kwargs)
+        return self.wrapper.wrap_reduced(nb.downside_risk_nb(
+            self.to_2d_array(), self.ann_factor, required_return
+        ), **wrap_kwargs)
 
-    def sortino_ratio(self, required_return=0.):
+    def sortino_ratio(self, required_return=0., wrap_kwargs=None):
         &#34;&#34;&#34;Sortino ratio of a strategy.
 
         Args:
             required_return (float or array_like): Minimum acceptance return of the investor.
                 Will broadcast per column.&#34;&#34;&#34;
         required_return = np.broadcast_to(required_return, (len(self.wrapper.columns),))
-        return self.wrapper.wrap_reduced(nb.sortino_ratio_nb(self.to_2d_array(), self.ann_factor, required_return))
+        wrap_kwargs = merge_dicts(dict(name_or_index=&#39;sortino_ratio&#39;), wrap_kwargs)
+        return self.wrapper.wrap_reduced(nb.sortino_ratio_nb(
+            self.to_2d_array(), self.ann_factor, required_return
+        ), **wrap_kwargs)
 
-    def information_ratio(self, benchmark_rets):
+    def information_ratio(self, benchmark_rets, wrap_kwargs=None):
         &#34;&#34;&#34;Information ratio of a strategy.
 
         Args:
@@ -228,10 +253,12 @@ class ReturnsAccessor(GenericAccessor):
         benchmark_rets = reshape_fns.broadcast_to(
             reshape_fns.to_2d(benchmark_rets, raw=True),
             reshape_fns.to_2d(self._obj, raw=True))
+        wrap_kwargs = merge_dicts(dict(name_or_index=&#39;information_ratio&#39;), wrap_kwargs)
+        return self.wrapper.wrap_reduced(nb.information_ratio_nb(
+            self.to_2d_array(), benchmark_rets
+        ), **wrap_kwargs)
 
-        return self.wrapper.wrap_reduced(nb.information_ratio_nb(self.to_2d_array(), benchmark_rets))
-
-    def beta(self, benchmark_rets):
+    def beta(self, benchmark_rets, wrap_kwargs=None):
         &#34;&#34;&#34;Beta.
 
         Args:
@@ -240,9 +267,12 @@ class ReturnsAccessor(GenericAccessor):
         benchmark_rets = reshape_fns.broadcast_to(
             reshape_fns.to_2d(benchmark_rets, raw=True),
             reshape_fns.to_2d(self._obj, raw=True))
-        return self.wrapper.wrap_reduced(nb.beta_nb(self.to_2d_array(), benchmark_rets))
+        wrap_kwargs = merge_dicts(dict(name_or_index=&#39;beta&#39;), wrap_kwargs)
+        return self.wrapper.wrap_reduced(nb.beta_nb(
+            self.to_2d_array(), benchmark_rets
+        ), **wrap_kwargs)
 
-    def alpha(self, benchmark_rets, risk_free=0.):
+    def alpha(self, benchmark_rets, risk_free=0., wrap_kwargs=None):
         &#34;&#34;&#34;Annualized alpha.
 
         Args:
@@ -254,35 +284,50 @@ class ReturnsAccessor(GenericAccessor):
             reshape_fns.to_2d(benchmark_rets, raw=True),
             reshape_fns.to_2d(self._obj, raw=True))
         risk_free = np.broadcast_to(risk_free, (len(self.wrapper.columns),))
-        return self.wrapper.wrap_reduced(nb.alpha_nb(self.to_2d_array(), benchmark_rets, self.ann_factor, risk_free))
+        wrap_kwargs = merge_dicts(dict(name_or_index=&#39;alpha&#39;), wrap_kwargs)
+        return self.wrapper.wrap_reduced(nb.alpha_nb(
+            self.to_2d_array(), benchmark_rets, self.ann_factor, risk_free
+        ), **wrap_kwargs)
 
-    def tail_ratio(self):
+    def tail_ratio(self, wrap_kwargs=None):
         &#34;&#34;&#34;Ratio between the right (95%) and left tail (5%).&#34;&#34;&#34;
-        return self.wrapper.wrap_reduced(nb.tail_ratio_nb(self.to_2d_array()))
+        wrap_kwargs = merge_dicts(dict(name_or_index=&#39;tail_ratio&#39;), wrap_kwargs)
+        return self.wrapper.wrap_reduced(nb.tail_ratio_nb(
+            self.to_2d_array()
+        ), **wrap_kwargs)
 
-    def common_sense_ratio(self):
+    def common_sense_ratio(self, wrap_kwargs=None):
         &#34;&#34;&#34;Common Sense Ratio.&#34;&#34;&#34;
-        return self.tail_ratio() * (1 + self.annualized())
+        wrap_kwargs = merge_dicts(dict(name_or_index=&#39;common_sense_ratio&#39;), wrap_kwargs)
+        return self.wrapper.wrap_reduced(reshape_fns.to_1d(
+            self.tail_ratio() * (1 + self.annualized()), raw=True
+        ), **wrap_kwargs)
 
-    def value_at_risk(self, cutoff=0.05):
+    def value_at_risk(self, cutoff=0.05, wrap_kwargs=None):
         &#34;&#34;&#34;Value at risk (VaR) of a returns stream.
 
         Args:
             cutoff (float or array_like): Decimal representing the percentage cutoff for the
                 bottom percentile of returns. Will broadcast per column.&#34;&#34;&#34;
         cutoff = np.broadcast_to(cutoff, (len(self.wrapper.columns),))
-        return self.wrapper.wrap_reduced(nb.value_at_risk_nb(self.to_2d_array(), cutoff))
+        wrap_kwargs = merge_dicts(dict(name_or_index=&#39;value_at_risk&#39;), wrap_kwargs)
+        return self.wrapper.wrap_reduced(nb.value_at_risk_nb(
+            self.to_2d_array(), cutoff
+        ), **wrap_kwargs)
 
-    def conditional_value_at_risk(self, cutoff=0.05):
+    def conditional_value_at_risk(self, cutoff=0.05, wrap_kwargs=None):
         &#34;&#34;&#34;Conditional value at risk (CVaR) of a returns stream.
 
         Args:
             cutoff (float or array_like): Decimal representing the percentage cutoff for the
                 bottom percentile of returns. Will broadcast per column.&#34;&#34;&#34;
         cutoff = np.broadcast_to(cutoff, (len(self.wrapper.columns),))
-        return self.wrapper.wrap_reduced(nb.conditional_value_at_risk_nb(self.to_2d_array(), cutoff))
+        wrap_kwargs = merge_dicts(dict(name_or_index=&#39;conditional_value_at_risk&#39;), wrap_kwargs)
+        return self.wrapper.wrap_reduced(nb.conditional_value_at_risk_nb(
+            self.to_2d_array(), cutoff
+        ), **wrap_kwargs)
 
-    def capture(self, benchmark_rets):
+    def capture(self, benchmark_rets, wrap_kwargs=None):
         &#34;&#34;&#34;Capture ratio.
 
         Args:
@@ -291,9 +336,12 @@ class ReturnsAccessor(GenericAccessor):
         benchmark_rets = reshape_fns.broadcast_to(
             reshape_fns.to_2d(benchmark_rets, raw=True),
             reshape_fns.to_2d(self._obj, raw=True))
-        return self.wrapper.wrap_reduced(nb.capture_nb(self.to_2d_array(), benchmark_rets, self.ann_factor))
+        wrap_kwargs = merge_dicts(dict(name_or_index=&#39;capture&#39;), wrap_kwargs)
+        return self.wrapper.wrap_reduced(nb.capture_nb(
+            self.to_2d_array(), benchmark_rets, self.ann_factor
+        ), **wrap_kwargs)
 
-    def up_capture(self, benchmark_rets):
+    def up_capture(self, benchmark_rets, wrap_kwargs=None):
         &#34;&#34;&#34;Capture ratio for periods when the benchmark return is positive.
 
         Args:
@@ -302,9 +350,12 @@ class ReturnsAccessor(GenericAccessor):
         benchmark_rets = reshape_fns.broadcast_to(
             reshape_fns.to_2d(benchmark_rets, raw=True),
             reshape_fns.to_2d(self._obj, raw=True))
-        return self.wrapper.wrap_reduced(nb.up_capture_nb(self.to_2d_array(), benchmark_rets, self.ann_factor))
+        wrap_kwargs = merge_dicts(dict(name_or_index=&#39;up_capture&#39;), wrap_kwargs)
+        return self.wrapper.wrap_reduced(nb.up_capture_nb(
+            self.to_2d_array(), benchmark_rets, self.ann_factor
+        ), **wrap_kwargs)
 
-    def down_capture(self, benchmark_rets):
+    def down_capture(self, benchmark_rets, wrap_kwargs=None):
         &#34;&#34;&#34;Capture ratio for periods when the benchmark return is negative.
 
         Args:
@@ -313,15 +364,21 @@ class ReturnsAccessor(GenericAccessor):
         benchmark_rets = reshape_fns.broadcast_to(
             reshape_fns.to_2d(benchmark_rets, raw=True),
             reshape_fns.to_2d(self._obj, raw=True))
-        return self.wrapper.wrap_reduced(nb.down_capture_nb(self.to_2d_array(), benchmark_rets, self.ann_factor))
+        wrap_kwargs = merge_dicts(dict(name_or_index=&#39;down_capture&#39;), wrap_kwargs)
+        return self.wrapper.wrap_reduced(nb.down_capture_nb(
+            self.to_2d_array(), benchmark_rets, self.ann_factor
+        ), **wrap_kwargs)
 
-    def drawdown(self):
+    def drawdown(self, wrap_kwargs=None):
         &#34;&#34;&#34;Relative decline from a peak.&#34;&#34;&#34;
-        return self.wrapper.wrap(nb.drawdown_nb(self.to_2d_array()))
+        return self.wrapper.wrap(nb.drawdown_nb(self.to_2d_array()), **merge_dicts({}, wrap_kwargs))
 
-    def max_drawdown(self):
+    def max_drawdown(self, wrap_kwargs=None):
         &#34;&#34;&#34;Total maximum drawdown (MDD).&#34;&#34;&#34;
-        return self.wrapper.wrap_reduced(nb.max_drawdown_nb(self.to_2d_array()))
+        wrap_kwargs = merge_dicts(dict(name_or_index=&#39;max_drawdown&#39;), wrap_kwargs)
+        return self.wrapper.wrap_reduced(nb.max_drawdown_nb(
+            self.to_2d_array()
+        ), **wrap_kwargs)
 
     @cached_property
     def drawdowns(self):
@@ -337,7 +394,7 @@ class ReturnsAccessor(GenericAccessor):
             group_by = self.wrapper.grouper.group_by
         return self.cumulative(start_value=1.).vbt(freq=self.wrapper.freq, group_by=group_by).get_drawdowns(**kwargs)
 
-    def stats(self, benchmark_rets, levy_alpha=2.0, risk_free=0., required_return=0.):
+    def stats(self, benchmark_rets, levy_alpha=2.0, risk_free=0., required_return=0., wrap_kwargs=None):
         &#34;&#34;&#34;Compute various statistics on these returns.
 
         Args:
@@ -410,7 +467,8 @@ class ReturnsAccessor(GenericAccessor):
 
         # Select columns or reduce
         if self.is_series():
-            return self.wrapper.wrap_reduced(stats_df.iloc[0], index=stats_df.columns)
+            wrap_kwargs = merge_dicts(dict(name_or_index=stats_df.columns), wrap_kwargs)
+            return self.wrapper.wrap_reduced(stats_df.iloc[0], **wrap_kwargs)
         return stats_df
 
 
@@ -594,56 +652,68 @@ class ReturnsDFAccessor(ReturnsAccessor, GenericDFAccessor):
             raise ValueError(&#34;Couldn&#39;t parse the frequency of index. You must set `freq`.&#34;)
         return self.year_freq / self.wrapper.freq
 
-    def daily(self):
+    def daily(self, **kwargs):
         &#34;&#34;&#34;Daily returns.&#34;&#34;&#34;
         checks.assert_type(self.wrapper.index, DatetimeTypes)
 
         if self.wrapper.freq == pd.Timedelta(&#39;1D&#39;):
             return self._obj
-        return self.resample_apply(&#39;1D&#39;, nb.total_return_apply_nb)
+        return self.resample_apply(&#39;1D&#39;, nb.total_return_apply_nb, **kwargs)
 
-    def annual(self):
+    def annual(self, **kwargs):
         &#34;&#34;&#34;Annual returns.&#34;&#34;&#34;
         checks.assert_type(self._obj.index, DatetimeTypes)
 
         if self.wrapper.freq == self.year_freq:
             return self._obj
-        return self.resample_apply(self.year_freq, nb.total_return_apply_nb)
+        return self.resample_apply(self.year_freq, nb.total_return_apply_nb, **kwargs)
 
-    def cumulative(self, start_value=0.):
+    def cumulative(self, start_value=0., wrap_kwargs=None):
         &#34;&#34;&#34;Cumulative returns.
 
         Args:
             start_value (float or array_like): The starting returns.
                 Will broadcast per column.&#34;&#34;&#34;
         start_value = np.broadcast_to(start_value, (len(self.wrapper.columns),))
-        return self.wrapper.wrap(nb.cum_returns_nb(self.to_2d_array(), start_value))
+        cumulative = nb.cum_returns_nb(self.to_2d_array(), start_value)
+        return self.wrapper.wrap(cumulative, **merge_dicts({}, wrap_kwargs))
 
-    def total(self):
+    def total(self, wrap_kwargs=None):
         &#34;&#34;&#34;Total return.&#34;&#34;&#34;
+        wrap_kwargs = merge_dicts(dict(name_or_index=&#39;total_return&#39;), wrap_kwargs)
         return self.wrapper.wrap_reduced(nb.cum_returns_final_nb(
-            self.to_2d_array(), np.full(len(self.wrapper.columns), 0.)))
+            self.to_2d_array(), np.full(len(self.wrapper.columns), 0.)
+        ), **wrap_kwargs)
 
-    def annualized(self):
+    def annualized(self, wrap_kwargs=None):
         &#34;&#34;&#34;Mean annual growth rate of returns.
 
         This is equivalent to the compound annual growth rate.&#34;&#34;&#34;
-        return self.wrapper.wrap_reduced(nb.annualized_return_nb(self.to_2d_array(), self.ann_factor))
+        wrap_kwargs = merge_dicts(dict(name_or_index=&#39;annualized_return&#39;), wrap_kwargs)
+        return self.wrapper.wrap_reduced(nb.annualized_return_nb(
+            self.to_2d_array(), self.ann_factor
+        ), **wrap_kwargs)
 
-    def annualized_volatility(self, levy_alpha=2.0):
+    def annualized_volatility(self, levy_alpha=2.0, wrap_kwargs=None):
         &#34;&#34;&#34;Annualized volatility of a strategy.
 
         Args:
             levy_alpha (float or array_like): Scaling relation (Levy stability exponent).
                 Will broadcast per column.&#34;&#34;&#34;
         levy_alpha = np.broadcast_to(levy_alpha, (len(self.wrapper.columns),))
-        return self.wrapper.wrap_reduced(nb.annualized_volatility_nb(self.to_2d_array(), self.ann_factor, levy_alpha))
+        wrap_kwargs = merge_dicts(dict(name_or_index=&#39;annualized_volatility&#39;), wrap_kwargs)
+        return self.wrapper.wrap_reduced(nb.annualized_volatility_nb(
+            self.to_2d_array(), self.ann_factor, levy_alpha
+        ), **wrap_kwargs)
 
-    def calmar_ratio(self):
+    def calmar_ratio(self, wrap_kwargs=None):
         &#34;&#34;&#34;Calmar ratio, or drawdown ratio, of a strategy.&#34;&#34;&#34;
-        return self.wrapper.wrap_reduced(nb.calmar_ratio_nb(self.to_2d_array(), self.ann_factor))
+        wrap_kwargs = merge_dicts(dict(name_or_index=&#39;calmar_ratio&#39;), wrap_kwargs)
+        return self.wrapper.wrap_reduced(nb.calmar_ratio_nb(
+            self.to_2d_array(), self.ann_factor
+        ), **wrap_kwargs)
 
-    def omega_ratio(self, risk_free=0., required_return=0.):
+    def omega_ratio(self, risk_free=0., required_return=0., wrap_kwargs=None):
         &#34;&#34;&#34;Omega ratio of a strategy.
 
         Args:
@@ -653,19 +723,25 @@ class ReturnsDFAccessor(ReturnsAccessor, GenericDFAccessor):
                 Will broadcast per column.&#34;&#34;&#34;
         risk_free = np.broadcast_to(risk_free, (len(self.wrapper.columns),))
         required_return = np.broadcast_to(required_return, (len(self.wrapper.columns),))
+        wrap_kwargs = merge_dicts(dict(name_or_index=&#39;omega_ratio&#39;), wrap_kwargs)
         return self.wrapper.wrap_reduced(nb.omega_ratio_nb(
-            self.to_2d_array(), self.ann_factor, risk_free, required_return))
+            self.to_2d_array(), self.ann_factor, risk_free, required_return
+        ), **wrap_kwargs)
 
-    def sharpe_ratio(self, risk_free=0.):
+    def sharpe_ratio(self, risk_free=0., wrap_kwargs=None):
         &#34;&#34;&#34;Sharpe ratio of a strategy.
 
         Args:
             risk_free (float or array_like): Constant risk-free return throughout the period.
                 Will broadcast per column.&#34;&#34;&#34;
         risk_free = np.broadcast_to(risk_free, (len(self.wrapper.columns),))
-        return self.wrapper.wrap_reduced(nb.sharpe_ratio_nb(self.to_2d_array(), self.ann_factor, risk_free))
+        wrap_kwargs = merge_dicts(dict(name_or_index=&#39;sharpe_ratio&#39;), wrap_kwargs)
+        return self.wrapper.wrap_reduced(nb.sharpe_ratio_nb(
+            self.to_2d_array(), self.ann_factor, risk_free
+        ), **wrap_kwargs)
 
-    def deflated_sharpe_ratio(self, risk_free=0., var_sharpe=None, nb_trials=None, ddof=0, bias=True):
+    def deflated_sharpe_ratio(self, risk_free=0., var_sharpe=None, nb_trials=None,
+                              ddof=0, bias=True, wrap_kwargs=None):
         &#34;&#34;&#34;Deflated Sharpe Ratio (DSR).
 
         Expresses the chance that the advertized strategy has a positive Sharpe ratio.
@@ -682,6 +758,7 @@ class ReturnsDFAccessor(ReturnsAccessor, GenericDFAccessor):
         if nanmask.any():
             returns = returns.copy()
             returns[nanmask] = 0.
+        wrap_kwargs = merge_dicts(dict(name_or_index=&#39;deflated_sharpe_ratio&#39;), wrap_kwargs)
         return self.wrapper.wrap_reduced(metrics.deflated_sharpe_ratio(
             est_sharpe=sharpe_ratio / np.sqrt(self.ann_factor),
             var_sharpe=var_sharpe / self.ann_factor,
@@ -689,27 +766,33 @@ class ReturnsDFAccessor(ReturnsAccessor, GenericDFAccessor):
             backtest_horizon=self.wrapper.shape_2d[0],
             skew=skew(returns, axis=0, bias=bias),
             kurtosis=kurtosis(returns, axis=0, bias=bias)
-        ))
+        ), **wrap_kwargs)
 
-    def downside_risk(self, required_return=0.):
+    def downside_risk(self, required_return=0., wrap_kwargs=None):
         &#34;&#34;&#34;Downside deviation below a threshold.
 
         Args:
             required_return (float or array_like): Minimum acceptance return of the investor.
                 Will broadcast per column.&#34;&#34;&#34;
         required_return = np.broadcast_to(required_return, (len(self.wrapper.columns),))
-        return self.wrapper.wrap_reduced(nb.downside_risk_nb(self.to_2d_array(), self.ann_factor, required_return))
+        wrap_kwargs = merge_dicts(dict(name_or_index=&#39;downside_risk&#39;), wrap_kwargs)
+        return self.wrapper.wrap_reduced(nb.downside_risk_nb(
+            self.to_2d_array(), self.ann_factor, required_return
+        ), **wrap_kwargs)
 
-    def sortino_ratio(self, required_return=0.):
+    def sortino_ratio(self, required_return=0., wrap_kwargs=None):
         &#34;&#34;&#34;Sortino ratio of a strategy.
 
         Args:
             required_return (float or array_like): Minimum acceptance return of the investor.
                 Will broadcast per column.&#34;&#34;&#34;
         required_return = np.broadcast_to(required_return, (len(self.wrapper.columns),))
-        return self.wrapper.wrap_reduced(nb.sortino_ratio_nb(self.to_2d_array(), self.ann_factor, required_return))
+        wrap_kwargs = merge_dicts(dict(name_or_index=&#39;sortino_ratio&#39;), wrap_kwargs)
+        return self.wrapper.wrap_reduced(nb.sortino_ratio_nb(
+            self.to_2d_array(), self.ann_factor, required_return
+        ), **wrap_kwargs)
 
-    def information_ratio(self, benchmark_rets):
+    def information_ratio(self, benchmark_rets, wrap_kwargs=None):
         &#34;&#34;&#34;Information ratio of a strategy.
 
         Args:
@@ -718,10 +801,12 @@ class ReturnsDFAccessor(ReturnsAccessor, GenericDFAccessor):
         benchmark_rets = reshape_fns.broadcast_to(
             reshape_fns.to_2d(benchmark_rets, raw=True),
             reshape_fns.to_2d(self._obj, raw=True))
+        wrap_kwargs = merge_dicts(dict(name_or_index=&#39;information_ratio&#39;), wrap_kwargs)
+        return self.wrapper.wrap_reduced(nb.information_ratio_nb(
+            self.to_2d_array(), benchmark_rets
+        ), **wrap_kwargs)
 
-        return self.wrapper.wrap_reduced(nb.information_ratio_nb(self.to_2d_array(), benchmark_rets))
-
-    def beta(self, benchmark_rets):
+    def beta(self, benchmark_rets, wrap_kwargs=None):
         &#34;&#34;&#34;Beta.
 
         Args:
@@ -730,9 +815,12 @@ class ReturnsDFAccessor(ReturnsAccessor, GenericDFAccessor):
         benchmark_rets = reshape_fns.broadcast_to(
             reshape_fns.to_2d(benchmark_rets, raw=True),
             reshape_fns.to_2d(self._obj, raw=True))
-        return self.wrapper.wrap_reduced(nb.beta_nb(self.to_2d_array(), benchmark_rets))
+        wrap_kwargs = merge_dicts(dict(name_or_index=&#39;beta&#39;), wrap_kwargs)
+        return self.wrapper.wrap_reduced(nb.beta_nb(
+            self.to_2d_array(), benchmark_rets
+        ), **wrap_kwargs)
 
-    def alpha(self, benchmark_rets, risk_free=0.):
+    def alpha(self, benchmark_rets, risk_free=0., wrap_kwargs=None):
         &#34;&#34;&#34;Annualized alpha.
 
         Args:
@@ -744,35 +832,50 @@ class ReturnsDFAccessor(ReturnsAccessor, GenericDFAccessor):
             reshape_fns.to_2d(benchmark_rets, raw=True),
             reshape_fns.to_2d(self._obj, raw=True))
         risk_free = np.broadcast_to(risk_free, (len(self.wrapper.columns),))
-        return self.wrapper.wrap_reduced(nb.alpha_nb(self.to_2d_array(), benchmark_rets, self.ann_factor, risk_free))
+        wrap_kwargs = merge_dicts(dict(name_or_index=&#39;alpha&#39;), wrap_kwargs)
+        return self.wrapper.wrap_reduced(nb.alpha_nb(
+            self.to_2d_array(), benchmark_rets, self.ann_factor, risk_free
+        ), **wrap_kwargs)
 
-    def tail_ratio(self):
+    def tail_ratio(self, wrap_kwargs=None):
         &#34;&#34;&#34;Ratio between the right (95%) and left tail (5%).&#34;&#34;&#34;
-        return self.wrapper.wrap_reduced(nb.tail_ratio_nb(self.to_2d_array()))
+        wrap_kwargs = merge_dicts(dict(name_or_index=&#39;tail_ratio&#39;), wrap_kwargs)
+        return self.wrapper.wrap_reduced(nb.tail_ratio_nb(
+            self.to_2d_array()
+        ), **wrap_kwargs)
 
-    def common_sense_ratio(self):
+    def common_sense_ratio(self, wrap_kwargs=None):
         &#34;&#34;&#34;Common Sense Ratio.&#34;&#34;&#34;
-        return self.tail_ratio() * (1 + self.annualized())
+        wrap_kwargs = merge_dicts(dict(name_or_index=&#39;common_sense_ratio&#39;), wrap_kwargs)
+        return self.wrapper.wrap_reduced(reshape_fns.to_1d(
+            self.tail_ratio() * (1 + self.annualized()), raw=True
+        ), **wrap_kwargs)
 
-    def value_at_risk(self, cutoff=0.05):
+    def value_at_risk(self, cutoff=0.05, wrap_kwargs=None):
         &#34;&#34;&#34;Value at risk (VaR) of a returns stream.
 
         Args:
             cutoff (float or array_like): Decimal representing the percentage cutoff for the
                 bottom percentile of returns. Will broadcast per column.&#34;&#34;&#34;
         cutoff = np.broadcast_to(cutoff, (len(self.wrapper.columns),))
-        return self.wrapper.wrap_reduced(nb.value_at_risk_nb(self.to_2d_array(), cutoff))
+        wrap_kwargs = merge_dicts(dict(name_or_index=&#39;value_at_risk&#39;), wrap_kwargs)
+        return self.wrapper.wrap_reduced(nb.value_at_risk_nb(
+            self.to_2d_array(), cutoff
+        ), **wrap_kwargs)
 
-    def conditional_value_at_risk(self, cutoff=0.05):
+    def conditional_value_at_risk(self, cutoff=0.05, wrap_kwargs=None):
         &#34;&#34;&#34;Conditional value at risk (CVaR) of a returns stream.
 
         Args:
             cutoff (float or array_like): Decimal representing the percentage cutoff for the
                 bottom percentile of returns. Will broadcast per column.&#34;&#34;&#34;
         cutoff = np.broadcast_to(cutoff, (len(self.wrapper.columns),))
-        return self.wrapper.wrap_reduced(nb.conditional_value_at_risk_nb(self.to_2d_array(), cutoff))
+        wrap_kwargs = merge_dicts(dict(name_or_index=&#39;conditional_value_at_risk&#39;), wrap_kwargs)
+        return self.wrapper.wrap_reduced(nb.conditional_value_at_risk_nb(
+            self.to_2d_array(), cutoff
+        ), **wrap_kwargs)
 
-    def capture(self, benchmark_rets):
+    def capture(self, benchmark_rets, wrap_kwargs=None):
         &#34;&#34;&#34;Capture ratio.
 
         Args:
@@ -781,9 +884,12 @@ class ReturnsDFAccessor(ReturnsAccessor, GenericDFAccessor):
         benchmark_rets = reshape_fns.broadcast_to(
             reshape_fns.to_2d(benchmark_rets, raw=True),
             reshape_fns.to_2d(self._obj, raw=True))
-        return self.wrapper.wrap_reduced(nb.capture_nb(self.to_2d_array(), benchmark_rets, self.ann_factor))
+        wrap_kwargs = merge_dicts(dict(name_or_index=&#39;capture&#39;), wrap_kwargs)
+        return self.wrapper.wrap_reduced(nb.capture_nb(
+            self.to_2d_array(), benchmark_rets, self.ann_factor
+        ), **wrap_kwargs)
 
-    def up_capture(self, benchmark_rets):
+    def up_capture(self, benchmark_rets, wrap_kwargs=None):
         &#34;&#34;&#34;Capture ratio for periods when the benchmark return is positive.
 
         Args:
@@ -792,9 +898,12 @@ class ReturnsDFAccessor(ReturnsAccessor, GenericDFAccessor):
         benchmark_rets = reshape_fns.broadcast_to(
             reshape_fns.to_2d(benchmark_rets, raw=True),
             reshape_fns.to_2d(self._obj, raw=True))
-        return self.wrapper.wrap_reduced(nb.up_capture_nb(self.to_2d_array(), benchmark_rets, self.ann_factor))
+        wrap_kwargs = merge_dicts(dict(name_or_index=&#39;up_capture&#39;), wrap_kwargs)
+        return self.wrapper.wrap_reduced(nb.up_capture_nb(
+            self.to_2d_array(), benchmark_rets, self.ann_factor
+        ), **wrap_kwargs)
 
-    def down_capture(self, benchmark_rets):
+    def down_capture(self, benchmark_rets, wrap_kwargs=None):
         &#34;&#34;&#34;Capture ratio for periods when the benchmark return is negative.
 
         Args:
@@ -803,15 +912,21 @@ class ReturnsDFAccessor(ReturnsAccessor, GenericDFAccessor):
         benchmark_rets = reshape_fns.broadcast_to(
             reshape_fns.to_2d(benchmark_rets, raw=True),
             reshape_fns.to_2d(self._obj, raw=True))
-        return self.wrapper.wrap_reduced(nb.down_capture_nb(self.to_2d_array(), benchmark_rets, self.ann_factor))
+        wrap_kwargs = merge_dicts(dict(name_or_index=&#39;down_capture&#39;), wrap_kwargs)
+        return self.wrapper.wrap_reduced(nb.down_capture_nb(
+            self.to_2d_array(), benchmark_rets, self.ann_factor
+        ), **wrap_kwargs)
 
-    def drawdown(self):
+    def drawdown(self, wrap_kwargs=None):
         &#34;&#34;&#34;Relative decline from a peak.&#34;&#34;&#34;
-        return self.wrapper.wrap(nb.drawdown_nb(self.to_2d_array()))
+        return self.wrapper.wrap(nb.drawdown_nb(self.to_2d_array()), **merge_dicts({}, wrap_kwargs))
 
-    def max_drawdown(self):
+    def max_drawdown(self, wrap_kwargs=None):
         &#34;&#34;&#34;Total maximum drawdown (MDD).&#34;&#34;&#34;
-        return self.wrapper.wrap_reduced(nb.max_drawdown_nb(self.to_2d_array()))
+        wrap_kwargs = merge_dicts(dict(name_or_index=&#39;max_drawdown&#39;), wrap_kwargs)
+        return self.wrapper.wrap_reduced(nb.max_drawdown_nb(
+            self.to_2d_array()
+        ), **wrap_kwargs)
 
     @cached_property
     def drawdowns(self):
@@ -827,7 +942,7 @@ class ReturnsDFAccessor(ReturnsAccessor, GenericDFAccessor):
             group_by = self.wrapper.grouper.group_by
         return self.cumulative(start_value=1.).vbt(freq=self.wrapper.freq, group_by=group_by).get_drawdowns(**kwargs)
 
-    def stats(self, benchmark_rets, levy_alpha=2.0, risk_free=0., required_return=0.):
+    def stats(self, benchmark_rets, levy_alpha=2.0, risk_free=0., required_return=0., wrap_kwargs=None):
         &#34;&#34;&#34;Compute various statistics on these returns.
 
         Args:
@@ -900,7 +1015,8 @@ class ReturnsDFAccessor(ReturnsAccessor, GenericDFAccessor):
 
         # Select columns or reduce
         if self.is_series():
-            return self.wrapper.wrap_reduced(stats_df.iloc[0], index=stats_df.columns)
+            wrap_kwargs = merge_dicts(dict(name_or_index=stats_df.columns), wrap_kwargs)
+            return self.wrapper.wrap_reduced(stats_df.iloc[0], **wrap_kwargs)
         return stats_df</code></pre>
 </details>
 <h3 class="section-subtitle">Ancestors</h3>
@@ -994,7 +1110,7 @@ def year_freq(self):
 <h3 class="section-subtitle">Methods</h3>
 <dl>
 <dt id="vectorbt.returns.accessors.ReturnsAccessor.alpha"><code class="name flex">
-<span>def <span class="ident fname">alpha</span></span>(<span>self, benchmark_rets, risk_free=0.0)</span>
+<span>def <span class="ident fname">alpha</span></span>(<span>self, benchmark_rets, risk_free=0.0, wrap_kwargs=None)</span>
 </code></dt>
 <dd>
 <div class="desc"><p>Annualized alpha.</p>
@@ -1011,7 +1127,7 @@ Will broadcast per column.</dd>
 <summary>
 <span>Expand source code</span>
 </summary>
-<pre><code class="python">def alpha(self, benchmark_rets, risk_free=0.):
+<pre><code class="python">def alpha(self, benchmark_rets, risk_free=0., wrap_kwargs=None):
     &#34;&#34;&#34;Annualized alpha.
 
     Args:
@@ -1023,11 +1139,14 @@ Will broadcast per column.</dd>
         reshape_fns.to_2d(benchmark_rets, raw=True),
         reshape_fns.to_2d(self._obj, raw=True))
     risk_free = np.broadcast_to(risk_free, (len(self.wrapper.columns),))
-    return self.wrapper.wrap_reduced(nb.alpha_nb(self.to_2d_array(), benchmark_rets, self.ann_factor, risk_free))</code></pre>
+    wrap_kwargs = merge_dicts(dict(name_or_index=&#39;alpha&#39;), wrap_kwargs)
+    return self.wrapper.wrap_reduced(nb.alpha_nb(
+        self.to_2d_array(), benchmark_rets, self.ann_factor, risk_free
+    ), **wrap_kwargs)</code></pre>
 </details>
 </dd>
 <dt id="vectorbt.returns.accessors.ReturnsAccessor.annual"><code class="name flex">
-<span>def <span class="ident fname">annual</span></span>(<span>self)</span>
+<span>def <span class="ident fname">annual</span></span>(<span>self, **kwargs)</span>
 </code></dt>
 <dd>
 <div class="desc"><p>Annual returns.</p></div>
@@ -1035,17 +1154,17 @@ Will broadcast per column.</dd>
 <summary>
 <span>Expand source code</span>
 </summary>
-<pre><code class="python">def annual(self):
+<pre><code class="python">def annual(self, **kwargs):
     &#34;&#34;&#34;Annual returns.&#34;&#34;&#34;
     checks.assert_type(self._obj.index, DatetimeTypes)
 
     if self.wrapper.freq == self.year_freq:
         return self._obj
-    return self.resample_apply(self.year_freq, nb.total_return_apply_nb)</code></pre>
+    return self.resample_apply(self.year_freq, nb.total_return_apply_nb, **kwargs)</code></pre>
 </details>
 </dd>
 <dt id="vectorbt.returns.accessors.ReturnsAccessor.annualized"><code class="name flex">
-<span>def <span class="ident fname">annualized</span></span>(<span>self)</span>
+<span>def <span class="ident fname">annualized</span></span>(<span>self, wrap_kwargs=None)</span>
 </code></dt>
 <dd>
 <div class="desc"><p>Mean annual growth rate of returns.</p>
@@ -1054,15 +1173,18 @@ Will broadcast per column.</dd>
 <summary>
 <span>Expand source code</span>
 </summary>
-<pre><code class="python">def annualized(self):
+<pre><code class="python">def annualized(self, wrap_kwargs=None):
     &#34;&#34;&#34;Mean annual growth rate of returns.
 
     This is equivalent to the compound annual growth rate.&#34;&#34;&#34;
-    return self.wrapper.wrap_reduced(nb.annualized_return_nb(self.to_2d_array(), self.ann_factor))</code></pre>
+    wrap_kwargs = merge_dicts(dict(name_or_index=&#39;annualized_return&#39;), wrap_kwargs)
+    return self.wrapper.wrap_reduced(nb.annualized_return_nb(
+        self.to_2d_array(), self.ann_factor
+    ), **wrap_kwargs)</code></pre>
 </details>
 </dd>
 <dt id="vectorbt.returns.accessors.ReturnsAccessor.annualized_volatility"><code class="name flex">
-<span>def <span class="ident fname">annualized_volatility</span></span>(<span>self, levy_alpha=2.0)</span>
+<span>def <span class="ident fname">annualized_volatility</span></span>(<span>self, levy_alpha=2.0, wrap_kwargs=None)</span>
 </code></dt>
 <dd>
 <div class="desc"><p>Annualized volatility of a strategy.</p>
@@ -1076,18 +1198,21 @@ Will broadcast per column.</dd>
 <summary>
 <span>Expand source code</span>
 </summary>
-<pre><code class="python">def annualized_volatility(self, levy_alpha=2.0):
+<pre><code class="python">def annualized_volatility(self, levy_alpha=2.0, wrap_kwargs=None):
     &#34;&#34;&#34;Annualized volatility of a strategy.
 
     Args:
         levy_alpha (float or array_like): Scaling relation (Levy stability exponent).
             Will broadcast per column.&#34;&#34;&#34;
     levy_alpha = np.broadcast_to(levy_alpha, (len(self.wrapper.columns),))
-    return self.wrapper.wrap_reduced(nb.annualized_volatility_nb(self.to_2d_array(), self.ann_factor, levy_alpha))</code></pre>
+    wrap_kwargs = merge_dicts(dict(name_or_index=&#39;annualized_volatility&#39;), wrap_kwargs)
+    return self.wrapper.wrap_reduced(nb.annualized_volatility_nb(
+        self.to_2d_array(), self.ann_factor, levy_alpha
+    ), **wrap_kwargs)</code></pre>
 </details>
 </dd>
 <dt id="vectorbt.returns.accessors.ReturnsAccessor.beta"><code class="name flex">
-<span>def <span class="ident fname">beta</span></span>(<span>self, benchmark_rets)</span>
+<span>def <span class="ident fname">beta</span></span>(<span>self, benchmark_rets, wrap_kwargs=None)</span>
 </code></dt>
 <dd>
 <div class="desc"><p>Beta.</p>
@@ -1101,7 +1226,7 @@ Will broadcast per element.</dd>
 <summary>
 <span>Expand source code</span>
 </summary>
-<pre><code class="python">def beta(self, benchmark_rets):
+<pre><code class="python">def beta(self, benchmark_rets, wrap_kwargs=None):
     &#34;&#34;&#34;Beta.
 
     Args:
@@ -1110,11 +1235,14 @@ Will broadcast per element.</dd>
     benchmark_rets = reshape_fns.broadcast_to(
         reshape_fns.to_2d(benchmark_rets, raw=True),
         reshape_fns.to_2d(self._obj, raw=True))
-    return self.wrapper.wrap_reduced(nb.beta_nb(self.to_2d_array(), benchmark_rets))</code></pre>
+    wrap_kwargs = merge_dicts(dict(name_or_index=&#39;beta&#39;), wrap_kwargs)
+    return self.wrapper.wrap_reduced(nb.beta_nb(
+        self.to_2d_array(), benchmark_rets
+    ), **wrap_kwargs)</code></pre>
 </details>
 </dd>
 <dt id="vectorbt.returns.accessors.ReturnsAccessor.calmar_ratio"><code class="name flex">
-<span>def <span class="ident fname">calmar_ratio</span></span>(<span>self)</span>
+<span>def <span class="ident fname">calmar_ratio</span></span>(<span>self, wrap_kwargs=None)</span>
 </code></dt>
 <dd>
 <div class="desc"><p>Calmar ratio, or drawdown ratio, of a strategy.</p></div>
@@ -1122,13 +1250,16 @@ Will broadcast per element.</dd>
 <summary>
 <span>Expand source code</span>
 </summary>
-<pre><code class="python">def calmar_ratio(self):
+<pre><code class="python">def calmar_ratio(self, wrap_kwargs=None):
     &#34;&#34;&#34;Calmar ratio, or drawdown ratio, of a strategy.&#34;&#34;&#34;
-    return self.wrapper.wrap_reduced(nb.calmar_ratio_nb(self.to_2d_array(), self.ann_factor))</code></pre>
+    wrap_kwargs = merge_dicts(dict(name_or_index=&#39;calmar_ratio&#39;), wrap_kwargs)
+    return self.wrapper.wrap_reduced(nb.calmar_ratio_nb(
+        self.to_2d_array(), self.ann_factor
+    ), **wrap_kwargs)</code></pre>
 </details>
 </dd>
 <dt id="vectorbt.returns.accessors.ReturnsAccessor.capture"><code class="name flex">
-<span>def <span class="ident fname">capture</span></span>(<span>self, benchmark_rets)</span>
+<span>def <span class="ident fname">capture</span></span>(<span>self, benchmark_rets, wrap_kwargs=None)</span>
 </code></dt>
 <dd>
 <div class="desc"><p>Capture ratio.</p>
@@ -1142,7 +1273,7 @@ Will broadcast per element.</dd>
 <summary>
 <span>Expand source code</span>
 </summary>
-<pre><code class="python">def capture(self, benchmark_rets):
+<pre><code class="python">def capture(self, benchmark_rets, wrap_kwargs=None):
     &#34;&#34;&#34;Capture ratio.
 
     Args:
@@ -1151,11 +1282,14 @@ Will broadcast per element.</dd>
     benchmark_rets = reshape_fns.broadcast_to(
         reshape_fns.to_2d(benchmark_rets, raw=True),
         reshape_fns.to_2d(self._obj, raw=True))
-    return self.wrapper.wrap_reduced(nb.capture_nb(self.to_2d_array(), benchmark_rets, self.ann_factor))</code></pre>
+    wrap_kwargs = merge_dicts(dict(name_or_index=&#39;capture&#39;), wrap_kwargs)
+    return self.wrapper.wrap_reduced(nb.capture_nb(
+        self.to_2d_array(), benchmark_rets, self.ann_factor
+    ), **wrap_kwargs)</code></pre>
 </details>
 </dd>
 <dt id="vectorbt.returns.accessors.ReturnsAccessor.common_sense_ratio"><code class="name flex">
-<span>def <span class="ident fname">common_sense_ratio</span></span>(<span>self)</span>
+<span>def <span class="ident fname">common_sense_ratio</span></span>(<span>self, wrap_kwargs=None)</span>
 </code></dt>
 <dd>
 <div class="desc"><p>Common Sense Ratio.</p></div>
@@ -1163,13 +1297,16 @@ Will broadcast per element.</dd>
 <summary>
 <span>Expand source code</span>
 </summary>
-<pre><code class="python">def common_sense_ratio(self):
+<pre><code class="python">def common_sense_ratio(self, wrap_kwargs=None):
     &#34;&#34;&#34;Common Sense Ratio.&#34;&#34;&#34;
-    return self.tail_ratio() * (1 + self.annualized())</code></pre>
+    wrap_kwargs = merge_dicts(dict(name_or_index=&#39;common_sense_ratio&#39;), wrap_kwargs)
+    return self.wrapper.wrap_reduced(reshape_fns.to_1d(
+        self.tail_ratio() * (1 + self.annualized()), raw=True
+    ), **wrap_kwargs)</code></pre>
 </details>
 </dd>
 <dt id="vectorbt.returns.accessors.ReturnsAccessor.conditional_value_at_risk"><code class="name flex">
-<span>def <span class="ident fname">conditional_value_at_risk</span></span>(<span>self, cutoff=0.05)</span>
+<span>def <span class="ident fname">conditional_value_at_risk</span></span>(<span>self, cutoff=0.05, wrap_kwargs=None)</span>
 </code></dt>
 <dd>
 <div class="desc"><p>Conditional value at risk (CVaR) of a returns stream.</p>
@@ -1183,18 +1320,21 @@ bottom percentile of returns. Will broadcast per column.</dd>
 <summary>
 <span>Expand source code</span>
 </summary>
-<pre><code class="python">def conditional_value_at_risk(self, cutoff=0.05):
+<pre><code class="python">def conditional_value_at_risk(self, cutoff=0.05, wrap_kwargs=None):
     &#34;&#34;&#34;Conditional value at risk (CVaR) of a returns stream.
 
     Args:
         cutoff (float or array_like): Decimal representing the percentage cutoff for the
             bottom percentile of returns. Will broadcast per column.&#34;&#34;&#34;
     cutoff = np.broadcast_to(cutoff, (len(self.wrapper.columns),))
-    return self.wrapper.wrap_reduced(nb.conditional_value_at_risk_nb(self.to_2d_array(), cutoff))</code></pre>
+    wrap_kwargs = merge_dicts(dict(name_or_index=&#39;conditional_value_at_risk&#39;), wrap_kwargs)
+    return self.wrapper.wrap_reduced(nb.conditional_value_at_risk_nb(
+        self.to_2d_array(), cutoff
+    ), **wrap_kwargs)</code></pre>
 </details>
 </dd>
 <dt id="vectorbt.returns.accessors.ReturnsAccessor.cumulative"><code class="name flex">
-<span>def <span class="ident fname">cumulative</span></span>(<span>self, start_value=0.0)</span>
+<span>def <span class="ident fname">cumulative</span></span>(<span>self, start_value=0.0, wrap_kwargs=None)</span>
 </code></dt>
 <dd>
 <div class="desc"><p>Cumulative returns.</p>
@@ -1208,18 +1348,19 @@ Will broadcast per column.</dd>
 <summary>
 <span>Expand source code</span>
 </summary>
-<pre><code class="python">def cumulative(self, start_value=0.):
+<pre><code class="python">def cumulative(self, start_value=0., wrap_kwargs=None):
     &#34;&#34;&#34;Cumulative returns.
 
     Args:
         start_value (float or array_like): The starting returns.
             Will broadcast per column.&#34;&#34;&#34;
     start_value = np.broadcast_to(start_value, (len(self.wrapper.columns),))
-    return self.wrapper.wrap(nb.cum_returns_nb(self.to_2d_array(), start_value))</code></pre>
+    cumulative = nb.cum_returns_nb(self.to_2d_array(), start_value)
+    return self.wrapper.wrap(cumulative, **merge_dicts({}, wrap_kwargs))</code></pre>
 </details>
 </dd>
 <dt id="vectorbt.returns.accessors.ReturnsAccessor.daily"><code class="name flex">
-<span>def <span class="ident fname">daily</span></span>(<span>self)</span>
+<span>def <span class="ident fname">daily</span></span>(<span>self, **kwargs)</span>
 </code></dt>
 <dd>
 <div class="desc"><p>Daily returns.</p></div>
@@ -1227,17 +1368,17 @@ Will broadcast per column.</dd>
 <summary>
 <span>Expand source code</span>
 </summary>
-<pre><code class="python">def daily(self):
+<pre><code class="python">def daily(self, **kwargs):
     &#34;&#34;&#34;Daily returns.&#34;&#34;&#34;
     checks.assert_type(self.wrapper.index, DatetimeTypes)
 
     if self.wrapper.freq == pd.Timedelta(&#39;1D&#39;):
         return self._obj
-    return self.resample_apply(&#39;1D&#39;, nb.total_return_apply_nb)</code></pre>
+    return self.resample_apply(&#39;1D&#39;, nb.total_return_apply_nb, **kwargs)</code></pre>
 </details>
 </dd>
 <dt id="vectorbt.returns.accessors.ReturnsAccessor.deflated_sharpe_ratio"><code class="name flex">
-<span>def <span class="ident fname">deflated_sharpe_ratio</span></span>(<span>self, risk_free=0.0, var_sharpe=None, nb_trials=None, ddof=0, bias=True)</span>
+<span>def <span class="ident fname">deflated_sharpe_ratio</span></span>(<span>self, risk_free=0.0, var_sharpe=None, nb_trials=None, ddof=0, bias=True, wrap_kwargs=None)</span>
 </code></dt>
 <dd>
 <div class="desc"><p>Deflated Sharpe Ratio (DSR).</p>
@@ -1248,7 +1389,8 @@ If <code>nb_trials</code> is None, is set to the number of columns.</p></div>
 <summary>
 <span>Expand source code</span>
 </summary>
-<pre><code class="python">def deflated_sharpe_ratio(self, risk_free=0., var_sharpe=None, nb_trials=None, ddof=0, bias=True):
+<pre><code class="python">def deflated_sharpe_ratio(self, risk_free=0., var_sharpe=None, nb_trials=None,
+                          ddof=0, bias=True, wrap_kwargs=None):
     &#34;&#34;&#34;Deflated Sharpe Ratio (DSR).
 
     Expresses the chance that the advertized strategy has a positive Sharpe ratio.
@@ -1265,6 +1407,7 @@ If <code>nb_trials</code> is None, is set to the number of columns.</p></div>
     if nanmask.any():
         returns = returns.copy()
         returns[nanmask] = 0.
+    wrap_kwargs = merge_dicts(dict(name_or_index=&#39;deflated_sharpe_ratio&#39;), wrap_kwargs)
     return self.wrapper.wrap_reduced(metrics.deflated_sharpe_ratio(
         est_sharpe=sharpe_ratio / np.sqrt(self.ann_factor),
         var_sharpe=var_sharpe / self.ann_factor,
@@ -1272,11 +1415,11 @@ If <code>nb_trials</code> is None, is set to the number of columns.</p></div>
         backtest_horizon=self.wrapper.shape_2d[0],
         skew=skew(returns, axis=0, bias=bias),
         kurtosis=kurtosis(returns, axis=0, bias=bias)
-    ))</code></pre>
+    ), **wrap_kwargs)</code></pre>
 </details>
 </dd>
 <dt id="vectorbt.returns.accessors.ReturnsAccessor.down_capture"><code class="name flex">
-<span>def <span class="ident fname">down_capture</span></span>(<span>self, benchmark_rets)</span>
+<span>def <span class="ident fname">down_capture</span></span>(<span>self, benchmark_rets, wrap_kwargs=None)</span>
 </code></dt>
 <dd>
 <div class="desc"><p>Capture ratio for periods when the benchmark return is negative.</p>
@@ -1290,7 +1433,7 @@ Will broadcast per element.</dd>
 <summary>
 <span>Expand source code</span>
 </summary>
-<pre><code class="python">def down_capture(self, benchmark_rets):
+<pre><code class="python">def down_capture(self, benchmark_rets, wrap_kwargs=None):
     &#34;&#34;&#34;Capture ratio for periods when the benchmark return is negative.
 
     Args:
@@ -1299,11 +1442,14 @@ Will broadcast per element.</dd>
     benchmark_rets = reshape_fns.broadcast_to(
         reshape_fns.to_2d(benchmark_rets, raw=True),
         reshape_fns.to_2d(self._obj, raw=True))
-    return self.wrapper.wrap_reduced(nb.down_capture_nb(self.to_2d_array(), benchmark_rets, self.ann_factor))</code></pre>
+    wrap_kwargs = merge_dicts(dict(name_or_index=&#39;down_capture&#39;), wrap_kwargs)
+    return self.wrapper.wrap_reduced(nb.down_capture_nb(
+        self.to_2d_array(), benchmark_rets, self.ann_factor
+    ), **wrap_kwargs)</code></pre>
 </details>
 </dd>
 <dt id="vectorbt.returns.accessors.ReturnsAccessor.downside_risk"><code class="name flex">
-<span>def <span class="ident fname">downside_risk</span></span>(<span>self, required_return=0.0)</span>
+<span>def <span class="ident fname">downside_risk</span></span>(<span>self, required_return=0.0, wrap_kwargs=None)</span>
 </code></dt>
 <dd>
 <div class="desc"><p>Downside deviation below a threshold.</p>
@@ -1317,18 +1463,21 @@ Will broadcast per column.</dd>
 <summary>
 <span>Expand source code</span>
 </summary>
-<pre><code class="python">def downside_risk(self, required_return=0.):
+<pre><code class="python">def downside_risk(self, required_return=0., wrap_kwargs=None):
     &#34;&#34;&#34;Downside deviation below a threshold.
 
     Args:
         required_return (float or array_like): Minimum acceptance return of the investor.
             Will broadcast per column.&#34;&#34;&#34;
     required_return = np.broadcast_to(required_return, (len(self.wrapper.columns),))
-    return self.wrapper.wrap_reduced(nb.downside_risk_nb(self.to_2d_array(), self.ann_factor, required_return))</code></pre>
+    wrap_kwargs = merge_dicts(dict(name_or_index=&#39;downside_risk&#39;), wrap_kwargs)
+    return self.wrapper.wrap_reduced(nb.downside_risk_nb(
+        self.to_2d_array(), self.ann_factor, required_return
+    ), **wrap_kwargs)</code></pre>
 </details>
 </dd>
 <dt id="vectorbt.returns.accessors.ReturnsAccessor.drawdown"><code class="name flex">
-<span>def <span class="ident fname">drawdown</span></span>(<span>self)</span>
+<span>def <span class="ident fname">drawdown</span></span>(<span>self, wrap_kwargs=None)</span>
 </code></dt>
 <dd>
 <div class="desc"><p>Relative decline from a peak.</p></div>
@@ -1336,9 +1485,9 @@ Will broadcast per column.</dd>
 <summary>
 <span>Expand source code</span>
 </summary>
-<pre><code class="python">def drawdown(self):
+<pre><code class="python">def drawdown(self, wrap_kwargs=None):
     &#34;&#34;&#34;Relative decline from a peak.&#34;&#34;&#34;
-    return self.wrapper.wrap(nb.drawdown_nb(self.to_2d_array()))</code></pre>
+    return self.wrapper.wrap(nb.drawdown_nb(self.to_2d_array()), **merge_dicts({}, wrap_kwargs))</code></pre>
 </details>
 </dd>
 <dt id="vectorbt.returns.accessors.ReturnsAccessor.get_drawdowns"><code class="name flex">
@@ -1362,7 +1511,7 @@ def get_drawdowns(self, group_by=None, **kwargs):
 </details>
 </dd>
 <dt id="vectorbt.returns.accessors.ReturnsAccessor.information_ratio"><code class="name flex">
-<span>def <span class="ident fname">information_ratio</span></span>(<span>self, benchmark_rets)</span>
+<span>def <span class="ident fname">information_ratio</span></span>(<span>self, benchmark_rets, wrap_kwargs=None)</span>
 </code></dt>
 <dd>
 <div class="desc"><p>Information ratio of a strategy.</p>
@@ -1376,7 +1525,7 @@ Will broadcast per element.</dd>
 <summary>
 <span>Expand source code</span>
 </summary>
-<pre><code class="python">def information_ratio(self, benchmark_rets):
+<pre><code class="python">def information_ratio(self, benchmark_rets, wrap_kwargs=None):
     &#34;&#34;&#34;Information ratio of a strategy.
 
     Args:
@@ -1385,12 +1534,14 @@ Will broadcast per element.</dd>
     benchmark_rets = reshape_fns.broadcast_to(
         reshape_fns.to_2d(benchmark_rets, raw=True),
         reshape_fns.to_2d(self._obj, raw=True))
-
-    return self.wrapper.wrap_reduced(nb.information_ratio_nb(self.to_2d_array(), benchmark_rets))</code></pre>
+    wrap_kwargs = merge_dicts(dict(name_or_index=&#39;information_ratio&#39;), wrap_kwargs)
+    return self.wrapper.wrap_reduced(nb.information_ratio_nb(
+        self.to_2d_array(), benchmark_rets
+    ), **wrap_kwargs)</code></pre>
 </details>
 </dd>
 <dt id="vectorbt.returns.accessors.ReturnsAccessor.max_drawdown"><code class="name flex">
-<span>def <span class="ident fname">max_drawdown</span></span>(<span>self)</span>
+<span>def <span class="ident fname">max_drawdown</span></span>(<span>self, wrap_kwargs=None)</span>
 </code></dt>
 <dd>
 <div class="desc"><p>Total maximum drawdown (MDD).</p></div>
@@ -1398,13 +1549,16 @@ Will broadcast per element.</dd>
 <summary>
 <span>Expand source code</span>
 </summary>
-<pre><code class="python">def max_drawdown(self):
+<pre><code class="python">def max_drawdown(self, wrap_kwargs=None):
     &#34;&#34;&#34;Total maximum drawdown (MDD).&#34;&#34;&#34;
-    return self.wrapper.wrap_reduced(nb.max_drawdown_nb(self.to_2d_array()))</code></pre>
+    wrap_kwargs = merge_dicts(dict(name_or_index=&#39;max_drawdown&#39;), wrap_kwargs)
+    return self.wrapper.wrap_reduced(nb.max_drawdown_nb(
+        self.to_2d_array()
+    ), **wrap_kwargs)</code></pre>
 </details>
 </dd>
 <dt id="vectorbt.returns.accessors.ReturnsAccessor.omega_ratio"><code class="name flex">
-<span>def <span class="ident fname">omega_ratio</span></span>(<span>self, risk_free=0.0, required_return=0.0)</span>
+<span>def <span class="ident fname">omega_ratio</span></span>(<span>self, risk_free=0.0, required_return=0.0, wrap_kwargs=None)</span>
 </code></dt>
 <dd>
 <div class="desc"><p>Omega ratio of a strategy.</p>
@@ -1421,7 +1575,7 @@ Will broadcast per column.</dd>
 <summary>
 <span>Expand source code</span>
 </summary>
-<pre><code class="python">def omega_ratio(self, risk_free=0., required_return=0.):
+<pre><code class="python">def omega_ratio(self, risk_free=0., required_return=0., wrap_kwargs=None):
     &#34;&#34;&#34;Omega ratio of a strategy.
 
     Args:
@@ -1431,12 +1585,14 @@ Will broadcast per column.</dd>
             Will broadcast per column.&#34;&#34;&#34;
     risk_free = np.broadcast_to(risk_free, (len(self.wrapper.columns),))
     required_return = np.broadcast_to(required_return, (len(self.wrapper.columns),))
+    wrap_kwargs = merge_dicts(dict(name_or_index=&#39;omega_ratio&#39;), wrap_kwargs)
     return self.wrapper.wrap_reduced(nb.omega_ratio_nb(
-        self.to_2d_array(), self.ann_factor, risk_free, required_return))</code></pre>
+        self.to_2d_array(), self.ann_factor, risk_free, required_return
+    ), **wrap_kwargs)</code></pre>
 </details>
 </dd>
 <dt id="vectorbt.returns.accessors.ReturnsAccessor.sharpe_ratio"><code class="name flex">
-<span>def <span class="ident fname">sharpe_ratio</span></span>(<span>self, risk_free=0.0)</span>
+<span>def <span class="ident fname">sharpe_ratio</span></span>(<span>self, risk_free=0.0, wrap_kwargs=None)</span>
 </code></dt>
 <dd>
 <div class="desc"><p>Sharpe ratio of a strategy.</p>
@@ -1450,18 +1606,21 @@ Will broadcast per column.</dd>
 <summary>
 <span>Expand source code</span>
 </summary>
-<pre><code class="python">def sharpe_ratio(self, risk_free=0.):
+<pre><code class="python">def sharpe_ratio(self, risk_free=0., wrap_kwargs=None):
     &#34;&#34;&#34;Sharpe ratio of a strategy.
 
     Args:
         risk_free (float or array_like): Constant risk-free return throughout the period.
             Will broadcast per column.&#34;&#34;&#34;
     risk_free = np.broadcast_to(risk_free, (len(self.wrapper.columns),))
-    return self.wrapper.wrap_reduced(nb.sharpe_ratio_nb(self.to_2d_array(), self.ann_factor, risk_free))</code></pre>
+    wrap_kwargs = merge_dicts(dict(name_or_index=&#39;sharpe_ratio&#39;), wrap_kwargs)
+    return self.wrapper.wrap_reduced(nb.sharpe_ratio_nb(
+        self.to_2d_array(), self.ann_factor, risk_free
+    ), **wrap_kwargs)</code></pre>
 </details>
 </dd>
 <dt id="vectorbt.returns.accessors.ReturnsAccessor.sortino_ratio"><code class="name flex">
-<span>def <span class="ident fname">sortino_ratio</span></span>(<span>self, required_return=0.0)</span>
+<span>def <span class="ident fname">sortino_ratio</span></span>(<span>self, required_return=0.0, wrap_kwargs=None)</span>
 </code></dt>
 <dd>
 <div class="desc"><p>Sortino ratio of a strategy.</p>
@@ -1475,18 +1634,21 @@ Will broadcast per column.</dd>
 <summary>
 <span>Expand source code</span>
 </summary>
-<pre><code class="python">def sortino_ratio(self, required_return=0.):
+<pre><code class="python">def sortino_ratio(self, required_return=0., wrap_kwargs=None):
     &#34;&#34;&#34;Sortino ratio of a strategy.
 
     Args:
         required_return (float or array_like): Minimum acceptance return of the investor.
             Will broadcast per column.&#34;&#34;&#34;
     required_return = np.broadcast_to(required_return, (len(self.wrapper.columns),))
-    return self.wrapper.wrap_reduced(nb.sortino_ratio_nb(self.to_2d_array(), self.ann_factor, required_return))</code></pre>
+    wrap_kwargs = merge_dicts(dict(name_or_index=&#39;sortino_ratio&#39;), wrap_kwargs)
+    return self.wrapper.wrap_reduced(nb.sortino_ratio_nb(
+        self.to_2d_array(), self.ann_factor, required_return
+    ), **wrap_kwargs)</code></pre>
 </details>
 </dd>
 <dt id="vectorbt.returns.accessors.ReturnsAccessor.stats"><code class="name flex">
-<span>def <span class="ident fname">stats</span></span>(<span>self, benchmark_rets, levy_alpha=2.0, risk_free=0.0, required_return=0.0)</span>
+<span>def <span class="ident fname">stats</span></span>(<span>self, benchmark_rets, levy_alpha=2.0, risk_free=0.0, required_return=0.0, wrap_kwargs=None)</span>
 </code></dt>
 <dd>
 <div class="desc"><p>Compute various statistics on these returns.</p>
@@ -1540,7 +1702,7 @@ Name: BTC-USD, dtype: object
 <summary>
 <span>Expand source code</span>
 </summary>
-<pre><code class="python">def stats(self, benchmark_rets, levy_alpha=2.0, risk_free=0., required_return=0.):
+<pre><code class="python">def stats(self, benchmark_rets, levy_alpha=2.0, risk_free=0., required_return=0., wrap_kwargs=None):
     &#34;&#34;&#34;Compute various statistics on these returns.
 
     Args:
@@ -1613,12 +1775,13 @@ Name: BTC-USD, dtype: object
 
     # Select columns or reduce
     if self.is_series():
-        return self.wrapper.wrap_reduced(stats_df.iloc[0], index=stats_df.columns)
+        wrap_kwargs = merge_dicts(dict(name_or_index=stats_df.columns), wrap_kwargs)
+        return self.wrapper.wrap_reduced(stats_df.iloc[0], **wrap_kwargs)
     return stats_df</code></pre>
 </details>
 </dd>
 <dt id="vectorbt.returns.accessors.ReturnsAccessor.tail_ratio"><code class="name flex">
-<span>def <span class="ident fname">tail_ratio</span></span>(<span>self)</span>
+<span>def <span class="ident fname">tail_ratio</span></span>(<span>self, wrap_kwargs=None)</span>
 </code></dt>
 <dd>
 <div class="desc"><p>Ratio between the right (95%) and left tail (5%).</p></div>
@@ -1626,13 +1789,16 @@ Name: BTC-USD, dtype: object
 <summary>
 <span>Expand source code</span>
 </summary>
-<pre><code class="python">def tail_ratio(self):
+<pre><code class="python">def tail_ratio(self, wrap_kwargs=None):
     &#34;&#34;&#34;Ratio between the right (95%) and left tail (5%).&#34;&#34;&#34;
-    return self.wrapper.wrap_reduced(nb.tail_ratio_nb(self.to_2d_array()))</code></pre>
+    wrap_kwargs = merge_dicts(dict(name_or_index=&#39;tail_ratio&#39;), wrap_kwargs)
+    return self.wrapper.wrap_reduced(nb.tail_ratio_nb(
+        self.to_2d_array()
+    ), **wrap_kwargs)</code></pre>
 </details>
 </dd>
 <dt id="vectorbt.returns.accessors.ReturnsAccessor.total"><code class="name flex">
-<span>def <span class="ident fname">total</span></span>(<span>self)</span>
+<span>def <span class="ident fname">total</span></span>(<span>self, wrap_kwargs=None)</span>
 </code></dt>
 <dd>
 <div class="desc"><p>Total return.</p></div>
@@ -1640,14 +1806,16 @@ Name: BTC-USD, dtype: object
 <summary>
 <span>Expand source code</span>
 </summary>
-<pre><code class="python">def total(self):
+<pre><code class="python">def total(self, wrap_kwargs=None):
     &#34;&#34;&#34;Total return.&#34;&#34;&#34;
+    wrap_kwargs = merge_dicts(dict(name_or_index=&#39;total_return&#39;), wrap_kwargs)
     return self.wrapper.wrap_reduced(nb.cum_returns_final_nb(
-        self.to_2d_array(), np.full(len(self.wrapper.columns), 0.)))</code></pre>
+        self.to_2d_array(), np.full(len(self.wrapper.columns), 0.)
+    ), **wrap_kwargs)</code></pre>
 </details>
 </dd>
 <dt id="vectorbt.returns.accessors.ReturnsAccessor.up_capture"><code class="name flex">
-<span>def <span class="ident fname">up_capture</span></span>(<span>self, benchmark_rets)</span>
+<span>def <span class="ident fname">up_capture</span></span>(<span>self, benchmark_rets, wrap_kwargs=None)</span>
 </code></dt>
 <dd>
 <div class="desc"><p>Capture ratio for periods when the benchmark return is positive.</p>
@@ -1661,7 +1829,7 @@ Will broadcast per element.</dd>
 <summary>
 <span>Expand source code</span>
 </summary>
-<pre><code class="python">def up_capture(self, benchmark_rets):
+<pre><code class="python">def up_capture(self, benchmark_rets, wrap_kwargs=None):
     &#34;&#34;&#34;Capture ratio for periods when the benchmark return is positive.
 
     Args:
@@ -1670,11 +1838,14 @@ Will broadcast per element.</dd>
     benchmark_rets = reshape_fns.broadcast_to(
         reshape_fns.to_2d(benchmark_rets, raw=True),
         reshape_fns.to_2d(self._obj, raw=True))
-    return self.wrapper.wrap_reduced(nb.up_capture_nb(self.to_2d_array(), benchmark_rets, self.ann_factor))</code></pre>
+    wrap_kwargs = merge_dicts(dict(name_or_index=&#39;up_capture&#39;), wrap_kwargs)
+    return self.wrapper.wrap_reduced(nb.up_capture_nb(
+        self.to_2d_array(), benchmark_rets, self.ann_factor
+    ), **wrap_kwargs)</code></pre>
 </details>
 </dd>
 <dt id="vectorbt.returns.accessors.ReturnsAccessor.value_at_risk"><code class="name flex">
-<span>def <span class="ident fname">value_at_risk</span></span>(<span>self, cutoff=0.05)</span>
+<span>def <span class="ident fname">value_at_risk</span></span>(<span>self, cutoff=0.05, wrap_kwargs=None)</span>
 </code></dt>
 <dd>
 <div class="desc"><p>Value at risk (VaR) of a returns stream.</p>
@@ -1688,14 +1859,17 @@ bottom percentile of returns. Will broadcast per column.</dd>
 <summary>
 <span>Expand source code</span>
 </summary>
-<pre><code class="python">def value_at_risk(self, cutoff=0.05):
+<pre><code class="python">def value_at_risk(self, cutoff=0.05, wrap_kwargs=None):
     &#34;&#34;&#34;Value at risk (VaR) of a returns stream.
 
     Args:
         cutoff (float or array_like): Decimal representing the percentage cutoff for the
             bottom percentile of returns. Will broadcast per column.&#34;&#34;&#34;
     cutoff = np.broadcast_to(cutoff, (len(self.wrapper.columns),))
-    return self.wrapper.wrap_reduced(nb.value_at_risk_nb(self.to_2d_array(), cutoff))</code></pre>
+    wrap_kwargs = merge_dicts(dict(name_or_index=&#39;value_at_risk&#39;), wrap_kwargs)
+    return self.wrapper.wrap_reduced(nb.value_at_risk_nb(
+        self.to_2d_array(), cutoff
+    ), **wrap_kwargs)</code></pre>
 </details>
 </dd>
 </dl>
@@ -1705,6 +1879,7 @@ bottom percentile of returns. Will broadcast per column.</dd>
 <ul class="hlist">
 <li><code><a title="vectorbt.generic.accessors.GenericAccessor.align_to" href="../base/accessors.html#vectorbt.base.accessors.BaseAccessor.align_to">align_to</a></code></li>
 <li><code><a title="vectorbt.generic.accessors.GenericAccessor.apply" href="../base/accessors.html#vectorbt.base.accessors.BaseAccessor.apply">apply</a></code></li>
+<li><code><a title="vectorbt.generic.accessors.GenericAccessor.apply_along_axis" href="../generic/accessors.html#vectorbt.generic.accessors.GenericAccessor.apply_along_axis">apply_along_axis</a></code></li>
 <li><code><a title="vectorbt.generic.accessors.GenericAccessor.apply_and_concat" href="../base/accessors.html#vectorbt.base.accessors.BaseAccessor.apply_and_concat">apply_and_concat</a></code></li>
 <li><code><a title="vectorbt.generic.accessors.GenericAccessor.apply_and_reduce" href="../generic/accessors.html#vectorbt.generic.accessors.GenericAccessor.apply_and_reduce">apply_and_reduce</a></code></li>
 <li><code><a title="vectorbt.generic.accessors.GenericAccessor.apply_on_index" href="../base/accessors.html#vectorbt.base.accessors.BaseAccessor.apply_on_index">apply_on_index</a></code></li>
@@ -1713,6 +1888,7 @@ bottom percentile of returns. Will broadcast per column.</dd>
 <li><code><a title="vectorbt.generic.accessors.GenericAccessor.boxplot" href="../generic/accessors.html#vectorbt.generic.accessors.GenericAccessor.boxplot">boxplot</a></code></li>
 <li><code><a title="vectorbt.generic.accessors.GenericAccessor.broadcast" href="../base/accessors.html#vectorbt.base.accessors.BaseAccessor.broadcast">broadcast</a></code></li>
 <li><code><a title="vectorbt.generic.accessors.GenericAccessor.broadcast_to" href="../base/accessors.html#vectorbt.base.accessors.BaseAccessor.broadcast_to">broadcast_to</a></code></li>
+<li><code><a title="vectorbt.generic.accessors.GenericAccessor.bshift" href="../generic/accessors.html#vectorbt.generic.accessors.GenericAccessor.bshift">bshift</a></code></li>
 <li><code><a title="vectorbt.generic.accessors.GenericAccessor.combine_with" href="../base/accessors.html#vectorbt.base.accessors.BaseAccessor.combine_with">combine_with</a></code></li>
 <li><code><a title="vectorbt.generic.accessors.GenericAccessor.combine_with_multiple" href="../base/accessors.html#vectorbt.base.accessors.BaseAccessor.combine_with_multiple">combine_with_multiple</a></code></li>
 <li><code><a title="vectorbt.generic.accessors.GenericAccessor.concat" href="../base/accessors.html#vectorbt.base.accessors.BaseAccessor.concat">concat</a></code></li>
@@ -1821,6 +1997,7 @@ bottom percentile of returns. Will broadcast per column.</dd>
 <li><code><a title="vectorbt.returns.accessors.ReturnsAccessor.annualized" href="#vectorbt.returns.accessors.ReturnsAccessor.annualized">annualized</a></code></li>
 <li><code><a title="vectorbt.returns.accessors.ReturnsAccessor.annualized_volatility" href="#vectorbt.returns.accessors.ReturnsAccessor.annualized_volatility">annualized_volatility</a></code></li>
 <li><code><a title="vectorbt.returns.accessors.ReturnsAccessor.apply" href="../base/accessors.html#vectorbt.base.accessors.BaseAccessor.apply">apply</a></code></li>
+<li><code><a title="vectorbt.returns.accessors.ReturnsAccessor.apply_along_axis" href="../generic/accessors.html#vectorbt.generic.accessors.GenericAccessor.apply_along_axis">apply_along_axis</a></code></li>
 <li><code><a title="vectorbt.returns.accessors.ReturnsAccessor.apply_and_concat" href="../base/accessors.html#vectorbt.base.accessors.BaseAccessor.apply_and_concat">apply_and_concat</a></code></li>
 <li><code><a title="vectorbt.returns.accessors.ReturnsAccessor.apply_and_reduce" href="../generic/accessors.html#vectorbt.generic.accessors.GenericAccessor.apply_and_reduce">apply_and_reduce</a></code></li>
 <li><code><a title="vectorbt.returns.accessors.ReturnsAccessor.apply_on_index" href="../base/accessors.html#vectorbt.base.accessors.BaseAccessor.apply_on_index">apply_on_index</a></code></li>
@@ -1830,6 +2007,7 @@ bottom percentile of returns. Will broadcast per column.</dd>
 <li><code><a title="vectorbt.returns.accessors.ReturnsAccessor.boxplot" href="../generic/accessors.html#vectorbt.generic.accessors.GenericAccessor.boxplot">boxplot</a></code></li>
 <li><code><a title="vectorbt.returns.accessors.ReturnsAccessor.broadcast" href="../base/accessors.html#vectorbt.base.accessors.BaseAccessor.broadcast">broadcast</a></code></li>
 <li><code><a title="vectorbt.returns.accessors.ReturnsAccessor.broadcast_to" href="../base/accessors.html#vectorbt.base.accessors.BaseAccessor.broadcast_to">broadcast_to</a></code></li>
+<li><code><a title="vectorbt.returns.accessors.ReturnsAccessor.bshift" href="../generic/accessors.html#vectorbt.generic.accessors.GenericAccessor.bshift">bshift</a></code></li>
 <li><code><a title="vectorbt.returns.accessors.ReturnsAccessor.calmar_ratio" href="#vectorbt.returns.accessors.ReturnsAccessor.calmar_ratio">calmar_ratio</a></code></li>
 <li><code><a title="vectorbt.returns.accessors.ReturnsAccessor.capture" href="#vectorbt.returns.accessors.ReturnsAccessor.capture">capture</a></code></li>
 <li><code><a title="vectorbt.returns.accessors.ReturnsAccessor.combine_with" href="../base/accessors.html#vectorbt.base.accessors.BaseAccessor.combine_with">combine_with</a></code></li>
@@ -1921,6 +2099,7 @@ bottom percentile of returns. Will broadcast per column.</dd>
 <li><code><b><a title="vectorbt.generic.accessors.GenericDFAccessor" href="../generic/accessors.html#vectorbt.generic.accessors.GenericDFAccessor">GenericDFAccessor</a></b></code>:
 <ul class="hlist">
 <li><code><a title="vectorbt.generic.accessors.GenericDFAccessor.heatmap" href="../generic/accessors.html#vectorbt.generic.accessors.GenericDFAccessor.heatmap">heatmap</a></code></li>
+<li><code><a title="vectorbt.generic.accessors.GenericDFAccessor.ts_heatmap" href="../generic/accessors.html#vectorbt.generic.accessors.GenericDFAccessor.ts_heatmap">ts_heatmap</a></code></li>
 </ul>
 </li>
 </ul>
@@ -2208,6 +2387,7 @@ Will broadcast per element.</dd>
 <li><code><a title="vectorbt.returns.accessors.ReturnsAccessor.annualized" href="#vectorbt.returns.accessors.ReturnsAccessor.annualized">annualized</a></code></li>
 <li><code><a title="vectorbt.returns.accessors.ReturnsAccessor.annualized_volatility" href="#vectorbt.returns.accessors.ReturnsAccessor.annualized_volatility">annualized_volatility</a></code></li>
 <li><code><a title="vectorbt.returns.accessors.ReturnsAccessor.apply" href="../base/accessors.html#vectorbt.base.accessors.BaseAccessor.apply">apply</a></code></li>
+<li><code><a title="vectorbt.returns.accessors.ReturnsAccessor.apply_along_axis" href="../generic/accessors.html#vectorbt.generic.accessors.GenericAccessor.apply_along_axis">apply_along_axis</a></code></li>
 <li><code><a title="vectorbt.returns.accessors.ReturnsAccessor.apply_and_concat" href="../base/accessors.html#vectorbt.base.accessors.BaseAccessor.apply_and_concat">apply_and_concat</a></code></li>
 <li><code><a title="vectorbt.returns.accessors.ReturnsAccessor.apply_and_reduce" href="../generic/accessors.html#vectorbt.generic.accessors.GenericAccessor.apply_and_reduce">apply_and_reduce</a></code></li>
 <li><code><a title="vectorbt.returns.accessors.ReturnsAccessor.apply_on_index" href="../base/accessors.html#vectorbt.base.accessors.BaseAccessor.apply_on_index">apply_on_index</a></code></li>
@@ -2217,6 +2397,7 @@ Will broadcast per element.</dd>
 <li><code><a title="vectorbt.returns.accessors.ReturnsAccessor.boxplot" href="../generic/accessors.html#vectorbt.generic.accessors.GenericAccessor.boxplot">boxplot</a></code></li>
 <li><code><a title="vectorbt.returns.accessors.ReturnsAccessor.broadcast" href="../base/accessors.html#vectorbt.base.accessors.BaseAccessor.broadcast">broadcast</a></code></li>
 <li><code><a title="vectorbt.returns.accessors.ReturnsAccessor.broadcast_to" href="../base/accessors.html#vectorbt.base.accessors.BaseAccessor.broadcast_to">broadcast_to</a></code></li>
+<li><code><a title="vectorbt.returns.accessors.ReturnsAccessor.bshift" href="../generic/accessors.html#vectorbt.generic.accessors.GenericAccessor.bshift">bshift</a></code></li>
 <li><code><a title="vectorbt.returns.accessors.ReturnsAccessor.calmar_ratio" href="#vectorbt.returns.accessors.ReturnsAccessor.calmar_ratio">calmar_ratio</a></code></li>
 <li><code><a title="vectorbt.returns.accessors.ReturnsAccessor.capture" href="#vectorbt.returns.accessors.ReturnsAccessor.capture">capture</a></code></li>
 <li><code><a title="vectorbt.returns.accessors.ReturnsAccessor.combine_with" href="../base/accessors.html#vectorbt.base.accessors.BaseAccessor.combine_with">combine_with</a></code></li>
@@ -2311,6 +2492,7 @@ Will broadcast per element.</dd>
 <li><code><a title="vectorbt.generic.accessors.GenericSRAccessor.overlay_with_heatmap" href="../generic/accessors.html#vectorbt.generic.accessors.GenericSRAccessor.overlay_with_heatmap">overlay_with_heatmap</a></code></li>
 <li><code><a title="vectorbt.generic.accessors.GenericSRAccessor.plot_against" href="../generic/accessors.html#vectorbt.generic.accessors.GenericSRAccessor.plot_against">plot_against</a></code></li>
 <li><code><a title="vectorbt.generic.accessors.GenericSRAccessor.qqplot" href="../generic/accessors.html#vectorbt.generic.accessors.GenericSRAccessor.qqplot">qqplot</a></code></li>
+<li><code><a title="vectorbt.generic.accessors.GenericSRAccessor.ts_heatmap" href="../generic/accessors.html#vectorbt.generic.accessors.GenericSRAccessor.ts_heatmap">ts_heatmap</a></code></li>
 <li><code><a title="vectorbt.generic.accessors.GenericSRAccessor.volume" href="../generic/accessors.html#vectorbt.generic.accessors.GenericSRAccessor.volume">volume</a></code></li>
 </ul>
 </li>

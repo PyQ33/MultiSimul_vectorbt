@@ -144,21 +144,22 @@ except ImportError:
 
 
 @add_nb_methods([
-    nb.shuffle_nb,
-    nb.fillna_nb,
-    nb.fshift_nb,
-    nb.diff_nb,
-    nb.pct_change_nb,
-    nb.ffill_nb,
-    nb.product_nb,
-    nb.cumsum_nb,
-    nb.cumprod_nb,
-    nb.rolling_min_nb,
-    nb.rolling_max_nb,
-    nb.rolling_mean_nb,
-    nb.expanding_min_nb,
-    nb.expanding_max_nb,
-    nb.expanding_mean_nb
+    (nb.shuffle_nb, False),
+    (nb.fillna_nb, False),
+    (nb.bshift_nb, False),
+    (nb.fshift_nb, False),
+    (nb.diff_nb, False),
+    (nb.pct_change_nb, False),
+    (nb.ffill_nb, False),
+    (nb.cumsum_nb, False),
+    (nb.cumprod_nb, False),
+    (nb.rolling_min_nb, False),
+    (nb.rolling_max_nb, False),
+    (nb.rolling_mean_nb, False),
+    (nb.expanding_min_nb, False),
+    (nb.expanding_max_nb, False),
+    (nb.expanding_mean_nb, False),
+    (nb.product_nb, True, &#39;product&#39;)
 ], module_name=&#39;vectorbt.generic.nb&#39;)
 class GenericAccessor(BaseAccessor):
     &#34;&#34;&#34;Accessor on top of data of any type. For both, Series and DataFrames.
@@ -171,21 +172,25 @@ class GenericAccessor(BaseAccessor):
 
         BaseAccessor.__init__(self, obj, **kwargs)
 
-    def rolling_std(self, window, minp=1, ddof=1):  # pragma: no cover
+    def rolling_std(self, window, minp=1, ddof=1, wrap_kwargs=None):  # pragma: no cover
         &#34;&#34;&#34;See `vectorbt.generic.nb.rolling_std_nb`.&#34;&#34;&#34;
-        return self.wrapper.wrap(nb.rolling_std_nb(self.to_2d_array(), window, minp=minp, ddof=ddof))
+        out = nb.rolling_std_nb(self.to_2d_array(), window, minp=minp, ddof=ddof)
+        return self.wrapper.wrap(out, **merge_dicts({}, wrap_kwargs))
 
-    def expanding_std(self, minp=1, ddof=1):  # pragma: no cover
+    def expanding_std(self, minp=1, ddof=1, wrap_kwargs=None):  # pragma: no cover
         &#34;&#34;&#34;See `vectorbt.generic.nb.expanding_std_nb`.&#34;&#34;&#34;
-        return self.wrapper.wrap(nb.expanding_std_nb(self.to_2d_array(), minp=minp, ddof=ddof))
+        out = nb.expanding_std_nb(self.to_2d_array(), minp=minp, ddof=ddof)
+        return self.wrapper.wrap(out, **merge_dicts({}, wrap_kwargs))
 
-    def ewm_mean(self, span, minp=0, adjust=True):  # pragma: no cover
+    def ewm_mean(self, span, minp=0, adjust=True, wrap_kwargs=None):  # pragma: no cover
         &#34;&#34;&#34;See `vectorbt.generic.nb.ewm_mean_nb`.&#34;&#34;&#34;
-        return self.wrapper.wrap(nb.ewm_mean_nb(self.to_2d_array(), span, minp=minp, adjust=adjust))
+        out = nb.ewm_mean_nb(self.to_2d_array(), span, minp=minp, adjust=adjust)
+        return self.wrapper.wrap(out, **merge_dicts({}, wrap_kwargs))
 
-    def ewm_std(self, span, minp=0, adjust=True, ddof=1):  # pragma: no cover
+    def ewm_std(self, span, minp=0, adjust=True, ddof=1, wrap_kwargs=None):  # pragma: no cover
         &#34;&#34;&#34;See `vectorbt.generic.nb.ewm_std_nb`.&#34;&#34;&#34;
-        return self.wrapper.wrap(nb.ewm_std_nb(self.to_2d_array(), span, minp=minp, adjust=adjust, ddof=ddof))
+        out = nb.ewm_std_nb(self.to_2d_array(), span, minp=minp, adjust=adjust, ddof=ddof)
+        return self.wrapper.wrap(out, **merge_dicts({}, wrap_kwargs))
 
     def split_into_ranges(self, n=None, range_len=None, start_idxs=None, end_idxs=None):
         &#34;&#34;&#34;Either split into `n` ranges each `range_len` long, or split into ranges between
@@ -280,7 +285,19 @@ class GenericAccessor(BaseAccessor):
         new_columns = index_fns.combine_indexes(self.wrapper.columns, range_columns)
         return pd.DataFrame(matrix, columns=new_columns)
 
-    def rolling_apply(self, window, apply_func_nb, *args, on_matrix=False):
+    def apply_along_axis(self, apply_func_nb, *args, axis=0, wrap_kwargs=None):
+        &#34;&#34;&#34;Apply a function `apply_func_nb` along an axis.&#34;&#34;&#34;
+        checks.assert_numba_func(apply_func_nb)
+
+        if axis == 0:
+            out = nb.apply_along_0_nb(self.to_2d_array(), apply_func_nb, *args)
+        elif axis == 1:
+            out = nb.apply_along_1_nb(self.to_2d_array(), apply_func_nb, *args)
+        else:
+            raise ValueError(&#34;Only axes 0 and 1 are supported&#34;)
+        return self.wrapper.wrap(out, **merge_dicts({}, wrap_kwargs))
+
+    def rolling_apply(self, window, apply_func_nb, *args, on_matrix=False, wrap_kwargs=None):
         &#34;&#34;&#34;See `vectorbt.generic.nb.rolling_apply_nb` and
         `vectorbt.generic.nb.rolling_apply_matrix_nb` for `on_matrix=True`.
 
@@ -312,9 +329,9 @@ class GenericAccessor(BaseAccessor):
             out = nb.rolling_apply_matrix_nb(self.to_2d_array(), window, apply_func_nb, *args)
         else:
             out = nb.rolling_apply_nb(self.to_2d_array(), window, apply_func_nb, *args)
-        return self.wrapper.wrap(out)
+        return self.wrapper.wrap(out, **merge_dicts({}, wrap_kwargs))
 
-    def expanding_apply(self, apply_func_nb, *args, on_matrix=False):
+    def expanding_apply(self, apply_func_nb, *args, on_matrix=False, wrap_kwargs=None):
         &#34;&#34;&#34;See `vectorbt.generic.nb.expanding_apply_nb` and
         `vectorbt.generic.nb.expanding_apply_matrix_nb` for `on_matrix=True`.
 
@@ -346,9 +363,9 @@ class GenericAccessor(BaseAccessor):
             out = nb.expanding_apply_matrix_nb(self.to_2d_array(), apply_func_nb, *args)
         else:
             out = nb.expanding_apply_nb(self.to_2d_array(), apply_func_nb, *args)
-        return self.wrapper.wrap(out)
+        return self.wrapper.wrap(out, **merge_dicts({}, wrap_kwargs))
 
-    def groupby_apply(self, by, apply_func_nb, *args, on_matrix=False, **kwargs):
+    def groupby_apply(self, by, apply_func_nb, *args, on_matrix=False, wrap_kwargs=None, **kwargs):
         &#34;&#34;&#34;See `vectorbt.generic.nb.groupby_apply_nb` and
         `vectorbt.generic.nb.groupby_apply_matrix_nb` for `on_matrix=True`.
 
@@ -382,9 +399,10 @@ class GenericAccessor(BaseAccessor):
             out = nb.groupby_apply_matrix_nb(self.to_2d_array(), groups, apply_func_nb, *args)
         else:
             out = nb.groupby_apply_nb(self.to_2d_array(), groups, apply_func_nb, *args)
-        return self.wrapper.wrap_reduced(out, index=list(regrouped.indices.keys()))
+        wrap_kwargs = merge_dicts(dict(name_or_index=list(regrouped.indices.keys())), wrap_kwargs)
+        return self.wrapper.wrap_reduced(out, **wrap_kwargs)
 
-    def resample_apply(self, freq, apply_func_nb, *args, on_matrix=False, **kwargs):
+    def resample_apply(self, freq, apply_func_nb, *args, on_matrix=False, wrap_kwargs=None, **kwargs):
         &#34;&#34;&#34;See `vectorbt.generic.nb.groupby_apply_nb` and
         `vectorbt.generic.nb.groupby_apply_matrix_nb` for `on_matrix=True`.
 
@@ -420,11 +438,15 @@ class GenericAccessor(BaseAccessor):
             out = nb.groupby_apply_nb(self.to_2d_array(), groups, apply_func_nb, *args)
         out_obj = self.wrapper.wrap(out, index=list(resampled.indices.keys()))
         resampled_arr = np.full((resampled.ngroups, self.to_2d_array().shape[1]), np.nan)
-        resampled_obj = self.wrapper.wrap(resampled_arr, index=pd.Index(list(resampled.groups.keys()), freq=freq))
+        resampled_obj = self.wrapper.wrap(
+            resampled_arr, 
+            index=pd.Index(list(resampled.groups.keys()), freq=freq), 
+            **merge_dicts({}, wrap_kwargs)
+        )
         resampled_obj.loc[out_obj.index] = out_obj.values
         return resampled_obj
 
-    def applymap(self, apply_func_nb, *args):
+    def applymap(self, apply_func_nb, *args, wrap_kwargs=None):
         &#34;&#34;&#34;See `vectorbt.generic.nb.applymap_nb`.
 
         ## Example
@@ -443,9 +465,9 @@ class GenericAccessor(BaseAccessor):
         checks.assert_numba_func(apply_func_nb)
 
         out = nb.applymap_nb(self.to_2d_array(), apply_func_nb, *args)
-        return self.wrapper.wrap(out)
+        return self.wrapper.wrap(out, **merge_dicts({}, wrap_kwargs))
 
-    def filter(self, filter_func_nb, *args):
+    def filter(self, filter_func_nb, *args, wrap_kwargs=None):
         &#34;&#34;&#34;See `vectorbt.generic.nb.filter_nb`.
 
         ## Example
@@ -464,12 +486,10 @@ class GenericAccessor(BaseAccessor):
         checks.assert_numba_func(filter_func_nb)
 
         out = nb.filter_nb(self.to_2d_array(), filter_func_nb, *args)
-        return self.wrapper.wrap(out)
+        return self.wrapper.wrap(out, **merge_dicts({}, wrap_kwargs))
 
-    def apply_and_reduce(self, apply_func_nb, reduce_func_nb, apply_args=None, reduce_args=None, **kwargs):
+    def apply_and_reduce(self, apply_func_nb, reduce_func_nb, apply_args=None, reduce_args=None, wrap_kwargs=None):
         &#34;&#34;&#34;See `vectorbt.generic.nb.apply_and_reduce_nb`.
-
-        `**kwargs` will be passed to `vectorbt.base.array_wrapper.ArrayWrapper.wrap_reduced`.
 
         ## Example
 
@@ -491,10 +511,11 @@ class GenericAccessor(BaseAccessor):
             reduce_args = ()
 
         out = nb.apply_and_reduce_nb(self.to_2d_array(), apply_func_nb, apply_args, reduce_func_nb, reduce_args)
-        return self.wrapper.wrap_reduced(out, **kwargs)
+        wrap_kwargs = merge_dicts(dict(name_or_index=&#39;apply_and_reduce&#39;), wrap_kwargs)
+        return self.wrapper.wrap_reduced(out, **wrap_kwargs)
 
     def reduce(self, reduce_func_nb, *args, to_array=False, to_idx=False, flatten=False,
-               order=&#39;C&#39;, idx_labeled=True, group_by=None, **kwargs):
+               order=&#39;C&#39;, idx_labeled=True, group_by=None, wrap_kwargs=None):
         &#34;&#34;&#34;Reduce by column.
 
         See `vectorbt.generic.nb.flat_reduce_grouped_to_array_nb` if grouped, `to_array` is True and `flatten` is True.
@@ -506,8 +527,6 @@ class GenericAccessor(BaseAccessor):
 
         Set `to_idx` to True if values returned by `reduce_func_nb` are indices/positions.
         Set `idx_labeled` to False to return raw positions instead of labels.
-
-        `**kwargs` will be passed to `vectorbt.base.array_wrapper.ArrayWrapper.wrap_reduced`.
 
         ## Example
 
@@ -534,7 +553,7 @@ class GenericAccessor(BaseAccessor):
         dtype: int64
 
         &gt;&gt;&gt; min_max_nb = njit(lambda col, a: np.array([np.nanmin(a), np.nanmax(a)]))
-        &gt;&gt;&gt; df.vbt.reduce(min_max_nb, index=[&#39;min&#39;, &#39;max&#39;], to_array=True)
+        &gt;&gt;&gt; df.vbt.reduce(min_max_nb, name_or_index=[&#39;min&#39;, &#39;max&#39;], to_array=True)
                a    b    c
         min  1.0  1.0  1.0
         max  5.0  5.0  3.0
@@ -546,7 +565,7 @@ class GenericAccessor(BaseAccessor):
         second    1.8
         dtype: float64
 
-        &gt;&gt;&gt; df.vbt.reduce(min_max_nb, index=[&#39;min&#39;, &#39;max&#39;],
+        &gt;&gt;&gt; df.vbt.reduce(min_max_nb, name_or_index=[&#39;min&#39;, &#39;max&#39;],
         ...     to_array=True, group_by=group_by)
         group  first  second
         min      1.0     1.0
@@ -595,14 +614,13 @@ class GenericAccessor(BaseAccessor):
             else:
                 out[nan_mask] = -1
                 out = out.astype(np.int_)
-        return self.wrapper.wrap_reduced(out, group_by=group_by, **kwargs)
+        wrap_kwargs = merge_dicts(dict(name_or_index=&#39;reduce&#39; if not to_array else None), wrap_kwargs)
+        return self.wrapper.wrap_reduced(out, group_by=group_by, **wrap_kwargs)
 
-    def squeeze_grouped(self, reduce_func_nb, *args, group_by=None, **kwargs):
+    def squeeze_grouped(self, reduce_func_nb, *args, group_by=None, wrap_kwargs=None):
         &#34;&#34;&#34;Squeeze each group of columns into a single column.
 
         See `vectorbt.generic.nb.squeeze_grouped_nb`.
-
-        `**kwargs` will be passed to `vectorbt.base.array_wrapper.ArrayWrapper.wrap`.
 
         ## Example
 
@@ -624,14 +642,12 @@ class GenericAccessor(BaseAccessor):
 
         group_lens = self.wrapper.grouper.get_group_lens(group_by=group_by)
         out = nb.squeeze_grouped_nb(self.to_2d_array(), group_lens, reduce_func_nb, *args)
-        return self.wrapper.wrap(out, group_by=group_by, **kwargs)
+        return self.wrapper.wrap(out, group_by=group_by, **merge_dicts({}, wrap_kwargs))
 
-    def flatten_grouped(self, group_by=None, order=&#39;C&#39;, **kwargs):
+    def flatten_grouped(self, group_by=None, order=&#39;C&#39;, wrap_kwargs=None):
         &#34;&#34;&#34;Flatten each group of columns.
 
         See `vectorbt.generic.nb.flatten_grouped_nb`.
-
-        `**kwargs` will be passed to `vectorbt.base.array_wrapper.ArrayWrapper.wrap`.
 
         !!! warning
             Make sure that the distribution of group lengths is close to uniform, otherwise
@@ -679,12 +695,14 @@ class GenericAccessor(BaseAccessor):
         else:
             out = nb.flatten_grouped_nb(self.to_2d_array(), group_lens, False)
             new_index = index_fns.tile_index(self.wrapper.index, np.max(group_lens))
-        return self.wrapper.wrap(out, group_by=group_by, index=new_index, **kwargs)
+        wrap_kwargs = merge_dicts(dict(index=new_index), wrap_kwargs)
+        return self.wrapper.wrap(out, group_by=group_by, **wrap_kwargs)
 
-    def min(self, group_by=None, **kwargs):
+    def min(self, group_by=None, wrap_kwargs=None):
         &#34;&#34;&#34;Return min of non-NaN elements.&#34;&#34;&#34;
+        wrap_kwargs = merge_dicts(dict(name_or_index=&#39;min&#39;), wrap_kwargs)
         if self.wrapper.grouper.is_grouped(group_by=group_by):
-            return self.reduce(nb.min_reduce_nb, group_by=group_by, flatten=True)
+            return self.reduce(nb.min_reduce_nb, group_by=group_by, flatten=True, wrap_kwargs=wrap_kwargs)
 
         arr = self.to_2d_array()
         if arr.dtype != int and arr.dtype != float:
@@ -692,12 +710,13 @@ class GenericAccessor(BaseAccessor):
             _nanmin = np.nanmin
         else:
             _nanmin = nanmin
-        return self.wrapper.wrap_reduced(_nanmin(arr, axis=0), **kwargs)
+        return self.wrapper.wrap_reduced(_nanmin(arr, axis=0), **wrap_kwargs)
 
-    def max(self, group_by=None, **kwargs):
+    def max(self, group_by=None, wrap_kwargs=None):
         &#34;&#34;&#34;Return max of non-NaN elements.&#34;&#34;&#34;
+        wrap_kwargs = merge_dicts(dict(name_or_index=&#39;max&#39;), wrap_kwargs)
         if self.wrapper.grouper.is_grouped(group_by=group_by):
-            return self.reduce(nb.max_reduce_nb, group_by=group_by, flatten=True)
+            return self.reduce(nb.max_reduce_nb, group_by=group_by, flatten=True, wrap_kwargs=wrap_kwargs)
 
         arr = self.to_2d_array()
         if arr.dtype != int and arr.dtype != float:
@@ -705,12 +724,14 @@ class GenericAccessor(BaseAccessor):
             _nanmax = np.nanmax
         else:
             _nanmax = nanmax
-        return self.wrapper.wrap_reduced(_nanmax(arr, axis=0), **kwargs)
+        return self.wrapper.wrap_reduced(_nanmax(arr, axis=0), **wrap_kwargs)
 
-    def mean(self, group_by=None, **kwargs):
+    def mean(self, group_by=None, wrap_kwargs=None):
         &#34;&#34;&#34;Return mean of non-NaN elements.&#34;&#34;&#34;
+        wrap_kwargs = merge_dicts(dict(name_or_index=&#39;mean&#39;), wrap_kwargs)
         if self.wrapper.grouper.is_grouped(group_by=group_by):
-            return self.reduce(nb.mean_reduce_nb, group_by=group_by, flatten=True)
+            return self.reduce(
+                nb.mean_reduce_nb, group_by=group_by, flatten=True, wrap_kwargs=wrap_kwargs)
 
         arr = self.to_2d_array()
         if arr.dtype != int and arr.dtype != float:
@@ -718,12 +739,13 @@ class GenericAccessor(BaseAccessor):
             _nanmean = np.nanmean
         else:
             _nanmean = nanmean
-        return self.wrapper.wrap_reduced(_nanmean(arr, axis=0), **kwargs)
+        return self.wrapper.wrap_reduced(_nanmean(arr, axis=0), **wrap_kwargs)
 
-    def median(self, group_by=None, **kwargs):
+    def median(self, group_by=None, wrap_kwargs=None):
         &#34;&#34;&#34;Return median of non-NaN elements.&#34;&#34;&#34;
+        wrap_kwargs = merge_dicts(dict(name_or_index=&#39;median&#39;), wrap_kwargs)
         if self.wrapper.grouper.is_grouped(group_by=group_by):
-            return self.reduce(nb.median_reduce_nb, group_by=group_by, flatten=True)
+            return self.reduce(nb.median_reduce_nb, group_by=group_by, flatten=True, wrap_kwargs=wrap_kwargs)
 
         arr = self.to_2d_array()
         if arr.dtype != int and arr.dtype != float:
@@ -731,12 +753,13 @@ class GenericAccessor(BaseAccessor):
             _nanmedian = np.nanmedian
         else:
             _nanmedian = nanmedian
-        return self.wrapper.wrap_reduced(_nanmedian(arr, axis=0), **kwargs)
+        return self.wrapper.wrap_reduced(_nanmedian(arr, axis=0), **wrap_kwargs)
 
-    def std(self, ddof=1, group_by=None, **kwargs):
+    def std(self, ddof=1, group_by=None, wrap_kwargs=None):
         &#34;&#34;&#34;Return standard deviation of non-NaN elements.&#34;&#34;&#34;
+        wrap_kwargs = merge_dicts(dict(name_or_index=&#39;std&#39;), wrap_kwargs)
         if self.wrapper.grouper.is_grouped(group_by=group_by):
-            return self.reduce(nb.std_reduce_nb, ddof, group_by=group_by, flatten=True)
+            return self.reduce(nb.std_reduce_nb, ddof, group_by=group_by, flatten=True, wrap_kwargs=wrap_kwargs)
 
         arr = self.to_2d_array()
         if arr.dtype != int and arr.dtype != float:
@@ -744,12 +767,13 @@ class GenericAccessor(BaseAccessor):
             _nanstd = np.nanstd
         else:
             _nanstd = nanstd
-        return self.wrapper.wrap_reduced(_nanstd(arr, ddof=ddof, axis=0), **kwargs)
+        return self.wrapper.wrap_reduced(_nanstd(arr, ddof=ddof, axis=0), **wrap_kwargs)
 
-    def sum(self, group_by=None, **kwargs):
+    def sum(self, group_by=None, wrap_kwargs=None):
         &#34;&#34;&#34;Return sum of non-NaN elements.&#34;&#34;&#34;
+        wrap_kwargs = merge_dicts(dict(name_or_index=&#39;sum&#39;), wrap_kwargs)
         if self.wrapper.grouper.is_grouped(group_by=group_by):
-            return self.reduce(nb.sum_reduce_nb, group_by=group_by, flatten=True)
+            return self.reduce(nb.sum_reduce_nb, group_by=group_by, flatten=True, wrap_kwargs=wrap_kwargs)
 
         arr = self.to_2d_array()
         if arr.dtype != int and arr.dtype != float:
@@ -757,53 +781,56 @@ class GenericAccessor(BaseAccessor):
             _nansum = np.nansum
         else:
             _nansum = nansum
-        return self.wrapper.wrap_reduced(_nansum(arr, axis=0), **kwargs)
+        return self.wrapper.wrap_reduced(_nansum(arr, axis=0), **wrap_kwargs)
 
-    def count(self, group_by=None, **kwargs):
+    def count(self, group_by=None, wrap_kwargs=None):
         &#34;&#34;&#34;Return count of non-NaN elements.&#34;&#34;&#34;
+        wrap_kwargs = merge_dicts(dict(name_or_index=&#39;count&#39;, dtype=np.int_), wrap_kwargs)
         if self.wrapper.grouper.is_grouped(group_by=group_by):
-            return self.reduce(nb.count_reduce_nb, group_by=group_by, flatten=True, dtype=np.int_)
+            return self.reduce(nb.count_reduce_nb, group_by=group_by, flatten=True, wrap_kwargs=wrap_kwargs)
 
-        return self.wrapper.wrap_reduced(np.sum(~np.isnan(self.to_2d_array()), axis=0), **kwargs)
+        return self.wrapper.wrap_reduced(np.sum(~np.isnan(self.to_2d_array()), axis=0), **wrap_kwargs)
 
-    def idxmin(self, group_by=None, order=&#39;C&#39;, **kwargs):
+    def idxmin(self, group_by=None, order=&#39;C&#39;, wrap_kwargs=None):
         &#34;&#34;&#34;Return labeled index of min of non-NaN elements.&#34;&#34;&#34;
+        wrap_kwargs = merge_dicts(dict(name_or_index=&#39;idxmin&#39;), wrap_kwargs)
         if self.wrapper.grouper.is_grouped(group_by=group_by):
             return self.reduce(
                 nb.argmin_reduce_nb,
                 group_by=group_by,
                 flatten=True,
                 to_idx=True,
-                order=order
+                order=order,
+                wrap_kwargs=wrap_kwargs
             )
 
         obj = self.to_2d_array()
         out = np.full(obj.shape[1], np.nan, dtype=np.object)
         nan_mask = np.all(np.isnan(obj), axis=0)
         out[~nan_mask] = self.wrapper.index[nanargmin(obj[:, ~nan_mask], axis=0)]
-        return self.wrapper.wrap_reduced(out, **kwargs)
+        return self.wrapper.wrap_reduced(out, **wrap_kwargs)
 
-    def idxmax(self, group_by=None, order=&#39;C&#39;, **kwargs):
+    def idxmax(self, group_by=None, order=&#39;C&#39;, wrap_kwargs=None):
         &#34;&#34;&#34;Return labeled index of max of non-NaN elements.&#34;&#34;&#34;
+        wrap_kwargs = merge_dicts(dict(name_or_index=&#39;idxmax&#39;), wrap_kwargs)
         if self.wrapper.grouper.is_grouped(group_by=group_by):
             return self.reduce(
                 nb.argmax_reduce_nb,
                 group_by=group_by,
                 flatten=True,
                 to_idx=True,
-                order=order
+                order=order,
+                wrap_kwargs=wrap_kwargs
             )
 
         obj = self.to_2d_array()
         out = np.full(obj.shape[1], np.nan, dtype=np.object)
         nan_mask = np.all(np.isnan(obj), axis=0)
         out[~nan_mask] = self.wrapper.index[nanargmax(obj[:, ~nan_mask], axis=0)]
-        return self.wrapper.wrap_reduced(out, **kwargs)
+        return self.wrapper.wrap_reduced(out, **wrap_kwargs)
 
-    def describe(self, percentiles=None, ddof=1, group_by=None, **kwargs):
+    def describe(self, percentiles=None, ddof=1, group_by=None, wrap_kwargs=None):
         &#34;&#34;&#34;See `vectorbt.generic.nb.describe_reduce_nb`.
-
-        `**kwargs` will be passed to `vectorbt.base.array_wrapper.ArrayWrapper.wrap_reduced`.
 
         For `percentiles`, see `pd.DataFrame.describe`.
 
@@ -832,19 +859,20 @@ class GenericAccessor(BaseAccessor):
         percentiles = np.unique(percentiles)
         perc_formatted = pd.io.formats.format.format_percentiles(percentiles)
         index = pd.Index([&#39;count&#39;, &#39;mean&#39;, &#39;std&#39;, &#39;min&#39;, *perc_formatted, &#39;max&#39;])
+        wrap_kwargs = merge_dicts(dict(name_or_index=index), wrap_kwargs)
         if self.wrapper.grouper.is_grouped(group_by=group_by):
             return self.reduce(
                 nb.describe_reduce_nb, percentiles, ddof,
                 group_by=group_by, flatten=True, to_array=True,
-                index=index, **kwargs)
+                wrap_kwargs=wrap_kwargs)
         return self.reduce(
             nb.describe_reduce_nb, percentiles, ddof,
-            to_array=True,
-            index=index, **kwargs)
+            to_array=True, wrap_kwargs=wrap_kwargs)
 
-    def drawdown(self):
+    def drawdown(self, wrap_kwargs=None):
         &#34;&#34;&#34;Drawdown series.&#34;&#34;&#34;
-        return self.wrapper.wrap(self.to_2d_array() / nb.expanding_max_nb(self.to_2d_array()) - 1)
+        out = self.to_2d_array() / nb.expanding_max_nb(self.to_2d_array()) - 1
+        return self.wrapper.wrap(out, **merge_dicts({}, wrap_kwargs))
 
     @cached_property
     def drawdowns(self):
@@ -1167,9 +1195,6 @@ class GenericSRAccessor(GenericAccessor, BaseSRAccessor):
 
         if trace_kwargs is None:
             trace_kwargs = {}
-        trace_kwargs = merge_dicts(dict(
-            line_color=color_schema[&#39;blue&#39;]
-        ), trace_kwargs)
         if heatmap_kwargs is None:
             heatmap_kwargs = {}
         if add_trace_kwargs is None:
@@ -1183,15 +1208,20 @@ class GenericSRAccessor(GenericAccessor, BaseSRAccessor):
                 fig.update_layout(width=layout[&#39;width&#39;] + 150)
         fig.update_layout(**layout_kwargs)
 
-        other.to_frame().vbt.heatmap(**heatmap_kwargs, horizontal=True, add_trace_kwargs=add_trace_kwargs, fig=fig)
-        add_trace_kwargs = merge_dicts(dict(secondary_y=True), add_trace_kwargs)
-        self.plot(trace_kwargs=trace_kwargs, add_trace_kwargs=add_trace_kwargs, fig=fig)
+        other.vbt.ts_heatmap(**heatmap_kwargs, add_trace_kwargs=add_trace_kwargs, fig=fig)
+        self.plot(
+            trace_kwargs=merge_dicts(dict(line_color=color_schema[&#39;blue&#39;]), trace_kwargs),
+            add_trace_kwargs=merge_dicts(dict(secondary_y=True), add_trace_kwargs),
+            fig=fig
+        )
         return fig
 
     def heatmap(self, x_level=None, y_level=None, symmetric=False, sort=True,
-                x_labels=None, y_labels=None, slider_level=None, slider_labels=None,
-                return_fig=True, fig=None, **kwargs):  # pragma: no cover
+                x_labels=None, y_labels=None, slider_level=None, active=0,
+                slider_labels=None, return_fig=True, fig=None, **kwargs):  # pragma: no cover
         &#34;&#34;&#34;Create a heatmap figure based on object&#39;s multi-index and values.
+
+        If index is not a multi-index, converts Series into a DataFrame and calls `GenericDFAccessor.heatmap`.
 
         If multi-index contains more than two levels or you want them in specific order,
         pass `x_level` and `y_level`, each (`int` if index or `str` if name) corresponding
@@ -1245,6 +1275,11 @@ class GenericSRAccessor(GenericAccessor, BaseSRAccessor):
 
         ![](/vectorbt/docs/img/sr_heatmap_slider.gif)
         &#34;&#34;&#34;
+        if not isinstance(self.wrapper.index, pd.MultiIndex):
+            return self._obj.to_frame().vbt.heatmap(
+                x_labels=x_labels, y_labels=y_labels,
+                return_fig=return_fig, fig=fig, **kwargs)
+
         (x_level, y_level), (slider_level,) = index_fns.pick_levels(
             self.wrapper.index,
             required_levels=(x_level, y_level),
@@ -1306,7 +1341,7 @@ class GenericSRAccessor(GenericAccessor, BaseSRAccessor):
             ).fig
             if default_size:
                 fig.layout[&#39;height&#39;] += 100  # slider takes up space
-        fig.data[0].visible = True
+        fig.data[active].visible = True
         steps = []
         for i in range(len(fig.data)):
             step = dict(
@@ -1319,7 +1354,7 @@ class GenericSRAccessor(GenericAccessor, BaseSRAccessor):
         prefix = f&#39;{self.wrapper.index.names[slider_level]}: &#39; \
             if self.wrapper.index.names[slider_level] is not None else None
         sliders = [dict(
-            active=0,
+            active=active,
             currentvalue={&#34;prefix&#34;: prefix},
             pad={&#34;t&#34;: 50},
             steps=steps
@@ -1329,8 +1364,12 @@ class GenericSRAccessor(GenericAccessor, BaseSRAccessor):
         )
         return fig
 
+    def ts_heatmap(self, **kwargs):
+        &#34;&#34;&#34;Heatmap of time-series data.&#34;&#34;&#34;
+        return self._obj.to_frame().vbt.ts_heatmap(**kwargs)
+
     def volume(self, x_level=None, y_level=None, z_level=None, x_labels=None, y_labels=None,
-               z_labels=None, slider_level=None, slider_labels=None, scene_name=&#39;scene&#39;,
+               z_labels=None, slider_level=None, slider_labels=None, active=0, scene_name=&#39;scene&#39;,
                fillna=None, fig=None, return_fig=True, **kwargs):  # pragma: no cover
         &#34;&#34;&#34;Create a 3D volume figure based on object&#39;s multi-index and values.
 
@@ -1447,7 +1486,7 @@ class GenericSRAccessor(GenericAccessor, BaseSRAccessor):
                 ).fig
                 if default_size:
                     fig.layout[&#39;height&#39;] += 100  # slider takes up space
-            fig.data[0].visible = True
+            fig.data[active].visible = True
             steps = []
             for i in range(len(fig.data)):
                 step = dict(
@@ -1460,7 +1499,7 @@ class GenericSRAccessor(GenericAccessor, BaseSRAccessor):
             prefix = f&#39;{self.wrapper.index.names[slider_level]}: &#39; \
                 if self.wrapper.index.names[slider_level] is not None else None
             sliders = [dict(
-                active=0,
+                active=active,
                 currentvalue={&#34;prefix&#34;: prefix},
                 pad={&#34;t&#34;: 50},
                 steps=steps
@@ -1550,7 +1589,11 @@ class GenericDFAccessor(GenericAccessor, BaseDFAccessor):
         )
         if return_fig:
             return heatmap.fig
-        return heatmap</code></pre>
+        return heatmap
+
+    def ts_heatmap(self, **kwargs):
+        &#34;&#34;&#34;Heatmap of time-series data.&#34;&#34;&#34;
+        return self._obj.transpose().iloc[::-1].vbt.heatmap(**kwargs)</code></pre>
 </details>
 </section>
 <section>
@@ -1584,21 +1627,25 @@ class GenericDFAccessor(GenericAccessor, BaseDFAccessor):
 
         BaseAccessor.__init__(self, obj, **kwargs)
 
-    def rolling_std(self, window, minp=1, ddof=1):  # pragma: no cover
+    def rolling_std(self, window, minp=1, ddof=1, wrap_kwargs=None):  # pragma: no cover
         &#34;&#34;&#34;See `vectorbt.generic.nb.rolling_std_nb`.&#34;&#34;&#34;
-        return self.wrapper.wrap(nb.rolling_std_nb(self.to_2d_array(), window, minp=minp, ddof=ddof))
+        out = nb.rolling_std_nb(self.to_2d_array(), window, minp=minp, ddof=ddof)
+        return self.wrapper.wrap(out, **merge_dicts({}, wrap_kwargs))
 
-    def expanding_std(self, minp=1, ddof=1):  # pragma: no cover
+    def expanding_std(self, minp=1, ddof=1, wrap_kwargs=None):  # pragma: no cover
         &#34;&#34;&#34;See `vectorbt.generic.nb.expanding_std_nb`.&#34;&#34;&#34;
-        return self.wrapper.wrap(nb.expanding_std_nb(self.to_2d_array(), minp=minp, ddof=ddof))
+        out = nb.expanding_std_nb(self.to_2d_array(), minp=minp, ddof=ddof)
+        return self.wrapper.wrap(out, **merge_dicts({}, wrap_kwargs))
 
-    def ewm_mean(self, span, minp=0, adjust=True):  # pragma: no cover
+    def ewm_mean(self, span, minp=0, adjust=True, wrap_kwargs=None):  # pragma: no cover
         &#34;&#34;&#34;See `vectorbt.generic.nb.ewm_mean_nb`.&#34;&#34;&#34;
-        return self.wrapper.wrap(nb.ewm_mean_nb(self.to_2d_array(), span, minp=minp, adjust=adjust))
+        out = nb.ewm_mean_nb(self.to_2d_array(), span, minp=minp, adjust=adjust)
+        return self.wrapper.wrap(out, **merge_dicts({}, wrap_kwargs))
 
-    def ewm_std(self, span, minp=0, adjust=True, ddof=1):  # pragma: no cover
+    def ewm_std(self, span, minp=0, adjust=True, ddof=1, wrap_kwargs=None):  # pragma: no cover
         &#34;&#34;&#34;See `vectorbt.generic.nb.ewm_std_nb`.&#34;&#34;&#34;
-        return self.wrapper.wrap(nb.ewm_std_nb(self.to_2d_array(), span, minp=minp, adjust=adjust, ddof=ddof))
+        out = nb.ewm_std_nb(self.to_2d_array(), span, minp=minp, adjust=adjust, ddof=ddof)
+        return self.wrapper.wrap(out, **merge_dicts({}, wrap_kwargs))
 
     def split_into_ranges(self, n=None, range_len=None, start_idxs=None, end_idxs=None):
         &#34;&#34;&#34;Either split into `n` ranges each `range_len` long, or split into ranges between
@@ -1693,7 +1740,19 @@ class GenericDFAccessor(GenericAccessor, BaseDFAccessor):
         new_columns = index_fns.combine_indexes(self.wrapper.columns, range_columns)
         return pd.DataFrame(matrix, columns=new_columns)
 
-    def rolling_apply(self, window, apply_func_nb, *args, on_matrix=False):
+    def apply_along_axis(self, apply_func_nb, *args, axis=0, wrap_kwargs=None):
+        &#34;&#34;&#34;Apply a function `apply_func_nb` along an axis.&#34;&#34;&#34;
+        checks.assert_numba_func(apply_func_nb)
+
+        if axis == 0:
+            out = nb.apply_along_0_nb(self.to_2d_array(), apply_func_nb, *args)
+        elif axis == 1:
+            out = nb.apply_along_1_nb(self.to_2d_array(), apply_func_nb, *args)
+        else:
+            raise ValueError(&#34;Only axes 0 and 1 are supported&#34;)
+        return self.wrapper.wrap(out, **merge_dicts({}, wrap_kwargs))
+
+    def rolling_apply(self, window, apply_func_nb, *args, on_matrix=False, wrap_kwargs=None):
         &#34;&#34;&#34;See `vectorbt.generic.nb.rolling_apply_nb` and
         `vectorbt.generic.nb.rolling_apply_matrix_nb` for `on_matrix=True`.
 
@@ -1725,9 +1784,9 @@ class GenericDFAccessor(GenericAccessor, BaseDFAccessor):
             out = nb.rolling_apply_matrix_nb(self.to_2d_array(), window, apply_func_nb, *args)
         else:
             out = nb.rolling_apply_nb(self.to_2d_array(), window, apply_func_nb, *args)
-        return self.wrapper.wrap(out)
+        return self.wrapper.wrap(out, **merge_dicts({}, wrap_kwargs))
 
-    def expanding_apply(self, apply_func_nb, *args, on_matrix=False):
+    def expanding_apply(self, apply_func_nb, *args, on_matrix=False, wrap_kwargs=None):
         &#34;&#34;&#34;See `vectorbt.generic.nb.expanding_apply_nb` and
         `vectorbt.generic.nb.expanding_apply_matrix_nb` for `on_matrix=True`.
 
@@ -1759,9 +1818,9 @@ class GenericDFAccessor(GenericAccessor, BaseDFAccessor):
             out = nb.expanding_apply_matrix_nb(self.to_2d_array(), apply_func_nb, *args)
         else:
             out = nb.expanding_apply_nb(self.to_2d_array(), apply_func_nb, *args)
-        return self.wrapper.wrap(out)
+        return self.wrapper.wrap(out, **merge_dicts({}, wrap_kwargs))
 
-    def groupby_apply(self, by, apply_func_nb, *args, on_matrix=False, **kwargs):
+    def groupby_apply(self, by, apply_func_nb, *args, on_matrix=False, wrap_kwargs=None, **kwargs):
         &#34;&#34;&#34;See `vectorbt.generic.nb.groupby_apply_nb` and
         `vectorbt.generic.nb.groupby_apply_matrix_nb` for `on_matrix=True`.
 
@@ -1795,9 +1854,10 @@ class GenericDFAccessor(GenericAccessor, BaseDFAccessor):
             out = nb.groupby_apply_matrix_nb(self.to_2d_array(), groups, apply_func_nb, *args)
         else:
             out = nb.groupby_apply_nb(self.to_2d_array(), groups, apply_func_nb, *args)
-        return self.wrapper.wrap_reduced(out, index=list(regrouped.indices.keys()))
+        wrap_kwargs = merge_dicts(dict(name_or_index=list(regrouped.indices.keys())), wrap_kwargs)
+        return self.wrapper.wrap_reduced(out, **wrap_kwargs)
 
-    def resample_apply(self, freq, apply_func_nb, *args, on_matrix=False, **kwargs):
+    def resample_apply(self, freq, apply_func_nb, *args, on_matrix=False, wrap_kwargs=None, **kwargs):
         &#34;&#34;&#34;See `vectorbt.generic.nb.groupby_apply_nb` and
         `vectorbt.generic.nb.groupby_apply_matrix_nb` for `on_matrix=True`.
 
@@ -1833,11 +1893,15 @@ class GenericDFAccessor(GenericAccessor, BaseDFAccessor):
             out = nb.groupby_apply_nb(self.to_2d_array(), groups, apply_func_nb, *args)
         out_obj = self.wrapper.wrap(out, index=list(resampled.indices.keys()))
         resampled_arr = np.full((resampled.ngroups, self.to_2d_array().shape[1]), np.nan)
-        resampled_obj = self.wrapper.wrap(resampled_arr, index=pd.Index(list(resampled.groups.keys()), freq=freq))
+        resampled_obj = self.wrapper.wrap(
+            resampled_arr, 
+            index=pd.Index(list(resampled.groups.keys()), freq=freq), 
+            **merge_dicts({}, wrap_kwargs)
+        )
         resampled_obj.loc[out_obj.index] = out_obj.values
         return resampled_obj
 
-    def applymap(self, apply_func_nb, *args):
+    def applymap(self, apply_func_nb, *args, wrap_kwargs=None):
         &#34;&#34;&#34;See `vectorbt.generic.nb.applymap_nb`.
 
         ## Example
@@ -1856,9 +1920,9 @@ class GenericDFAccessor(GenericAccessor, BaseDFAccessor):
         checks.assert_numba_func(apply_func_nb)
 
         out = nb.applymap_nb(self.to_2d_array(), apply_func_nb, *args)
-        return self.wrapper.wrap(out)
+        return self.wrapper.wrap(out, **merge_dicts({}, wrap_kwargs))
 
-    def filter(self, filter_func_nb, *args):
+    def filter(self, filter_func_nb, *args, wrap_kwargs=None):
         &#34;&#34;&#34;See `vectorbt.generic.nb.filter_nb`.
 
         ## Example
@@ -1877,12 +1941,10 @@ class GenericDFAccessor(GenericAccessor, BaseDFAccessor):
         checks.assert_numba_func(filter_func_nb)
 
         out = nb.filter_nb(self.to_2d_array(), filter_func_nb, *args)
-        return self.wrapper.wrap(out)
+        return self.wrapper.wrap(out, **merge_dicts({}, wrap_kwargs))
 
-    def apply_and_reduce(self, apply_func_nb, reduce_func_nb, apply_args=None, reduce_args=None, **kwargs):
+    def apply_and_reduce(self, apply_func_nb, reduce_func_nb, apply_args=None, reduce_args=None, wrap_kwargs=None):
         &#34;&#34;&#34;See `vectorbt.generic.nb.apply_and_reduce_nb`.
-
-        `**kwargs` will be passed to `vectorbt.base.array_wrapper.ArrayWrapper.wrap_reduced`.
 
         ## Example
 
@@ -1904,10 +1966,11 @@ class GenericDFAccessor(GenericAccessor, BaseDFAccessor):
             reduce_args = ()
 
         out = nb.apply_and_reduce_nb(self.to_2d_array(), apply_func_nb, apply_args, reduce_func_nb, reduce_args)
-        return self.wrapper.wrap_reduced(out, **kwargs)
+        wrap_kwargs = merge_dicts(dict(name_or_index=&#39;apply_and_reduce&#39;), wrap_kwargs)
+        return self.wrapper.wrap_reduced(out, **wrap_kwargs)
 
     def reduce(self, reduce_func_nb, *args, to_array=False, to_idx=False, flatten=False,
-               order=&#39;C&#39;, idx_labeled=True, group_by=None, **kwargs):
+               order=&#39;C&#39;, idx_labeled=True, group_by=None, wrap_kwargs=None):
         &#34;&#34;&#34;Reduce by column.
 
         See `vectorbt.generic.nb.flat_reduce_grouped_to_array_nb` if grouped, `to_array` is True and `flatten` is True.
@@ -1919,8 +1982,6 @@ class GenericDFAccessor(GenericAccessor, BaseDFAccessor):
 
         Set `to_idx` to True if values returned by `reduce_func_nb` are indices/positions.
         Set `idx_labeled` to False to return raw positions instead of labels.
-
-        `**kwargs` will be passed to `vectorbt.base.array_wrapper.ArrayWrapper.wrap_reduced`.
 
         ## Example
 
@@ -1947,7 +2008,7 @@ class GenericDFAccessor(GenericAccessor, BaseDFAccessor):
         dtype: int64
 
         &gt;&gt;&gt; min_max_nb = njit(lambda col, a: np.array([np.nanmin(a), np.nanmax(a)]))
-        &gt;&gt;&gt; df.vbt.reduce(min_max_nb, index=[&#39;min&#39;, &#39;max&#39;], to_array=True)
+        &gt;&gt;&gt; df.vbt.reduce(min_max_nb, name_or_index=[&#39;min&#39;, &#39;max&#39;], to_array=True)
                a    b    c
         min  1.0  1.0  1.0
         max  5.0  5.0  3.0
@@ -1959,7 +2020,7 @@ class GenericDFAccessor(GenericAccessor, BaseDFAccessor):
         second    1.8
         dtype: float64
 
-        &gt;&gt;&gt; df.vbt.reduce(min_max_nb, index=[&#39;min&#39;, &#39;max&#39;],
+        &gt;&gt;&gt; df.vbt.reduce(min_max_nb, name_or_index=[&#39;min&#39;, &#39;max&#39;],
         ...     to_array=True, group_by=group_by)
         group  first  second
         min      1.0     1.0
@@ -2008,14 +2069,13 @@ class GenericDFAccessor(GenericAccessor, BaseDFAccessor):
             else:
                 out[nan_mask] = -1
                 out = out.astype(np.int_)
-        return self.wrapper.wrap_reduced(out, group_by=group_by, **kwargs)
+        wrap_kwargs = merge_dicts(dict(name_or_index=&#39;reduce&#39; if not to_array else None), wrap_kwargs)
+        return self.wrapper.wrap_reduced(out, group_by=group_by, **wrap_kwargs)
 
-    def squeeze_grouped(self, reduce_func_nb, *args, group_by=None, **kwargs):
+    def squeeze_grouped(self, reduce_func_nb, *args, group_by=None, wrap_kwargs=None):
         &#34;&#34;&#34;Squeeze each group of columns into a single column.
 
         See `vectorbt.generic.nb.squeeze_grouped_nb`.
-
-        `**kwargs` will be passed to `vectorbt.base.array_wrapper.ArrayWrapper.wrap`.
 
         ## Example
 
@@ -2037,14 +2097,12 @@ class GenericDFAccessor(GenericAccessor, BaseDFAccessor):
 
         group_lens = self.wrapper.grouper.get_group_lens(group_by=group_by)
         out = nb.squeeze_grouped_nb(self.to_2d_array(), group_lens, reduce_func_nb, *args)
-        return self.wrapper.wrap(out, group_by=group_by, **kwargs)
+        return self.wrapper.wrap(out, group_by=group_by, **merge_dicts({}, wrap_kwargs))
 
-    def flatten_grouped(self, group_by=None, order=&#39;C&#39;, **kwargs):
+    def flatten_grouped(self, group_by=None, order=&#39;C&#39;, wrap_kwargs=None):
         &#34;&#34;&#34;Flatten each group of columns.
 
         See `vectorbt.generic.nb.flatten_grouped_nb`.
-
-        `**kwargs` will be passed to `vectorbt.base.array_wrapper.ArrayWrapper.wrap`.
 
         !!! warning
             Make sure that the distribution of group lengths is close to uniform, otherwise
@@ -2092,12 +2150,14 @@ class GenericDFAccessor(GenericAccessor, BaseDFAccessor):
         else:
             out = nb.flatten_grouped_nb(self.to_2d_array(), group_lens, False)
             new_index = index_fns.tile_index(self.wrapper.index, np.max(group_lens))
-        return self.wrapper.wrap(out, group_by=group_by, index=new_index, **kwargs)
+        wrap_kwargs = merge_dicts(dict(index=new_index), wrap_kwargs)
+        return self.wrapper.wrap(out, group_by=group_by, **wrap_kwargs)
 
-    def min(self, group_by=None, **kwargs):
+    def min(self, group_by=None, wrap_kwargs=None):
         &#34;&#34;&#34;Return min of non-NaN elements.&#34;&#34;&#34;
+        wrap_kwargs = merge_dicts(dict(name_or_index=&#39;min&#39;), wrap_kwargs)
         if self.wrapper.grouper.is_grouped(group_by=group_by):
-            return self.reduce(nb.min_reduce_nb, group_by=group_by, flatten=True)
+            return self.reduce(nb.min_reduce_nb, group_by=group_by, flatten=True, wrap_kwargs=wrap_kwargs)
 
         arr = self.to_2d_array()
         if arr.dtype != int and arr.dtype != float:
@@ -2105,12 +2165,13 @@ class GenericDFAccessor(GenericAccessor, BaseDFAccessor):
             _nanmin = np.nanmin
         else:
             _nanmin = nanmin
-        return self.wrapper.wrap_reduced(_nanmin(arr, axis=0), **kwargs)
+        return self.wrapper.wrap_reduced(_nanmin(arr, axis=0), **wrap_kwargs)
 
-    def max(self, group_by=None, **kwargs):
+    def max(self, group_by=None, wrap_kwargs=None):
         &#34;&#34;&#34;Return max of non-NaN elements.&#34;&#34;&#34;
+        wrap_kwargs = merge_dicts(dict(name_or_index=&#39;max&#39;), wrap_kwargs)
         if self.wrapper.grouper.is_grouped(group_by=group_by):
-            return self.reduce(nb.max_reduce_nb, group_by=group_by, flatten=True)
+            return self.reduce(nb.max_reduce_nb, group_by=group_by, flatten=True, wrap_kwargs=wrap_kwargs)
 
         arr = self.to_2d_array()
         if arr.dtype != int and arr.dtype != float:
@@ -2118,12 +2179,14 @@ class GenericDFAccessor(GenericAccessor, BaseDFAccessor):
             _nanmax = np.nanmax
         else:
             _nanmax = nanmax
-        return self.wrapper.wrap_reduced(_nanmax(arr, axis=0), **kwargs)
+        return self.wrapper.wrap_reduced(_nanmax(arr, axis=0), **wrap_kwargs)
 
-    def mean(self, group_by=None, **kwargs):
+    def mean(self, group_by=None, wrap_kwargs=None):
         &#34;&#34;&#34;Return mean of non-NaN elements.&#34;&#34;&#34;
+        wrap_kwargs = merge_dicts(dict(name_or_index=&#39;mean&#39;), wrap_kwargs)
         if self.wrapper.grouper.is_grouped(group_by=group_by):
-            return self.reduce(nb.mean_reduce_nb, group_by=group_by, flatten=True)
+            return self.reduce(
+                nb.mean_reduce_nb, group_by=group_by, flatten=True, wrap_kwargs=wrap_kwargs)
 
         arr = self.to_2d_array()
         if arr.dtype != int and arr.dtype != float:
@@ -2131,12 +2194,13 @@ class GenericDFAccessor(GenericAccessor, BaseDFAccessor):
             _nanmean = np.nanmean
         else:
             _nanmean = nanmean
-        return self.wrapper.wrap_reduced(_nanmean(arr, axis=0), **kwargs)
+        return self.wrapper.wrap_reduced(_nanmean(arr, axis=0), **wrap_kwargs)
 
-    def median(self, group_by=None, **kwargs):
+    def median(self, group_by=None, wrap_kwargs=None):
         &#34;&#34;&#34;Return median of non-NaN elements.&#34;&#34;&#34;
+        wrap_kwargs = merge_dicts(dict(name_or_index=&#39;median&#39;), wrap_kwargs)
         if self.wrapper.grouper.is_grouped(group_by=group_by):
-            return self.reduce(nb.median_reduce_nb, group_by=group_by, flatten=True)
+            return self.reduce(nb.median_reduce_nb, group_by=group_by, flatten=True, wrap_kwargs=wrap_kwargs)
 
         arr = self.to_2d_array()
         if arr.dtype != int and arr.dtype != float:
@@ -2144,12 +2208,13 @@ class GenericDFAccessor(GenericAccessor, BaseDFAccessor):
             _nanmedian = np.nanmedian
         else:
             _nanmedian = nanmedian
-        return self.wrapper.wrap_reduced(_nanmedian(arr, axis=0), **kwargs)
+        return self.wrapper.wrap_reduced(_nanmedian(arr, axis=0), **wrap_kwargs)
 
-    def std(self, ddof=1, group_by=None, **kwargs):
+    def std(self, ddof=1, group_by=None, wrap_kwargs=None):
         &#34;&#34;&#34;Return standard deviation of non-NaN elements.&#34;&#34;&#34;
+        wrap_kwargs = merge_dicts(dict(name_or_index=&#39;std&#39;), wrap_kwargs)
         if self.wrapper.grouper.is_grouped(group_by=group_by):
-            return self.reduce(nb.std_reduce_nb, ddof, group_by=group_by, flatten=True)
+            return self.reduce(nb.std_reduce_nb, ddof, group_by=group_by, flatten=True, wrap_kwargs=wrap_kwargs)
 
         arr = self.to_2d_array()
         if arr.dtype != int and arr.dtype != float:
@@ -2157,12 +2222,13 @@ class GenericDFAccessor(GenericAccessor, BaseDFAccessor):
             _nanstd = np.nanstd
         else:
             _nanstd = nanstd
-        return self.wrapper.wrap_reduced(_nanstd(arr, ddof=ddof, axis=0), **kwargs)
+        return self.wrapper.wrap_reduced(_nanstd(arr, ddof=ddof, axis=0), **wrap_kwargs)
 
-    def sum(self, group_by=None, **kwargs):
+    def sum(self, group_by=None, wrap_kwargs=None):
         &#34;&#34;&#34;Return sum of non-NaN elements.&#34;&#34;&#34;
+        wrap_kwargs = merge_dicts(dict(name_or_index=&#39;sum&#39;), wrap_kwargs)
         if self.wrapper.grouper.is_grouped(group_by=group_by):
-            return self.reduce(nb.sum_reduce_nb, group_by=group_by, flatten=True)
+            return self.reduce(nb.sum_reduce_nb, group_by=group_by, flatten=True, wrap_kwargs=wrap_kwargs)
 
         arr = self.to_2d_array()
         if arr.dtype != int and arr.dtype != float:
@@ -2170,53 +2236,56 @@ class GenericDFAccessor(GenericAccessor, BaseDFAccessor):
             _nansum = np.nansum
         else:
             _nansum = nansum
-        return self.wrapper.wrap_reduced(_nansum(arr, axis=0), **kwargs)
+        return self.wrapper.wrap_reduced(_nansum(arr, axis=0), **wrap_kwargs)
 
-    def count(self, group_by=None, **kwargs):
+    def count(self, group_by=None, wrap_kwargs=None):
         &#34;&#34;&#34;Return count of non-NaN elements.&#34;&#34;&#34;
+        wrap_kwargs = merge_dicts(dict(name_or_index=&#39;count&#39;, dtype=np.int_), wrap_kwargs)
         if self.wrapper.grouper.is_grouped(group_by=group_by):
-            return self.reduce(nb.count_reduce_nb, group_by=group_by, flatten=True, dtype=np.int_)
+            return self.reduce(nb.count_reduce_nb, group_by=group_by, flatten=True, wrap_kwargs=wrap_kwargs)
 
-        return self.wrapper.wrap_reduced(np.sum(~np.isnan(self.to_2d_array()), axis=0), **kwargs)
+        return self.wrapper.wrap_reduced(np.sum(~np.isnan(self.to_2d_array()), axis=0), **wrap_kwargs)
 
-    def idxmin(self, group_by=None, order=&#39;C&#39;, **kwargs):
+    def idxmin(self, group_by=None, order=&#39;C&#39;, wrap_kwargs=None):
         &#34;&#34;&#34;Return labeled index of min of non-NaN elements.&#34;&#34;&#34;
+        wrap_kwargs = merge_dicts(dict(name_or_index=&#39;idxmin&#39;), wrap_kwargs)
         if self.wrapper.grouper.is_grouped(group_by=group_by):
             return self.reduce(
                 nb.argmin_reduce_nb,
                 group_by=group_by,
                 flatten=True,
                 to_idx=True,
-                order=order
+                order=order,
+                wrap_kwargs=wrap_kwargs
             )
 
         obj = self.to_2d_array()
         out = np.full(obj.shape[1], np.nan, dtype=np.object)
         nan_mask = np.all(np.isnan(obj), axis=0)
         out[~nan_mask] = self.wrapper.index[nanargmin(obj[:, ~nan_mask], axis=0)]
-        return self.wrapper.wrap_reduced(out, **kwargs)
+        return self.wrapper.wrap_reduced(out, **wrap_kwargs)
 
-    def idxmax(self, group_by=None, order=&#39;C&#39;, **kwargs):
+    def idxmax(self, group_by=None, order=&#39;C&#39;, wrap_kwargs=None):
         &#34;&#34;&#34;Return labeled index of max of non-NaN elements.&#34;&#34;&#34;
+        wrap_kwargs = merge_dicts(dict(name_or_index=&#39;idxmax&#39;), wrap_kwargs)
         if self.wrapper.grouper.is_grouped(group_by=group_by):
             return self.reduce(
                 nb.argmax_reduce_nb,
                 group_by=group_by,
                 flatten=True,
                 to_idx=True,
-                order=order
+                order=order,
+                wrap_kwargs=wrap_kwargs
             )
 
         obj = self.to_2d_array()
         out = np.full(obj.shape[1], np.nan, dtype=np.object)
         nan_mask = np.all(np.isnan(obj), axis=0)
         out[~nan_mask] = self.wrapper.index[nanargmax(obj[:, ~nan_mask], axis=0)]
-        return self.wrapper.wrap_reduced(out, **kwargs)
+        return self.wrapper.wrap_reduced(out, **wrap_kwargs)
 
-    def describe(self, percentiles=None, ddof=1, group_by=None, **kwargs):
+    def describe(self, percentiles=None, ddof=1, group_by=None, wrap_kwargs=None):
         &#34;&#34;&#34;See `vectorbt.generic.nb.describe_reduce_nb`.
-
-        `**kwargs` will be passed to `vectorbt.base.array_wrapper.ArrayWrapper.wrap_reduced`.
 
         For `percentiles`, see `pd.DataFrame.describe`.
 
@@ -2245,19 +2314,20 @@ class GenericDFAccessor(GenericAccessor, BaseDFAccessor):
         percentiles = np.unique(percentiles)
         perc_formatted = pd.io.formats.format.format_percentiles(percentiles)
         index = pd.Index([&#39;count&#39;, &#39;mean&#39;, &#39;std&#39;, &#39;min&#39;, *perc_formatted, &#39;max&#39;])
+        wrap_kwargs = merge_dicts(dict(name_or_index=index), wrap_kwargs)
         if self.wrapper.grouper.is_grouped(group_by=group_by):
             return self.reduce(
                 nb.describe_reduce_nb, percentiles, ddof,
                 group_by=group_by, flatten=True, to_array=True,
-                index=index, **kwargs)
+                wrap_kwargs=wrap_kwargs)
         return self.reduce(
             nb.describe_reduce_nb, percentiles, ddof,
-            to_array=True,
-            index=index, **kwargs)
+            to_array=True, wrap_kwargs=wrap_kwargs)
 
-    def drawdown(self):
+    def drawdown(self, wrap_kwargs=None):
         &#34;&#34;&#34;Drawdown series.&#34;&#34;&#34;
-        return self.wrapper.wrap(self.to_2d_array() / nb.expanding_max_nb(self.to_2d_array()) - 1)
+        out = self.to_2d_array() / nb.expanding_max_nb(self.to_2d_array()) - 1
+        return self.wrapper.wrap(out, **merge_dicts({}, wrap_kwargs))
 
     @cached_property
     def drawdowns(self):
@@ -2461,12 +2531,33 @@ class GenericDFAccessor(GenericAccessor, BaseDFAccessor):
 </dl>
 <h3 class="section-subtitle">Methods</h3>
 <dl>
+<dt id="vectorbt.generic.accessors.GenericAccessor.apply_along_axis"><code class="name flex">
+<span>def <span class="ident fname">apply_along_axis</span></span>(<span>self, apply_func_nb, *args, axis=0, wrap_kwargs=None)</span>
+</code></dt>
+<dd>
+<div class="desc"><p>Apply a function <code>apply_func_nb</code> along an axis.</p></div>
+<details class="source">
+<summary>
+<span>Expand source code</span>
+</summary>
+<pre><code class="python">def apply_along_axis(self, apply_func_nb, *args, axis=0, wrap_kwargs=None):
+    &#34;&#34;&#34;Apply a function `apply_func_nb` along an axis.&#34;&#34;&#34;
+    checks.assert_numba_func(apply_func_nb)
+
+    if axis == 0:
+        out = nb.apply_along_0_nb(self.to_2d_array(), apply_func_nb, *args)
+    elif axis == 1:
+        out = nb.apply_along_1_nb(self.to_2d_array(), apply_func_nb, *args)
+    else:
+        raise ValueError(&#34;Only axes 0 and 1 are supported&#34;)
+    return self.wrapper.wrap(out, **merge_dicts({}, wrap_kwargs))</code></pre>
+</details>
+</dd>
 <dt id="vectorbt.generic.accessors.GenericAccessor.apply_and_reduce"><code class="name flex">
-<span>def <span class="ident fname">apply_and_reduce</span></span>(<span>self, apply_func_nb, reduce_func_nb, apply_args=None, reduce_args=None, **kwargs)</span>
+<span>def <span class="ident fname">apply_and_reduce</span></span>(<span>self, apply_func_nb, reduce_func_nb, apply_args=None, reduce_args=None, wrap_kwargs=None)</span>
 </code></dt>
 <dd>
 <div class="desc"><p>See <code><a title="vectorbt.generic.nb.apply_and_reduce_nb" href="nb.html#vectorbt.generic.nb.apply_and_reduce_nb">apply_and_reduce_nb()</a></code>.</p>
-<p><code>**kwargs</code> will be passed to <code><a title="vectorbt.base.array_wrapper.ArrayWrapper.wrap_reduced" href="../base/array_wrapper.html#vectorbt.base.array_wrapper.ArrayWrapper.wrap_reduced">ArrayWrapper.wrap_reduced()</a></code>.</p>
 <h2 id="example">Example</h2>
 <pre><code class="language-python-repl">&gt;&gt;&gt; greater_nb = njit(lambda col, a: a[a &gt; 2])
 &gt;&gt;&gt; mean_nb = njit(lambda col, a: np.nanmean(a))
@@ -2480,10 +2571,8 @@ dtype: float64
 <summary>
 <span>Expand source code</span>
 </summary>
-<pre><code class="python">def apply_and_reduce(self, apply_func_nb, reduce_func_nb, apply_args=None, reduce_args=None, **kwargs):
+<pre><code class="python">def apply_and_reduce(self, apply_func_nb, reduce_func_nb, apply_args=None, reduce_args=None, wrap_kwargs=None):
     &#34;&#34;&#34;See `vectorbt.generic.nb.apply_and_reduce_nb`.
-
-    `**kwargs` will be passed to `vectorbt.base.array_wrapper.ArrayWrapper.wrap_reduced`.
 
     ## Example
 
@@ -2505,11 +2594,12 @@ dtype: float64
         reduce_args = ()
 
     out = nb.apply_and_reduce_nb(self.to_2d_array(), apply_func_nb, apply_args, reduce_func_nb, reduce_args)
-    return self.wrapper.wrap_reduced(out, **kwargs)</code></pre>
+    wrap_kwargs = merge_dicts(dict(name_or_index=&#39;apply_and_reduce&#39;), wrap_kwargs)
+    return self.wrapper.wrap_reduced(out, **wrap_kwargs)</code></pre>
 </details>
 </dd>
 <dt id="vectorbt.generic.accessors.GenericAccessor.applymap"><code class="name flex">
-<span>def <span class="ident fname">applymap</span></span>(<span>self, apply_func_nb, *args)</span>
+<span>def <span class="ident fname">applymap</span></span>(<span>self, apply_func_nb, *args, wrap_kwargs=None)</span>
 </code></dt>
 <dd>
 <div class="desc"><p>See <code><a title="vectorbt.generic.nb.applymap_nb" href="nb.html#vectorbt.generic.nb.applymap_nb">applymap_nb()</a></code>.</p>
@@ -2527,7 +2617,7 @@ dtype: float64
 <summary>
 <span>Expand source code</span>
 </summary>
-<pre><code class="python">def applymap(self, apply_func_nb, *args):
+<pre><code class="python">def applymap(self, apply_func_nb, *args, wrap_kwargs=None):
     &#34;&#34;&#34;See `vectorbt.generic.nb.applymap_nb`.
 
     ## Example
@@ -2546,7 +2636,7 @@ dtype: float64
     checks.assert_numba_func(apply_func_nb)
 
     out = nb.applymap_nb(self.to_2d_array(), apply_func_nb, *args)
-    return self.wrapper.wrap(out)</code></pre>
+    return self.wrapper.wrap(out, **merge_dicts({}, wrap_kwargs))</code></pre>
 </details>
 </dd>
 <dt id="vectorbt.generic.accessors.GenericAccessor.barplot"><code class="name flex">
@@ -2629,8 +2719,40 @@ dtype: float64
     return box</code></pre>
 </details>
 </dd>
+<dt id="vectorbt.generic.accessors.GenericAccessor.bshift"><code class="name flex">
+<span>def <span class="ident fname">bshift</span></span>(<span>self, n)</span>
+</code></dt>
+<dd>
+<div class="desc"><p>See <code><a title="vectorbt.generic.nb.bshift_nb" href="nb.html#vectorbt.generic.nb.bshift_nb">bshift_nb()</a></code></p></div>
+<details class="source">
+<summary>
+<span>Expand source code</span>
+</summary>
+<pre><code class="python">def nb_method(self,
+              *args,
+              _nb_func=nb_func,
+              _is_reducing=is_reducing,
+              _name_or_index=name_or_index,
+              wrap_kwargs=None,
+              **kwargs):
+    default_kwargs = get_kwargs(nb_func)
+    wrap_kwargs = merge_dicts({}, wrap_kwargs)
+    if &#39;_1d&#39; in _nb_func.__name__:
+        # One-dimensional array as input
+        a = _nb_func(self.to_1d_array(), *args, **{**default_kwargs, **kwargs})
+        if _is_reducing:
+            return self.wrapper.wrap_reduced(a, name_or_index=_name_or_index, **wrap_kwargs)
+        return self.wrapper.wrap(a, **wrap_kwargs)
+    else:
+        # Two-dimensional array as input
+        a = _nb_func(self.to_2d_array(), *args, **{**default_kwargs, **kwargs})
+        if _is_reducing:
+            return self.wrapper.wrap_reduced(a, name_or_index=_name_or_index, **wrap_kwargs)
+        return self.wrapper.wrap(a, **wrap_kwargs)</code></pre>
+</details>
+</dd>
 <dt id="vectorbt.generic.accessors.GenericAccessor.count"><code class="name flex">
-<span>def <span class="ident fname">count</span></span>(<span>self, group_by=None, **kwargs)</span>
+<span>def <span class="ident fname">count</span></span>(<span>self, group_by=None, wrap_kwargs=None)</span>
 </code></dt>
 <dd>
 <div class="desc"><p>Return count of non-NaN elements.</p></div>
@@ -2638,12 +2760,13 @@ dtype: float64
 <summary>
 <span>Expand source code</span>
 </summary>
-<pre><code class="python">def count(self, group_by=None, **kwargs):
+<pre><code class="python">def count(self, group_by=None, wrap_kwargs=None):
     &#34;&#34;&#34;Return count of non-NaN elements.&#34;&#34;&#34;
+    wrap_kwargs = merge_dicts(dict(name_or_index=&#39;count&#39;, dtype=np.int_), wrap_kwargs)
     if self.wrapper.grouper.is_grouped(group_by=group_by):
-        return self.reduce(nb.count_reduce_nb, group_by=group_by, flatten=True, dtype=np.int_)
+        return self.reduce(nb.count_reduce_nb, group_by=group_by, flatten=True, wrap_kwargs=wrap_kwargs)
 
-    return self.wrapper.wrap_reduced(np.sum(~np.isnan(self.to_2d_array()), axis=0), **kwargs)</code></pre>
+    return self.wrapper.wrap_reduced(np.sum(~np.isnan(self.to_2d_array()), axis=0), **wrap_kwargs)</code></pre>
 </details>
 </dd>
 <dt id="vectorbt.generic.accessors.GenericAccessor.cumprod"><code class="name flex">
@@ -2655,19 +2778,27 @@ dtype: float64
 <summary>
 <span>Expand source code</span>
 </summary>
-<pre><code class="python">def nb_method(self, *args, nb_func=nb_func, default_kwargs=default_kwargs, **kwargs):
-    if &#39;_1d&#39; in nb_func.__name__:
+<pre><code class="python">def nb_method(self,
+              *args,
+              _nb_func=nb_func,
+              _is_reducing=is_reducing,
+              _name_or_index=name_or_index,
+              wrap_kwargs=None,
+              **kwargs):
+    default_kwargs = get_kwargs(nb_func)
+    wrap_kwargs = merge_dicts({}, wrap_kwargs)
+    if &#39;_1d&#39; in _nb_func.__name__:
         # One-dimensional array as input
-        a = nb_func(self.to_1d_array(), *args, **{**default_kwargs, **kwargs})
-        if np.asarray(a).ndim == 0 or len(self.wrapper.index) != a.shape[0]:
-            return self.wrapper.wrap_reduced(a)
-        return self.wrapper.wrap(a)
+        a = _nb_func(self.to_1d_array(), *args, **{**default_kwargs, **kwargs})
+        if _is_reducing:
+            return self.wrapper.wrap_reduced(a, name_or_index=_name_or_index, **wrap_kwargs)
+        return self.wrapper.wrap(a, **wrap_kwargs)
     else:
         # Two-dimensional array as input
-        a = nb_func(self.to_2d_array(), *args, **{**default_kwargs, **kwargs})
-        if np.asarray(a).ndim == 0 or a.ndim == 1 or len(self.wrapper.index) != a.shape[0]:
-            return self.wrapper.wrap_reduced(a)
-        return self.wrapper.wrap(a)</code></pre>
+        a = _nb_func(self.to_2d_array(), *args, **{**default_kwargs, **kwargs})
+        if _is_reducing:
+            return self.wrapper.wrap_reduced(a, name_or_index=_name_or_index, **wrap_kwargs)
+        return self.wrapper.wrap(a, **wrap_kwargs)</code></pre>
 </details>
 </dd>
 <dt id="vectorbt.generic.accessors.GenericAccessor.cumsum"><code class="name flex">
@@ -2679,27 +2810,34 @@ dtype: float64
 <summary>
 <span>Expand source code</span>
 </summary>
-<pre><code class="python">def nb_method(self, *args, nb_func=nb_func, default_kwargs=default_kwargs, **kwargs):
-    if &#39;_1d&#39; in nb_func.__name__:
+<pre><code class="python">def nb_method(self,
+              *args,
+              _nb_func=nb_func,
+              _is_reducing=is_reducing,
+              _name_or_index=name_or_index,
+              wrap_kwargs=None,
+              **kwargs):
+    default_kwargs = get_kwargs(nb_func)
+    wrap_kwargs = merge_dicts({}, wrap_kwargs)
+    if &#39;_1d&#39; in _nb_func.__name__:
         # One-dimensional array as input
-        a = nb_func(self.to_1d_array(), *args, **{**default_kwargs, **kwargs})
-        if np.asarray(a).ndim == 0 or len(self.wrapper.index) != a.shape[0]:
-            return self.wrapper.wrap_reduced(a)
-        return self.wrapper.wrap(a)
+        a = _nb_func(self.to_1d_array(), *args, **{**default_kwargs, **kwargs})
+        if _is_reducing:
+            return self.wrapper.wrap_reduced(a, name_or_index=_name_or_index, **wrap_kwargs)
+        return self.wrapper.wrap(a, **wrap_kwargs)
     else:
         # Two-dimensional array as input
-        a = nb_func(self.to_2d_array(), *args, **{**default_kwargs, **kwargs})
-        if np.asarray(a).ndim == 0 or a.ndim == 1 or len(self.wrapper.index) != a.shape[0]:
-            return self.wrapper.wrap_reduced(a)
-        return self.wrapper.wrap(a)</code></pre>
+        a = _nb_func(self.to_2d_array(), *args, **{**default_kwargs, **kwargs})
+        if _is_reducing:
+            return self.wrapper.wrap_reduced(a, name_or_index=_name_or_index, **wrap_kwargs)
+        return self.wrapper.wrap(a, **wrap_kwargs)</code></pre>
 </details>
 </dd>
 <dt id="vectorbt.generic.accessors.GenericAccessor.describe"><code class="name flex">
-<span>def <span class="ident fname">describe</span></span>(<span>self, percentiles=None, ddof=1, group_by=None, **kwargs)</span>
+<span>def <span class="ident fname">describe</span></span>(<span>self, percentiles=None, ddof=1, group_by=None, wrap_kwargs=None)</span>
 </code></dt>
 <dd>
 <div class="desc"><p>See <code><a title="vectorbt.generic.nb.describe_reduce_nb" href="nb.html#vectorbt.generic.nb.describe_reduce_nb">describe_reduce_nb()</a></code>.</p>
-<p><code>**kwargs</code> will be passed to <code><a title="vectorbt.base.array_wrapper.ArrayWrapper.wrap_reduced" href="../base/array_wrapper.html#vectorbt.base.array_wrapper.ArrayWrapper.wrap_reduced">ArrayWrapper.wrap_reduced()</a></code>.</p>
 <p>For <code>percentiles</code>, see <code>pd.DataFrame.describe</code>.</p>
 <h2 id="example">Example</h2>
 <pre><code class="language-python-repl">&gt;&gt;&gt; df.vbt.describe()
@@ -2717,10 +2855,8 @@ max    5.000000  5.000000  3.00000
 <summary>
 <span>Expand source code</span>
 </summary>
-<pre><code class="python">def describe(self, percentiles=None, ddof=1, group_by=None, **kwargs):
+<pre><code class="python">def describe(self, percentiles=None, ddof=1, group_by=None, wrap_kwargs=None):
     &#34;&#34;&#34;See `vectorbt.generic.nb.describe_reduce_nb`.
-
-    `**kwargs` will be passed to `vectorbt.base.array_wrapper.ArrayWrapper.wrap_reduced`.
 
     For `percentiles`, see `pd.DataFrame.describe`.
 
@@ -2749,15 +2885,15 @@ max    5.000000  5.000000  3.00000
     percentiles = np.unique(percentiles)
     perc_formatted = pd.io.formats.format.format_percentiles(percentiles)
     index = pd.Index([&#39;count&#39;, &#39;mean&#39;, &#39;std&#39;, &#39;min&#39;, *perc_formatted, &#39;max&#39;])
+    wrap_kwargs = merge_dicts(dict(name_or_index=index), wrap_kwargs)
     if self.wrapper.grouper.is_grouped(group_by=group_by):
         return self.reduce(
             nb.describe_reduce_nb, percentiles, ddof,
             group_by=group_by, flatten=True, to_array=True,
-            index=index, **kwargs)
+            wrap_kwargs=wrap_kwargs)
     return self.reduce(
         nb.describe_reduce_nb, percentiles, ddof,
-        to_array=True,
-        index=index, **kwargs)</code></pre>
+        to_array=True, wrap_kwargs=wrap_kwargs)</code></pre>
 </details>
 </dd>
 <dt id="vectorbt.generic.accessors.GenericAccessor.diff"><code class="name flex">
@@ -2769,23 +2905,31 @@ max    5.000000  5.000000  3.00000
 <summary>
 <span>Expand source code</span>
 </summary>
-<pre><code class="python">def nb_method(self, *args, nb_func=nb_func, default_kwargs=default_kwargs, **kwargs):
-    if &#39;_1d&#39; in nb_func.__name__:
+<pre><code class="python">def nb_method(self,
+              *args,
+              _nb_func=nb_func,
+              _is_reducing=is_reducing,
+              _name_or_index=name_or_index,
+              wrap_kwargs=None,
+              **kwargs):
+    default_kwargs = get_kwargs(nb_func)
+    wrap_kwargs = merge_dicts({}, wrap_kwargs)
+    if &#39;_1d&#39; in _nb_func.__name__:
         # One-dimensional array as input
-        a = nb_func(self.to_1d_array(), *args, **{**default_kwargs, **kwargs})
-        if np.asarray(a).ndim == 0 or len(self.wrapper.index) != a.shape[0]:
-            return self.wrapper.wrap_reduced(a)
-        return self.wrapper.wrap(a)
+        a = _nb_func(self.to_1d_array(), *args, **{**default_kwargs, **kwargs})
+        if _is_reducing:
+            return self.wrapper.wrap_reduced(a, name_or_index=_name_or_index, **wrap_kwargs)
+        return self.wrapper.wrap(a, **wrap_kwargs)
     else:
         # Two-dimensional array as input
-        a = nb_func(self.to_2d_array(), *args, **{**default_kwargs, **kwargs})
-        if np.asarray(a).ndim == 0 or a.ndim == 1 or len(self.wrapper.index) != a.shape[0]:
-            return self.wrapper.wrap_reduced(a)
-        return self.wrapper.wrap(a)</code></pre>
+        a = _nb_func(self.to_2d_array(), *args, **{**default_kwargs, **kwargs})
+        if _is_reducing:
+            return self.wrapper.wrap_reduced(a, name_or_index=_name_or_index, **wrap_kwargs)
+        return self.wrapper.wrap(a, **wrap_kwargs)</code></pre>
 </details>
 </dd>
 <dt id="vectorbt.generic.accessors.GenericAccessor.drawdown"><code class="name flex">
-<span>def <span class="ident fname">drawdown</span></span>(<span>self)</span>
+<span>def <span class="ident fname">drawdown</span></span>(<span>self, wrap_kwargs=None)</span>
 </code></dt>
 <dd>
 <div class="desc"><p>Drawdown series.</p></div>
@@ -2793,13 +2937,14 @@ max    5.000000  5.000000  3.00000
 <summary>
 <span>Expand source code</span>
 </summary>
-<pre><code class="python">def drawdown(self):
+<pre><code class="python">def drawdown(self, wrap_kwargs=None):
     &#34;&#34;&#34;Drawdown series.&#34;&#34;&#34;
-    return self.wrapper.wrap(self.to_2d_array() / nb.expanding_max_nb(self.to_2d_array()) - 1)</code></pre>
+    out = self.to_2d_array() / nb.expanding_max_nb(self.to_2d_array()) - 1
+    return self.wrapper.wrap(out, **merge_dicts({}, wrap_kwargs))</code></pre>
 </details>
 </dd>
 <dt id="vectorbt.generic.accessors.GenericAccessor.ewm_mean"><code class="name flex">
-<span>def <span class="ident fname">ewm_mean</span></span>(<span>self, span, minp=0, adjust=True)</span>
+<span>def <span class="ident fname">ewm_mean</span></span>(<span>self, span, minp=0, adjust=True, wrap_kwargs=None)</span>
 </code></dt>
 <dd>
 <div class="desc"><p>See <code><a title="vectorbt.generic.nb.ewm_mean_nb" href="nb.html#vectorbt.generic.nb.ewm_mean_nb">ewm_mean_nb()</a></code>.</p></div>
@@ -2807,13 +2952,14 @@ max    5.000000  5.000000  3.00000
 <summary>
 <span>Expand source code</span>
 </summary>
-<pre><code class="python">def ewm_mean(self, span, minp=0, adjust=True):  # pragma: no cover
+<pre><code class="python">def ewm_mean(self, span, minp=0, adjust=True, wrap_kwargs=None):  # pragma: no cover
     &#34;&#34;&#34;See `vectorbt.generic.nb.ewm_mean_nb`.&#34;&#34;&#34;
-    return self.wrapper.wrap(nb.ewm_mean_nb(self.to_2d_array(), span, minp=minp, adjust=adjust))</code></pre>
+    out = nb.ewm_mean_nb(self.to_2d_array(), span, minp=minp, adjust=adjust)
+    return self.wrapper.wrap(out, **merge_dicts({}, wrap_kwargs))</code></pre>
 </details>
 </dd>
 <dt id="vectorbt.generic.accessors.GenericAccessor.ewm_std"><code class="name flex">
-<span>def <span class="ident fname">ewm_std</span></span>(<span>self, span, minp=0, adjust=True, ddof=1)</span>
+<span>def <span class="ident fname">ewm_std</span></span>(<span>self, span, minp=0, adjust=True, ddof=1, wrap_kwargs=None)</span>
 </code></dt>
 <dd>
 <div class="desc"><p>See <code><a title="vectorbt.generic.nb.ewm_std_nb" href="nb.html#vectorbt.generic.nb.ewm_std_nb">ewm_std_nb()</a></code>.</p></div>
@@ -2821,13 +2967,14 @@ max    5.000000  5.000000  3.00000
 <summary>
 <span>Expand source code</span>
 </summary>
-<pre><code class="python">def ewm_std(self, span, minp=0, adjust=True, ddof=1):  # pragma: no cover
+<pre><code class="python">def ewm_std(self, span, minp=0, adjust=True, ddof=1, wrap_kwargs=None):  # pragma: no cover
     &#34;&#34;&#34;See `vectorbt.generic.nb.ewm_std_nb`.&#34;&#34;&#34;
-    return self.wrapper.wrap(nb.ewm_std_nb(self.to_2d_array(), span, minp=minp, adjust=adjust, ddof=ddof))</code></pre>
+    out = nb.ewm_std_nb(self.to_2d_array(), span, minp=minp, adjust=adjust, ddof=ddof)
+    return self.wrapper.wrap(out, **merge_dicts({}, wrap_kwargs))</code></pre>
 </details>
 </dd>
 <dt id="vectorbt.generic.accessors.GenericAccessor.expanding_apply"><code class="name flex">
-<span>def <span class="ident fname">expanding_apply</span></span>(<span>self, apply_func_nb, *args, on_matrix=False)</span>
+<span>def <span class="ident fname">expanding_apply</span></span>(<span>self, apply_func_nb, *args, on_matrix=False, wrap_kwargs=None)</span>
 </code></dt>
 <dd>
 <div class="desc"><p>See <code><a title="vectorbt.generic.nb.expanding_apply_nb" href="nb.html#vectorbt.generic.nb.expanding_apply_nb">expanding_apply_nb()</a></code> and
@@ -2855,7 +3002,7 @@ max    5.000000  5.000000  3.00000
 <summary>
 <span>Expand source code</span>
 </summary>
-<pre><code class="python">def expanding_apply(self, apply_func_nb, *args, on_matrix=False):
+<pre><code class="python">def expanding_apply(self, apply_func_nb, *args, on_matrix=False, wrap_kwargs=None):
     &#34;&#34;&#34;See `vectorbt.generic.nb.expanding_apply_nb` and
     `vectorbt.generic.nb.expanding_apply_matrix_nb` for `on_matrix=True`.
 
@@ -2887,7 +3034,7 @@ max    5.000000  5.000000  3.00000
         out = nb.expanding_apply_matrix_nb(self.to_2d_array(), apply_func_nb, *args)
     else:
         out = nb.expanding_apply_nb(self.to_2d_array(), apply_func_nb, *args)
-    return self.wrapper.wrap(out)</code></pre>
+    return self.wrapper.wrap(out, **merge_dicts({}, wrap_kwargs))</code></pre>
 </details>
 </dd>
 <dt id="vectorbt.generic.accessors.GenericAccessor.expanding_max"><code class="name flex">
@@ -2899,19 +3046,27 @@ max    5.000000  5.000000  3.00000
 <summary>
 <span>Expand source code</span>
 </summary>
-<pre><code class="python">def nb_method(self, *args, nb_func=nb_func, default_kwargs=default_kwargs, **kwargs):
-    if &#39;_1d&#39; in nb_func.__name__:
+<pre><code class="python">def nb_method(self,
+              *args,
+              _nb_func=nb_func,
+              _is_reducing=is_reducing,
+              _name_or_index=name_or_index,
+              wrap_kwargs=None,
+              **kwargs):
+    default_kwargs = get_kwargs(nb_func)
+    wrap_kwargs = merge_dicts({}, wrap_kwargs)
+    if &#39;_1d&#39; in _nb_func.__name__:
         # One-dimensional array as input
-        a = nb_func(self.to_1d_array(), *args, **{**default_kwargs, **kwargs})
-        if np.asarray(a).ndim == 0 or len(self.wrapper.index) != a.shape[0]:
-            return self.wrapper.wrap_reduced(a)
-        return self.wrapper.wrap(a)
+        a = _nb_func(self.to_1d_array(), *args, **{**default_kwargs, **kwargs})
+        if _is_reducing:
+            return self.wrapper.wrap_reduced(a, name_or_index=_name_or_index, **wrap_kwargs)
+        return self.wrapper.wrap(a, **wrap_kwargs)
     else:
         # Two-dimensional array as input
-        a = nb_func(self.to_2d_array(), *args, **{**default_kwargs, **kwargs})
-        if np.asarray(a).ndim == 0 or a.ndim == 1 or len(self.wrapper.index) != a.shape[0]:
-            return self.wrapper.wrap_reduced(a)
-        return self.wrapper.wrap(a)</code></pre>
+        a = _nb_func(self.to_2d_array(), *args, **{**default_kwargs, **kwargs})
+        if _is_reducing:
+            return self.wrapper.wrap_reduced(a, name_or_index=_name_or_index, **wrap_kwargs)
+        return self.wrapper.wrap(a, **wrap_kwargs)</code></pre>
 </details>
 </dd>
 <dt id="vectorbt.generic.accessors.GenericAccessor.expanding_mean"><code class="name flex">
@@ -2923,19 +3078,27 @@ max    5.000000  5.000000  3.00000
 <summary>
 <span>Expand source code</span>
 </summary>
-<pre><code class="python">def nb_method(self, *args, nb_func=nb_func, default_kwargs=default_kwargs, **kwargs):
-    if &#39;_1d&#39; in nb_func.__name__:
+<pre><code class="python">def nb_method(self,
+              *args,
+              _nb_func=nb_func,
+              _is_reducing=is_reducing,
+              _name_or_index=name_or_index,
+              wrap_kwargs=None,
+              **kwargs):
+    default_kwargs = get_kwargs(nb_func)
+    wrap_kwargs = merge_dicts({}, wrap_kwargs)
+    if &#39;_1d&#39; in _nb_func.__name__:
         # One-dimensional array as input
-        a = nb_func(self.to_1d_array(), *args, **{**default_kwargs, **kwargs})
-        if np.asarray(a).ndim == 0 or len(self.wrapper.index) != a.shape[0]:
-            return self.wrapper.wrap_reduced(a)
-        return self.wrapper.wrap(a)
+        a = _nb_func(self.to_1d_array(), *args, **{**default_kwargs, **kwargs})
+        if _is_reducing:
+            return self.wrapper.wrap_reduced(a, name_or_index=_name_or_index, **wrap_kwargs)
+        return self.wrapper.wrap(a, **wrap_kwargs)
     else:
         # Two-dimensional array as input
-        a = nb_func(self.to_2d_array(), *args, **{**default_kwargs, **kwargs})
-        if np.asarray(a).ndim == 0 or a.ndim == 1 or len(self.wrapper.index) != a.shape[0]:
-            return self.wrapper.wrap_reduced(a)
-        return self.wrapper.wrap(a)</code></pre>
+        a = _nb_func(self.to_2d_array(), *args, **{**default_kwargs, **kwargs})
+        if _is_reducing:
+            return self.wrapper.wrap_reduced(a, name_or_index=_name_or_index, **wrap_kwargs)
+        return self.wrapper.wrap(a, **wrap_kwargs)</code></pre>
 </details>
 </dd>
 <dt id="vectorbt.generic.accessors.GenericAccessor.expanding_min"><code class="name flex">
@@ -2947,23 +3110,31 @@ max    5.000000  5.000000  3.00000
 <summary>
 <span>Expand source code</span>
 </summary>
-<pre><code class="python">def nb_method(self, *args, nb_func=nb_func, default_kwargs=default_kwargs, **kwargs):
-    if &#39;_1d&#39; in nb_func.__name__:
+<pre><code class="python">def nb_method(self,
+              *args,
+              _nb_func=nb_func,
+              _is_reducing=is_reducing,
+              _name_or_index=name_or_index,
+              wrap_kwargs=None,
+              **kwargs):
+    default_kwargs = get_kwargs(nb_func)
+    wrap_kwargs = merge_dicts({}, wrap_kwargs)
+    if &#39;_1d&#39; in _nb_func.__name__:
         # One-dimensional array as input
-        a = nb_func(self.to_1d_array(), *args, **{**default_kwargs, **kwargs})
-        if np.asarray(a).ndim == 0 or len(self.wrapper.index) != a.shape[0]:
-            return self.wrapper.wrap_reduced(a)
-        return self.wrapper.wrap(a)
+        a = _nb_func(self.to_1d_array(), *args, **{**default_kwargs, **kwargs})
+        if _is_reducing:
+            return self.wrapper.wrap_reduced(a, name_or_index=_name_or_index, **wrap_kwargs)
+        return self.wrapper.wrap(a, **wrap_kwargs)
     else:
         # Two-dimensional array as input
-        a = nb_func(self.to_2d_array(), *args, **{**default_kwargs, **kwargs})
-        if np.asarray(a).ndim == 0 or a.ndim == 1 or len(self.wrapper.index) != a.shape[0]:
-            return self.wrapper.wrap_reduced(a)
-        return self.wrapper.wrap(a)</code></pre>
+        a = _nb_func(self.to_2d_array(), *args, **{**default_kwargs, **kwargs})
+        if _is_reducing:
+            return self.wrapper.wrap_reduced(a, name_or_index=_name_or_index, **wrap_kwargs)
+        return self.wrapper.wrap(a, **wrap_kwargs)</code></pre>
 </details>
 </dd>
 <dt id="vectorbt.generic.accessors.GenericAccessor.expanding_std"><code class="name flex">
-<span>def <span class="ident fname">expanding_std</span></span>(<span>self, minp=1, ddof=1)</span>
+<span>def <span class="ident fname">expanding_std</span></span>(<span>self, minp=1, ddof=1, wrap_kwargs=None)</span>
 </code></dt>
 <dd>
 <div class="desc"><p>See <code><a title="vectorbt.generic.nb.expanding_std_nb" href="nb.html#vectorbt.generic.nb.expanding_std_nb">expanding_std_nb()</a></code>.</p></div>
@@ -2971,9 +3142,10 @@ max    5.000000  5.000000  3.00000
 <summary>
 <span>Expand source code</span>
 </summary>
-<pre><code class="python">def expanding_std(self, minp=1, ddof=1):  # pragma: no cover
+<pre><code class="python">def expanding_std(self, minp=1, ddof=1, wrap_kwargs=None):  # pragma: no cover
     &#34;&#34;&#34;See `vectorbt.generic.nb.expanding_std_nb`.&#34;&#34;&#34;
-    return self.wrapper.wrap(nb.expanding_std_nb(self.to_2d_array(), minp=minp, ddof=ddof))</code></pre>
+    out = nb.expanding_std_nb(self.to_2d_array(), minp=minp, ddof=ddof)
+    return self.wrapper.wrap(out, **merge_dicts({}, wrap_kwargs))</code></pre>
 </details>
 </dd>
 <dt id="vectorbt.generic.accessors.GenericAccessor.ffill"><code class="name flex">
@@ -2985,19 +3157,27 @@ max    5.000000  5.000000  3.00000
 <summary>
 <span>Expand source code</span>
 </summary>
-<pre><code class="python">def nb_method(self, *args, nb_func=nb_func, default_kwargs=default_kwargs, **kwargs):
-    if &#39;_1d&#39; in nb_func.__name__:
+<pre><code class="python">def nb_method(self,
+              *args,
+              _nb_func=nb_func,
+              _is_reducing=is_reducing,
+              _name_or_index=name_or_index,
+              wrap_kwargs=None,
+              **kwargs):
+    default_kwargs = get_kwargs(nb_func)
+    wrap_kwargs = merge_dicts({}, wrap_kwargs)
+    if &#39;_1d&#39; in _nb_func.__name__:
         # One-dimensional array as input
-        a = nb_func(self.to_1d_array(), *args, **{**default_kwargs, **kwargs})
-        if np.asarray(a).ndim == 0 or len(self.wrapper.index) != a.shape[0]:
-            return self.wrapper.wrap_reduced(a)
-        return self.wrapper.wrap(a)
+        a = _nb_func(self.to_1d_array(), *args, **{**default_kwargs, **kwargs})
+        if _is_reducing:
+            return self.wrapper.wrap_reduced(a, name_or_index=_name_or_index, **wrap_kwargs)
+        return self.wrapper.wrap(a, **wrap_kwargs)
     else:
         # Two-dimensional array as input
-        a = nb_func(self.to_2d_array(), *args, **{**default_kwargs, **kwargs})
-        if np.asarray(a).ndim == 0 or a.ndim == 1 or len(self.wrapper.index) != a.shape[0]:
-            return self.wrapper.wrap_reduced(a)
-        return self.wrapper.wrap(a)</code></pre>
+        a = _nb_func(self.to_2d_array(), *args, **{**default_kwargs, **kwargs})
+        if _is_reducing:
+            return self.wrapper.wrap_reduced(a, name_or_index=_name_or_index, **wrap_kwargs)
+        return self.wrapper.wrap(a, **wrap_kwargs)</code></pre>
 </details>
 </dd>
 <dt id="vectorbt.generic.accessors.GenericAccessor.fillna"><code class="name flex">
@@ -3009,23 +3189,31 @@ max    5.000000  5.000000  3.00000
 <summary>
 <span>Expand source code</span>
 </summary>
-<pre><code class="python">def nb_method(self, *args, nb_func=nb_func, default_kwargs=default_kwargs, **kwargs):
-    if &#39;_1d&#39; in nb_func.__name__:
+<pre><code class="python">def nb_method(self,
+              *args,
+              _nb_func=nb_func,
+              _is_reducing=is_reducing,
+              _name_or_index=name_or_index,
+              wrap_kwargs=None,
+              **kwargs):
+    default_kwargs = get_kwargs(nb_func)
+    wrap_kwargs = merge_dicts({}, wrap_kwargs)
+    if &#39;_1d&#39; in _nb_func.__name__:
         # One-dimensional array as input
-        a = nb_func(self.to_1d_array(), *args, **{**default_kwargs, **kwargs})
-        if np.asarray(a).ndim == 0 or len(self.wrapper.index) != a.shape[0]:
-            return self.wrapper.wrap_reduced(a)
-        return self.wrapper.wrap(a)
+        a = _nb_func(self.to_1d_array(), *args, **{**default_kwargs, **kwargs})
+        if _is_reducing:
+            return self.wrapper.wrap_reduced(a, name_or_index=_name_or_index, **wrap_kwargs)
+        return self.wrapper.wrap(a, **wrap_kwargs)
     else:
         # Two-dimensional array as input
-        a = nb_func(self.to_2d_array(), *args, **{**default_kwargs, **kwargs})
-        if np.asarray(a).ndim == 0 or a.ndim == 1 or len(self.wrapper.index) != a.shape[0]:
-            return self.wrapper.wrap_reduced(a)
-        return self.wrapper.wrap(a)</code></pre>
+        a = _nb_func(self.to_2d_array(), *args, **{**default_kwargs, **kwargs})
+        if _is_reducing:
+            return self.wrapper.wrap_reduced(a, name_or_index=_name_or_index, **wrap_kwargs)
+        return self.wrapper.wrap(a, **wrap_kwargs)</code></pre>
 </details>
 </dd>
 <dt id="vectorbt.generic.accessors.GenericAccessor.filter"><code class="name flex">
-<span>def <span class="ident fname">filter</span></span>(<span>self, filter_func_nb, *args)</span>
+<span>def <span class="ident fname">filter</span></span>(<span>self, filter_func_nb, *args, wrap_kwargs=None)</span>
 </code></dt>
 <dd>
 <div class="desc"><p>See <code><a title="vectorbt.generic.nb.filter_nb" href="nb.html#vectorbt.generic.nb.filter_nb">filter_nb()</a></code>.</p>
@@ -3043,7 +3231,7 @@ max    5.000000  5.000000  3.00000
 <summary>
 <span>Expand source code</span>
 </summary>
-<pre><code class="python">def filter(self, filter_func_nb, *args):
+<pre><code class="python">def filter(self, filter_func_nb, *args, wrap_kwargs=None):
     &#34;&#34;&#34;See `vectorbt.generic.nb.filter_nb`.
 
     ## Example
@@ -3062,16 +3250,15 @@ max    5.000000  5.000000  3.00000
     checks.assert_numba_func(filter_func_nb)
 
     out = nb.filter_nb(self.to_2d_array(), filter_func_nb, *args)
-    return self.wrapper.wrap(out)</code></pre>
+    return self.wrapper.wrap(out, **merge_dicts({}, wrap_kwargs))</code></pre>
 </details>
 </dd>
 <dt id="vectorbt.generic.accessors.GenericAccessor.flatten_grouped"><code class="name flex">
-<span>def <span class="ident fname">flatten_grouped</span></span>(<span>self, group_by=None, order='C', **kwargs)</span>
+<span>def <span class="ident fname">flatten_grouped</span></span>(<span>self, group_by=None, order='C', wrap_kwargs=None)</span>
 </code></dt>
 <dd>
 <div class="desc"><p>Flatten each group of columns.</p>
 <p>See <code><a title="vectorbt.generic.nb.flatten_grouped_nb" href="nb.html#vectorbt.generic.nb.flatten_grouped_nb">flatten_grouped_nb()</a></code>.</p>
-<p><code>**kwargs</code> will be passed to <code><a title="vectorbt.base.array_wrapper.ArrayWrapper.wrap" href="../base/array_wrapper.html#vectorbt.base.array_wrapper.ArrayWrapper.wrap">ArrayWrapper.wrap()</a></code>.</p>
 <div class="admonition warning">
 <p class="admonition-title">Warning</p>
 <p>Make sure that the distribution of group lengths is close to uniform, otherwise
@@ -3109,12 +3296,10 @@ group       first  second
 <summary>
 <span>Expand source code</span>
 </summary>
-<pre><code class="python">def flatten_grouped(self, group_by=None, order=&#39;C&#39;, **kwargs):
+<pre><code class="python">def flatten_grouped(self, group_by=None, order=&#39;C&#39;, wrap_kwargs=None):
     &#34;&#34;&#34;Flatten each group of columns.
 
     See `vectorbt.generic.nb.flatten_grouped_nb`.
-
-    `**kwargs` will be passed to `vectorbt.base.array_wrapper.ArrayWrapper.wrap`.
 
     !!! warning
         Make sure that the distribution of group lengths is close to uniform, otherwise
@@ -3162,7 +3347,8 @@ group       first  second
     else:
         out = nb.flatten_grouped_nb(self.to_2d_array(), group_lens, False)
         new_index = index_fns.tile_index(self.wrapper.index, np.max(group_lens))
-    return self.wrapper.wrap(out, group_by=group_by, index=new_index, **kwargs)</code></pre>
+    wrap_kwargs = merge_dicts(dict(index=new_index), wrap_kwargs)
+    return self.wrapper.wrap(out, group_by=group_by, **wrap_kwargs)</code></pre>
 </details>
 </dd>
 <dt id="vectorbt.generic.accessors.GenericAccessor.fshift"><code class="name flex">
@@ -3174,19 +3360,27 @@ group       first  second
 <summary>
 <span>Expand source code</span>
 </summary>
-<pre><code class="python">def nb_method(self, *args, nb_func=nb_func, default_kwargs=default_kwargs, **kwargs):
-    if &#39;_1d&#39; in nb_func.__name__:
+<pre><code class="python">def nb_method(self,
+              *args,
+              _nb_func=nb_func,
+              _is_reducing=is_reducing,
+              _name_or_index=name_or_index,
+              wrap_kwargs=None,
+              **kwargs):
+    default_kwargs = get_kwargs(nb_func)
+    wrap_kwargs = merge_dicts({}, wrap_kwargs)
+    if &#39;_1d&#39; in _nb_func.__name__:
         # One-dimensional array as input
-        a = nb_func(self.to_1d_array(), *args, **{**default_kwargs, **kwargs})
-        if np.asarray(a).ndim == 0 or len(self.wrapper.index) != a.shape[0]:
-            return self.wrapper.wrap_reduced(a)
-        return self.wrapper.wrap(a)
+        a = _nb_func(self.to_1d_array(), *args, **{**default_kwargs, **kwargs})
+        if _is_reducing:
+            return self.wrapper.wrap_reduced(a, name_or_index=_name_or_index, **wrap_kwargs)
+        return self.wrapper.wrap(a, **wrap_kwargs)
     else:
         # Two-dimensional array as input
-        a = nb_func(self.to_2d_array(), *args, **{**default_kwargs, **kwargs})
-        if np.asarray(a).ndim == 0 or a.ndim == 1 or len(self.wrapper.index) != a.shape[0]:
-            return self.wrapper.wrap_reduced(a)
-        return self.wrapper.wrap(a)</code></pre>
+        a = _nb_func(self.to_2d_array(), *args, **{**default_kwargs, **kwargs})
+        if _is_reducing:
+            return self.wrapper.wrap_reduced(a, name_or_index=_name_or_index, **wrap_kwargs)
+        return self.wrapper.wrap(a, **wrap_kwargs)</code></pre>
 </details>
 </dd>
 <dt id="vectorbt.generic.accessors.GenericAccessor.get_drawdowns"><code class="name flex">
@@ -3210,7 +3404,7 @@ def get_drawdowns(self, group_by=None, **kwargs):
 </details>
 </dd>
 <dt id="vectorbt.generic.accessors.GenericAccessor.groupby_apply"><code class="name flex">
-<span>def <span class="ident fname">groupby_apply</span></span>(<span>self, by, apply_func_nb, *args, on_matrix=False, **kwargs)</span>
+<span>def <span class="ident fname">groupby_apply</span></span>(<span>self, by, apply_func_nb, *args, on_matrix=False, wrap_kwargs=None, **kwargs)</span>
 </code></dt>
 <dd>
 <div class="desc"><p>See <code><a title="vectorbt.generic.nb.groupby_apply_nb" href="nb.html#vectorbt.generic.nb.groupby_apply_nb">groupby_apply_nb()</a></code> and
@@ -3235,7 +3429,7 @@ def get_drawdowns(self, group_by=None, **kwargs):
 <summary>
 <span>Expand source code</span>
 </summary>
-<pre><code class="python">def groupby_apply(self, by, apply_func_nb, *args, on_matrix=False, **kwargs):
+<pre><code class="python">def groupby_apply(self, by, apply_func_nb, *args, on_matrix=False, wrap_kwargs=None, **kwargs):
     &#34;&#34;&#34;See `vectorbt.generic.nb.groupby_apply_nb` and
     `vectorbt.generic.nb.groupby_apply_matrix_nb` for `on_matrix=True`.
 
@@ -3269,7 +3463,8 @@ def get_drawdowns(self, group_by=None, **kwargs):
         out = nb.groupby_apply_matrix_nb(self.to_2d_array(), groups, apply_func_nb, *args)
     else:
         out = nb.groupby_apply_nb(self.to_2d_array(), groups, apply_func_nb, *args)
-    return self.wrapper.wrap_reduced(out, index=list(regrouped.indices.keys()))</code></pre>
+    wrap_kwargs = merge_dicts(dict(name_or_index=list(regrouped.indices.keys())), wrap_kwargs)
+    return self.wrapper.wrap_reduced(out, **wrap_kwargs)</code></pre>
 </details>
 </dd>
 <dt id="vectorbt.generic.accessors.GenericAccessor.histplot"><code class="name flex">
@@ -3313,7 +3508,7 @@ def get_drawdowns(self, group_by=None, **kwargs):
 </details>
 </dd>
 <dt id="vectorbt.generic.accessors.GenericAccessor.idxmax"><code class="name flex">
-<span>def <span class="ident fname">idxmax</span></span>(<span>self, group_by=None, order='C', **kwargs)</span>
+<span>def <span class="ident fname">idxmax</span></span>(<span>self, group_by=None, order='C', wrap_kwargs=None)</span>
 </code></dt>
 <dd>
 <div class="desc"><p>Return labeled index of max of non-NaN elements.</p></div>
@@ -3321,26 +3516,28 @@ def get_drawdowns(self, group_by=None, **kwargs):
 <summary>
 <span>Expand source code</span>
 </summary>
-<pre><code class="python">def idxmax(self, group_by=None, order=&#39;C&#39;, **kwargs):
+<pre><code class="python">def idxmax(self, group_by=None, order=&#39;C&#39;, wrap_kwargs=None):
     &#34;&#34;&#34;Return labeled index of max of non-NaN elements.&#34;&#34;&#34;
+    wrap_kwargs = merge_dicts(dict(name_or_index=&#39;idxmax&#39;), wrap_kwargs)
     if self.wrapper.grouper.is_grouped(group_by=group_by):
         return self.reduce(
             nb.argmax_reduce_nb,
             group_by=group_by,
             flatten=True,
             to_idx=True,
-            order=order
+            order=order,
+            wrap_kwargs=wrap_kwargs
         )
 
     obj = self.to_2d_array()
     out = np.full(obj.shape[1], np.nan, dtype=np.object)
     nan_mask = np.all(np.isnan(obj), axis=0)
     out[~nan_mask] = self.wrapper.index[nanargmax(obj[:, ~nan_mask], axis=0)]
-    return self.wrapper.wrap_reduced(out, **kwargs)</code></pre>
+    return self.wrapper.wrap_reduced(out, **wrap_kwargs)</code></pre>
 </details>
 </dd>
 <dt id="vectorbt.generic.accessors.GenericAccessor.idxmin"><code class="name flex">
-<span>def <span class="ident fname">idxmin</span></span>(<span>self, group_by=None, order='C', **kwargs)</span>
+<span>def <span class="ident fname">idxmin</span></span>(<span>self, group_by=None, order='C', wrap_kwargs=None)</span>
 </code></dt>
 <dd>
 <div class="desc"><p>Return labeled index of min of non-NaN elements.</p></div>
@@ -3348,22 +3545,24 @@ def get_drawdowns(self, group_by=None, **kwargs):
 <summary>
 <span>Expand source code</span>
 </summary>
-<pre><code class="python">def idxmin(self, group_by=None, order=&#39;C&#39;, **kwargs):
+<pre><code class="python">def idxmin(self, group_by=None, order=&#39;C&#39;, wrap_kwargs=None):
     &#34;&#34;&#34;Return labeled index of min of non-NaN elements.&#34;&#34;&#34;
+    wrap_kwargs = merge_dicts(dict(name_or_index=&#39;idxmin&#39;), wrap_kwargs)
     if self.wrapper.grouper.is_grouped(group_by=group_by):
         return self.reduce(
             nb.argmin_reduce_nb,
             group_by=group_by,
             flatten=True,
             to_idx=True,
-            order=order
+            order=order,
+            wrap_kwargs=wrap_kwargs
         )
 
     obj = self.to_2d_array()
     out = np.full(obj.shape[1], np.nan, dtype=np.object)
     nan_mask = np.all(np.isnan(obj), axis=0)
     out[~nan_mask] = self.wrapper.index[nanargmin(obj[:, ~nan_mask], axis=0)]
-    return self.wrapper.wrap_reduced(out, **kwargs)</code></pre>
+    return self.wrapper.wrap_reduced(out, **wrap_kwargs)</code></pre>
 </details>
 </dd>
 <dt id="vectorbt.generic.accessors.GenericAccessor.lineplot"><code class="name flex">
@@ -3394,7 +3593,7 @@ def get_drawdowns(self, group_by=None, **kwargs):
 </details>
 </dd>
 <dt id="vectorbt.generic.accessors.GenericAccessor.max"><code class="name flex">
-<span>def <span class="ident fname">max</span></span>(<span>self, group_by=None, **kwargs)</span>
+<span>def <span class="ident fname">max</span></span>(<span>self, group_by=None, wrap_kwargs=None)</span>
 </code></dt>
 <dd>
 <div class="desc"><p>Return max of non-NaN elements.</p></div>
@@ -3402,10 +3601,11 @@ def get_drawdowns(self, group_by=None, **kwargs):
 <summary>
 <span>Expand source code</span>
 </summary>
-<pre><code class="python">def max(self, group_by=None, **kwargs):
+<pre><code class="python">def max(self, group_by=None, wrap_kwargs=None):
     &#34;&#34;&#34;Return max of non-NaN elements.&#34;&#34;&#34;
+    wrap_kwargs = merge_dicts(dict(name_or_index=&#39;max&#39;), wrap_kwargs)
     if self.wrapper.grouper.is_grouped(group_by=group_by):
-        return self.reduce(nb.max_reduce_nb, group_by=group_by, flatten=True)
+        return self.reduce(nb.max_reduce_nb, group_by=group_by, flatten=True, wrap_kwargs=wrap_kwargs)
 
     arr = self.to_2d_array()
     if arr.dtype != int and arr.dtype != float:
@@ -3413,11 +3613,11 @@ def get_drawdowns(self, group_by=None, **kwargs):
         _nanmax = np.nanmax
     else:
         _nanmax = nanmax
-    return self.wrapper.wrap_reduced(_nanmax(arr, axis=0), **kwargs)</code></pre>
+    return self.wrapper.wrap_reduced(_nanmax(arr, axis=0), **wrap_kwargs)</code></pre>
 </details>
 </dd>
 <dt id="vectorbt.generic.accessors.GenericAccessor.mean"><code class="name flex">
-<span>def <span class="ident fname">mean</span></span>(<span>self, group_by=None, **kwargs)</span>
+<span>def <span class="ident fname">mean</span></span>(<span>self, group_by=None, wrap_kwargs=None)</span>
 </code></dt>
 <dd>
 <div class="desc"><p>Return mean of non-NaN elements.</p></div>
@@ -3425,10 +3625,12 @@ def get_drawdowns(self, group_by=None, **kwargs):
 <summary>
 <span>Expand source code</span>
 </summary>
-<pre><code class="python">def mean(self, group_by=None, **kwargs):
+<pre><code class="python">def mean(self, group_by=None, wrap_kwargs=None):
     &#34;&#34;&#34;Return mean of non-NaN elements.&#34;&#34;&#34;
+    wrap_kwargs = merge_dicts(dict(name_or_index=&#39;mean&#39;), wrap_kwargs)
     if self.wrapper.grouper.is_grouped(group_by=group_by):
-        return self.reduce(nb.mean_reduce_nb, group_by=group_by, flatten=True)
+        return self.reduce(
+            nb.mean_reduce_nb, group_by=group_by, flatten=True, wrap_kwargs=wrap_kwargs)
 
     arr = self.to_2d_array()
     if arr.dtype != int and arr.dtype != float:
@@ -3436,11 +3638,11 @@ def get_drawdowns(self, group_by=None, **kwargs):
         _nanmean = np.nanmean
     else:
         _nanmean = nanmean
-    return self.wrapper.wrap_reduced(_nanmean(arr, axis=0), **kwargs)</code></pre>
+    return self.wrapper.wrap_reduced(_nanmean(arr, axis=0), **wrap_kwargs)</code></pre>
 </details>
 </dd>
 <dt id="vectorbt.generic.accessors.GenericAccessor.median"><code class="name flex">
-<span>def <span class="ident fname">median</span></span>(<span>self, group_by=None, **kwargs)</span>
+<span>def <span class="ident fname">median</span></span>(<span>self, group_by=None, wrap_kwargs=None)</span>
 </code></dt>
 <dd>
 <div class="desc"><p>Return median of non-NaN elements.</p></div>
@@ -3448,10 +3650,11 @@ def get_drawdowns(self, group_by=None, **kwargs):
 <summary>
 <span>Expand source code</span>
 </summary>
-<pre><code class="python">def median(self, group_by=None, **kwargs):
+<pre><code class="python">def median(self, group_by=None, wrap_kwargs=None):
     &#34;&#34;&#34;Return median of non-NaN elements.&#34;&#34;&#34;
+    wrap_kwargs = merge_dicts(dict(name_or_index=&#39;median&#39;), wrap_kwargs)
     if self.wrapper.grouper.is_grouped(group_by=group_by):
-        return self.reduce(nb.median_reduce_nb, group_by=group_by, flatten=True)
+        return self.reduce(nb.median_reduce_nb, group_by=group_by, flatten=True, wrap_kwargs=wrap_kwargs)
 
     arr = self.to_2d_array()
     if arr.dtype != int and arr.dtype != float:
@@ -3459,11 +3662,11 @@ def get_drawdowns(self, group_by=None, **kwargs):
         _nanmedian = np.nanmedian
     else:
         _nanmedian = nanmedian
-    return self.wrapper.wrap_reduced(_nanmedian(arr, axis=0), **kwargs)</code></pre>
+    return self.wrapper.wrap_reduced(_nanmedian(arr, axis=0), **wrap_kwargs)</code></pre>
 </details>
 </dd>
 <dt id="vectorbt.generic.accessors.GenericAccessor.min"><code class="name flex">
-<span>def <span class="ident fname">min</span></span>(<span>self, group_by=None, **kwargs)</span>
+<span>def <span class="ident fname">min</span></span>(<span>self, group_by=None, wrap_kwargs=None)</span>
 </code></dt>
 <dd>
 <div class="desc"><p>Return min of non-NaN elements.</p></div>
@@ -3471,10 +3674,11 @@ def get_drawdowns(self, group_by=None, **kwargs):
 <summary>
 <span>Expand source code</span>
 </summary>
-<pre><code class="python">def min(self, group_by=None, **kwargs):
+<pre><code class="python">def min(self, group_by=None, wrap_kwargs=None):
     &#34;&#34;&#34;Return min of non-NaN elements.&#34;&#34;&#34;
+    wrap_kwargs = merge_dicts(dict(name_or_index=&#39;min&#39;), wrap_kwargs)
     if self.wrapper.grouper.is_grouped(group_by=group_by):
-        return self.reduce(nb.min_reduce_nb, group_by=group_by, flatten=True)
+        return self.reduce(nb.min_reduce_nb, group_by=group_by, flatten=True, wrap_kwargs=wrap_kwargs)
 
     arr = self.to_2d_array()
     if arr.dtype != int and arr.dtype != float:
@@ -3482,7 +3686,7 @@ def get_drawdowns(self, group_by=None, **kwargs):
         _nanmin = np.nanmin
     else:
         _nanmin = nanmin
-    return self.wrapper.wrap_reduced(_nanmin(arr, axis=0), **kwargs)</code></pre>
+    return self.wrapper.wrap_reduced(_nanmin(arr, axis=0), **wrap_kwargs)</code></pre>
 </details>
 </dd>
 <dt id="vectorbt.generic.accessors.GenericAccessor.pct_change"><code class="name flex">
@@ -3494,19 +3698,27 @@ def get_drawdowns(self, group_by=None, **kwargs):
 <summary>
 <span>Expand source code</span>
 </summary>
-<pre><code class="python">def nb_method(self, *args, nb_func=nb_func, default_kwargs=default_kwargs, **kwargs):
-    if &#39;_1d&#39; in nb_func.__name__:
+<pre><code class="python">def nb_method(self,
+              *args,
+              _nb_func=nb_func,
+              _is_reducing=is_reducing,
+              _name_or_index=name_or_index,
+              wrap_kwargs=None,
+              **kwargs):
+    default_kwargs = get_kwargs(nb_func)
+    wrap_kwargs = merge_dicts({}, wrap_kwargs)
+    if &#39;_1d&#39; in _nb_func.__name__:
         # One-dimensional array as input
-        a = nb_func(self.to_1d_array(), *args, **{**default_kwargs, **kwargs})
-        if np.asarray(a).ndim == 0 or len(self.wrapper.index) != a.shape[0]:
-            return self.wrapper.wrap_reduced(a)
-        return self.wrapper.wrap(a)
+        a = _nb_func(self.to_1d_array(), *args, **{**default_kwargs, **kwargs})
+        if _is_reducing:
+            return self.wrapper.wrap_reduced(a, name_or_index=_name_or_index, **wrap_kwargs)
+        return self.wrapper.wrap(a, **wrap_kwargs)
     else:
         # Two-dimensional array as input
-        a = nb_func(self.to_2d_array(), *args, **{**default_kwargs, **kwargs})
-        if np.asarray(a).ndim == 0 or a.ndim == 1 or len(self.wrapper.index) != a.shape[0]:
-            return self.wrapper.wrap_reduced(a)
-        return self.wrapper.wrap(a)</code></pre>
+        a = _nb_func(self.to_2d_array(), *args, **{**default_kwargs, **kwargs})
+        if _is_reducing:
+            return self.wrapper.wrap_reduced(a, name_or_index=_name_or_index, **wrap_kwargs)
+        return self.wrapper.wrap(a, **wrap_kwargs)</code></pre>
 </details>
 </dd>
 <dt id="vectorbt.generic.accessors.GenericAccessor.plot"><code class="name flex">
@@ -3558,23 +3770,31 @@ def get_drawdowns(self, group_by=None, **kwargs):
 <summary>
 <span>Expand source code</span>
 </summary>
-<pre><code class="python">def nb_method(self, *args, nb_func=nb_func, default_kwargs=default_kwargs, **kwargs):
-    if &#39;_1d&#39; in nb_func.__name__:
+<pre><code class="python">def nb_method(self,
+              *args,
+              _nb_func=nb_func,
+              _is_reducing=is_reducing,
+              _name_or_index=name_or_index,
+              wrap_kwargs=None,
+              **kwargs):
+    default_kwargs = get_kwargs(nb_func)
+    wrap_kwargs = merge_dicts({}, wrap_kwargs)
+    if &#39;_1d&#39; in _nb_func.__name__:
         # One-dimensional array as input
-        a = nb_func(self.to_1d_array(), *args, **{**default_kwargs, **kwargs})
-        if np.asarray(a).ndim == 0 or len(self.wrapper.index) != a.shape[0]:
-            return self.wrapper.wrap_reduced(a)
-        return self.wrapper.wrap(a)
+        a = _nb_func(self.to_1d_array(), *args, **{**default_kwargs, **kwargs})
+        if _is_reducing:
+            return self.wrapper.wrap_reduced(a, name_or_index=_name_or_index, **wrap_kwargs)
+        return self.wrapper.wrap(a, **wrap_kwargs)
     else:
         # Two-dimensional array as input
-        a = nb_func(self.to_2d_array(), *args, **{**default_kwargs, **kwargs})
-        if np.asarray(a).ndim == 0 or a.ndim == 1 or len(self.wrapper.index) != a.shape[0]:
-            return self.wrapper.wrap_reduced(a)
-        return self.wrapper.wrap(a)</code></pre>
+        a = _nb_func(self.to_2d_array(), *args, **{**default_kwargs, **kwargs})
+        if _is_reducing:
+            return self.wrapper.wrap_reduced(a, name_or_index=_name_or_index, **wrap_kwargs)
+        return self.wrapper.wrap(a, **wrap_kwargs)</code></pre>
 </details>
 </dd>
 <dt id="vectorbt.generic.accessors.GenericAccessor.reduce"><code class="name flex">
-<span>def <span class="ident fname">reduce</span></span>(<span>self, reduce_func_nb, *args, to_array=False, to_idx=False, flatten=False, order='C', idx_labeled=True, group_by=None, **kwargs)</span>
+<span>def <span class="ident fname">reduce</span></span>(<span>self, reduce_func_nb, *args, to_array=False, to_idx=False, flatten=False, order='C', idx_labeled=True, group_by=None, wrap_kwargs=None)</span>
 </code></dt>
 <dd>
 <div class="desc"><p>Reduce by column.</p>
@@ -3586,7 +3806,6 @@ See <code><a title="vectorbt.generic.nb.reduce_to_array_nb" href="nb.html#vector
 See <code><a title="vectorbt.generic.nb.reduce_nb" href="nb.html#vectorbt.generic.nb.reduce_nb">reduce_nb()</a></code> if not grouped and <code>to_array</code> is False.</p>
 <p>Set <code>to_idx</code> to True if values returned by <code>reduce_func_nb</code> are indices/positions.
 Set <code>idx_labeled</code> to False to return raw positions instead of labels.</p>
-<p><code>**kwargs</code> will be passed to <code><a title="vectorbt.base.array_wrapper.ArrayWrapper.wrap_reduced" href="../base/array_wrapper.html#vectorbt.base.array_wrapper.ArrayWrapper.wrap_reduced">ArrayWrapper.wrap_reduced()</a></code>.</p>
 <h2 id="example">Example</h2>
 <pre><code class="language-python-repl">&gt;&gt;&gt; mean_nb = njit(lambda col, a: np.nanmean(a))
 &gt;&gt;&gt; df.vbt.reduce(mean_nb)
@@ -3610,7 +3829,7 @@ c    2
 dtype: int64
 
 &gt;&gt;&gt; min_max_nb = njit(lambda col, a: np.array([np.nanmin(a), np.nanmax(a)]))
-&gt;&gt;&gt; df.vbt.reduce(min_max_nb, index=['min', 'max'], to_array=True)
+&gt;&gt;&gt; df.vbt.reduce(min_max_nb, name_or_index=['min', 'max'], to_array=True)
        a    b    c
 min  1.0  1.0  1.0
 max  5.0  5.0  3.0
@@ -3622,7 +3841,7 @@ first     3.0
 second    1.8
 dtype: float64
 
-&gt;&gt;&gt; df.vbt.reduce(min_max_nb, index=['min', 'max'],
+&gt;&gt;&gt; df.vbt.reduce(min_max_nb, name_or_index=['min', 'max'],
 ...     to_array=True, group_by=group_by)
 group  first  second
 min      1.0     1.0
@@ -3633,7 +3852,7 @@ max      5.0     3.0
 <span>Expand source code</span>
 </summary>
 <pre><code class="python">def reduce(self, reduce_func_nb, *args, to_array=False, to_idx=False, flatten=False,
-           order=&#39;C&#39;, idx_labeled=True, group_by=None, **kwargs):
+           order=&#39;C&#39;, idx_labeled=True, group_by=None, wrap_kwargs=None):
     &#34;&#34;&#34;Reduce by column.
 
     See `vectorbt.generic.nb.flat_reduce_grouped_to_array_nb` if grouped, `to_array` is True and `flatten` is True.
@@ -3645,8 +3864,6 @@ max      5.0     3.0
 
     Set `to_idx` to True if values returned by `reduce_func_nb` are indices/positions.
     Set `idx_labeled` to False to return raw positions instead of labels.
-
-    `**kwargs` will be passed to `vectorbt.base.array_wrapper.ArrayWrapper.wrap_reduced`.
 
     ## Example
 
@@ -3673,7 +3890,7 @@ max      5.0     3.0
     dtype: int64
 
     &gt;&gt;&gt; min_max_nb = njit(lambda col, a: np.array([np.nanmin(a), np.nanmax(a)]))
-    &gt;&gt;&gt; df.vbt.reduce(min_max_nb, index=[&#39;min&#39;, &#39;max&#39;], to_array=True)
+    &gt;&gt;&gt; df.vbt.reduce(min_max_nb, name_or_index=[&#39;min&#39;, &#39;max&#39;], to_array=True)
            a    b    c
     min  1.0  1.0  1.0
     max  5.0  5.0  3.0
@@ -3685,7 +3902,7 @@ max      5.0     3.0
     second    1.8
     dtype: float64
 
-    &gt;&gt;&gt; df.vbt.reduce(min_max_nb, index=[&#39;min&#39;, &#39;max&#39;],
+    &gt;&gt;&gt; df.vbt.reduce(min_max_nb, name_or_index=[&#39;min&#39;, &#39;max&#39;],
     ...     to_array=True, group_by=group_by)
     group  first  second
     min      1.0     1.0
@@ -3734,11 +3951,12 @@ max      5.0     3.0
         else:
             out[nan_mask] = -1
             out = out.astype(np.int_)
-    return self.wrapper.wrap_reduced(out, group_by=group_by, **kwargs)</code></pre>
+    wrap_kwargs = merge_dicts(dict(name_or_index=&#39;reduce&#39; if not to_array else None), wrap_kwargs)
+    return self.wrapper.wrap_reduced(out, group_by=group_by, **wrap_kwargs)</code></pre>
 </details>
 </dd>
 <dt id="vectorbt.generic.accessors.GenericAccessor.resample_apply"><code class="name flex">
-<span>def <span class="ident fname">resample_apply</span></span>(<span>self, freq, apply_func_nb, *args, on_matrix=False, **kwargs)</span>
+<span>def <span class="ident fname">resample_apply</span></span>(<span>self, freq, apply_func_nb, *args, on_matrix=False, wrap_kwargs=None, **kwargs)</span>
 </code></dt>
 <dd>
 <div class="desc"><p>See <code><a title="vectorbt.generic.nb.groupby_apply_nb" href="nb.html#vectorbt.generic.nb.groupby_apply_nb">groupby_apply_nb()</a></code> and
@@ -3763,7 +3981,7 @@ max      5.0     3.0
 <summary>
 <span>Expand source code</span>
 </summary>
-<pre><code class="python">def resample_apply(self, freq, apply_func_nb, *args, on_matrix=False, **kwargs):
+<pre><code class="python">def resample_apply(self, freq, apply_func_nb, *args, on_matrix=False, wrap_kwargs=None, **kwargs):
     &#34;&#34;&#34;See `vectorbt.generic.nb.groupby_apply_nb` and
     `vectorbt.generic.nb.groupby_apply_matrix_nb` for `on_matrix=True`.
 
@@ -3799,13 +4017,17 @@ max      5.0     3.0
         out = nb.groupby_apply_nb(self.to_2d_array(), groups, apply_func_nb, *args)
     out_obj = self.wrapper.wrap(out, index=list(resampled.indices.keys()))
     resampled_arr = np.full((resampled.ngroups, self.to_2d_array().shape[1]), np.nan)
-    resampled_obj = self.wrapper.wrap(resampled_arr, index=pd.Index(list(resampled.groups.keys()), freq=freq))
+    resampled_obj = self.wrapper.wrap(
+        resampled_arr, 
+        index=pd.Index(list(resampled.groups.keys()), freq=freq), 
+        **merge_dicts({}, wrap_kwargs)
+    )
     resampled_obj.loc[out_obj.index] = out_obj.values
     return resampled_obj</code></pre>
 </details>
 </dd>
 <dt id="vectorbt.generic.accessors.GenericAccessor.rolling_apply"><code class="name flex">
-<span>def <span class="ident fname">rolling_apply</span></span>(<span>self, window, apply_func_nb, *args, on_matrix=False)</span>
+<span>def <span class="ident fname">rolling_apply</span></span>(<span>self, window, apply_func_nb, *args, on_matrix=False, wrap_kwargs=None)</span>
 </code></dt>
 <dd>
 <div class="desc"><p>See <code><a title="vectorbt.generic.nb.rolling_apply_nb" href="nb.html#vectorbt.generic.nb.rolling_apply_nb">rolling_apply_nb()</a></code> and
@@ -3833,7 +4055,7 @@ max      5.0     3.0
 <summary>
 <span>Expand source code</span>
 </summary>
-<pre><code class="python">def rolling_apply(self, window, apply_func_nb, *args, on_matrix=False):
+<pre><code class="python">def rolling_apply(self, window, apply_func_nb, *args, on_matrix=False, wrap_kwargs=None):
     &#34;&#34;&#34;See `vectorbt.generic.nb.rolling_apply_nb` and
     `vectorbt.generic.nb.rolling_apply_matrix_nb` for `on_matrix=True`.
 
@@ -3865,7 +4087,7 @@ max      5.0     3.0
         out = nb.rolling_apply_matrix_nb(self.to_2d_array(), window, apply_func_nb, *args)
     else:
         out = nb.rolling_apply_nb(self.to_2d_array(), window, apply_func_nb, *args)
-    return self.wrapper.wrap(out)</code></pre>
+    return self.wrapper.wrap(out, **merge_dicts({}, wrap_kwargs))</code></pre>
 </details>
 </dd>
 <dt id="vectorbt.generic.accessors.GenericAccessor.rolling_max"><code class="name flex">
@@ -3877,19 +4099,27 @@ max      5.0     3.0
 <summary>
 <span>Expand source code</span>
 </summary>
-<pre><code class="python">def nb_method(self, *args, nb_func=nb_func, default_kwargs=default_kwargs, **kwargs):
-    if &#39;_1d&#39; in nb_func.__name__:
+<pre><code class="python">def nb_method(self,
+              *args,
+              _nb_func=nb_func,
+              _is_reducing=is_reducing,
+              _name_or_index=name_or_index,
+              wrap_kwargs=None,
+              **kwargs):
+    default_kwargs = get_kwargs(nb_func)
+    wrap_kwargs = merge_dicts({}, wrap_kwargs)
+    if &#39;_1d&#39; in _nb_func.__name__:
         # One-dimensional array as input
-        a = nb_func(self.to_1d_array(), *args, **{**default_kwargs, **kwargs})
-        if np.asarray(a).ndim == 0 or len(self.wrapper.index) != a.shape[0]:
-            return self.wrapper.wrap_reduced(a)
-        return self.wrapper.wrap(a)
+        a = _nb_func(self.to_1d_array(), *args, **{**default_kwargs, **kwargs})
+        if _is_reducing:
+            return self.wrapper.wrap_reduced(a, name_or_index=_name_or_index, **wrap_kwargs)
+        return self.wrapper.wrap(a, **wrap_kwargs)
     else:
         # Two-dimensional array as input
-        a = nb_func(self.to_2d_array(), *args, **{**default_kwargs, **kwargs})
-        if np.asarray(a).ndim == 0 or a.ndim == 1 or len(self.wrapper.index) != a.shape[0]:
-            return self.wrapper.wrap_reduced(a)
-        return self.wrapper.wrap(a)</code></pre>
+        a = _nb_func(self.to_2d_array(), *args, **{**default_kwargs, **kwargs})
+        if _is_reducing:
+            return self.wrapper.wrap_reduced(a, name_or_index=_name_or_index, **wrap_kwargs)
+        return self.wrapper.wrap(a, **wrap_kwargs)</code></pre>
 </details>
 </dd>
 <dt id="vectorbt.generic.accessors.GenericAccessor.rolling_mean"><code class="name flex">
@@ -3901,19 +4131,27 @@ max      5.0     3.0
 <summary>
 <span>Expand source code</span>
 </summary>
-<pre><code class="python">def nb_method(self, *args, nb_func=nb_func, default_kwargs=default_kwargs, **kwargs):
-    if &#39;_1d&#39; in nb_func.__name__:
+<pre><code class="python">def nb_method(self,
+              *args,
+              _nb_func=nb_func,
+              _is_reducing=is_reducing,
+              _name_or_index=name_or_index,
+              wrap_kwargs=None,
+              **kwargs):
+    default_kwargs = get_kwargs(nb_func)
+    wrap_kwargs = merge_dicts({}, wrap_kwargs)
+    if &#39;_1d&#39; in _nb_func.__name__:
         # One-dimensional array as input
-        a = nb_func(self.to_1d_array(), *args, **{**default_kwargs, **kwargs})
-        if np.asarray(a).ndim == 0 or len(self.wrapper.index) != a.shape[0]:
-            return self.wrapper.wrap_reduced(a)
-        return self.wrapper.wrap(a)
+        a = _nb_func(self.to_1d_array(), *args, **{**default_kwargs, **kwargs})
+        if _is_reducing:
+            return self.wrapper.wrap_reduced(a, name_or_index=_name_or_index, **wrap_kwargs)
+        return self.wrapper.wrap(a, **wrap_kwargs)
     else:
         # Two-dimensional array as input
-        a = nb_func(self.to_2d_array(), *args, **{**default_kwargs, **kwargs})
-        if np.asarray(a).ndim == 0 or a.ndim == 1 or len(self.wrapper.index) != a.shape[0]:
-            return self.wrapper.wrap_reduced(a)
-        return self.wrapper.wrap(a)</code></pre>
+        a = _nb_func(self.to_2d_array(), *args, **{**default_kwargs, **kwargs})
+        if _is_reducing:
+            return self.wrapper.wrap_reduced(a, name_or_index=_name_or_index, **wrap_kwargs)
+        return self.wrapper.wrap(a, **wrap_kwargs)</code></pre>
 </details>
 </dd>
 <dt id="vectorbt.generic.accessors.GenericAccessor.rolling_min"><code class="name flex">
@@ -3925,23 +4163,31 @@ max      5.0     3.0
 <summary>
 <span>Expand source code</span>
 </summary>
-<pre><code class="python">def nb_method(self, *args, nb_func=nb_func, default_kwargs=default_kwargs, **kwargs):
-    if &#39;_1d&#39; in nb_func.__name__:
+<pre><code class="python">def nb_method(self,
+              *args,
+              _nb_func=nb_func,
+              _is_reducing=is_reducing,
+              _name_or_index=name_or_index,
+              wrap_kwargs=None,
+              **kwargs):
+    default_kwargs = get_kwargs(nb_func)
+    wrap_kwargs = merge_dicts({}, wrap_kwargs)
+    if &#39;_1d&#39; in _nb_func.__name__:
         # One-dimensional array as input
-        a = nb_func(self.to_1d_array(), *args, **{**default_kwargs, **kwargs})
-        if np.asarray(a).ndim == 0 or len(self.wrapper.index) != a.shape[0]:
-            return self.wrapper.wrap_reduced(a)
-        return self.wrapper.wrap(a)
+        a = _nb_func(self.to_1d_array(), *args, **{**default_kwargs, **kwargs})
+        if _is_reducing:
+            return self.wrapper.wrap_reduced(a, name_or_index=_name_or_index, **wrap_kwargs)
+        return self.wrapper.wrap(a, **wrap_kwargs)
     else:
         # Two-dimensional array as input
-        a = nb_func(self.to_2d_array(), *args, **{**default_kwargs, **kwargs})
-        if np.asarray(a).ndim == 0 or a.ndim == 1 or len(self.wrapper.index) != a.shape[0]:
-            return self.wrapper.wrap_reduced(a)
-        return self.wrapper.wrap(a)</code></pre>
+        a = _nb_func(self.to_2d_array(), *args, **{**default_kwargs, **kwargs})
+        if _is_reducing:
+            return self.wrapper.wrap_reduced(a, name_or_index=_name_or_index, **wrap_kwargs)
+        return self.wrapper.wrap(a, **wrap_kwargs)</code></pre>
 </details>
 </dd>
 <dt id="vectorbt.generic.accessors.GenericAccessor.rolling_std"><code class="name flex">
-<span>def <span class="ident fname">rolling_std</span></span>(<span>self, window, minp=1, ddof=1)</span>
+<span>def <span class="ident fname">rolling_std</span></span>(<span>self, window, minp=1, ddof=1, wrap_kwargs=None)</span>
 </code></dt>
 <dd>
 <div class="desc"><p>See <code><a title="vectorbt.generic.nb.rolling_std_nb" href="nb.html#vectorbt.generic.nb.rolling_std_nb">rolling_std_nb()</a></code>.</p></div>
@@ -3949,9 +4195,10 @@ max      5.0     3.0
 <summary>
 <span>Expand source code</span>
 </summary>
-<pre><code class="python">def rolling_std(self, window, minp=1, ddof=1):  # pragma: no cover
+<pre><code class="python">def rolling_std(self, window, minp=1, ddof=1, wrap_kwargs=None):  # pragma: no cover
     &#34;&#34;&#34;See `vectorbt.generic.nb.rolling_std_nb`.&#34;&#34;&#34;
-    return self.wrapper.wrap(nb.rolling_std_nb(self.to_2d_array(), window, minp=minp, ddof=ddof))</code></pre>
+    out = nb.rolling_std_nb(self.to_2d_array(), window, minp=minp, ddof=ddof)
+    return self.wrapper.wrap(out, **merge_dicts({}, wrap_kwargs))</code></pre>
 </details>
 </dd>
 <dt id="vectorbt.generic.accessors.GenericAccessor.scatterplot"><code class="name flex">
@@ -3990,19 +4237,27 @@ max      5.0     3.0
 <summary>
 <span>Expand source code</span>
 </summary>
-<pre><code class="python">def nb_method(self, *args, nb_func=nb_func, default_kwargs=default_kwargs, **kwargs):
-    if &#39;_1d&#39; in nb_func.__name__:
+<pre><code class="python">def nb_method(self,
+              *args,
+              _nb_func=nb_func,
+              _is_reducing=is_reducing,
+              _name_or_index=name_or_index,
+              wrap_kwargs=None,
+              **kwargs):
+    default_kwargs = get_kwargs(nb_func)
+    wrap_kwargs = merge_dicts({}, wrap_kwargs)
+    if &#39;_1d&#39; in _nb_func.__name__:
         # One-dimensional array as input
-        a = nb_func(self.to_1d_array(), *args, **{**default_kwargs, **kwargs})
-        if np.asarray(a).ndim == 0 or len(self.wrapper.index) != a.shape[0]:
-            return self.wrapper.wrap_reduced(a)
-        return self.wrapper.wrap(a)
+        a = _nb_func(self.to_1d_array(), *args, **{**default_kwargs, **kwargs})
+        if _is_reducing:
+            return self.wrapper.wrap_reduced(a, name_or_index=_name_or_index, **wrap_kwargs)
+        return self.wrapper.wrap(a, **wrap_kwargs)
     else:
         # Two-dimensional array as input
-        a = nb_func(self.to_2d_array(), *args, **{**default_kwargs, **kwargs})
-        if np.asarray(a).ndim == 0 or a.ndim == 1 or len(self.wrapper.index) != a.shape[0]:
-            return self.wrapper.wrap_reduced(a)
-        return self.wrapper.wrap(a)</code></pre>
+        a = _nb_func(self.to_2d_array(), *args, **{**default_kwargs, **kwargs})
+        if _is_reducing:
+            return self.wrapper.wrap_reduced(a, name_or_index=_name_or_index, **wrap_kwargs)
+        return self.wrapper.wrap(a, **wrap_kwargs)</code></pre>
 </details>
 </dd>
 <dt id="vectorbt.generic.accessors.GenericAccessor.split_into_ranges"><code class="name flex">
@@ -4159,12 +4414,11 @@ range_end   2020-01-02 2020-01-04 2020-01-02 2020-01-04 2020-01-02 2020-01-04
 </details>
 </dd>
 <dt id="vectorbt.generic.accessors.GenericAccessor.squeeze_grouped"><code class="name flex">
-<span>def <span class="ident fname">squeeze_grouped</span></span>(<span>self, reduce_func_nb, *args, group_by=None, **kwargs)</span>
+<span>def <span class="ident fname">squeeze_grouped</span></span>(<span>self, reduce_func_nb, *args, group_by=None, wrap_kwargs=None)</span>
 </code></dt>
 <dd>
 <div class="desc"><p>Squeeze each group of columns into a single column.</p>
 <p>See <code><a title="vectorbt.generic.nb.squeeze_grouped_nb" href="nb.html#vectorbt.generic.nb.squeeze_grouped_nb">squeeze_grouped_nb()</a></code>.</p>
-<p><code>**kwargs</code> will be passed to <code><a title="vectorbt.base.array_wrapper.ArrayWrapper.wrap" href="../base/array_wrapper.html#vectorbt.base.array_wrapper.ArrayWrapper.wrap">ArrayWrapper.wrap()</a></code>.</p>
 <h2 id="example">Example</h2>
 <pre><code class="language-python-repl">&gt;&gt;&gt; group_by = pd.Series(['first', 'first', 'second'], name='group')
 &gt;&gt;&gt; mean_nb = njit(lambda i, group, a: np.nanmean(a))
@@ -4180,12 +4434,10 @@ group       first  second
 <summary>
 <span>Expand source code</span>
 </summary>
-<pre><code class="python">def squeeze_grouped(self, reduce_func_nb, *args, group_by=None, **kwargs):
+<pre><code class="python">def squeeze_grouped(self, reduce_func_nb, *args, group_by=None, wrap_kwargs=None):
     &#34;&#34;&#34;Squeeze each group of columns into a single column.
 
     See `vectorbt.generic.nb.squeeze_grouped_nb`.
-
-    `**kwargs` will be passed to `vectorbt.base.array_wrapper.ArrayWrapper.wrap`.
 
     ## Example
 
@@ -4207,11 +4459,11 @@ group       first  second
 
     group_lens = self.wrapper.grouper.get_group_lens(group_by=group_by)
     out = nb.squeeze_grouped_nb(self.to_2d_array(), group_lens, reduce_func_nb, *args)
-    return self.wrapper.wrap(out, group_by=group_by, **kwargs)</code></pre>
+    return self.wrapper.wrap(out, group_by=group_by, **merge_dicts({}, wrap_kwargs))</code></pre>
 </details>
 </dd>
 <dt id="vectorbt.generic.accessors.GenericAccessor.std"><code class="name flex">
-<span>def <span class="ident fname">std</span></span>(<span>self, ddof=1, group_by=None, **kwargs)</span>
+<span>def <span class="ident fname">std</span></span>(<span>self, ddof=1, group_by=None, wrap_kwargs=None)</span>
 </code></dt>
 <dd>
 <div class="desc"><p>Return standard deviation of non-NaN elements.</p></div>
@@ -4219,10 +4471,11 @@ group       first  second
 <summary>
 <span>Expand source code</span>
 </summary>
-<pre><code class="python">def std(self, ddof=1, group_by=None, **kwargs):
+<pre><code class="python">def std(self, ddof=1, group_by=None, wrap_kwargs=None):
     &#34;&#34;&#34;Return standard deviation of non-NaN elements.&#34;&#34;&#34;
+    wrap_kwargs = merge_dicts(dict(name_or_index=&#39;std&#39;), wrap_kwargs)
     if self.wrapper.grouper.is_grouped(group_by=group_by):
-        return self.reduce(nb.std_reduce_nb, ddof, group_by=group_by, flatten=True)
+        return self.reduce(nb.std_reduce_nb, ddof, group_by=group_by, flatten=True, wrap_kwargs=wrap_kwargs)
 
     arr = self.to_2d_array()
     if arr.dtype != int and arr.dtype != float:
@@ -4230,11 +4483,11 @@ group       first  second
         _nanstd = np.nanstd
     else:
         _nanstd = nanstd
-    return self.wrapper.wrap_reduced(_nanstd(arr, ddof=ddof, axis=0), **kwargs)</code></pre>
+    return self.wrapper.wrap_reduced(_nanstd(arr, ddof=ddof, axis=0), **wrap_kwargs)</code></pre>
 </details>
 </dd>
 <dt id="vectorbt.generic.accessors.GenericAccessor.sum"><code class="name flex">
-<span>def <span class="ident fname">sum</span></span>(<span>self, group_by=None, **kwargs)</span>
+<span>def <span class="ident fname">sum</span></span>(<span>self, group_by=None, wrap_kwargs=None)</span>
 </code></dt>
 <dd>
 <div class="desc"><p>Return sum of non-NaN elements.</p></div>
@@ -4242,10 +4495,11 @@ group       first  second
 <summary>
 <span>Expand source code</span>
 </summary>
-<pre><code class="python">def sum(self, group_by=None, **kwargs):
+<pre><code class="python">def sum(self, group_by=None, wrap_kwargs=None):
     &#34;&#34;&#34;Return sum of non-NaN elements.&#34;&#34;&#34;
+    wrap_kwargs = merge_dicts(dict(name_or_index=&#39;sum&#39;), wrap_kwargs)
     if self.wrapper.grouper.is_grouped(group_by=group_by):
-        return self.reduce(nb.sum_reduce_nb, group_by=group_by, flatten=True)
+        return self.reduce(nb.sum_reduce_nb, group_by=group_by, flatten=True, wrap_kwargs=wrap_kwargs)
 
     arr = self.to_2d_array()
     if arr.dtype != int and arr.dtype != float:
@@ -4253,7 +4507,7 @@ group       first  second
         _nansum = np.nansum
     else:
         _nansum = nansum
-    return self.wrapper.wrap_reduced(_nansum(arr, axis=0), **kwargs)</code></pre>
+    return self.wrapper.wrap_reduced(_nansum(arr, axis=0), **wrap_kwargs)</code></pre>
 </details>
 </dd>
 <dt id="vectorbt.generic.accessors.GenericAccessor.to_mapped_array"><code class="name flex">
@@ -4367,7 +4621,11 @@ group       first  second
         )
         if return_fig:
             return heatmap.fig
-        return heatmap</code></pre>
+        return heatmap
+
+    def ts_heatmap(self, **kwargs):
+        &#34;&#34;&#34;Heatmap of time-series data.&#34;&#34;&#34;
+        return self._obj.transpose().iloc[::-1].vbt.heatmap(**kwargs)</code></pre>
 </details>
 <h3 class="section-subtitle">Ancestors</h3>
 <ul class="hlist">
@@ -4433,6 +4691,20 @@ group       first  second
     return heatmap</code></pre>
 </details>
 </dd>
+<dt id="vectorbt.generic.accessors.GenericDFAccessor.ts_heatmap"><code class="name flex">
+<span>def <span class="ident fname">ts_heatmap</span></span>(<span>self, **kwargs)</span>
+</code></dt>
+<dd>
+<div class="desc"><p>Heatmap of time-series data.</p></div>
+<details class="source">
+<summary>
+<span>Expand source code</span>
+</summary>
+<pre><code class="python">def ts_heatmap(self, **kwargs):
+    &#34;&#34;&#34;Heatmap of time-series data.&#34;&#34;&#34;
+    return self._obj.transpose().iloc[::-1].vbt.heatmap(**kwargs)</code></pre>
+</details>
+</dd>
 </dl>
 <h3 class="section-subtitle">Inherited members</h3>
 <ul class="hlist">
@@ -4440,6 +4712,7 @@ group       first  second
 <ul class="hlist">
 <li><code><a title="vectorbt.generic.accessors.GenericAccessor.align_to" href="../base/accessors.html#vectorbt.base.accessors.BaseAccessor.align_to">align_to</a></code></li>
 <li><code><a title="vectorbt.generic.accessors.GenericAccessor.apply" href="../base/accessors.html#vectorbt.base.accessors.BaseAccessor.apply">apply</a></code></li>
+<li><code><a title="vectorbt.generic.accessors.GenericAccessor.apply_along_axis" href="#vectorbt.generic.accessors.GenericAccessor.apply_along_axis">apply_along_axis</a></code></li>
 <li><code><a title="vectorbt.generic.accessors.GenericAccessor.apply_and_concat" href="../base/accessors.html#vectorbt.base.accessors.BaseAccessor.apply_and_concat">apply_and_concat</a></code></li>
 <li><code><a title="vectorbt.generic.accessors.GenericAccessor.apply_and_reduce" href="#vectorbt.generic.accessors.GenericAccessor.apply_and_reduce">apply_and_reduce</a></code></li>
 <li><code><a title="vectorbt.generic.accessors.GenericAccessor.apply_on_index" href="../base/accessors.html#vectorbt.base.accessors.BaseAccessor.apply_on_index">apply_on_index</a></code></li>
@@ -4448,6 +4721,7 @@ group       first  second
 <li><code><a title="vectorbt.generic.accessors.GenericAccessor.boxplot" href="#vectorbt.generic.accessors.GenericAccessor.boxplot">boxplot</a></code></li>
 <li><code><a title="vectorbt.generic.accessors.GenericAccessor.broadcast" href="../base/accessors.html#vectorbt.base.accessors.BaseAccessor.broadcast">broadcast</a></code></li>
 <li><code><a title="vectorbt.generic.accessors.GenericAccessor.broadcast_to" href="../base/accessors.html#vectorbt.base.accessors.BaseAccessor.broadcast_to">broadcast_to</a></code></li>
+<li><code><a title="vectorbt.generic.accessors.GenericAccessor.bshift" href="#vectorbt.generic.accessors.GenericAccessor.bshift">bshift</a></code></li>
 <li><code><a title="vectorbt.generic.accessors.GenericAccessor.combine_with" href="../base/accessors.html#vectorbt.base.accessors.BaseAccessor.combine_with">combine_with</a></code></li>
 <li><code><a title="vectorbt.generic.accessors.GenericAccessor.combine_with_multiple" href="../base/accessors.html#vectorbt.base.accessors.BaseAccessor.combine_with_multiple">combine_with_multiple</a></code></li>
 <li><code><a title="vectorbt.generic.accessors.GenericAccessor.concat" href="../base/accessors.html#vectorbt.base.accessors.BaseAccessor.concat">concat</a></code></li>
@@ -4686,9 +4960,6 @@ group       first  second
 
         if trace_kwargs is None:
             trace_kwargs = {}
-        trace_kwargs = merge_dicts(dict(
-            line_color=color_schema[&#39;blue&#39;]
-        ), trace_kwargs)
         if heatmap_kwargs is None:
             heatmap_kwargs = {}
         if add_trace_kwargs is None:
@@ -4702,15 +4973,20 @@ group       first  second
                 fig.update_layout(width=layout[&#39;width&#39;] + 150)
         fig.update_layout(**layout_kwargs)
 
-        other.to_frame().vbt.heatmap(**heatmap_kwargs, horizontal=True, add_trace_kwargs=add_trace_kwargs, fig=fig)
-        add_trace_kwargs = merge_dicts(dict(secondary_y=True), add_trace_kwargs)
-        self.plot(trace_kwargs=trace_kwargs, add_trace_kwargs=add_trace_kwargs, fig=fig)
+        other.vbt.ts_heatmap(**heatmap_kwargs, add_trace_kwargs=add_trace_kwargs, fig=fig)
+        self.plot(
+            trace_kwargs=merge_dicts(dict(line_color=color_schema[&#39;blue&#39;]), trace_kwargs),
+            add_trace_kwargs=merge_dicts(dict(secondary_y=True), add_trace_kwargs),
+            fig=fig
+        )
         return fig
 
     def heatmap(self, x_level=None, y_level=None, symmetric=False, sort=True,
-                x_labels=None, y_labels=None, slider_level=None, slider_labels=None,
-                return_fig=True, fig=None, **kwargs):  # pragma: no cover
+                x_labels=None, y_labels=None, slider_level=None, active=0,
+                slider_labels=None, return_fig=True, fig=None, **kwargs):  # pragma: no cover
         &#34;&#34;&#34;Create a heatmap figure based on object&#39;s multi-index and values.
+
+        If index is not a multi-index, converts Series into a DataFrame and calls `GenericDFAccessor.heatmap`.
 
         If multi-index contains more than two levels or you want them in specific order,
         pass `x_level` and `y_level`, each (`int` if index or `str` if name) corresponding
@@ -4764,6 +5040,11 @@ group       first  second
 
         ![](/vectorbt/docs/img/sr_heatmap_slider.gif)
         &#34;&#34;&#34;
+        if not isinstance(self.wrapper.index, pd.MultiIndex):
+            return self._obj.to_frame().vbt.heatmap(
+                x_labels=x_labels, y_labels=y_labels,
+                return_fig=return_fig, fig=fig, **kwargs)
+
         (x_level, y_level), (slider_level,) = index_fns.pick_levels(
             self.wrapper.index,
             required_levels=(x_level, y_level),
@@ -4825,7 +5106,7 @@ group       first  second
             ).fig
             if default_size:
                 fig.layout[&#39;height&#39;] += 100  # slider takes up space
-        fig.data[0].visible = True
+        fig.data[active].visible = True
         steps = []
         for i in range(len(fig.data)):
             step = dict(
@@ -4838,7 +5119,7 @@ group       first  second
         prefix = f&#39;{self.wrapper.index.names[slider_level]}: &#39; \
             if self.wrapper.index.names[slider_level] is not None else None
         sliders = [dict(
-            active=0,
+            active=active,
             currentvalue={&#34;prefix&#34;: prefix},
             pad={&#34;t&#34;: 50},
             steps=steps
@@ -4848,8 +5129,12 @@ group       first  second
         )
         return fig
 
+    def ts_heatmap(self, **kwargs):
+        &#34;&#34;&#34;Heatmap of time-series data.&#34;&#34;&#34;
+        return self._obj.to_frame().vbt.ts_heatmap(**kwargs)
+
     def volume(self, x_level=None, y_level=None, z_level=None, x_labels=None, y_labels=None,
-               z_labels=None, slider_level=None, slider_labels=None, scene_name=&#39;scene&#39;,
+               z_labels=None, slider_level=None, slider_labels=None, active=0, scene_name=&#39;scene&#39;,
                fillna=None, fig=None, return_fig=True, **kwargs):  # pragma: no cover
         &#34;&#34;&#34;Create a 3D volume figure based on object&#39;s multi-index and values.
 
@@ -4966,7 +5251,7 @@ group       first  second
                 ).fig
                 if default_size:
                     fig.layout[&#39;height&#39;] += 100  # slider takes up space
-            fig.data[0].visible = True
+            fig.data[active].visible = True
             steps = []
             for i in range(len(fig.data)):
                 step = dict(
@@ -4979,7 +5264,7 @@ group       first  second
             prefix = f&#39;{self.wrapper.index.names[slider_level]}: &#39; \
                 if self.wrapper.index.names[slider_level] is not None else None
             sliders = [dict(
-                active=0,
+                active=active,
                 currentvalue={&#34;prefix&#34;: prefix},
                 pad={&#34;t&#34;: 50},
                 steps=steps
@@ -5043,10 +5328,11 @@ group       first  second
 <h3 class="section-subtitle">Methods</h3>
 <dl>
 <dt id="vectorbt.generic.accessors.GenericSRAccessor.heatmap"><code class="name flex">
-<span>def <span class="ident fname">heatmap</span></span>(<span>self, x_level=None, y_level=None, symmetric=False, sort=True, x_labels=None, y_labels=None, slider_level=None, slider_labels=None, return_fig=True, fig=None, **kwargs)</span>
+<span>def <span class="ident fname">heatmap</span></span>(<span>self, x_level=None, y_level=None, symmetric=False, sort=True, x_labels=None, y_labels=None, slider_level=None, active=0, slider_labels=None, return_fig=True, fig=None, **kwargs)</span>
 </code></dt>
 <dd>
 <div class="desc"><p>Create a heatmap figure based on object's multi-index and values.</p>
+<p>If index is not a multi-index, converts Series into a DataFrame and calls <code><a title="vectorbt.generic.accessors.GenericDFAccessor.heatmap" href="#vectorbt.generic.accessors.GenericDFAccessor.heatmap">GenericDFAccessor.heatmap()</a></code>.</p>
 <p>If multi-index contains more than two levels or you want them in specific order,
 pass <code>x_level</code> and <code>y_level</code>, each (<code>int</code> if index or <code>str</code> if name) corresponding
 to an axis of the heatmap. Optionally, pass <code>slider_level</code> to use a level as a slider.</p>
@@ -5094,9 +5380,11 @@ dtype: int64
 <span>Expand source code</span>
 </summary>
 <pre><code class="python">def heatmap(self, x_level=None, y_level=None, symmetric=False, sort=True,
-            x_labels=None, y_labels=None, slider_level=None, slider_labels=None,
-            return_fig=True, fig=None, **kwargs):  # pragma: no cover
+            x_labels=None, y_labels=None, slider_level=None, active=0,
+            slider_labels=None, return_fig=True, fig=None, **kwargs):  # pragma: no cover
     &#34;&#34;&#34;Create a heatmap figure based on object&#39;s multi-index and values.
+
+    If index is not a multi-index, converts Series into a DataFrame and calls `GenericDFAccessor.heatmap`.
 
     If multi-index contains more than two levels or you want them in specific order,
     pass `x_level` and `y_level`, each (`int` if index or `str` if name) corresponding
@@ -5150,6 +5438,11 @@ dtype: int64
 
     ![](/vectorbt/docs/img/sr_heatmap_slider.gif)
     &#34;&#34;&#34;
+    if not isinstance(self.wrapper.index, pd.MultiIndex):
+        return self._obj.to_frame().vbt.heatmap(
+            x_labels=x_labels, y_labels=y_labels,
+            return_fig=return_fig, fig=fig, **kwargs)
+
     (x_level, y_level), (slider_level,) = index_fns.pick_levels(
         self.wrapper.index,
         required_levels=(x_level, y_level),
@@ -5211,7 +5504,7 @@ dtype: int64
         ).fig
         if default_size:
             fig.layout[&#39;height&#39;] += 100  # slider takes up space
-    fig.data[0].visible = True
+    fig.data[active].visible = True
     steps = []
     for i in range(len(fig.data)):
         step = dict(
@@ -5224,7 +5517,7 @@ dtype: int64
     prefix = f&#39;{self.wrapper.index.names[slider_level]}: &#39; \
         if self.wrapper.index.names[slider_level] is not None else None
     sliders = [dict(
-        active=0,
+        active=active,
         currentvalue={&#34;prefix&#34;: prefix},
         pad={&#34;t&#34;: 50},
         steps=steps
@@ -5287,9 +5580,6 @@ dtype: int64
 
     if trace_kwargs is None:
         trace_kwargs = {}
-    trace_kwargs = merge_dicts(dict(
-        line_color=color_schema[&#39;blue&#39;]
-    ), trace_kwargs)
     if heatmap_kwargs is None:
         heatmap_kwargs = {}
     if add_trace_kwargs is None:
@@ -5303,9 +5593,12 @@ dtype: int64
             fig.update_layout(width=layout[&#39;width&#39;] + 150)
     fig.update_layout(**layout_kwargs)
 
-    other.to_frame().vbt.heatmap(**heatmap_kwargs, horizontal=True, add_trace_kwargs=add_trace_kwargs, fig=fig)
-    add_trace_kwargs = merge_dicts(dict(secondary_y=True), add_trace_kwargs)
-    self.plot(trace_kwargs=trace_kwargs, add_trace_kwargs=add_trace_kwargs, fig=fig)
+    other.vbt.ts_heatmap(**heatmap_kwargs, add_trace_kwargs=add_trace_kwargs, fig=fig)
+    self.plot(
+        trace_kwargs=merge_dicts(dict(line_color=color_schema[&#39;blue&#39;]), trace_kwargs),
+        add_trace_kwargs=merge_dicts(dict(secondary_y=True), add_trace_kwargs),
+        fig=fig
+    )
     return fig</code></pre>
 </details>
 </dd>
@@ -5519,8 +5812,22 @@ dtype: int64
     return fig</code></pre>
 </details>
 </dd>
+<dt id="vectorbt.generic.accessors.GenericSRAccessor.ts_heatmap"><code class="name flex">
+<span>def <span class="ident fname">ts_heatmap</span></span>(<span>self, **kwargs)</span>
+</code></dt>
+<dd>
+<div class="desc"><p>Heatmap of time-series data.</p></div>
+<details class="source">
+<summary>
+<span>Expand source code</span>
+</summary>
+<pre><code class="python">def ts_heatmap(self, **kwargs):
+    &#34;&#34;&#34;Heatmap of time-series data.&#34;&#34;&#34;
+    return self._obj.to_frame().vbt.ts_heatmap(**kwargs)</code></pre>
+</details>
+</dd>
 <dt id="vectorbt.generic.accessors.GenericSRAccessor.volume"><code class="name flex">
-<span>def <span class="ident fname">volume</span></span>(<span>self, x_level=None, y_level=None, z_level=None, x_labels=None, y_labels=None, z_labels=None, slider_level=None, slider_labels=None, scene_name='scene', fillna=None, fig=None, return_fig=True, **kwargs)</span>
+<span>def <span class="ident fname">volume</span></span>(<span>self, x_level=None, y_level=None, z_level=None, x_labels=None, y_labels=None, z_labels=None, slider_level=None, slider_labels=None, active=0, scene_name='scene', fillna=None, fig=None, return_fig=True, **kwargs)</span>
 </code></dt>
 <dd>
 <div class="desc"><p>Create a 3D volume figure based on object's multi-index and values.</p>
@@ -5549,7 +5856,7 @@ dtype: int64
 <span>Expand source code</span>
 </summary>
 <pre><code class="python">def volume(self, x_level=None, y_level=None, z_level=None, x_labels=None, y_labels=None,
-           z_labels=None, slider_level=None, slider_labels=None, scene_name=&#39;scene&#39;,
+           z_labels=None, slider_level=None, slider_labels=None, active=0, scene_name=&#39;scene&#39;,
            fillna=None, fig=None, return_fig=True, **kwargs):  # pragma: no cover
     &#34;&#34;&#34;Create a 3D volume figure based on object&#39;s multi-index and values.
 
@@ -5666,7 +5973,7 @@ dtype: int64
             ).fig
             if default_size:
                 fig.layout[&#39;height&#39;] += 100  # slider takes up space
-        fig.data[0].visible = True
+        fig.data[active].visible = True
         steps = []
         for i in range(len(fig.data)):
             step = dict(
@@ -5679,7 +5986,7 @@ dtype: int64
         prefix = f&#39;{self.wrapper.index.names[slider_level]}: &#39; \
             if self.wrapper.index.names[slider_level] is not None else None
         sliders = [dict(
-            active=0,
+            active=active,
             currentvalue={&#34;prefix&#34;: prefix},
             pad={&#34;t&#34;: 50},
             steps=steps
@@ -5701,6 +6008,7 @@ dtype: int64
 <ul class="hlist">
 <li><code><a title="vectorbt.generic.accessors.GenericAccessor.align_to" href="../base/accessors.html#vectorbt.base.accessors.BaseAccessor.align_to">align_to</a></code></li>
 <li><code><a title="vectorbt.generic.accessors.GenericAccessor.apply" href="../base/accessors.html#vectorbt.base.accessors.BaseAccessor.apply">apply</a></code></li>
+<li><code><a title="vectorbt.generic.accessors.GenericAccessor.apply_along_axis" href="#vectorbt.generic.accessors.GenericAccessor.apply_along_axis">apply_along_axis</a></code></li>
 <li><code><a title="vectorbt.generic.accessors.GenericAccessor.apply_and_concat" href="../base/accessors.html#vectorbt.base.accessors.BaseAccessor.apply_and_concat">apply_and_concat</a></code></li>
 <li><code><a title="vectorbt.generic.accessors.GenericAccessor.apply_and_reduce" href="#vectorbt.generic.accessors.GenericAccessor.apply_and_reduce">apply_and_reduce</a></code></li>
 <li><code><a title="vectorbt.generic.accessors.GenericAccessor.apply_on_index" href="../base/accessors.html#vectorbt.base.accessors.BaseAccessor.apply_on_index">apply_on_index</a></code></li>
@@ -5709,6 +6017,7 @@ dtype: int64
 <li><code><a title="vectorbt.generic.accessors.GenericAccessor.boxplot" href="#vectorbt.generic.accessors.GenericAccessor.boxplot">boxplot</a></code></li>
 <li><code><a title="vectorbt.generic.accessors.GenericAccessor.broadcast" href="../base/accessors.html#vectorbt.base.accessors.BaseAccessor.broadcast">broadcast</a></code></li>
 <li><code><a title="vectorbt.generic.accessors.GenericAccessor.broadcast_to" href="../base/accessors.html#vectorbt.base.accessors.BaseAccessor.broadcast_to">broadcast_to</a></code></li>
+<li><code><a title="vectorbt.generic.accessors.GenericAccessor.bshift" href="#vectorbt.generic.accessors.GenericAccessor.bshift">bshift</a></code></li>
 <li><code><a title="vectorbt.generic.accessors.GenericAccessor.combine_with" href="../base/accessors.html#vectorbt.base.accessors.BaseAccessor.combine_with">combine_with</a></code></li>
 <li><code><a title="vectorbt.generic.accessors.GenericAccessor.combine_with_multiple" href="../base/accessors.html#vectorbt.base.accessors.BaseAccessor.combine_with_multiple">combine_with_multiple</a></code></li>
 <li><code><a title="vectorbt.generic.accessors.GenericAccessor.concat" href="../base/accessors.html#vectorbt.base.accessors.BaseAccessor.concat">concat</a></code></li>
@@ -5811,10 +6120,12 @@ title="Search"
 <li>
 <h4><code><a title="vectorbt.generic.accessors.GenericAccessor" href="#vectorbt.generic.accessors.GenericAccessor">GenericAccessor</a></code></h4>
 <ul class="two-column">
+<li><code><a title="vectorbt.generic.accessors.GenericAccessor.apply_along_axis" href="#vectorbt.generic.accessors.GenericAccessor.apply_along_axis">apply_along_axis</a></code></li>
 <li><code><a title="vectorbt.generic.accessors.GenericAccessor.apply_and_reduce" href="#vectorbt.generic.accessors.GenericAccessor.apply_and_reduce">apply_and_reduce</a></code></li>
 <li><code><a title="vectorbt.generic.accessors.GenericAccessor.applymap" href="#vectorbt.generic.accessors.GenericAccessor.applymap">applymap</a></code></li>
 <li><code><a title="vectorbt.generic.accessors.GenericAccessor.barplot" href="#vectorbt.generic.accessors.GenericAccessor.barplot">barplot</a></code></li>
 <li><code><a title="vectorbt.generic.accessors.GenericAccessor.boxplot" href="#vectorbt.generic.accessors.GenericAccessor.boxplot">boxplot</a></code></li>
+<li><code><a title="vectorbt.generic.accessors.GenericAccessor.bshift" href="#vectorbt.generic.accessors.GenericAccessor.bshift">bshift</a></code></li>
 <li><code><a title="vectorbt.generic.accessors.GenericAccessor.count" href="#vectorbt.generic.accessors.GenericAccessor.count">count</a></code></li>
 <li><code><a title="vectorbt.generic.accessors.GenericAccessor.cumprod" href="#vectorbt.generic.accessors.GenericAccessor.cumprod">cumprod</a></code></li>
 <li><code><a title="vectorbt.generic.accessors.GenericAccessor.cumsum" href="#vectorbt.generic.accessors.GenericAccessor.cumsum">cumsum</a></code></li>
@@ -5867,6 +6178,7 @@ title="Search"
 <h4><code><a title="vectorbt.generic.accessors.GenericDFAccessor" href="#vectorbt.generic.accessors.GenericDFAccessor">GenericDFAccessor</a></code></h4>
 <ul class="">
 <li><code><a title="vectorbt.generic.accessors.GenericDFAccessor.heatmap" href="#vectorbt.generic.accessors.GenericDFAccessor.heatmap">heatmap</a></code></li>
+<li><code><a title="vectorbt.generic.accessors.GenericDFAccessor.ts_heatmap" href="#vectorbt.generic.accessors.GenericDFAccessor.ts_heatmap">ts_heatmap</a></code></li>
 </ul>
 </li>
 <li>
@@ -5876,6 +6188,7 @@ title="Search"
 <li><code><a title="vectorbt.generic.accessors.GenericSRAccessor.overlay_with_heatmap" href="#vectorbt.generic.accessors.GenericSRAccessor.overlay_with_heatmap">overlay_with_heatmap</a></code></li>
 <li><code><a title="vectorbt.generic.accessors.GenericSRAccessor.plot_against" href="#vectorbt.generic.accessors.GenericSRAccessor.plot_against">plot_against</a></code></li>
 <li><code><a title="vectorbt.generic.accessors.GenericSRAccessor.qqplot" href="#vectorbt.generic.accessors.GenericSRAccessor.qqplot">qqplot</a></code></li>
+<li><code><a title="vectorbt.generic.accessors.GenericSRAccessor.ts_heatmap" href="#vectorbt.generic.accessors.GenericSRAccessor.ts_heatmap">ts_heatmap</a></code></li>
 <li><code><a title="vectorbt.generic.accessors.GenericSRAccessor.volume" href="#vectorbt.generic.accessors.GenericSRAccessor.volume">volume</a></code></li>
 </ul>
 </li>
