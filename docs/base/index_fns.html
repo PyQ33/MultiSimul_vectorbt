@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1, minimum-scale=1" />
 <meta name="generator" content="pdoc 0.9.2" />
 <title>vectorbt.base.index_fns API documentation</title>
-<meta name="description" content="Functions for working with index/columns." />
+<meta name="description" content="Functions for working with index/columns …" />
 <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/5.12.0-2/css/all.min.css" integrity="sha256-46r060N2LrChLLb5zowXQ72/iKKNiw/lAmygmHExk/o=" crossorigin="anonymous" />
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/docsearch.js@2/dist/cdn/docsearch.min.css" />
 <link href='https://cdnjs.cloudflare.com/ajax/libs/normalize/8.0.0/normalize.min.css' rel='stylesheet'>
@@ -35,11 +35,16 @@ ga('create', 'UA-142521178-3', 'auto'); ga('send', 'pageview');
 </header>
 <section id="section-intro">
 <p>Functions for working with index/columns.</p>
+<p>Index functions perform operations on index objects, such as stacking, combining,
+and cleansing MultiIndex levels. "Index" in pandas context is referred to both index and columns.</p>
 <details class="source">
 <summary>
 <span>Expand source code</span>
 </summary>
-<pre><code class="python">&#34;&#34;&#34;Functions for working with index/columns.&#34;&#34;&#34;
+<pre><code class="python">&#34;&#34;&#34;Functions for working with index/columns.
+
+Index functions perform operations on index objects, such as stacking, combining,
+and cleansing MultiIndex levels. &#34;Index&#34; in pandas context is referred to both index and columns.&#34;&#34;&#34;
 
 import numpy as np
 import pandas as pd
@@ -73,28 +78,40 @@ def index_from_values(values, name=None):
 
     value_names = []
     for i, v in enumerate(values):
-        v = np.asarray(v)
-        if np.all(v == v.item(0)):
-            value_names.append(v.item(0))
+        if isinstance(v, np.ndarray):
+            if np.all(v == v.item(0)):
+                value_names.append(v.item(0))
+            else:
+                value_names.append(&#39;mix_%d&#39; % i)
         else:
-            value_names.append(&#39;mix_%d&#39; % i)
+            value_names.append(v)
     return pd.Index(value_names, name=name)
 
 
-def repeat_index(index, n):
+def repeat_index(index, n, ignore_default=None):
     &#34;&#34;&#34;Repeat each element in `index` `n` times.&#34;&#34;&#34;
+    from vectorbt import settings
+
+    if ignore_default is None:
+        ignore_default = settings.broadcasting[&#39;ignore_default&#39;]
+
     if not isinstance(index, pd.Index):
         index = pd.Index(index)
-    if checks.is_default_index(index):  # ignore simple ranges without name
+    if checks.is_default_index(index) and ignore_default:  # ignore simple ranges without name
         return pd.RangeIndex(start=0, stop=len(index) * n, step=1)
     return np.repeat(index, n)
 
 
-def tile_index(index, n):
+def tile_index(index, n, ignore_default=None):
     &#34;&#34;&#34;Tile the whole `index` `n` times.&#34;&#34;&#34;
+    from vectorbt import settings
+
+    if ignore_default is None:
+        ignore_default = settings.broadcasting[&#39;ignore_default&#39;]
+
     if not isinstance(index, pd.Index):
         index = pd.Index(index)
-    if checks.is_default_index(index):  # ignore simple ranges without name
+    if checks.is_default_index(index) and ignore_default:  # ignore simple ranges without name
         return pd.RangeIndex(start=0, stop=len(index) * n, step=1)
     if isinstance(index, pd.MultiIndex):
         return pd.MultiIndex.from_tuples(np.tile(index, n), names=index.names)
@@ -129,31 +146,16 @@ def stack_indexes(*indexes, drop_duplicates=None, keep=None, drop_redundant=None
     return new_index
 
 
-def combine_indexes(*indexes, **kwargs):
+def combine_indexes(*indexes, ignore_default=None, **kwargs):
     &#34;&#34;&#34;Combine each index in `indexes` using Cartesian product.
 
     Keyword arguments will be passed to `stack_indexes`.&#34;&#34;&#34;
     new_index = indexes[0]
     for i in range(1, len(indexes)):
         index1, index2 = new_index, indexes[i]
-        if not isinstance(index1, pd.Index):
-            index1 = pd.Index(index1)
-        if not isinstance(index2, pd.Index):
-            index2 = pd.Index(index2)
-
-        tuples1 = np.repeat(index1.to_numpy(), len(index2))
-        tuples2 = np.tile(index2.to_numpy(), len(index1))
-
-        if isinstance(index1, pd.MultiIndex):
-            index1 = pd.MultiIndex.from_tuples(tuples1, names=index1.names)
-        else:
-            index1 = pd.Index(tuples1, name=index1.name)
-        if isinstance(index2, pd.MultiIndex):
-            index2 = pd.MultiIndex.from_tuples(tuples2, names=index2.names)
-        else:
-            index2 = pd.Index(tuples2, name=index2.name)
-
-        new_index = stack_indexes(index1, index2, **kwargs)
+        new_index1 = repeat_index(index1, len(index2), ignore_default=ignore_default)
+        new_index2 = tile_index(index2, len(index1), ignore_default=ignore_default)
+        new_index = stack_indexes(new_index1, new_index2, **kwargs)
     return new_index
 
 
@@ -378,7 +380,19 @@ def pick_levels(index, required_levels=[], optional_levels=[]):
         if level is None:
             _required_levels[i] = levels_left.pop(0)
 
-    return _required_levels, _optional_levels</code></pre>
+    return _required_levels, _optional_levels
+
+
+def find_first_occurrence(index_value, index):
+    &#34;&#34;&#34;Return index of the first occurrence in `index`.&#34;&#34;&#34;
+    loc = index.get_loc(index_value)
+    if isinstance(loc, slice):
+        return loc.start
+    elif isinstance(loc, list):
+        return loc[0]
+    elif isinstance(loc, np.ndarray):
+        return np.flatnonzero(loc)[0]
+    return loc</code></pre>
 </details>
 </section>
 <section>
@@ -485,7 +499,7 @@ def pick_levels(index, required_levels=[], optional_levels=[]):
 </details>
 </dd>
 <dt id="vectorbt.base.index_fns.combine_indexes"><code class="name flex">
-<span>def <span class="ident fname">combine_indexes</span></span>(<span>*indexes, **kwargs)</span>
+<span>def <span class="ident fname">combine_indexes</span></span>(<span>*indexes, ignore_default=None, **kwargs)</span>
 </code></dt>
 <dd>
 <div class="desc"><p>Combine each index in <code>indexes</code> using Cartesian product.</p>
@@ -494,31 +508,16 @@ def pick_levels(index, required_levels=[], optional_levels=[]):
 <summary>
 <span>Expand source code</span>
 </summary>
-<pre><code class="python">def combine_indexes(*indexes, **kwargs):
+<pre><code class="python">def combine_indexes(*indexes, ignore_default=None, **kwargs):
     &#34;&#34;&#34;Combine each index in `indexes` using Cartesian product.
 
     Keyword arguments will be passed to `stack_indexes`.&#34;&#34;&#34;
     new_index = indexes[0]
     for i in range(1, len(indexes)):
         index1, index2 = new_index, indexes[i]
-        if not isinstance(index1, pd.Index):
-            index1 = pd.Index(index1)
-        if not isinstance(index2, pd.Index):
-            index2 = pd.Index(index2)
-
-        tuples1 = np.repeat(index1.to_numpy(), len(index2))
-        tuples2 = np.tile(index2.to_numpy(), len(index1))
-
-        if isinstance(index1, pd.MultiIndex):
-            index1 = pd.MultiIndex.from_tuples(tuples1, names=index1.names)
-        else:
-            index1 = pd.Index(tuples1, name=index1.name)
-        if isinstance(index2, pd.MultiIndex):
-            index2 = pd.MultiIndex.from_tuples(tuples2, names=index2.names)
-        else:
-            index2 = pd.Index(tuples2, name=index2.name)
-
-        new_index = stack_indexes(index1, index2, **kwargs)
+        new_index1 = repeat_index(index1, len(index2), ignore_default=ignore_default)
+        new_index2 = tile_index(index2, len(index1), ignore_default=ignore_default)
+        new_index = stack_indexes(new_index1, new_index2, **kwargs)
     return new_index</code></pre>
 </details>
 </dd>
@@ -615,6 +614,27 @@ def pick_levels(index, required_levels=[], optional_levels=[]):
     return index</code></pre>
 </details>
 </dd>
+<dt id="vectorbt.base.index_fns.find_first_occurrence"><code class="name flex">
+<span>def <span class="ident fname">find_first_occurrence</span></span>(<span>index_value, index)</span>
+</code></dt>
+<dd>
+<div class="desc"><p>Return index of the first occurrence in <code>index</code>.</p></div>
+<details class="source">
+<summary>
+<span>Expand source code</span>
+</summary>
+<pre><code class="python">def find_first_occurrence(index_value, index):
+    &#34;&#34;&#34;Return index of the first occurrence in `index`.&#34;&#34;&#34;
+    loc = index.get_loc(index_value)
+    if isinstance(loc, slice):
+        return loc.start
+    elif isinstance(loc, list):
+        return loc[0]
+    elif isinstance(loc, np.ndarray):
+        return np.flatnonzero(loc)[0]
+    return loc</code></pre>
+</details>
+</dd>
 <dt id="vectorbt.base.index_fns.get_index"><code class="name flex">
 <span>def <span class="ident fname">get_index</span></span>(<span>arg, axis)</span>
 </code></dt>
@@ -658,11 +678,13 @@ def pick_levels(index, required_levels=[], optional_levels=[]):
 
     value_names = []
     for i, v in enumerate(values):
-        v = np.asarray(v)
-        if np.all(v == v.item(0)):
-            value_names.append(v.item(0))
+        if isinstance(v, np.ndarray):
+            if np.all(v == v.item(0)):
+                value_names.append(v.item(0))
+            else:
+                value_names.append(&#39;mix_%d&#39; % i)
         else:
-            value_names.append(&#39;mix_%d&#39; % i)
+            value_names.append(v)
     return pd.Index(value_names, name=name)</code></pre>
 </details>
 </dd>
@@ -744,7 +766,7 @@ def pick_levels(index, required_levels=[], optional_levels=[]):
 </details>
 </dd>
 <dt id="vectorbt.base.index_fns.repeat_index"><code class="name flex">
-<span>def <span class="ident fname">repeat_index</span></span>(<span>index, n)</span>
+<span>def <span class="ident fname">repeat_index</span></span>(<span>index, n, ignore_default=None)</span>
 </code></dt>
 <dd>
 <div class="desc"><p>Repeat each element in <code>index</code> <code>n</code> times.</p></div>
@@ -752,11 +774,16 @@ def pick_levels(index, required_levels=[], optional_levels=[]):
 <summary>
 <span>Expand source code</span>
 </summary>
-<pre><code class="python">def repeat_index(index, n):
+<pre><code class="python">def repeat_index(index, n, ignore_default=None):
     &#34;&#34;&#34;Repeat each element in `index` `n` times.&#34;&#34;&#34;
+    from vectorbt import settings
+
+    if ignore_default is None:
+        ignore_default = settings.broadcasting[&#39;ignore_default&#39;]
+
     if not isinstance(index, pd.Index):
         index = pd.Index(index)
-    if checks.is_default_index(index):  # ignore simple ranges without name
+    if checks.is_default_index(index) and ignore_default:  # ignore simple ranges without name
         return pd.RangeIndex(start=0, stop=len(index) * n, step=1)
     return np.repeat(index, n)</code></pre>
 </details>
@@ -818,7 +845,7 @@ def pick_levels(index, required_levels=[], optional_levels=[]):
 </details>
 </dd>
 <dt id="vectorbt.base.index_fns.tile_index"><code class="name flex">
-<span>def <span class="ident fname">tile_index</span></span>(<span>index, n)</span>
+<span>def <span class="ident fname">tile_index</span></span>(<span>index, n, ignore_default=None)</span>
 </code></dt>
 <dd>
 <div class="desc"><p>Tile the whole <code>index</code> <code>n</code> times.</p></div>
@@ -826,11 +853,16 @@ def pick_levels(index, required_levels=[], optional_levels=[]):
 <summary>
 <span>Expand source code</span>
 </summary>
-<pre><code class="python">def tile_index(index, n):
+<pre><code class="python">def tile_index(index, n, ignore_default=None):
     &#34;&#34;&#34;Tile the whole `index` `n` times.&#34;&#34;&#34;
+    from vectorbt import settings
+
+    if ignore_default is None:
+        ignore_default = settings.broadcasting[&#39;ignore_default&#39;]
+
     if not isinstance(index, pd.Index):
         index = pd.Index(index)
-    if checks.is_default_index(index):  # ignore simple ranges without name
+    if checks.is_default_index(index) and ignore_default:  # ignore simple ranges without name
         return pd.RangeIndex(start=0, stop=len(index) * n, step=1)
     if isinstance(index, pd.MultiIndex):
         return pd.MultiIndex.from_tuples(np.tile(index, n), names=index.names)
@@ -875,6 +907,7 @@ title="Search"
 <li><code><a title="vectorbt.base.index_fns.drop_duplicate_levels" href="#vectorbt.base.index_fns.drop_duplicate_levels">drop_duplicate_levels</a></code></li>
 <li><code><a title="vectorbt.base.index_fns.drop_levels" href="#vectorbt.base.index_fns.drop_levels">drop_levels</a></code></li>
 <li><code><a title="vectorbt.base.index_fns.drop_redundant_levels" href="#vectorbt.base.index_fns.drop_redundant_levels">drop_redundant_levels</a></code></li>
+<li><code><a title="vectorbt.base.index_fns.find_first_occurrence" href="#vectorbt.base.index_fns.find_first_occurrence">find_first_occurrence</a></code></li>
 <li><code><a title="vectorbt.base.index_fns.get_index" href="#vectorbt.base.index_fns.get_index">get_index</a></code></li>
 <li><code><a title="vectorbt.base.index_fns.index_from_values" href="#vectorbt.base.index_fns.index_from_values">index_from_values</a></code></li>
 <li><code><a title="vectorbt.base.index_fns.pick_levels" href="#vectorbt.base.index_fns.pick_levels">pick_levels</a></code></li>

@@ -35,6 +35,26 @@ ga('create', 'UA-142521178-3', 'auto'); ga('send', 'pageview');
 </header>
 <section id="section-intro">
 <p>Custom pandas accessors.</p>
+<p>Methods can be accessed as follows:</p>
+<ul>
+<li><code><a title="vectorbt.returns.accessors.ReturnsSRAccessor" href="#vectorbt.returns.accessors.ReturnsSRAccessor">ReturnsSRAccessor</a></code> -&gt; <code>pd.Series.vbt.returns.*</code></li>
+<li><code><a title="vectorbt.returns.accessors.ReturnsDFAccessor" href="#vectorbt.returns.accessors.ReturnsDFAccessor">ReturnsDFAccessor</a></code> -&gt; <code>pd.DataFrame.vbt.returns.*</code></li>
+</ul>
+<pre><code class="language-python-repl">&gt;&gt;&gt; import numpy as np
+&gt;&gt;&gt; import pandas as pd
+&gt;&gt;&gt; import vectorbt as vbt
+
+&gt;&gt;&gt; # vectorbt.returns.accessors.ReturnsAccessor.total
+&gt;&gt;&gt; price = pd.Series([1.1, 1.2, 1.3, 1.2, 1.1])
+&gt;&gt;&gt; returns = price.pct_change()
+&gt;&gt;&gt; returns.vbt.returns.total()
+0.0
+</code></pre>
+<p>The accessors extend <code><a title="vectorbt.generic.accessors" href="../generic/accessors.html">vectorbt.generic.accessors</a></code>.</p>
+<pre><code class="language-python-repl">&gt;&gt;&gt; # inherited from GenericAccessor
+&gt;&gt;&gt; returns.vbt.returns.max()
+0.09090909090909083
+</code></pre>
 <div class="admonition note">
 <p class="admonition-title">Note</p>
 <p>The underlying Series/DataFrame must already be a return series.</p>
@@ -44,6 +64,31 @@ ga('create', 'UA-142521178-3', 'auto'); ga('send', 'pageview');
 <span>Expand source code</span>
 </summary>
 <pre><code class="python">&#34;&#34;&#34;Custom pandas accessors.
+
+Methods can be accessed as follows:
+
+* `ReturnsSRAccessor` -&gt; `pd.Series.vbt.returns.*`
+* `ReturnsDFAccessor` -&gt; `pd.DataFrame.vbt.returns.*`
+
+```python-repl
+&gt;&gt;&gt; import numpy as np
+&gt;&gt;&gt; import pandas as pd
+&gt;&gt;&gt; import vectorbt as vbt
+
+&gt;&gt;&gt; # vectorbt.returns.accessors.ReturnsAccessor.total
+&gt;&gt;&gt; price = pd.Series([1.1, 1.2, 1.3, 1.2, 1.1])
+&gt;&gt;&gt; returns = price.pct_change()
+&gt;&gt;&gt; returns.vbt.returns.total()
+0.0
+```
+
+The accessors extend `vectorbt.generic.accessors`.
+
+```python-repl
+&gt;&gt;&gt; # inherited from GenericAccessor
+&gt;&gt;&gt; returns.vbt.returns.max()
+0.09090909090909083
+```
 
 !!! note
     The underlying Series/DataFrame must already be a return series.
@@ -124,9 +169,7 @@ class ReturnsAccessor(GenericAccessor):
         &#34;&#34;&#34;Cumulative returns.
 
         Args:
-            start_value (float or array_like): The starting returns.
-                Will broadcast per column.&#34;&#34;&#34;
-        start_value = np.broadcast_to(start_value, (len(self.wrapper.columns),))
+            start_value (float or array_like): The starting returns.&#34;&#34;&#34;
         cumulative = nb.cum_returns_nb(self.to_2d_array(), start_value)
         return self.wrapper.wrap(cumulative, **merge_dicts({}, wrap_kwargs))
 
@@ -134,8 +177,14 @@ class ReturnsAccessor(GenericAccessor):
         &#34;&#34;&#34;Total return.&#34;&#34;&#34;
         wrap_kwargs = merge_dicts(dict(name_or_index=&#39;total_return&#39;), wrap_kwargs)
         return self.wrapper.wrap_reduced(nb.cum_returns_final_nb(
-            self.to_2d_array(), np.full(len(self.wrapper.columns), 0.)
+            self.to_2d_array(), 0.
         ), **wrap_kwargs)
+
+    def rolling_total(self, window, minp=None, wrap_kwargs=None):
+        &#34;&#34;&#34;Rolling version of `ReturnsAccessor.total`.&#34;&#34;&#34;
+        return self.wrapper.wrap(nb.rolling_cum_returns_final_nb(
+            self.to_2d_array(), window, minp, 0.
+        ), **merge_dicts({}, wrap_kwargs))
 
     def annualized(self, wrap_kwargs=None):
         &#34;&#34;&#34;Mean annual growth rate of returns.
@@ -146,17 +195,27 @@ class ReturnsAccessor(GenericAccessor):
             self.to_2d_array(), self.ann_factor
         ), **wrap_kwargs)
 
-    def annualized_volatility(self, levy_alpha=2.0, wrap_kwargs=None):
+    def rolling_annualized(self, window, minp=None, wrap_kwargs=None):
+        &#34;&#34;&#34;Rolling version of `ReturnsAccessor.annualized`.&#34;&#34;&#34;
+        return self.wrapper.wrap(nb.rolling_annualized_return_nb(
+            self.to_2d_array(), window, minp, self.ann_factor
+        ), **merge_dicts({}, wrap_kwargs))
+
+    def annualized_volatility(self, levy_alpha=2.0, ddof=1, wrap_kwargs=None):
         &#34;&#34;&#34;Annualized volatility of a strategy.
 
         Args:
-            levy_alpha (float or array_like): Scaling relation (Levy stability exponent).
-                Will broadcast per column.&#34;&#34;&#34;
-        levy_alpha = np.broadcast_to(levy_alpha, (len(self.wrapper.columns),))
+            levy_alpha (float or array_like): Scaling relation (Levy stability exponent).&#34;&#34;&#34;
         wrap_kwargs = merge_dicts(dict(name_or_index=&#39;annualized_volatility&#39;), wrap_kwargs)
         return self.wrapper.wrap_reduced(nb.annualized_volatility_nb(
-            self.to_2d_array(), self.ann_factor, levy_alpha
+            self.to_2d_array(), self.ann_factor, levy_alpha, ddof
         ), **wrap_kwargs)
+
+    def rolling_annualized_volatility(self, window, minp=None, levy_alpha=2.0, ddof=1, wrap_kwargs=None):
+        &#34;&#34;&#34;Rolling version of `ReturnsAccessor.annualized_volatility`.&#34;&#34;&#34;
+        return self.wrapper.wrap(nb.rolling_annualized_volatility_nb(
+            self.to_2d_array(), window, minp, self.ann_factor, levy_alpha, ddof
+        ), **merge_dicts({}, wrap_kwargs))
 
     def calmar_ratio(self, wrap_kwargs=None):
         &#34;&#34;&#34;Calmar ratio, or drawdown ratio, of a strategy.&#34;&#34;&#34;
@@ -165,32 +224,44 @@ class ReturnsAccessor(GenericAccessor):
             self.to_2d_array(), self.ann_factor
         ), **wrap_kwargs)
 
+    def rolling_calmar_ratio(self, window, minp=None, wrap_kwargs=None):
+        &#34;&#34;&#34;Rolling version of `ReturnsAccessor.calmar_ratio`.&#34;&#34;&#34;
+        return self.wrapper.wrap(nb.rolling_calmar_ratio_nb(
+            self.to_2d_array(), window, minp, self.ann_factor
+        ), **merge_dicts({}, wrap_kwargs))
+
     def omega_ratio(self, risk_free=0., required_return=0., wrap_kwargs=None):
         &#34;&#34;&#34;Omega ratio of a strategy.
 
         Args:
             risk_free (float or array_like): Constant risk-free return throughout the period.
-                Will broadcast per column.
-            required_return (float or array_like): Minimum acceptance return of the investor.
-                Will broadcast per column.&#34;&#34;&#34;
-        risk_free = np.broadcast_to(risk_free, (len(self.wrapper.columns),))
-        required_return = np.broadcast_to(required_return, (len(self.wrapper.columns),))
+            required_return (float or array_like): Minimum acceptance return of the investor.&#34;&#34;&#34;
         wrap_kwargs = merge_dicts(dict(name_or_index=&#39;omega_ratio&#39;), wrap_kwargs)
         return self.wrapper.wrap_reduced(nb.omega_ratio_nb(
             self.to_2d_array(), self.ann_factor, risk_free, required_return
         ), **wrap_kwargs)
 
-    def sharpe_ratio(self, risk_free=0., wrap_kwargs=None):
+    def rolling_omega_ratio(self, window, minp=None, risk_free=0., required_return=0., wrap_kwargs=None):
+        &#34;&#34;&#34;Rolling version of `ReturnsAccessor.omega_ratio`.&#34;&#34;&#34;
+        return self.wrapper.wrap(nb.rolling_omega_ratio_nb(
+            self.to_2d_array(), window, minp, self.ann_factor, risk_free, required_return
+        ), **merge_dicts({}, wrap_kwargs))
+
+    def sharpe_ratio(self, risk_free=0., ddof=1, wrap_kwargs=None):
         &#34;&#34;&#34;Sharpe ratio of a strategy.
 
         Args:
-            risk_free (float or array_like): Constant risk-free return throughout the period.
-                Will broadcast per column.&#34;&#34;&#34;
-        risk_free = np.broadcast_to(risk_free, (len(self.wrapper.columns),))
+            risk_free (float or array_like): Constant risk-free return throughout the period.&#34;&#34;&#34;
         wrap_kwargs = merge_dicts(dict(name_or_index=&#39;sharpe_ratio&#39;), wrap_kwargs)
         return self.wrapper.wrap_reduced(nb.sharpe_ratio_nb(
-            self.to_2d_array(), self.ann_factor, risk_free
+            self.to_2d_array(), self.ann_factor, risk_free, ddof
         ), **wrap_kwargs)
+
+    def rolling_sharpe_ratio(self, window, minp=None, risk_free=0., ddof=1, wrap_kwargs=None):
+        &#34;&#34;&#34;Rolling version of `ReturnsAccessor.sharpe_ratio`.&#34;&#34;&#34;
+        return self.wrapper.wrap(nb.rolling_sharpe_ratio_nb(
+            self.to_2d_array(), window, minp, self.ann_factor, risk_free, ddof
+        ), **merge_dicts({}, wrap_kwargs))
 
     def deflated_sharpe_ratio(self, risk_free=0., var_sharpe=None, nb_trials=None,
                               ddof=0, bias=True, wrap_kwargs=None):
@@ -224,13 +295,17 @@ class ReturnsAccessor(GenericAccessor):
         &#34;&#34;&#34;Downside deviation below a threshold.
 
         Args:
-            required_return (float or array_like): Minimum acceptance return of the investor.
-                Will broadcast per column.&#34;&#34;&#34;
-        required_return = np.broadcast_to(required_return, (len(self.wrapper.columns),))
+            required_return (float or array_like): Minimum acceptance return of the investor.&#34;&#34;&#34;
         wrap_kwargs = merge_dicts(dict(name_or_index=&#39;downside_risk&#39;), wrap_kwargs)
         return self.wrapper.wrap_reduced(nb.downside_risk_nb(
             self.to_2d_array(), self.ann_factor, required_return
         ), **wrap_kwargs)
+
+    def rolling_downside_risk(self, window, minp=None, required_return=0., wrap_kwargs=None):
+        &#34;&#34;&#34;Rolling version of `ReturnsAccessor.downside_risk`.&#34;&#34;&#34;
+        return self.wrapper.wrap(nb.rolling_downside_risk_nb(
+            self.to_2d_array(), window, minp, self.ann_factor, required_return
+        ), **merge_dicts({}, wrap_kwargs))
 
     def sortino_ratio(self, required_return=0., wrap_kwargs=None):
         &#34;&#34;&#34;Sortino ratio of a strategy.
@@ -238,32 +313,44 @@ class ReturnsAccessor(GenericAccessor):
         Args:
             required_return (float or array_like): Minimum acceptance return of the investor.
                 Will broadcast per column.&#34;&#34;&#34;
-        required_return = np.broadcast_to(required_return, (len(self.wrapper.columns),))
         wrap_kwargs = merge_dicts(dict(name_or_index=&#39;sortino_ratio&#39;), wrap_kwargs)
         return self.wrapper.wrap_reduced(nb.sortino_ratio_nb(
             self.to_2d_array(), self.ann_factor, required_return
         ), **wrap_kwargs)
 
-    def information_ratio(self, benchmark_rets, wrap_kwargs=None):
+    def rolling_sortino_ratio(self, window, minp=None, required_return=0., wrap_kwargs=None):
+        &#34;&#34;&#34;Rolling version of `ReturnsAccessor.sortino_ratio`.&#34;&#34;&#34;
+        return self.wrapper.wrap(nb.rolling_sortino_ratio_nb(
+            self.to_2d_array(), window, minp, self.ann_factor, required_return
+        ), **merge_dicts({}, wrap_kwargs))
+
+    def information_ratio(self, benchmark_rets, ddof=1, wrap_kwargs=None):
         &#34;&#34;&#34;Information ratio of a strategy.
 
         Args:
-            benchmark_rets (array_like): Benchmark return to compare returns against.
-                Will broadcast per element.&#34;&#34;&#34;
+            benchmark_rets (array_like): Benchmark return to compare returns against. Will broadcast.&#34;&#34;&#34;
         benchmark_rets = reshape_fns.broadcast_to(
             reshape_fns.to_2d(benchmark_rets, raw=True),
             reshape_fns.to_2d(self._obj, raw=True))
         wrap_kwargs = merge_dicts(dict(name_or_index=&#39;information_ratio&#39;), wrap_kwargs)
         return self.wrapper.wrap_reduced(nb.information_ratio_nb(
-            self.to_2d_array(), benchmark_rets
+            self.to_2d_array(), benchmark_rets, ddof
         ), **wrap_kwargs)
+
+    def rolling_information_ratio(self, window, benchmark_rets, minp=None, ddof=1, wrap_kwargs=None):
+        &#34;&#34;&#34;Rolling version of `ReturnsAccessor.information_ratio`.&#34;&#34;&#34;
+        benchmark_rets = reshape_fns.broadcast_to(
+            reshape_fns.to_2d(benchmark_rets, raw=True),
+            reshape_fns.to_2d(self._obj, raw=True))
+        return self.wrapper.wrap(nb.rolling_information_ratio_nb(
+            self.to_2d_array(), window, minp, benchmark_rets, ddof
+        ), **merge_dicts({}, wrap_kwargs))
 
     def beta(self, benchmark_rets, wrap_kwargs=None):
         &#34;&#34;&#34;Beta.
 
         Args:
-            benchmark_rets (array_like): Benchmark return to compare returns against.
-                Will broadcast per element.&#34;&#34;&#34;
+            benchmark_rets (array_like): Benchmark return to compare returns against. Will broadcast.&#34;&#34;&#34;
         benchmark_rets = reshape_fns.broadcast_to(
             reshape_fns.to_2d(benchmark_rets, raw=True),
             reshape_fns.to_2d(self._obj, raw=True))
@@ -272,22 +359,37 @@ class ReturnsAccessor(GenericAccessor):
             self.to_2d_array(), benchmark_rets
         ), **wrap_kwargs)
 
+    def rolling_beta(self, window, benchmark_rets, minp=None, wrap_kwargs=None):
+        &#34;&#34;&#34;Rolling version of `ReturnsAccessor.beta`.&#34;&#34;&#34;
+        benchmark_rets = reshape_fns.broadcast_to(
+            reshape_fns.to_2d(benchmark_rets, raw=True),
+            reshape_fns.to_2d(self._obj, raw=True))
+        return self.wrapper.wrap(nb.rolling_beta_nb(
+            self.to_2d_array(), window, minp, benchmark_rets
+        ), **merge_dicts({}, wrap_kwargs))
+
     def alpha(self, benchmark_rets, risk_free=0., wrap_kwargs=None):
         &#34;&#34;&#34;Annualized alpha.
 
         Args:
-            benchmark_rets (array_like): Benchmark return to compare returns against.
-                Will broadcast per element.
-            risk_free (float or array_like): Constant risk-free return throughout the period.
-                Will broadcast per column.&#34;&#34;&#34;
+            benchmark_rets (array_like): Benchmark return to compare returns against. Will broadcast.
+            risk_free (float or array_like): Constant risk-free return throughout the period.&#34;&#34;&#34;
         benchmark_rets = reshape_fns.broadcast_to(
             reshape_fns.to_2d(benchmark_rets, raw=True),
             reshape_fns.to_2d(self._obj, raw=True))
-        risk_free = np.broadcast_to(risk_free, (len(self.wrapper.columns),))
         wrap_kwargs = merge_dicts(dict(name_or_index=&#39;alpha&#39;), wrap_kwargs)
         return self.wrapper.wrap_reduced(nb.alpha_nb(
             self.to_2d_array(), benchmark_rets, self.ann_factor, risk_free
         ), **wrap_kwargs)
+
+    def rolling_alpha(self, window, benchmark_rets, minp=None, risk_free=0., wrap_kwargs=None):
+        &#34;&#34;&#34;Rolling version of `ReturnsAccessor.alpha`.&#34;&#34;&#34;
+        benchmark_rets = reshape_fns.broadcast_to(
+            reshape_fns.to_2d(benchmark_rets, raw=True),
+            reshape_fns.to_2d(self._obj, raw=True))
+        return self.wrapper.wrap(nb.rolling_alpha_nb(
+            self.to_2d_array(), window, minp, benchmark_rets, self.ann_factor, risk_free
+        ), **merge_dicts({}, wrap_kwargs))
 
     def tail_ratio(self, wrap_kwargs=None):
         &#34;&#34;&#34;Ratio between the right (95%) and left tail (5%).&#34;&#34;&#34;
@@ -296,6 +398,12 @@ class ReturnsAccessor(GenericAccessor):
             self.to_2d_array()
         ), **wrap_kwargs)
 
+    def rolling_tail_ratio(self, window, minp=None, wrap_kwargs=None):
+        &#34;&#34;&#34;Rolling version of `ReturnsAccessor.tail_ratio`.&#34;&#34;&#34;
+        return self.wrapper.wrap(nb.rolling_tail_ratio_nb(
+            self.to_2d_array(), window, minp
+        ), **merge_dicts({}, wrap_kwargs))
+
     def common_sense_ratio(self, wrap_kwargs=None):
         &#34;&#34;&#34;Common Sense Ratio.&#34;&#34;&#34;
         wrap_kwargs = merge_dicts(dict(name_or_index=&#39;common_sense_ratio&#39;), wrap_kwargs)
@@ -303,36 +411,51 @@ class ReturnsAccessor(GenericAccessor):
             self.tail_ratio() * (1 + self.annualized()), raw=True
         ), **wrap_kwargs)
 
+    def rolling_common_sense_ratio(self, window, minp=None, wrap_kwargs=None):
+        &#34;&#34;&#34;Rolling version of `ReturnsAccessor.common_sense_ratio`.&#34;&#34;&#34;
+        return self.wrapper.wrap(reshape_fns.to_1d(
+            self.rolling_tail_ratio(window, minp=minp) * (1 + self.rolling_annualized(window, minp=minp)), raw=True
+        ), **merge_dicts({}, wrap_kwargs))
+
     def value_at_risk(self, cutoff=0.05, wrap_kwargs=None):
         &#34;&#34;&#34;Value at risk (VaR) of a returns stream.
 
         Args:
             cutoff (float or array_like): Decimal representing the percentage cutoff for the
-                bottom percentile of returns. Will broadcast per column.&#34;&#34;&#34;
-        cutoff = np.broadcast_to(cutoff, (len(self.wrapper.columns),))
+                bottom percentile of returns.&#34;&#34;&#34;
         wrap_kwargs = merge_dicts(dict(name_or_index=&#39;value_at_risk&#39;), wrap_kwargs)
         return self.wrapper.wrap_reduced(nb.value_at_risk_nb(
             self.to_2d_array(), cutoff
         ), **wrap_kwargs)
 
-    def conditional_value_at_risk(self, cutoff=0.05, wrap_kwargs=None):
+    def rolling_value_at_risk(self, window, minp=None, cutoff=0.05, wrap_kwargs=None):
+        &#34;&#34;&#34;Rolling version of `ReturnsAccessor.value_at_risk`.&#34;&#34;&#34;
+        return self.wrapper.wrap(nb.rolling_value_at_risk_nb(
+            self.to_2d_array(), window, minp, cutoff
+        ), **merge_dicts({}, wrap_kwargs))
+
+    def cond_value_at_risk(self, cutoff=0.05, wrap_kwargs=None):
         &#34;&#34;&#34;Conditional value at risk (CVaR) of a returns stream.
 
         Args:
             cutoff (float or array_like): Decimal representing the percentage cutoff for the
-                bottom percentile of returns. Will broadcast per column.&#34;&#34;&#34;
-        cutoff = np.broadcast_to(cutoff, (len(self.wrapper.columns),))
-        wrap_kwargs = merge_dicts(dict(name_or_index=&#39;conditional_value_at_risk&#39;), wrap_kwargs)
-        return self.wrapper.wrap_reduced(nb.conditional_value_at_risk_nb(
+                bottom percentile of returns.&#34;&#34;&#34;
+        wrap_kwargs = merge_dicts(dict(name_or_index=&#39;cond_value_at_risk&#39;), wrap_kwargs)
+        return self.wrapper.wrap_reduced(nb.cond_value_at_risk_nb(
             self.to_2d_array(), cutoff
         ), **wrap_kwargs)
+
+    def rolling_cond_value_at_risk(self, window, minp=None, cutoff=0.05, wrap_kwargs=None):
+        &#34;&#34;&#34;Rolling version of `ReturnsAccessor.cond_value_at_risk`.&#34;&#34;&#34;
+        return self.wrapper.wrap(nb.rolling_cond_value_at_risk_nb(
+            self.to_2d_array(), window, minp, cutoff
+        ), **merge_dicts({}, wrap_kwargs))
 
     def capture(self, benchmark_rets, wrap_kwargs=None):
         &#34;&#34;&#34;Capture ratio.
 
         Args:
-            benchmark_rets (array_like): Benchmark return to compare returns against.
-                Will broadcast per element.&#34;&#34;&#34;
+            benchmark_rets (array_like): Benchmark return to compare returns against. Will broadcast.&#34;&#34;&#34;
         benchmark_rets = reshape_fns.broadcast_to(
             reshape_fns.to_2d(benchmark_rets, raw=True),
             reshape_fns.to_2d(self._obj, raw=True))
@@ -341,12 +464,20 @@ class ReturnsAccessor(GenericAccessor):
             self.to_2d_array(), benchmark_rets, self.ann_factor
         ), **wrap_kwargs)
 
+    def rolling_capture(self, window, benchmark_rets, minp=None, wrap_kwargs=None):
+        &#34;&#34;&#34;Rolling version of `ReturnsAccessor.capture`.&#34;&#34;&#34;
+        benchmark_rets = reshape_fns.broadcast_to(
+            reshape_fns.to_2d(benchmark_rets, raw=True),
+            reshape_fns.to_2d(self._obj, raw=True))
+        return self.wrapper.wrap(nb.rolling_capture_nb(
+            self.to_2d_array(), window, minp, benchmark_rets, self.ann_factor
+        ), **merge_dicts({}, wrap_kwargs))
+
     def up_capture(self, benchmark_rets, wrap_kwargs=None):
         &#34;&#34;&#34;Capture ratio for periods when the benchmark return is positive.
 
         Args:
-            benchmark_rets (array_like): Benchmark return to compare returns against.
-                Will broadcast per element.&#34;&#34;&#34;
+            benchmark_rets (array_like): Benchmark return to compare returns against. Will broadcast.&#34;&#34;&#34;
         benchmark_rets = reshape_fns.broadcast_to(
             reshape_fns.to_2d(benchmark_rets, raw=True),
             reshape_fns.to_2d(self._obj, raw=True))
@@ -355,12 +486,20 @@ class ReturnsAccessor(GenericAccessor):
             self.to_2d_array(), benchmark_rets, self.ann_factor
         ), **wrap_kwargs)
 
+    def rolling_up_capture(self, window, benchmark_rets, minp=None, wrap_kwargs=None):
+        &#34;&#34;&#34;Rolling version of `ReturnsAccessor.up_capture`.&#34;&#34;&#34;
+        benchmark_rets = reshape_fns.broadcast_to(
+            reshape_fns.to_2d(benchmark_rets, raw=True),
+            reshape_fns.to_2d(self._obj, raw=True))
+        return self.wrapper.wrap(nb.rolling_up_capture_nb(
+            self.to_2d_array(), window, minp, benchmark_rets, self.ann_factor
+        ), **merge_dicts({}, wrap_kwargs))
+
     def down_capture(self, benchmark_rets, wrap_kwargs=None):
         &#34;&#34;&#34;Capture ratio for periods when the benchmark return is negative.
 
         Args:
-            benchmark_rets (array_like): Benchmark return to compare returns against.
-                Will broadcast per element.&#34;&#34;&#34;
+            benchmark_rets (array_like): Benchmark return to compare returns against. Will broadcast.&#34;&#34;&#34;
         benchmark_rets = reshape_fns.broadcast_to(
             reshape_fns.to_2d(benchmark_rets, raw=True),
             reshape_fns.to_2d(self._obj, raw=True))
@@ -368,6 +507,15 @@ class ReturnsAccessor(GenericAccessor):
         return self.wrapper.wrap_reduced(nb.down_capture_nb(
             self.to_2d_array(), benchmark_rets, self.ann_factor
         ), **wrap_kwargs)
+
+    def rolling_down_capture(self, window, benchmark_rets, minp=None, wrap_kwargs=None):
+        &#34;&#34;&#34;Rolling version of `ReturnsAccessor.down_capture`.&#34;&#34;&#34;
+        benchmark_rets = reshape_fns.broadcast_to(
+            reshape_fns.to_2d(benchmark_rets, raw=True),
+            reshape_fns.to_2d(self._obj, raw=True))
+        return self.wrapper.wrap(nb.rolling_down_capture_nb(
+            self.to_2d_array(), window, minp, benchmark_rets, self.ann_factor
+        ), **merge_dicts({}, wrap_kwargs))
 
     def drawdown(self, wrap_kwargs=None):
         &#34;&#34;&#34;Relative decline from a peak.&#34;&#34;&#34;
@@ -379,6 +527,12 @@ class ReturnsAccessor(GenericAccessor):
         return self.wrapper.wrap_reduced(nb.max_drawdown_nb(
             self.to_2d_array()
         ), **wrap_kwargs)
+
+    def rolling_max_drawdown(self, window, minp=None, wrap_kwargs=None):
+        &#34;&#34;&#34;Rolling version of `ReturnsAccessor.max_drawdown`.&#34;&#34;&#34;
+        return self.wrapper.wrap(nb.rolling_max_drawdown_nb(
+            self.to_2d_array(), window, minp
+        ), **merge_dicts({}, wrap_kwargs))
 
     @cached_property
     def drawdowns(self):
@@ -672,9 +826,7 @@ class ReturnsDFAccessor(ReturnsAccessor, GenericDFAccessor):
         &#34;&#34;&#34;Cumulative returns.
 
         Args:
-            start_value (float or array_like): The starting returns.
-                Will broadcast per column.&#34;&#34;&#34;
-        start_value = np.broadcast_to(start_value, (len(self.wrapper.columns),))
+            start_value (float or array_like): The starting returns.&#34;&#34;&#34;
         cumulative = nb.cum_returns_nb(self.to_2d_array(), start_value)
         return self.wrapper.wrap(cumulative, **merge_dicts({}, wrap_kwargs))
 
@@ -682,8 +834,14 @@ class ReturnsDFAccessor(ReturnsAccessor, GenericDFAccessor):
         &#34;&#34;&#34;Total return.&#34;&#34;&#34;
         wrap_kwargs = merge_dicts(dict(name_or_index=&#39;total_return&#39;), wrap_kwargs)
         return self.wrapper.wrap_reduced(nb.cum_returns_final_nb(
-            self.to_2d_array(), np.full(len(self.wrapper.columns), 0.)
+            self.to_2d_array(), 0.
         ), **wrap_kwargs)
+
+    def rolling_total(self, window, minp=None, wrap_kwargs=None):
+        &#34;&#34;&#34;Rolling version of `ReturnsAccessor.total`.&#34;&#34;&#34;
+        return self.wrapper.wrap(nb.rolling_cum_returns_final_nb(
+            self.to_2d_array(), window, minp, 0.
+        ), **merge_dicts({}, wrap_kwargs))
 
     def annualized(self, wrap_kwargs=None):
         &#34;&#34;&#34;Mean annual growth rate of returns.
@@ -694,17 +852,27 @@ class ReturnsDFAccessor(ReturnsAccessor, GenericDFAccessor):
             self.to_2d_array(), self.ann_factor
         ), **wrap_kwargs)
 
-    def annualized_volatility(self, levy_alpha=2.0, wrap_kwargs=None):
+    def rolling_annualized(self, window, minp=None, wrap_kwargs=None):
+        &#34;&#34;&#34;Rolling version of `ReturnsAccessor.annualized`.&#34;&#34;&#34;
+        return self.wrapper.wrap(nb.rolling_annualized_return_nb(
+            self.to_2d_array(), window, minp, self.ann_factor
+        ), **merge_dicts({}, wrap_kwargs))
+
+    def annualized_volatility(self, levy_alpha=2.0, ddof=1, wrap_kwargs=None):
         &#34;&#34;&#34;Annualized volatility of a strategy.
 
         Args:
-            levy_alpha (float or array_like): Scaling relation (Levy stability exponent).
-                Will broadcast per column.&#34;&#34;&#34;
-        levy_alpha = np.broadcast_to(levy_alpha, (len(self.wrapper.columns),))
+            levy_alpha (float or array_like): Scaling relation (Levy stability exponent).&#34;&#34;&#34;
         wrap_kwargs = merge_dicts(dict(name_or_index=&#39;annualized_volatility&#39;), wrap_kwargs)
         return self.wrapper.wrap_reduced(nb.annualized_volatility_nb(
-            self.to_2d_array(), self.ann_factor, levy_alpha
+            self.to_2d_array(), self.ann_factor, levy_alpha, ddof
         ), **wrap_kwargs)
+
+    def rolling_annualized_volatility(self, window, minp=None, levy_alpha=2.0, ddof=1, wrap_kwargs=None):
+        &#34;&#34;&#34;Rolling version of `ReturnsAccessor.annualized_volatility`.&#34;&#34;&#34;
+        return self.wrapper.wrap(nb.rolling_annualized_volatility_nb(
+            self.to_2d_array(), window, minp, self.ann_factor, levy_alpha, ddof
+        ), **merge_dicts({}, wrap_kwargs))
 
     def calmar_ratio(self, wrap_kwargs=None):
         &#34;&#34;&#34;Calmar ratio, or drawdown ratio, of a strategy.&#34;&#34;&#34;
@@ -713,32 +881,44 @@ class ReturnsDFAccessor(ReturnsAccessor, GenericDFAccessor):
             self.to_2d_array(), self.ann_factor
         ), **wrap_kwargs)
 
+    def rolling_calmar_ratio(self, window, minp=None, wrap_kwargs=None):
+        &#34;&#34;&#34;Rolling version of `ReturnsAccessor.calmar_ratio`.&#34;&#34;&#34;
+        return self.wrapper.wrap(nb.rolling_calmar_ratio_nb(
+            self.to_2d_array(), window, minp, self.ann_factor
+        ), **merge_dicts({}, wrap_kwargs))
+
     def omega_ratio(self, risk_free=0., required_return=0., wrap_kwargs=None):
         &#34;&#34;&#34;Omega ratio of a strategy.
 
         Args:
             risk_free (float or array_like): Constant risk-free return throughout the period.
-                Will broadcast per column.
-            required_return (float or array_like): Minimum acceptance return of the investor.
-                Will broadcast per column.&#34;&#34;&#34;
-        risk_free = np.broadcast_to(risk_free, (len(self.wrapper.columns),))
-        required_return = np.broadcast_to(required_return, (len(self.wrapper.columns),))
+            required_return (float or array_like): Minimum acceptance return of the investor.&#34;&#34;&#34;
         wrap_kwargs = merge_dicts(dict(name_or_index=&#39;omega_ratio&#39;), wrap_kwargs)
         return self.wrapper.wrap_reduced(nb.omega_ratio_nb(
             self.to_2d_array(), self.ann_factor, risk_free, required_return
         ), **wrap_kwargs)
 
-    def sharpe_ratio(self, risk_free=0., wrap_kwargs=None):
+    def rolling_omega_ratio(self, window, minp=None, risk_free=0., required_return=0., wrap_kwargs=None):
+        &#34;&#34;&#34;Rolling version of `ReturnsAccessor.omega_ratio`.&#34;&#34;&#34;
+        return self.wrapper.wrap(nb.rolling_omega_ratio_nb(
+            self.to_2d_array(), window, minp, self.ann_factor, risk_free, required_return
+        ), **merge_dicts({}, wrap_kwargs))
+
+    def sharpe_ratio(self, risk_free=0., ddof=1, wrap_kwargs=None):
         &#34;&#34;&#34;Sharpe ratio of a strategy.
 
         Args:
-            risk_free (float or array_like): Constant risk-free return throughout the period.
-                Will broadcast per column.&#34;&#34;&#34;
-        risk_free = np.broadcast_to(risk_free, (len(self.wrapper.columns),))
+            risk_free (float or array_like): Constant risk-free return throughout the period.&#34;&#34;&#34;
         wrap_kwargs = merge_dicts(dict(name_or_index=&#39;sharpe_ratio&#39;), wrap_kwargs)
         return self.wrapper.wrap_reduced(nb.sharpe_ratio_nb(
-            self.to_2d_array(), self.ann_factor, risk_free
+            self.to_2d_array(), self.ann_factor, risk_free, ddof
         ), **wrap_kwargs)
+
+    def rolling_sharpe_ratio(self, window, minp=None, risk_free=0., ddof=1, wrap_kwargs=None):
+        &#34;&#34;&#34;Rolling version of `ReturnsAccessor.sharpe_ratio`.&#34;&#34;&#34;
+        return self.wrapper.wrap(nb.rolling_sharpe_ratio_nb(
+            self.to_2d_array(), window, minp, self.ann_factor, risk_free, ddof
+        ), **merge_dicts({}, wrap_kwargs))
 
     def deflated_sharpe_ratio(self, risk_free=0., var_sharpe=None, nb_trials=None,
                               ddof=0, bias=True, wrap_kwargs=None):
@@ -772,13 +952,17 @@ class ReturnsDFAccessor(ReturnsAccessor, GenericDFAccessor):
         &#34;&#34;&#34;Downside deviation below a threshold.
 
         Args:
-            required_return (float or array_like): Minimum acceptance return of the investor.
-                Will broadcast per column.&#34;&#34;&#34;
-        required_return = np.broadcast_to(required_return, (len(self.wrapper.columns),))
+            required_return (float or array_like): Minimum acceptance return of the investor.&#34;&#34;&#34;
         wrap_kwargs = merge_dicts(dict(name_or_index=&#39;downside_risk&#39;), wrap_kwargs)
         return self.wrapper.wrap_reduced(nb.downside_risk_nb(
             self.to_2d_array(), self.ann_factor, required_return
         ), **wrap_kwargs)
+
+    def rolling_downside_risk(self, window, minp=None, required_return=0., wrap_kwargs=None):
+        &#34;&#34;&#34;Rolling version of `ReturnsAccessor.downside_risk`.&#34;&#34;&#34;
+        return self.wrapper.wrap(nb.rolling_downside_risk_nb(
+            self.to_2d_array(), window, minp, self.ann_factor, required_return
+        ), **merge_dicts({}, wrap_kwargs))
 
     def sortino_ratio(self, required_return=0., wrap_kwargs=None):
         &#34;&#34;&#34;Sortino ratio of a strategy.
@@ -786,32 +970,44 @@ class ReturnsDFAccessor(ReturnsAccessor, GenericDFAccessor):
         Args:
             required_return (float or array_like): Minimum acceptance return of the investor.
                 Will broadcast per column.&#34;&#34;&#34;
-        required_return = np.broadcast_to(required_return, (len(self.wrapper.columns),))
         wrap_kwargs = merge_dicts(dict(name_or_index=&#39;sortino_ratio&#39;), wrap_kwargs)
         return self.wrapper.wrap_reduced(nb.sortino_ratio_nb(
             self.to_2d_array(), self.ann_factor, required_return
         ), **wrap_kwargs)
 
-    def information_ratio(self, benchmark_rets, wrap_kwargs=None):
+    def rolling_sortino_ratio(self, window, minp=None, required_return=0., wrap_kwargs=None):
+        &#34;&#34;&#34;Rolling version of `ReturnsAccessor.sortino_ratio`.&#34;&#34;&#34;
+        return self.wrapper.wrap(nb.rolling_sortino_ratio_nb(
+            self.to_2d_array(), window, minp, self.ann_factor, required_return
+        ), **merge_dicts({}, wrap_kwargs))
+
+    def information_ratio(self, benchmark_rets, ddof=1, wrap_kwargs=None):
         &#34;&#34;&#34;Information ratio of a strategy.
 
         Args:
-            benchmark_rets (array_like): Benchmark return to compare returns against.
-                Will broadcast per element.&#34;&#34;&#34;
+            benchmark_rets (array_like): Benchmark return to compare returns against. Will broadcast.&#34;&#34;&#34;
         benchmark_rets = reshape_fns.broadcast_to(
             reshape_fns.to_2d(benchmark_rets, raw=True),
             reshape_fns.to_2d(self._obj, raw=True))
         wrap_kwargs = merge_dicts(dict(name_or_index=&#39;information_ratio&#39;), wrap_kwargs)
         return self.wrapper.wrap_reduced(nb.information_ratio_nb(
-            self.to_2d_array(), benchmark_rets
+            self.to_2d_array(), benchmark_rets, ddof
         ), **wrap_kwargs)
+
+    def rolling_information_ratio(self, window, benchmark_rets, minp=None, ddof=1, wrap_kwargs=None):
+        &#34;&#34;&#34;Rolling version of `ReturnsAccessor.information_ratio`.&#34;&#34;&#34;
+        benchmark_rets = reshape_fns.broadcast_to(
+            reshape_fns.to_2d(benchmark_rets, raw=True),
+            reshape_fns.to_2d(self._obj, raw=True))
+        return self.wrapper.wrap(nb.rolling_information_ratio_nb(
+            self.to_2d_array(), window, minp, benchmark_rets, ddof
+        ), **merge_dicts({}, wrap_kwargs))
 
     def beta(self, benchmark_rets, wrap_kwargs=None):
         &#34;&#34;&#34;Beta.
 
         Args:
-            benchmark_rets (array_like): Benchmark return to compare returns against.
-                Will broadcast per element.&#34;&#34;&#34;
+            benchmark_rets (array_like): Benchmark return to compare returns against. Will broadcast.&#34;&#34;&#34;
         benchmark_rets = reshape_fns.broadcast_to(
             reshape_fns.to_2d(benchmark_rets, raw=True),
             reshape_fns.to_2d(self._obj, raw=True))
@@ -820,22 +1016,37 @@ class ReturnsDFAccessor(ReturnsAccessor, GenericDFAccessor):
             self.to_2d_array(), benchmark_rets
         ), **wrap_kwargs)
 
+    def rolling_beta(self, window, benchmark_rets, minp=None, wrap_kwargs=None):
+        &#34;&#34;&#34;Rolling version of `ReturnsAccessor.beta`.&#34;&#34;&#34;
+        benchmark_rets = reshape_fns.broadcast_to(
+            reshape_fns.to_2d(benchmark_rets, raw=True),
+            reshape_fns.to_2d(self._obj, raw=True))
+        return self.wrapper.wrap(nb.rolling_beta_nb(
+            self.to_2d_array(), window, minp, benchmark_rets
+        ), **merge_dicts({}, wrap_kwargs))
+
     def alpha(self, benchmark_rets, risk_free=0., wrap_kwargs=None):
         &#34;&#34;&#34;Annualized alpha.
 
         Args:
-            benchmark_rets (array_like): Benchmark return to compare returns against.
-                Will broadcast per element.
-            risk_free (float or array_like): Constant risk-free return throughout the period.
-                Will broadcast per column.&#34;&#34;&#34;
+            benchmark_rets (array_like): Benchmark return to compare returns against. Will broadcast.
+            risk_free (float or array_like): Constant risk-free return throughout the period.&#34;&#34;&#34;
         benchmark_rets = reshape_fns.broadcast_to(
             reshape_fns.to_2d(benchmark_rets, raw=True),
             reshape_fns.to_2d(self._obj, raw=True))
-        risk_free = np.broadcast_to(risk_free, (len(self.wrapper.columns),))
         wrap_kwargs = merge_dicts(dict(name_or_index=&#39;alpha&#39;), wrap_kwargs)
         return self.wrapper.wrap_reduced(nb.alpha_nb(
             self.to_2d_array(), benchmark_rets, self.ann_factor, risk_free
         ), **wrap_kwargs)
+
+    def rolling_alpha(self, window, benchmark_rets, minp=None, risk_free=0., wrap_kwargs=None):
+        &#34;&#34;&#34;Rolling version of `ReturnsAccessor.alpha`.&#34;&#34;&#34;
+        benchmark_rets = reshape_fns.broadcast_to(
+            reshape_fns.to_2d(benchmark_rets, raw=True),
+            reshape_fns.to_2d(self._obj, raw=True))
+        return self.wrapper.wrap(nb.rolling_alpha_nb(
+            self.to_2d_array(), window, minp, benchmark_rets, self.ann_factor, risk_free
+        ), **merge_dicts({}, wrap_kwargs))
 
     def tail_ratio(self, wrap_kwargs=None):
         &#34;&#34;&#34;Ratio between the right (95%) and left tail (5%).&#34;&#34;&#34;
@@ -844,6 +1055,12 @@ class ReturnsDFAccessor(ReturnsAccessor, GenericDFAccessor):
             self.to_2d_array()
         ), **wrap_kwargs)
 
+    def rolling_tail_ratio(self, window, minp=None, wrap_kwargs=None):
+        &#34;&#34;&#34;Rolling version of `ReturnsAccessor.tail_ratio`.&#34;&#34;&#34;
+        return self.wrapper.wrap(nb.rolling_tail_ratio_nb(
+            self.to_2d_array(), window, minp
+        ), **merge_dicts({}, wrap_kwargs))
+
     def common_sense_ratio(self, wrap_kwargs=None):
         &#34;&#34;&#34;Common Sense Ratio.&#34;&#34;&#34;
         wrap_kwargs = merge_dicts(dict(name_or_index=&#39;common_sense_ratio&#39;), wrap_kwargs)
@@ -851,36 +1068,51 @@ class ReturnsDFAccessor(ReturnsAccessor, GenericDFAccessor):
             self.tail_ratio() * (1 + self.annualized()), raw=True
         ), **wrap_kwargs)
 
+    def rolling_common_sense_ratio(self, window, minp=None, wrap_kwargs=None):
+        &#34;&#34;&#34;Rolling version of `ReturnsAccessor.common_sense_ratio`.&#34;&#34;&#34;
+        return self.wrapper.wrap(reshape_fns.to_1d(
+            self.rolling_tail_ratio(window, minp=minp) * (1 + self.rolling_annualized(window, minp=minp)), raw=True
+        ), **merge_dicts({}, wrap_kwargs))
+
     def value_at_risk(self, cutoff=0.05, wrap_kwargs=None):
         &#34;&#34;&#34;Value at risk (VaR) of a returns stream.
 
         Args:
             cutoff (float or array_like): Decimal representing the percentage cutoff for the
-                bottom percentile of returns. Will broadcast per column.&#34;&#34;&#34;
-        cutoff = np.broadcast_to(cutoff, (len(self.wrapper.columns),))
+                bottom percentile of returns.&#34;&#34;&#34;
         wrap_kwargs = merge_dicts(dict(name_or_index=&#39;value_at_risk&#39;), wrap_kwargs)
         return self.wrapper.wrap_reduced(nb.value_at_risk_nb(
             self.to_2d_array(), cutoff
         ), **wrap_kwargs)
 
-    def conditional_value_at_risk(self, cutoff=0.05, wrap_kwargs=None):
+    def rolling_value_at_risk(self, window, minp=None, cutoff=0.05, wrap_kwargs=None):
+        &#34;&#34;&#34;Rolling version of `ReturnsAccessor.value_at_risk`.&#34;&#34;&#34;
+        return self.wrapper.wrap(nb.rolling_value_at_risk_nb(
+            self.to_2d_array(), window, minp, cutoff
+        ), **merge_dicts({}, wrap_kwargs))
+
+    def cond_value_at_risk(self, cutoff=0.05, wrap_kwargs=None):
         &#34;&#34;&#34;Conditional value at risk (CVaR) of a returns stream.
 
         Args:
             cutoff (float or array_like): Decimal representing the percentage cutoff for the
-                bottom percentile of returns. Will broadcast per column.&#34;&#34;&#34;
-        cutoff = np.broadcast_to(cutoff, (len(self.wrapper.columns),))
-        wrap_kwargs = merge_dicts(dict(name_or_index=&#39;conditional_value_at_risk&#39;), wrap_kwargs)
-        return self.wrapper.wrap_reduced(nb.conditional_value_at_risk_nb(
+                bottom percentile of returns.&#34;&#34;&#34;
+        wrap_kwargs = merge_dicts(dict(name_or_index=&#39;cond_value_at_risk&#39;), wrap_kwargs)
+        return self.wrapper.wrap_reduced(nb.cond_value_at_risk_nb(
             self.to_2d_array(), cutoff
         ), **wrap_kwargs)
+
+    def rolling_cond_value_at_risk(self, window, minp=None, cutoff=0.05, wrap_kwargs=None):
+        &#34;&#34;&#34;Rolling version of `ReturnsAccessor.cond_value_at_risk`.&#34;&#34;&#34;
+        return self.wrapper.wrap(nb.rolling_cond_value_at_risk_nb(
+            self.to_2d_array(), window, minp, cutoff
+        ), **merge_dicts({}, wrap_kwargs))
 
     def capture(self, benchmark_rets, wrap_kwargs=None):
         &#34;&#34;&#34;Capture ratio.
 
         Args:
-            benchmark_rets (array_like): Benchmark return to compare returns against.
-                Will broadcast per element.&#34;&#34;&#34;
+            benchmark_rets (array_like): Benchmark return to compare returns against. Will broadcast.&#34;&#34;&#34;
         benchmark_rets = reshape_fns.broadcast_to(
             reshape_fns.to_2d(benchmark_rets, raw=True),
             reshape_fns.to_2d(self._obj, raw=True))
@@ -889,12 +1121,20 @@ class ReturnsDFAccessor(ReturnsAccessor, GenericDFAccessor):
             self.to_2d_array(), benchmark_rets, self.ann_factor
         ), **wrap_kwargs)
 
+    def rolling_capture(self, window, benchmark_rets, minp=None, wrap_kwargs=None):
+        &#34;&#34;&#34;Rolling version of `ReturnsAccessor.capture`.&#34;&#34;&#34;
+        benchmark_rets = reshape_fns.broadcast_to(
+            reshape_fns.to_2d(benchmark_rets, raw=True),
+            reshape_fns.to_2d(self._obj, raw=True))
+        return self.wrapper.wrap(nb.rolling_capture_nb(
+            self.to_2d_array(), window, minp, benchmark_rets, self.ann_factor
+        ), **merge_dicts({}, wrap_kwargs))
+
     def up_capture(self, benchmark_rets, wrap_kwargs=None):
         &#34;&#34;&#34;Capture ratio for periods when the benchmark return is positive.
 
         Args:
-            benchmark_rets (array_like): Benchmark return to compare returns against.
-                Will broadcast per element.&#34;&#34;&#34;
+            benchmark_rets (array_like): Benchmark return to compare returns against. Will broadcast.&#34;&#34;&#34;
         benchmark_rets = reshape_fns.broadcast_to(
             reshape_fns.to_2d(benchmark_rets, raw=True),
             reshape_fns.to_2d(self._obj, raw=True))
@@ -903,12 +1143,20 @@ class ReturnsDFAccessor(ReturnsAccessor, GenericDFAccessor):
             self.to_2d_array(), benchmark_rets, self.ann_factor
         ), **wrap_kwargs)
 
+    def rolling_up_capture(self, window, benchmark_rets, minp=None, wrap_kwargs=None):
+        &#34;&#34;&#34;Rolling version of `ReturnsAccessor.up_capture`.&#34;&#34;&#34;
+        benchmark_rets = reshape_fns.broadcast_to(
+            reshape_fns.to_2d(benchmark_rets, raw=True),
+            reshape_fns.to_2d(self._obj, raw=True))
+        return self.wrapper.wrap(nb.rolling_up_capture_nb(
+            self.to_2d_array(), window, minp, benchmark_rets, self.ann_factor
+        ), **merge_dicts({}, wrap_kwargs))
+
     def down_capture(self, benchmark_rets, wrap_kwargs=None):
         &#34;&#34;&#34;Capture ratio for periods when the benchmark return is negative.
 
         Args:
-            benchmark_rets (array_like): Benchmark return to compare returns against.
-                Will broadcast per element.&#34;&#34;&#34;
+            benchmark_rets (array_like): Benchmark return to compare returns against. Will broadcast.&#34;&#34;&#34;
         benchmark_rets = reshape_fns.broadcast_to(
             reshape_fns.to_2d(benchmark_rets, raw=True),
             reshape_fns.to_2d(self._obj, raw=True))
@@ -916,6 +1164,15 @@ class ReturnsDFAccessor(ReturnsAccessor, GenericDFAccessor):
         return self.wrapper.wrap_reduced(nb.down_capture_nb(
             self.to_2d_array(), benchmark_rets, self.ann_factor
         ), **wrap_kwargs)
+
+    def rolling_down_capture(self, window, benchmark_rets, minp=None, wrap_kwargs=None):
+        &#34;&#34;&#34;Rolling version of `ReturnsAccessor.down_capture`.&#34;&#34;&#34;
+        benchmark_rets = reshape_fns.broadcast_to(
+            reshape_fns.to_2d(benchmark_rets, raw=True),
+            reshape_fns.to_2d(self._obj, raw=True))
+        return self.wrapper.wrap(nb.rolling_down_capture_nb(
+            self.to_2d_array(), window, minp, benchmark_rets, self.ann_factor
+        ), **merge_dicts({}, wrap_kwargs))
 
     def drawdown(self, wrap_kwargs=None):
         &#34;&#34;&#34;Relative decline from a peak.&#34;&#34;&#34;
@@ -927,6 +1184,12 @@ class ReturnsDFAccessor(ReturnsAccessor, GenericDFAccessor):
         return self.wrapper.wrap_reduced(nb.max_drawdown_nb(
             self.to_2d_array()
         ), **wrap_kwargs)
+
+    def rolling_max_drawdown(self, window, minp=None, wrap_kwargs=None):
+        &#34;&#34;&#34;Rolling version of `ReturnsAccessor.max_drawdown`.&#34;&#34;&#34;
+        return self.wrapper.wrap(nb.rolling_max_drawdown_nb(
+            self.to_2d_array(), window, minp
+        ), **merge_dicts({}, wrap_kwargs))
 
     @cached_property
     def drawdowns(self):
@@ -1117,11 +1380,9 @@ def year_freq(self):
 <h2 id="args">Args</h2>
 <dl>
 <dt><strong><code>benchmark_rets</code></strong> :&ensp;<code>array_like</code></dt>
-<dd>Benchmark return to compare returns against.
-Will broadcast per element.</dd>
+<dd>Benchmark return to compare returns against. Will broadcast.</dd>
 <dt><strong><code>risk_free</code></strong> :&ensp;<code>float</code> or <code>array_like</code></dt>
-<dd>Constant risk-free return throughout the period.
-Will broadcast per column.</dd>
+<dd>Constant risk-free return throughout the period.</dd>
 </dl></div>
 <details class="source">
 <summary>
@@ -1131,14 +1392,11 @@ Will broadcast per column.</dd>
     &#34;&#34;&#34;Annualized alpha.
 
     Args:
-        benchmark_rets (array_like): Benchmark return to compare returns against.
-            Will broadcast per element.
-        risk_free (float or array_like): Constant risk-free return throughout the period.
-            Will broadcast per column.&#34;&#34;&#34;
+        benchmark_rets (array_like): Benchmark return to compare returns against. Will broadcast.
+        risk_free (float or array_like): Constant risk-free return throughout the period.&#34;&#34;&#34;
     benchmark_rets = reshape_fns.broadcast_to(
         reshape_fns.to_2d(benchmark_rets, raw=True),
         reshape_fns.to_2d(self._obj, raw=True))
-    risk_free = np.broadcast_to(risk_free, (len(self.wrapper.columns),))
     wrap_kwargs = merge_dicts(dict(name_or_index=&#39;alpha&#39;), wrap_kwargs)
     return self.wrapper.wrap_reduced(nb.alpha_nb(
         self.to_2d_array(), benchmark_rets, self.ann_factor, risk_free
@@ -1184,30 +1442,27 @@ Will broadcast per column.</dd>
 </details>
 </dd>
 <dt id="vectorbt.returns.accessors.ReturnsAccessor.annualized_volatility"><code class="name flex">
-<span>def <span class="ident fname">annualized_volatility</span></span>(<span>self, levy_alpha=2.0, wrap_kwargs=None)</span>
+<span>def <span class="ident fname">annualized_volatility</span></span>(<span>self, levy_alpha=2.0, ddof=1, wrap_kwargs=None)</span>
 </code></dt>
 <dd>
 <div class="desc"><p>Annualized volatility of a strategy.</p>
 <h2 id="args">Args</h2>
 <dl>
 <dt><strong><code>levy_alpha</code></strong> :&ensp;<code>float</code> or <code>array_like</code></dt>
-<dd>Scaling relation (Levy stability exponent).
-Will broadcast per column.</dd>
+<dd>Scaling relation (Levy stability exponent).</dd>
 </dl></div>
 <details class="source">
 <summary>
 <span>Expand source code</span>
 </summary>
-<pre><code class="python">def annualized_volatility(self, levy_alpha=2.0, wrap_kwargs=None):
+<pre><code class="python">def annualized_volatility(self, levy_alpha=2.0, ddof=1, wrap_kwargs=None):
     &#34;&#34;&#34;Annualized volatility of a strategy.
 
     Args:
-        levy_alpha (float or array_like): Scaling relation (Levy stability exponent).
-            Will broadcast per column.&#34;&#34;&#34;
-    levy_alpha = np.broadcast_to(levy_alpha, (len(self.wrapper.columns),))
+        levy_alpha (float or array_like): Scaling relation (Levy stability exponent).&#34;&#34;&#34;
     wrap_kwargs = merge_dicts(dict(name_or_index=&#39;annualized_volatility&#39;), wrap_kwargs)
     return self.wrapper.wrap_reduced(nb.annualized_volatility_nb(
-        self.to_2d_array(), self.ann_factor, levy_alpha
+        self.to_2d_array(), self.ann_factor, levy_alpha, ddof
     ), **wrap_kwargs)</code></pre>
 </details>
 </dd>
@@ -1219,8 +1474,7 @@ Will broadcast per column.</dd>
 <h2 id="args">Args</h2>
 <dl>
 <dt><strong><code>benchmark_rets</code></strong> :&ensp;<code>array_like</code></dt>
-<dd>Benchmark return to compare returns against.
-Will broadcast per element.</dd>
+<dd>Benchmark return to compare returns against. Will broadcast.</dd>
 </dl></div>
 <details class="source">
 <summary>
@@ -1230,8 +1484,7 @@ Will broadcast per element.</dd>
     &#34;&#34;&#34;Beta.
 
     Args:
-        benchmark_rets (array_like): Benchmark return to compare returns against.
-            Will broadcast per element.&#34;&#34;&#34;
+        benchmark_rets (array_like): Benchmark return to compare returns against. Will broadcast.&#34;&#34;&#34;
     benchmark_rets = reshape_fns.broadcast_to(
         reshape_fns.to_2d(benchmark_rets, raw=True),
         reshape_fns.to_2d(self._obj, raw=True))
@@ -1266,8 +1519,7 @@ Will broadcast per element.</dd>
 <h2 id="args">Args</h2>
 <dl>
 <dt><strong><code>benchmark_rets</code></strong> :&ensp;<code>array_like</code></dt>
-<dd>Benchmark return to compare returns against.
-Will broadcast per element.</dd>
+<dd>Benchmark return to compare returns against. Will broadcast.</dd>
 </dl></div>
 <details class="source">
 <summary>
@@ -1277,8 +1529,7 @@ Will broadcast per element.</dd>
     &#34;&#34;&#34;Capture ratio.
 
     Args:
-        benchmark_rets (array_like): Benchmark return to compare returns against.
-            Will broadcast per element.&#34;&#34;&#34;
+        benchmark_rets (array_like): Benchmark return to compare returns against. Will broadcast.&#34;&#34;&#34;
     benchmark_rets = reshape_fns.broadcast_to(
         reshape_fns.to_2d(benchmark_rets, raw=True),
         reshape_fns.to_2d(self._obj, raw=True))
@@ -1305,8 +1556,8 @@ Will broadcast per element.</dd>
     ), **wrap_kwargs)</code></pre>
 </details>
 </dd>
-<dt id="vectorbt.returns.accessors.ReturnsAccessor.conditional_value_at_risk"><code class="name flex">
-<span>def <span class="ident fname">conditional_value_at_risk</span></span>(<span>self, cutoff=0.05, wrap_kwargs=None)</span>
+<dt id="vectorbt.returns.accessors.ReturnsAccessor.cond_value_at_risk"><code class="name flex">
+<span>def <span class="ident fname">cond_value_at_risk</span></span>(<span>self, cutoff=0.05, wrap_kwargs=None)</span>
 </code></dt>
 <dd>
 <div class="desc"><p>Conditional value at risk (CVaR) of a returns stream.</p>
@@ -1314,21 +1565,20 @@ Will broadcast per element.</dd>
 <dl>
 <dt><strong><code>cutoff</code></strong> :&ensp;<code>float</code> or <code>array_like</code></dt>
 <dd>Decimal representing the percentage cutoff for the
-bottom percentile of returns. Will broadcast per column.</dd>
+bottom percentile of returns.</dd>
 </dl></div>
 <details class="source">
 <summary>
 <span>Expand source code</span>
 </summary>
-<pre><code class="python">def conditional_value_at_risk(self, cutoff=0.05, wrap_kwargs=None):
+<pre><code class="python">def cond_value_at_risk(self, cutoff=0.05, wrap_kwargs=None):
     &#34;&#34;&#34;Conditional value at risk (CVaR) of a returns stream.
 
     Args:
         cutoff (float or array_like): Decimal representing the percentage cutoff for the
-            bottom percentile of returns. Will broadcast per column.&#34;&#34;&#34;
-    cutoff = np.broadcast_to(cutoff, (len(self.wrapper.columns),))
-    wrap_kwargs = merge_dicts(dict(name_or_index=&#39;conditional_value_at_risk&#39;), wrap_kwargs)
-    return self.wrapper.wrap_reduced(nb.conditional_value_at_risk_nb(
+            bottom percentile of returns.&#34;&#34;&#34;
+    wrap_kwargs = merge_dicts(dict(name_or_index=&#39;cond_value_at_risk&#39;), wrap_kwargs)
+    return self.wrapper.wrap_reduced(nb.cond_value_at_risk_nb(
         self.to_2d_array(), cutoff
     ), **wrap_kwargs)</code></pre>
 </details>
@@ -1341,8 +1591,7 @@ bottom percentile of returns. Will broadcast per column.</dd>
 <h2 id="args">Args</h2>
 <dl>
 <dt><strong><code>start_value</code></strong> :&ensp;<code>float</code> or <code>array_like</code></dt>
-<dd>The starting returns.
-Will broadcast per column.</dd>
+<dd>The starting returns.</dd>
 </dl></div>
 <details class="source">
 <summary>
@@ -1352,9 +1601,7 @@ Will broadcast per column.</dd>
     &#34;&#34;&#34;Cumulative returns.
 
     Args:
-        start_value (float or array_like): The starting returns.
-            Will broadcast per column.&#34;&#34;&#34;
-    start_value = np.broadcast_to(start_value, (len(self.wrapper.columns),))
+        start_value (float or array_like): The starting returns.&#34;&#34;&#34;
     cumulative = nb.cum_returns_nb(self.to_2d_array(), start_value)
     return self.wrapper.wrap(cumulative, **merge_dicts({}, wrap_kwargs))</code></pre>
 </details>
@@ -1426,8 +1673,7 @@ If <code>nb_trials</code> is None, is set to the number of columns.</p></div>
 <h2 id="args">Args</h2>
 <dl>
 <dt><strong><code>benchmark_rets</code></strong> :&ensp;<code>array_like</code></dt>
-<dd>Benchmark return to compare returns against.
-Will broadcast per element.</dd>
+<dd>Benchmark return to compare returns against. Will broadcast.</dd>
 </dl></div>
 <details class="source">
 <summary>
@@ -1437,8 +1683,7 @@ Will broadcast per element.</dd>
     &#34;&#34;&#34;Capture ratio for periods when the benchmark return is negative.
 
     Args:
-        benchmark_rets (array_like): Benchmark return to compare returns against.
-            Will broadcast per element.&#34;&#34;&#34;
+        benchmark_rets (array_like): Benchmark return to compare returns against. Will broadcast.&#34;&#34;&#34;
     benchmark_rets = reshape_fns.broadcast_to(
         reshape_fns.to_2d(benchmark_rets, raw=True),
         reshape_fns.to_2d(self._obj, raw=True))
@@ -1456,8 +1701,7 @@ Will broadcast per element.</dd>
 <h2 id="args">Args</h2>
 <dl>
 <dt><strong><code>required_return</code></strong> :&ensp;<code>float</code> or <code>array_like</code></dt>
-<dd>Minimum acceptance return of the investor.
-Will broadcast per column.</dd>
+<dd>Minimum acceptance return of the investor.</dd>
 </dl></div>
 <details class="source">
 <summary>
@@ -1467,9 +1711,7 @@ Will broadcast per column.</dd>
     &#34;&#34;&#34;Downside deviation below a threshold.
 
     Args:
-        required_return (float or array_like): Minimum acceptance return of the investor.
-            Will broadcast per column.&#34;&#34;&#34;
-    required_return = np.broadcast_to(required_return, (len(self.wrapper.columns),))
+        required_return (float or array_like): Minimum acceptance return of the investor.&#34;&#34;&#34;
     wrap_kwargs = merge_dicts(dict(name_or_index=&#39;downside_risk&#39;), wrap_kwargs)
     return self.wrapper.wrap_reduced(nb.downside_risk_nb(
         self.to_2d_array(), self.ann_factor, required_return
@@ -1511,32 +1753,30 @@ def get_drawdowns(self, group_by=None, **kwargs):
 </details>
 </dd>
 <dt id="vectorbt.returns.accessors.ReturnsAccessor.information_ratio"><code class="name flex">
-<span>def <span class="ident fname">information_ratio</span></span>(<span>self, benchmark_rets, wrap_kwargs=None)</span>
+<span>def <span class="ident fname">information_ratio</span></span>(<span>self, benchmark_rets, ddof=1, wrap_kwargs=None)</span>
 </code></dt>
 <dd>
 <div class="desc"><p>Information ratio of a strategy.</p>
 <h2 id="args">Args</h2>
 <dl>
 <dt><strong><code>benchmark_rets</code></strong> :&ensp;<code>array_like</code></dt>
-<dd>Benchmark return to compare returns against.
-Will broadcast per element.</dd>
+<dd>Benchmark return to compare returns against. Will broadcast.</dd>
 </dl></div>
 <details class="source">
 <summary>
 <span>Expand source code</span>
 </summary>
-<pre><code class="python">def information_ratio(self, benchmark_rets, wrap_kwargs=None):
+<pre><code class="python">def information_ratio(self, benchmark_rets, ddof=1, wrap_kwargs=None):
     &#34;&#34;&#34;Information ratio of a strategy.
 
     Args:
-        benchmark_rets (array_like): Benchmark return to compare returns against.
-            Will broadcast per element.&#34;&#34;&#34;
+        benchmark_rets (array_like): Benchmark return to compare returns against. Will broadcast.&#34;&#34;&#34;
     benchmark_rets = reshape_fns.broadcast_to(
         reshape_fns.to_2d(benchmark_rets, raw=True),
         reshape_fns.to_2d(self._obj, raw=True))
     wrap_kwargs = merge_dicts(dict(name_or_index=&#39;information_ratio&#39;), wrap_kwargs)
     return self.wrapper.wrap_reduced(nb.information_ratio_nb(
-        self.to_2d_array(), benchmark_rets
+        self.to_2d_array(), benchmark_rets, ddof
     ), **wrap_kwargs)</code></pre>
 </details>
 </dd>
@@ -1565,11 +1805,9 @@ Will broadcast per element.</dd>
 <h2 id="args">Args</h2>
 <dl>
 <dt><strong><code>risk_free</code></strong> :&ensp;<code>float</code> or <code>array_like</code></dt>
-<dd>Constant risk-free return throughout the period.
-Will broadcast per column.</dd>
+<dd>Constant risk-free return throughout the period.</dd>
 <dt><strong><code>required_return</code></strong> :&ensp;<code>float</code> or <code>array_like</code></dt>
-<dd>Minimum acceptance return of the investor.
-Will broadcast per column.</dd>
+<dd>Minimum acceptance return of the investor.</dd>
 </dl></div>
 <details class="source">
 <summary>
@@ -1580,42 +1818,357 @@ Will broadcast per column.</dd>
 
     Args:
         risk_free (float or array_like): Constant risk-free return throughout the period.
-            Will broadcast per column.
-        required_return (float or array_like): Minimum acceptance return of the investor.
-            Will broadcast per column.&#34;&#34;&#34;
-    risk_free = np.broadcast_to(risk_free, (len(self.wrapper.columns),))
-    required_return = np.broadcast_to(required_return, (len(self.wrapper.columns),))
+        required_return (float or array_like): Minimum acceptance return of the investor.&#34;&#34;&#34;
     wrap_kwargs = merge_dicts(dict(name_or_index=&#39;omega_ratio&#39;), wrap_kwargs)
     return self.wrapper.wrap_reduced(nb.omega_ratio_nb(
         self.to_2d_array(), self.ann_factor, risk_free, required_return
     ), **wrap_kwargs)</code></pre>
 </details>
 </dd>
+<dt id="vectorbt.returns.accessors.ReturnsAccessor.rolling_alpha"><code class="name flex">
+<span>def <span class="ident fname">rolling_alpha</span></span>(<span>self, window, benchmark_rets, minp=None, risk_free=0.0, wrap_kwargs=None)</span>
+</code></dt>
+<dd>
+<div class="desc"><p>Rolling version of <code><a title="vectorbt.returns.accessors.ReturnsAccessor.alpha" href="#vectorbt.returns.accessors.ReturnsAccessor.alpha">ReturnsAccessor.alpha()</a></code>.</p></div>
+<details class="source">
+<summary>
+<span>Expand source code</span>
+</summary>
+<pre><code class="python">def rolling_alpha(self, window, benchmark_rets, minp=None, risk_free=0., wrap_kwargs=None):
+    &#34;&#34;&#34;Rolling version of `ReturnsAccessor.alpha`.&#34;&#34;&#34;
+    benchmark_rets = reshape_fns.broadcast_to(
+        reshape_fns.to_2d(benchmark_rets, raw=True),
+        reshape_fns.to_2d(self._obj, raw=True))
+    return self.wrapper.wrap(nb.rolling_alpha_nb(
+        self.to_2d_array(), window, minp, benchmark_rets, self.ann_factor, risk_free
+    ), **merge_dicts({}, wrap_kwargs))</code></pre>
+</details>
+</dd>
+<dt id="vectorbt.returns.accessors.ReturnsAccessor.rolling_annualized"><code class="name flex">
+<span>def <span class="ident fname">rolling_annualized</span></span>(<span>self, window, minp=None, wrap_kwargs=None)</span>
+</code></dt>
+<dd>
+<div class="desc"><p>Rolling version of <code><a title="vectorbt.returns.accessors.ReturnsAccessor.annualized" href="#vectorbt.returns.accessors.ReturnsAccessor.annualized">ReturnsAccessor.annualized()</a></code>.</p></div>
+<details class="source">
+<summary>
+<span>Expand source code</span>
+</summary>
+<pre><code class="python">def rolling_annualized(self, window, minp=None, wrap_kwargs=None):
+    &#34;&#34;&#34;Rolling version of `ReturnsAccessor.annualized`.&#34;&#34;&#34;
+    return self.wrapper.wrap(nb.rolling_annualized_return_nb(
+        self.to_2d_array(), window, minp, self.ann_factor
+    ), **merge_dicts({}, wrap_kwargs))</code></pre>
+</details>
+</dd>
+<dt id="vectorbt.returns.accessors.ReturnsAccessor.rolling_annualized_volatility"><code class="name flex">
+<span>def <span class="ident fname">rolling_annualized_volatility</span></span>(<span>self, window, minp=None, levy_alpha=2.0, ddof=1, wrap_kwargs=None)</span>
+</code></dt>
+<dd>
+<div class="desc"><p>Rolling version of <code><a title="vectorbt.returns.accessors.ReturnsAccessor.annualized_volatility" href="#vectorbt.returns.accessors.ReturnsAccessor.annualized_volatility">ReturnsAccessor.annualized_volatility()</a></code>.</p></div>
+<details class="source">
+<summary>
+<span>Expand source code</span>
+</summary>
+<pre><code class="python">def rolling_annualized_volatility(self, window, minp=None, levy_alpha=2.0, ddof=1, wrap_kwargs=None):
+    &#34;&#34;&#34;Rolling version of `ReturnsAccessor.annualized_volatility`.&#34;&#34;&#34;
+    return self.wrapper.wrap(nb.rolling_annualized_volatility_nb(
+        self.to_2d_array(), window, minp, self.ann_factor, levy_alpha, ddof
+    ), **merge_dicts({}, wrap_kwargs))</code></pre>
+</details>
+</dd>
+<dt id="vectorbt.returns.accessors.ReturnsAccessor.rolling_beta"><code class="name flex">
+<span>def <span class="ident fname">rolling_beta</span></span>(<span>self, window, benchmark_rets, minp=None, wrap_kwargs=None)</span>
+</code></dt>
+<dd>
+<div class="desc"><p>Rolling version of <code><a title="vectorbt.returns.accessors.ReturnsAccessor.beta" href="#vectorbt.returns.accessors.ReturnsAccessor.beta">ReturnsAccessor.beta()</a></code>.</p></div>
+<details class="source">
+<summary>
+<span>Expand source code</span>
+</summary>
+<pre><code class="python">def rolling_beta(self, window, benchmark_rets, minp=None, wrap_kwargs=None):
+    &#34;&#34;&#34;Rolling version of `ReturnsAccessor.beta`.&#34;&#34;&#34;
+    benchmark_rets = reshape_fns.broadcast_to(
+        reshape_fns.to_2d(benchmark_rets, raw=True),
+        reshape_fns.to_2d(self._obj, raw=True))
+    return self.wrapper.wrap(nb.rolling_beta_nb(
+        self.to_2d_array(), window, minp, benchmark_rets
+    ), **merge_dicts({}, wrap_kwargs))</code></pre>
+</details>
+</dd>
+<dt id="vectorbt.returns.accessors.ReturnsAccessor.rolling_calmar_ratio"><code class="name flex">
+<span>def <span class="ident fname">rolling_calmar_ratio</span></span>(<span>self, window, minp=None, wrap_kwargs=None)</span>
+</code></dt>
+<dd>
+<div class="desc"><p>Rolling version of <code><a title="vectorbt.returns.accessors.ReturnsAccessor.calmar_ratio" href="#vectorbt.returns.accessors.ReturnsAccessor.calmar_ratio">ReturnsAccessor.calmar_ratio()</a></code>.</p></div>
+<details class="source">
+<summary>
+<span>Expand source code</span>
+</summary>
+<pre><code class="python">def rolling_calmar_ratio(self, window, minp=None, wrap_kwargs=None):
+    &#34;&#34;&#34;Rolling version of `ReturnsAccessor.calmar_ratio`.&#34;&#34;&#34;
+    return self.wrapper.wrap(nb.rolling_calmar_ratio_nb(
+        self.to_2d_array(), window, minp, self.ann_factor
+    ), **merge_dicts({}, wrap_kwargs))</code></pre>
+</details>
+</dd>
+<dt id="vectorbt.returns.accessors.ReturnsAccessor.rolling_capture"><code class="name flex">
+<span>def <span class="ident fname">rolling_capture</span></span>(<span>self, window, benchmark_rets, minp=None, wrap_kwargs=None)</span>
+</code></dt>
+<dd>
+<div class="desc"><p>Rolling version of <code><a title="vectorbt.returns.accessors.ReturnsAccessor.capture" href="#vectorbt.returns.accessors.ReturnsAccessor.capture">ReturnsAccessor.capture()</a></code>.</p></div>
+<details class="source">
+<summary>
+<span>Expand source code</span>
+</summary>
+<pre><code class="python">def rolling_capture(self, window, benchmark_rets, minp=None, wrap_kwargs=None):
+    &#34;&#34;&#34;Rolling version of `ReturnsAccessor.capture`.&#34;&#34;&#34;
+    benchmark_rets = reshape_fns.broadcast_to(
+        reshape_fns.to_2d(benchmark_rets, raw=True),
+        reshape_fns.to_2d(self._obj, raw=True))
+    return self.wrapper.wrap(nb.rolling_capture_nb(
+        self.to_2d_array(), window, minp, benchmark_rets, self.ann_factor
+    ), **merge_dicts({}, wrap_kwargs))</code></pre>
+</details>
+</dd>
+<dt id="vectorbt.returns.accessors.ReturnsAccessor.rolling_common_sense_ratio"><code class="name flex">
+<span>def <span class="ident fname">rolling_common_sense_ratio</span></span>(<span>self, window, minp=None, wrap_kwargs=None)</span>
+</code></dt>
+<dd>
+<div class="desc"><p>Rolling version of <code><a title="vectorbt.returns.accessors.ReturnsAccessor.common_sense_ratio" href="#vectorbt.returns.accessors.ReturnsAccessor.common_sense_ratio">ReturnsAccessor.common_sense_ratio()</a></code>.</p></div>
+<details class="source">
+<summary>
+<span>Expand source code</span>
+</summary>
+<pre><code class="python">def rolling_common_sense_ratio(self, window, minp=None, wrap_kwargs=None):
+    &#34;&#34;&#34;Rolling version of `ReturnsAccessor.common_sense_ratio`.&#34;&#34;&#34;
+    return self.wrapper.wrap(reshape_fns.to_1d(
+        self.rolling_tail_ratio(window, minp=minp) * (1 + self.rolling_annualized(window, minp=minp)), raw=True
+    ), **merge_dicts({}, wrap_kwargs))</code></pre>
+</details>
+</dd>
+<dt id="vectorbt.returns.accessors.ReturnsAccessor.rolling_cond_value_at_risk"><code class="name flex">
+<span>def <span class="ident fname">rolling_cond_value_at_risk</span></span>(<span>self, window, minp=None, cutoff=0.05, wrap_kwargs=None)</span>
+</code></dt>
+<dd>
+<div class="desc"><p>Rolling version of <code><a title="vectorbt.returns.accessors.ReturnsAccessor.cond_value_at_risk" href="#vectorbt.returns.accessors.ReturnsAccessor.cond_value_at_risk">ReturnsAccessor.cond_value_at_risk()</a></code>.</p></div>
+<details class="source">
+<summary>
+<span>Expand source code</span>
+</summary>
+<pre><code class="python">def rolling_cond_value_at_risk(self, window, minp=None, cutoff=0.05, wrap_kwargs=None):
+    &#34;&#34;&#34;Rolling version of `ReturnsAccessor.cond_value_at_risk`.&#34;&#34;&#34;
+    return self.wrapper.wrap(nb.rolling_cond_value_at_risk_nb(
+        self.to_2d_array(), window, minp, cutoff
+    ), **merge_dicts({}, wrap_kwargs))</code></pre>
+</details>
+</dd>
+<dt id="vectorbt.returns.accessors.ReturnsAccessor.rolling_down_capture"><code class="name flex">
+<span>def <span class="ident fname">rolling_down_capture</span></span>(<span>self, window, benchmark_rets, minp=None, wrap_kwargs=None)</span>
+</code></dt>
+<dd>
+<div class="desc"><p>Rolling version of <code><a title="vectorbt.returns.accessors.ReturnsAccessor.down_capture" href="#vectorbt.returns.accessors.ReturnsAccessor.down_capture">ReturnsAccessor.down_capture()</a></code>.</p></div>
+<details class="source">
+<summary>
+<span>Expand source code</span>
+</summary>
+<pre><code class="python">def rolling_down_capture(self, window, benchmark_rets, minp=None, wrap_kwargs=None):
+    &#34;&#34;&#34;Rolling version of `ReturnsAccessor.down_capture`.&#34;&#34;&#34;
+    benchmark_rets = reshape_fns.broadcast_to(
+        reshape_fns.to_2d(benchmark_rets, raw=True),
+        reshape_fns.to_2d(self._obj, raw=True))
+    return self.wrapper.wrap(nb.rolling_down_capture_nb(
+        self.to_2d_array(), window, minp, benchmark_rets, self.ann_factor
+    ), **merge_dicts({}, wrap_kwargs))</code></pre>
+</details>
+</dd>
+<dt id="vectorbt.returns.accessors.ReturnsAccessor.rolling_downside_risk"><code class="name flex">
+<span>def <span class="ident fname">rolling_downside_risk</span></span>(<span>self, window, minp=None, required_return=0.0, wrap_kwargs=None)</span>
+</code></dt>
+<dd>
+<div class="desc"><p>Rolling version of <code><a title="vectorbt.returns.accessors.ReturnsAccessor.downside_risk" href="#vectorbt.returns.accessors.ReturnsAccessor.downside_risk">ReturnsAccessor.downside_risk()</a></code>.</p></div>
+<details class="source">
+<summary>
+<span>Expand source code</span>
+</summary>
+<pre><code class="python">def rolling_downside_risk(self, window, minp=None, required_return=0., wrap_kwargs=None):
+    &#34;&#34;&#34;Rolling version of `ReturnsAccessor.downside_risk`.&#34;&#34;&#34;
+    return self.wrapper.wrap(nb.rolling_downside_risk_nb(
+        self.to_2d_array(), window, minp, self.ann_factor, required_return
+    ), **merge_dicts({}, wrap_kwargs))</code></pre>
+</details>
+</dd>
+<dt id="vectorbt.returns.accessors.ReturnsAccessor.rolling_information_ratio"><code class="name flex">
+<span>def <span class="ident fname">rolling_information_ratio</span></span>(<span>self, window, benchmark_rets, minp=None, ddof=1, wrap_kwargs=None)</span>
+</code></dt>
+<dd>
+<div class="desc"><p>Rolling version of <code><a title="vectorbt.returns.accessors.ReturnsAccessor.information_ratio" href="#vectorbt.returns.accessors.ReturnsAccessor.information_ratio">ReturnsAccessor.information_ratio()</a></code>.</p></div>
+<details class="source">
+<summary>
+<span>Expand source code</span>
+</summary>
+<pre><code class="python">def rolling_information_ratio(self, window, benchmark_rets, minp=None, ddof=1, wrap_kwargs=None):
+    &#34;&#34;&#34;Rolling version of `ReturnsAccessor.information_ratio`.&#34;&#34;&#34;
+    benchmark_rets = reshape_fns.broadcast_to(
+        reshape_fns.to_2d(benchmark_rets, raw=True),
+        reshape_fns.to_2d(self._obj, raw=True))
+    return self.wrapper.wrap(nb.rolling_information_ratio_nb(
+        self.to_2d_array(), window, minp, benchmark_rets, ddof
+    ), **merge_dicts({}, wrap_kwargs))</code></pre>
+</details>
+</dd>
+<dt id="vectorbt.returns.accessors.ReturnsAccessor.rolling_max_drawdown"><code class="name flex">
+<span>def <span class="ident fname">rolling_max_drawdown</span></span>(<span>self, window, minp=None, wrap_kwargs=None)</span>
+</code></dt>
+<dd>
+<div class="desc"><p>Rolling version of <code><a title="vectorbt.returns.accessors.ReturnsAccessor.max_drawdown" href="#vectorbt.returns.accessors.ReturnsAccessor.max_drawdown">ReturnsAccessor.max_drawdown()</a></code>.</p></div>
+<details class="source">
+<summary>
+<span>Expand source code</span>
+</summary>
+<pre><code class="python">def rolling_max_drawdown(self, window, minp=None, wrap_kwargs=None):
+    &#34;&#34;&#34;Rolling version of `ReturnsAccessor.max_drawdown`.&#34;&#34;&#34;
+    return self.wrapper.wrap(nb.rolling_max_drawdown_nb(
+        self.to_2d_array(), window, minp
+    ), **merge_dicts({}, wrap_kwargs))</code></pre>
+</details>
+</dd>
+<dt id="vectorbt.returns.accessors.ReturnsAccessor.rolling_omega_ratio"><code class="name flex">
+<span>def <span class="ident fname">rolling_omega_ratio</span></span>(<span>self, window, minp=None, risk_free=0.0, required_return=0.0, wrap_kwargs=None)</span>
+</code></dt>
+<dd>
+<div class="desc"><p>Rolling version of <code><a title="vectorbt.returns.accessors.ReturnsAccessor.omega_ratio" href="#vectorbt.returns.accessors.ReturnsAccessor.omega_ratio">ReturnsAccessor.omega_ratio()</a></code>.</p></div>
+<details class="source">
+<summary>
+<span>Expand source code</span>
+</summary>
+<pre><code class="python">def rolling_omega_ratio(self, window, minp=None, risk_free=0., required_return=0., wrap_kwargs=None):
+    &#34;&#34;&#34;Rolling version of `ReturnsAccessor.omega_ratio`.&#34;&#34;&#34;
+    return self.wrapper.wrap(nb.rolling_omega_ratio_nb(
+        self.to_2d_array(), window, minp, self.ann_factor, risk_free, required_return
+    ), **merge_dicts({}, wrap_kwargs))</code></pre>
+</details>
+</dd>
+<dt id="vectorbt.returns.accessors.ReturnsAccessor.rolling_sharpe_ratio"><code class="name flex">
+<span>def <span class="ident fname">rolling_sharpe_ratio</span></span>(<span>self, window, minp=None, risk_free=0.0, ddof=1, wrap_kwargs=None)</span>
+</code></dt>
+<dd>
+<div class="desc"><p>Rolling version of <code><a title="vectorbt.returns.accessors.ReturnsAccessor.sharpe_ratio" href="#vectorbt.returns.accessors.ReturnsAccessor.sharpe_ratio">ReturnsAccessor.sharpe_ratio()</a></code>.</p></div>
+<details class="source">
+<summary>
+<span>Expand source code</span>
+</summary>
+<pre><code class="python">def rolling_sharpe_ratio(self, window, minp=None, risk_free=0., ddof=1, wrap_kwargs=None):
+    &#34;&#34;&#34;Rolling version of `ReturnsAccessor.sharpe_ratio`.&#34;&#34;&#34;
+    return self.wrapper.wrap(nb.rolling_sharpe_ratio_nb(
+        self.to_2d_array(), window, minp, self.ann_factor, risk_free, ddof
+    ), **merge_dicts({}, wrap_kwargs))</code></pre>
+</details>
+</dd>
+<dt id="vectorbt.returns.accessors.ReturnsAccessor.rolling_sortino_ratio"><code class="name flex">
+<span>def <span class="ident fname">rolling_sortino_ratio</span></span>(<span>self, window, minp=None, required_return=0.0, wrap_kwargs=None)</span>
+</code></dt>
+<dd>
+<div class="desc"><p>Rolling version of <code><a title="vectorbt.returns.accessors.ReturnsAccessor.sortino_ratio" href="#vectorbt.returns.accessors.ReturnsAccessor.sortino_ratio">ReturnsAccessor.sortino_ratio()</a></code>.</p></div>
+<details class="source">
+<summary>
+<span>Expand source code</span>
+</summary>
+<pre><code class="python">def rolling_sortino_ratio(self, window, minp=None, required_return=0., wrap_kwargs=None):
+    &#34;&#34;&#34;Rolling version of `ReturnsAccessor.sortino_ratio`.&#34;&#34;&#34;
+    return self.wrapper.wrap(nb.rolling_sortino_ratio_nb(
+        self.to_2d_array(), window, minp, self.ann_factor, required_return
+    ), **merge_dicts({}, wrap_kwargs))</code></pre>
+</details>
+</dd>
+<dt id="vectorbt.returns.accessors.ReturnsAccessor.rolling_tail_ratio"><code class="name flex">
+<span>def <span class="ident fname">rolling_tail_ratio</span></span>(<span>self, window, minp=None, wrap_kwargs=None)</span>
+</code></dt>
+<dd>
+<div class="desc"><p>Rolling version of <code><a title="vectorbt.returns.accessors.ReturnsAccessor.tail_ratio" href="#vectorbt.returns.accessors.ReturnsAccessor.tail_ratio">ReturnsAccessor.tail_ratio()</a></code>.</p></div>
+<details class="source">
+<summary>
+<span>Expand source code</span>
+</summary>
+<pre><code class="python">def rolling_tail_ratio(self, window, minp=None, wrap_kwargs=None):
+    &#34;&#34;&#34;Rolling version of `ReturnsAccessor.tail_ratio`.&#34;&#34;&#34;
+    return self.wrapper.wrap(nb.rolling_tail_ratio_nb(
+        self.to_2d_array(), window, minp
+    ), **merge_dicts({}, wrap_kwargs))</code></pre>
+</details>
+</dd>
+<dt id="vectorbt.returns.accessors.ReturnsAccessor.rolling_total"><code class="name flex">
+<span>def <span class="ident fname">rolling_total</span></span>(<span>self, window, minp=None, wrap_kwargs=None)</span>
+</code></dt>
+<dd>
+<div class="desc"><p>Rolling version of <code><a title="vectorbt.returns.accessors.ReturnsAccessor.total" href="#vectorbt.returns.accessors.ReturnsAccessor.total">ReturnsAccessor.total()</a></code>.</p></div>
+<details class="source">
+<summary>
+<span>Expand source code</span>
+</summary>
+<pre><code class="python">def rolling_total(self, window, minp=None, wrap_kwargs=None):
+    &#34;&#34;&#34;Rolling version of `ReturnsAccessor.total`.&#34;&#34;&#34;
+    return self.wrapper.wrap(nb.rolling_cum_returns_final_nb(
+        self.to_2d_array(), window, minp, 0.
+    ), **merge_dicts({}, wrap_kwargs))</code></pre>
+</details>
+</dd>
+<dt id="vectorbt.returns.accessors.ReturnsAccessor.rolling_up_capture"><code class="name flex">
+<span>def <span class="ident fname">rolling_up_capture</span></span>(<span>self, window, benchmark_rets, minp=None, wrap_kwargs=None)</span>
+</code></dt>
+<dd>
+<div class="desc"><p>Rolling version of <code><a title="vectorbt.returns.accessors.ReturnsAccessor.up_capture" href="#vectorbt.returns.accessors.ReturnsAccessor.up_capture">ReturnsAccessor.up_capture()</a></code>.</p></div>
+<details class="source">
+<summary>
+<span>Expand source code</span>
+</summary>
+<pre><code class="python">def rolling_up_capture(self, window, benchmark_rets, minp=None, wrap_kwargs=None):
+    &#34;&#34;&#34;Rolling version of `ReturnsAccessor.up_capture`.&#34;&#34;&#34;
+    benchmark_rets = reshape_fns.broadcast_to(
+        reshape_fns.to_2d(benchmark_rets, raw=True),
+        reshape_fns.to_2d(self._obj, raw=True))
+    return self.wrapper.wrap(nb.rolling_up_capture_nb(
+        self.to_2d_array(), window, minp, benchmark_rets, self.ann_factor
+    ), **merge_dicts({}, wrap_kwargs))</code></pre>
+</details>
+</dd>
+<dt id="vectorbt.returns.accessors.ReturnsAccessor.rolling_value_at_risk"><code class="name flex">
+<span>def <span class="ident fname">rolling_value_at_risk</span></span>(<span>self, window, minp=None, cutoff=0.05, wrap_kwargs=None)</span>
+</code></dt>
+<dd>
+<div class="desc"><p>Rolling version of <code><a title="vectorbt.returns.accessors.ReturnsAccessor.value_at_risk" href="#vectorbt.returns.accessors.ReturnsAccessor.value_at_risk">ReturnsAccessor.value_at_risk()</a></code>.</p></div>
+<details class="source">
+<summary>
+<span>Expand source code</span>
+</summary>
+<pre><code class="python">def rolling_value_at_risk(self, window, minp=None, cutoff=0.05, wrap_kwargs=None):
+    &#34;&#34;&#34;Rolling version of `ReturnsAccessor.value_at_risk`.&#34;&#34;&#34;
+    return self.wrapper.wrap(nb.rolling_value_at_risk_nb(
+        self.to_2d_array(), window, minp, cutoff
+    ), **merge_dicts({}, wrap_kwargs))</code></pre>
+</details>
+</dd>
 <dt id="vectorbt.returns.accessors.ReturnsAccessor.sharpe_ratio"><code class="name flex">
-<span>def <span class="ident fname">sharpe_ratio</span></span>(<span>self, risk_free=0.0, wrap_kwargs=None)</span>
+<span>def <span class="ident fname">sharpe_ratio</span></span>(<span>self, risk_free=0.0, ddof=1, wrap_kwargs=None)</span>
 </code></dt>
 <dd>
 <div class="desc"><p>Sharpe ratio of a strategy.</p>
 <h2 id="args">Args</h2>
 <dl>
 <dt><strong><code>risk_free</code></strong> :&ensp;<code>float</code> or <code>array_like</code></dt>
-<dd>Constant risk-free return throughout the period.
-Will broadcast per column.</dd>
+<dd>Constant risk-free return throughout the period.</dd>
 </dl></div>
 <details class="source">
 <summary>
 <span>Expand source code</span>
 </summary>
-<pre><code class="python">def sharpe_ratio(self, risk_free=0., wrap_kwargs=None):
+<pre><code class="python">def sharpe_ratio(self, risk_free=0., ddof=1, wrap_kwargs=None):
     &#34;&#34;&#34;Sharpe ratio of a strategy.
 
     Args:
-        risk_free (float or array_like): Constant risk-free return throughout the period.
-            Will broadcast per column.&#34;&#34;&#34;
-    risk_free = np.broadcast_to(risk_free, (len(self.wrapper.columns),))
+        risk_free (float or array_like): Constant risk-free return throughout the period.&#34;&#34;&#34;
     wrap_kwargs = merge_dicts(dict(name_or_index=&#39;sharpe_ratio&#39;), wrap_kwargs)
     return self.wrapper.wrap_reduced(nb.sharpe_ratio_nb(
-        self.to_2d_array(), self.ann_factor, risk_free
+        self.to_2d_array(), self.ann_factor, risk_free, ddof
     ), **wrap_kwargs)</code></pre>
 </details>
 </dd>
@@ -1640,7 +2193,6 @@ Will broadcast per column.</dd>
     Args:
         required_return (float or array_like): Minimum acceptance return of the investor.
             Will broadcast per column.&#34;&#34;&#34;
-    required_return = np.broadcast_to(required_return, (len(self.wrapper.columns),))
     wrap_kwargs = merge_dicts(dict(name_or_index=&#39;sortino_ratio&#39;), wrap_kwargs)
     return self.wrapper.wrap_reduced(nb.sortino_ratio_nb(
         self.to_2d_array(), self.ann_factor, required_return
@@ -1810,7 +2362,7 @@ Name: BTC-USD, dtype: object
     &#34;&#34;&#34;Total return.&#34;&#34;&#34;
     wrap_kwargs = merge_dicts(dict(name_or_index=&#39;total_return&#39;), wrap_kwargs)
     return self.wrapper.wrap_reduced(nb.cum_returns_final_nb(
-        self.to_2d_array(), np.full(len(self.wrapper.columns), 0.)
+        self.to_2d_array(), 0.
     ), **wrap_kwargs)</code></pre>
 </details>
 </dd>
@@ -1822,8 +2374,7 @@ Name: BTC-USD, dtype: object
 <h2 id="args">Args</h2>
 <dl>
 <dt><strong><code>benchmark_rets</code></strong> :&ensp;<code>array_like</code></dt>
-<dd>Benchmark return to compare returns against.
-Will broadcast per element.</dd>
+<dd>Benchmark return to compare returns against. Will broadcast.</dd>
 </dl></div>
 <details class="source">
 <summary>
@@ -1833,8 +2384,7 @@ Will broadcast per element.</dd>
     &#34;&#34;&#34;Capture ratio for periods when the benchmark return is positive.
 
     Args:
-        benchmark_rets (array_like): Benchmark return to compare returns against.
-            Will broadcast per element.&#34;&#34;&#34;
+        benchmark_rets (array_like): Benchmark return to compare returns against. Will broadcast.&#34;&#34;&#34;
     benchmark_rets = reshape_fns.broadcast_to(
         reshape_fns.to_2d(benchmark_rets, raw=True),
         reshape_fns.to_2d(self._obj, raw=True))
@@ -1853,7 +2403,7 @@ Will broadcast per element.</dd>
 <dl>
 <dt><strong><code>cutoff</code></strong> :&ensp;<code>float</code> or <code>array_like</code></dt>
 <dd>Decimal representing the percentage cutoff for the
-bottom percentile of returns. Will broadcast per column.</dd>
+bottom percentile of returns.</dd>
 </dl></div>
 <details class="source">
 <summary>
@@ -1864,8 +2414,7 @@ bottom percentile of returns. Will broadcast per column.</dd>
 
     Args:
         cutoff (float or array_like): Decimal representing the percentage cutoff for the
-            bottom percentile of returns. Will broadcast per column.&#34;&#34;&#34;
-    cutoff = np.broadcast_to(cutoff, (len(self.wrapper.columns),))
+            bottom percentile of returns.&#34;&#34;&#34;
     wrap_kwargs = merge_dicts(dict(name_or_index=&#39;value_at_risk&#39;), wrap_kwargs)
     return self.wrapper.wrap_reduced(nb.value_at_risk_nb(
         self.to_2d_array(), cutoff
@@ -1908,6 +2457,7 @@ bottom percentile of returns. Will broadcast per column.</dd>
 <li><code><a title="vectorbt.generic.accessors.GenericAccessor.expanding_max" href="../generic/accessors.html#vectorbt.generic.accessors.GenericAccessor.expanding_max">expanding_max</a></code></li>
 <li><code><a title="vectorbt.generic.accessors.GenericAccessor.expanding_mean" href="../generic/accessors.html#vectorbt.generic.accessors.GenericAccessor.expanding_mean">expanding_mean</a></code></li>
 <li><code><a title="vectorbt.generic.accessors.GenericAccessor.expanding_min" href="../generic/accessors.html#vectorbt.generic.accessors.GenericAccessor.expanding_min">expanding_min</a></code></li>
+<li><code><a title="vectorbt.generic.accessors.GenericAccessor.expanding_split" href="../generic/accessors.html#vectorbt.generic.accessors.GenericAccessor.expanding_split">expanding_split</a></code></li>
 <li><code><a title="vectorbt.generic.accessors.GenericAccessor.expanding_std" href="../generic/accessors.html#vectorbt.generic.accessors.GenericAccessor.expanding_std">expanding_std</a></code></li>
 <li><code><a title="vectorbt.generic.accessors.GenericAccessor.ffill" href="../generic/accessors.html#vectorbt.generic.accessors.GenericAccessor.ffill">ffill</a></code></li>
 <li><code><a title="vectorbt.generic.accessors.GenericAccessor.fillna" href="../generic/accessors.html#vectorbt.generic.accessors.GenericAccessor.fillna">fillna</a></code></li>
@@ -1927,6 +2477,7 @@ bottom percentile of returns. Will broadcast per column.</dd>
 <li><code><a title="vectorbt.generic.accessors.GenericAccessor.pct_change" href="../generic/accessors.html#vectorbt.generic.accessors.GenericAccessor.pct_change">pct_change</a></code></li>
 <li><code><a title="vectorbt.generic.accessors.GenericAccessor.plot" href="../generic/accessors.html#vectorbt.generic.accessors.GenericAccessor.plot">plot</a></code></li>
 <li><code><a title="vectorbt.generic.accessors.GenericAccessor.product" href="../generic/accessors.html#vectorbt.generic.accessors.GenericAccessor.product">product</a></code></li>
+<li><code><a title="vectorbt.generic.accessors.GenericAccessor.range_split" href="../generic/accessors.html#vectorbt.generic.accessors.GenericAccessor.range_split">range_split</a></code></li>
 <li><code><a title="vectorbt.generic.accessors.GenericAccessor.reduce" href="../generic/accessors.html#vectorbt.generic.accessors.GenericAccessor.reduce">reduce</a></code></li>
 <li><code><a title="vectorbt.generic.accessors.GenericAccessor.rename_levels" href="../base/accessors.html#vectorbt.base.accessors.BaseAccessor.rename_levels">rename_levels</a></code></li>
 <li><code><a title="vectorbt.generic.accessors.GenericAccessor.repeat" href="../base/accessors.html#vectorbt.base.accessors.BaseAccessor.repeat">repeat</a></code></li>
@@ -1935,11 +2486,12 @@ bottom percentile of returns. Will broadcast per column.</dd>
 <li><code><a title="vectorbt.generic.accessors.GenericAccessor.rolling_max" href="../generic/accessors.html#vectorbt.generic.accessors.GenericAccessor.rolling_max">rolling_max</a></code></li>
 <li><code><a title="vectorbt.generic.accessors.GenericAccessor.rolling_mean" href="../generic/accessors.html#vectorbt.generic.accessors.GenericAccessor.rolling_mean">rolling_mean</a></code></li>
 <li><code><a title="vectorbt.generic.accessors.GenericAccessor.rolling_min" href="../generic/accessors.html#vectorbt.generic.accessors.GenericAccessor.rolling_min">rolling_min</a></code></li>
+<li><code><a title="vectorbt.generic.accessors.GenericAccessor.rolling_split" href="../generic/accessors.html#vectorbt.generic.accessors.GenericAccessor.rolling_split">rolling_split</a></code></li>
 <li><code><a title="vectorbt.generic.accessors.GenericAccessor.rolling_std" href="../generic/accessors.html#vectorbt.generic.accessors.GenericAccessor.rolling_std">rolling_std</a></code></li>
 <li><code><a title="vectorbt.generic.accessors.GenericAccessor.scatterplot" href="../generic/accessors.html#vectorbt.generic.accessors.GenericAccessor.scatterplot">scatterplot</a></code></li>
 <li><code><a title="vectorbt.generic.accessors.GenericAccessor.select_levels" href="../base/accessors.html#vectorbt.base.accessors.BaseAccessor.select_levels">select_levels</a></code></li>
 <li><code><a title="vectorbt.generic.accessors.GenericAccessor.shuffle" href="../generic/accessors.html#vectorbt.generic.accessors.GenericAccessor.shuffle">shuffle</a></code></li>
-<li><code><a title="vectorbt.generic.accessors.GenericAccessor.split_into_ranges" href="../generic/accessors.html#vectorbt.generic.accessors.GenericAccessor.split_into_ranges">split_into_ranges</a></code></li>
+<li><code><a title="vectorbt.generic.accessors.GenericAccessor.split" href="../generic/accessors.html#vectorbt.generic.accessors.GenericAccessor.split">split</a></code></li>
 <li><code><a title="vectorbt.generic.accessors.GenericAccessor.squeeze_grouped" href="../generic/accessors.html#vectorbt.generic.accessors.GenericAccessor.squeeze_grouped">squeeze_grouped</a></code></li>
 <li><code><a title="vectorbt.generic.accessors.GenericAccessor.stack_index" href="../base/accessors.html#vectorbt.base.accessors.BaseAccessor.stack_index">stack_index</a></code></li>
 <li><code><a title="vectorbt.generic.accessors.GenericAccessor.std" href="../generic/accessors.html#vectorbt.generic.accessors.GenericAccessor.std">std</a></code></li>
@@ -2014,7 +2566,7 @@ bottom percentile of returns. Will broadcast per column.</dd>
 <li><code><a title="vectorbt.returns.accessors.ReturnsAccessor.combine_with_multiple" href="../base/accessors.html#vectorbt.base.accessors.BaseAccessor.combine_with_multiple">combine_with_multiple</a></code></li>
 <li><code><a title="vectorbt.returns.accessors.ReturnsAccessor.common_sense_ratio" href="#vectorbt.returns.accessors.ReturnsAccessor.common_sense_ratio">common_sense_ratio</a></code></li>
 <li><code><a title="vectorbt.returns.accessors.ReturnsAccessor.concat" href="../base/accessors.html#vectorbt.base.accessors.BaseAccessor.concat">concat</a></code></li>
-<li><code><a title="vectorbt.returns.accessors.ReturnsAccessor.conditional_value_at_risk" href="#vectorbt.returns.accessors.ReturnsAccessor.conditional_value_at_risk">conditional_value_at_risk</a></code></li>
+<li><code><a title="vectorbt.returns.accessors.ReturnsAccessor.cond_value_at_risk" href="#vectorbt.returns.accessors.ReturnsAccessor.cond_value_at_risk">cond_value_at_risk</a></code></li>
 <li><code><a title="vectorbt.returns.accessors.ReturnsAccessor.count" href="../generic/accessors.html#vectorbt.generic.accessors.GenericAccessor.count">count</a></code></li>
 <li><code><a title="vectorbt.returns.accessors.ReturnsAccessor.cumprod" href="../generic/accessors.html#vectorbt.generic.accessors.GenericAccessor.cumprod">cumprod</a></code></li>
 <li><code><a title="vectorbt.returns.accessors.ReturnsAccessor.cumsum" href="../generic/accessors.html#vectorbt.generic.accessors.GenericAccessor.cumsum">cumsum</a></code></li>
@@ -2038,6 +2590,7 @@ bottom percentile of returns. Will broadcast per column.</dd>
 <li><code><a title="vectorbt.returns.accessors.ReturnsAccessor.expanding_max" href="../generic/accessors.html#vectorbt.generic.accessors.GenericAccessor.expanding_max">expanding_max</a></code></li>
 <li><code><a title="vectorbt.returns.accessors.ReturnsAccessor.expanding_mean" href="../generic/accessors.html#vectorbt.generic.accessors.GenericAccessor.expanding_mean">expanding_mean</a></code></li>
 <li><code><a title="vectorbt.returns.accessors.ReturnsAccessor.expanding_min" href="../generic/accessors.html#vectorbt.generic.accessors.GenericAccessor.expanding_min">expanding_min</a></code></li>
+<li><code><a title="vectorbt.returns.accessors.ReturnsAccessor.expanding_split" href="../generic/accessors.html#vectorbt.generic.accessors.GenericAccessor.expanding_split">expanding_split</a></code></li>
 <li><code><a title="vectorbt.returns.accessors.ReturnsAccessor.expanding_std" href="../generic/accessors.html#vectorbt.generic.accessors.GenericAccessor.expanding_std">expanding_std</a></code></li>
 <li><code><a title="vectorbt.returns.accessors.ReturnsAccessor.ffill" href="../generic/accessors.html#vectorbt.generic.accessors.GenericAccessor.ffill">ffill</a></code></li>
 <li><code><a title="vectorbt.returns.accessors.ReturnsAccessor.fillna" href="../generic/accessors.html#vectorbt.generic.accessors.GenericAccessor.fillna">fillna</a></code></li>
@@ -2062,21 +2615,42 @@ bottom percentile of returns. Will broadcast per column.</dd>
 <li><code><a title="vectorbt.returns.accessors.ReturnsAccessor.pct_change" href="../generic/accessors.html#vectorbt.generic.accessors.GenericAccessor.pct_change">pct_change</a></code></li>
 <li><code><a title="vectorbt.returns.accessors.ReturnsAccessor.plot" href="../generic/accessors.html#vectorbt.generic.accessors.GenericAccessor.plot">plot</a></code></li>
 <li><code><a title="vectorbt.returns.accessors.ReturnsAccessor.product" href="../generic/accessors.html#vectorbt.generic.accessors.GenericAccessor.product">product</a></code></li>
+<li><code><a title="vectorbt.returns.accessors.ReturnsAccessor.range_split" href="../generic/accessors.html#vectorbt.generic.accessors.GenericAccessor.range_split">range_split</a></code></li>
 <li><code><a title="vectorbt.returns.accessors.ReturnsAccessor.reduce" href="../generic/accessors.html#vectorbt.generic.accessors.GenericAccessor.reduce">reduce</a></code></li>
 <li><code><a title="vectorbt.returns.accessors.ReturnsAccessor.rename_levels" href="../base/accessors.html#vectorbt.base.accessors.BaseAccessor.rename_levels">rename_levels</a></code></li>
 <li><code><a title="vectorbt.returns.accessors.ReturnsAccessor.repeat" href="../base/accessors.html#vectorbt.base.accessors.BaseAccessor.repeat">repeat</a></code></li>
 <li><code><a title="vectorbt.returns.accessors.ReturnsAccessor.resample_apply" href="../generic/accessors.html#vectorbt.generic.accessors.GenericAccessor.resample_apply">resample_apply</a></code></li>
+<li><code><a title="vectorbt.returns.accessors.ReturnsAccessor.rolling_alpha" href="#vectorbt.returns.accessors.ReturnsAccessor.rolling_alpha">rolling_alpha</a></code></li>
+<li><code><a title="vectorbt.returns.accessors.ReturnsAccessor.rolling_annualized" href="#vectorbt.returns.accessors.ReturnsAccessor.rolling_annualized">rolling_annualized</a></code></li>
+<li><code><a title="vectorbt.returns.accessors.ReturnsAccessor.rolling_annualized_volatility" href="#vectorbt.returns.accessors.ReturnsAccessor.rolling_annualized_volatility">rolling_annualized_volatility</a></code></li>
 <li><code><a title="vectorbt.returns.accessors.ReturnsAccessor.rolling_apply" href="../generic/accessors.html#vectorbt.generic.accessors.GenericAccessor.rolling_apply">rolling_apply</a></code></li>
+<li><code><a title="vectorbt.returns.accessors.ReturnsAccessor.rolling_beta" href="#vectorbt.returns.accessors.ReturnsAccessor.rolling_beta">rolling_beta</a></code></li>
+<li><code><a title="vectorbt.returns.accessors.ReturnsAccessor.rolling_calmar_ratio" href="#vectorbt.returns.accessors.ReturnsAccessor.rolling_calmar_ratio">rolling_calmar_ratio</a></code></li>
+<li><code><a title="vectorbt.returns.accessors.ReturnsAccessor.rolling_capture" href="#vectorbt.returns.accessors.ReturnsAccessor.rolling_capture">rolling_capture</a></code></li>
+<li><code><a title="vectorbt.returns.accessors.ReturnsAccessor.rolling_common_sense_ratio" href="#vectorbt.returns.accessors.ReturnsAccessor.rolling_common_sense_ratio">rolling_common_sense_ratio</a></code></li>
+<li><code><a title="vectorbt.returns.accessors.ReturnsAccessor.rolling_cond_value_at_risk" href="#vectorbt.returns.accessors.ReturnsAccessor.rolling_cond_value_at_risk">rolling_cond_value_at_risk</a></code></li>
+<li><code><a title="vectorbt.returns.accessors.ReturnsAccessor.rolling_down_capture" href="#vectorbt.returns.accessors.ReturnsAccessor.rolling_down_capture">rolling_down_capture</a></code></li>
+<li><code><a title="vectorbt.returns.accessors.ReturnsAccessor.rolling_downside_risk" href="#vectorbt.returns.accessors.ReturnsAccessor.rolling_downside_risk">rolling_downside_risk</a></code></li>
+<li><code><a title="vectorbt.returns.accessors.ReturnsAccessor.rolling_information_ratio" href="#vectorbt.returns.accessors.ReturnsAccessor.rolling_information_ratio">rolling_information_ratio</a></code></li>
 <li><code><a title="vectorbt.returns.accessors.ReturnsAccessor.rolling_max" href="../generic/accessors.html#vectorbt.generic.accessors.GenericAccessor.rolling_max">rolling_max</a></code></li>
+<li><code><a title="vectorbt.returns.accessors.ReturnsAccessor.rolling_max_drawdown" href="#vectorbt.returns.accessors.ReturnsAccessor.rolling_max_drawdown">rolling_max_drawdown</a></code></li>
 <li><code><a title="vectorbt.returns.accessors.ReturnsAccessor.rolling_mean" href="../generic/accessors.html#vectorbt.generic.accessors.GenericAccessor.rolling_mean">rolling_mean</a></code></li>
 <li><code><a title="vectorbt.returns.accessors.ReturnsAccessor.rolling_min" href="../generic/accessors.html#vectorbt.generic.accessors.GenericAccessor.rolling_min">rolling_min</a></code></li>
+<li><code><a title="vectorbt.returns.accessors.ReturnsAccessor.rolling_omega_ratio" href="#vectorbt.returns.accessors.ReturnsAccessor.rolling_omega_ratio">rolling_omega_ratio</a></code></li>
+<li><code><a title="vectorbt.returns.accessors.ReturnsAccessor.rolling_sharpe_ratio" href="#vectorbt.returns.accessors.ReturnsAccessor.rolling_sharpe_ratio">rolling_sharpe_ratio</a></code></li>
+<li><code><a title="vectorbt.returns.accessors.ReturnsAccessor.rolling_sortino_ratio" href="#vectorbt.returns.accessors.ReturnsAccessor.rolling_sortino_ratio">rolling_sortino_ratio</a></code></li>
+<li><code><a title="vectorbt.returns.accessors.ReturnsAccessor.rolling_split" href="../generic/accessors.html#vectorbt.generic.accessors.GenericAccessor.rolling_split">rolling_split</a></code></li>
 <li><code><a title="vectorbt.returns.accessors.ReturnsAccessor.rolling_std" href="../generic/accessors.html#vectorbt.generic.accessors.GenericAccessor.rolling_std">rolling_std</a></code></li>
+<li><code><a title="vectorbt.returns.accessors.ReturnsAccessor.rolling_tail_ratio" href="#vectorbt.returns.accessors.ReturnsAccessor.rolling_tail_ratio">rolling_tail_ratio</a></code></li>
+<li><code><a title="vectorbt.returns.accessors.ReturnsAccessor.rolling_total" href="#vectorbt.returns.accessors.ReturnsAccessor.rolling_total">rolling_total</a></code></li>
+<li><code><a title="vectorbt.returns.accessors.ReturnsAccessor.rolling_up_capture" href="#vectorbt.returns.accessors.ReturnsAccessor.rolling_up_capture">rolling_up_capture</a></code></li>
+<li><code><a title="vectorbt.returns.accessors.ReturnsAccessor.rolling_value_at_risk" href="#vectorbt.returns.accessors.ReturnsAccessor.rolling_value_at_risk">rolling_value_at_risk</a></code></li>
 <li><code><a title="vectorbt.returns.accessors.ReturnsAccessor.scatterplot" href="../generic/accessors.html#vectorbt.generic.accessors.GenericAccessor.scatterplot">scatterplot</a></code></li>
 <li><code><a title="vectorbt.returns.accessors.ReturnsAccessor.select_levels" href="../base/accessors.html#vectorbt.base.accessors.BaseAccessor.select_levels">select_levels</a></code></li>
 <li><code><a title="vectorbt.returns.accessors.ReturnsAccessor.sharpe_ratio" href="#vectorbt.returns.accessors.ReturnsAccessor.sharpe_ratio">sharpe_ratio</a></code></li>
 <li><code><a title="vectorbt.returns.accessors.ReturnsAccessor.shuffle" href="../generic/accessors.html#vectorbt.generic.accessors.GenericAccessor.shuffle">shuffle</a></code></li>
 <li><code><a title="vectorbt.returns.accessors.ReturnsAccessor.sortino_ratio" href="#vectorbt.returns.accessors.ReturnsAccessor.sortino_ratio">sortino_ratio</a></code></li>
-<li><code><a title="vectorbt.returns.accessors.ReturnsAccessor.split_into_ranges" href="../generic/accessors.html#vectorbt.generic.accessors.GenericAccessor.split_into_ranges">split_into_ranges</a></code></li>
+<li><code><a title="vectorbt.returns.accessors.ReturnsAccessor.split" href="../generic/accessors.html#vectorbt.generic.accessors.GenericAccessor.split">split</a></code></li>
 <li><code><a title="vectorbt.returns.accessors.ReturnsAccessor.squeeze_grouped" href="../generic/accessors.html#vectorbt.generic.accessors.GenericAccessor.squeeze_grouped">squeeze_grouped</a></code></li>
 <li><code><a title="vectorbt.returns.accessors.ReturnsAccessor.stack_index" href="../base/accessors.html#vectorbt.base.accessors.BaseAccessor.stack_index">stack_index</a></code></li>
 <li><code><a title="vectorbt.returns.accessors.ReturnsAccessor.stats" href="#vectorbt.returns.accessors.ReturnsAccessor.stats">stats</a></code></li>
@@ -2404,7 +2978,7 @@ Will broadcast per element.</dd>
 <li><code><a title="vectorbt.returns.accessors.ReturnsAccessor.combine_with_multiple" href="../base/accessors.html#vectorbt.base.accessors.BaseAccessor.combine_with_multiple">combine_with_multiple</a></code></li>
 <li><code><a title="vectorbt.returns.accessors.ReturnsAccessor.common_sense_ratio" href="#vectorbt.returns.accessors.ReturnsAccessor.common_sense_ratio">common_sense_ratio</a></code></li>
 <li><code><a title="vectorbt.returns.accessors.ReturnsAccessor.concat" href="../base/accessors.html#vectorbt.base.accessors.BaseAccessor.concat">concat</a></code></li>
-<li><code><a title="vectorbt.returns.accessors.ReturnsAccessor.conditional_value_at_risk" href="#vectorbt.returns.accessors.ReturnsAccessor.conditional_value_at_risk">conditional_value_at_risk</a></code></li>
+<li><code><a title="vectorbt.returns.accessors.ReturnsAccessor.cond_value_at_risk" href="#vectorbt.returns.accessors.ReturnsAccessor.cond_value_at_risk">cond_value_at_risk</a></code></li>
 <li><code><a title="vectorbt.returns.accessors.ReturnsAccessor.count" href="../generic/accessors.html#vectorbt.generic.accessors.GenericAccessor.count">count</a></code></li>
 <li><code><a title="vectorbt.returns.accessors.ReturnsAccessor.cumprod" href="../generic/accessors.html#vectorbt.generic.accessors.GenericAccessor.cumprod">cumprod</a></code></li>
 <li><code><a title="vectorbt.returns.accessors.ReturnsAccessor.cumsum" href="../generic/accessors.html#vectorbt.generic.accessors.GenericAccessor.cumsum">cumsum</a></code></li>
@@ -2428,6 +3002,7 @@ Will broadcast per element.</dd>
 <li><code><a title="vectorbt.returns.accessors.ReturnsAccessor.expanding_max" href="../generic/accessors.html#vectorbt.generic.accessors.GenericAccessor.expanding_max">expanding_max</a></code></li>
 <li><code><a title="vectorbt.returns.accessors.ReturnsAccessor.expanding_mean" href="../generic/accessors.html#vectorbt.generic.accessors.GenericAccessor.expanding_mean">expanding_mean</a></code></li>
 <li><code><a title="vectorbt.returns.accessors.ReturnsAccessor.expanding_min" href="../generic/accessors.html#vectorbt.generic.accessors.GenericAccessor.expanding_min">expanding_min</a></code></li>
+<li><code><a title="vectorbt.returns.accessors.ReturnsAccessor.expanding_split" href="../generic/accessors.html#vectorbt.generic.accessors.GenericAccessor.expanding_split">expanding_split</a></code></li>
 <li><code><a title="vectorbt.returns.accessors.ReturnsAccessor.expanding_std" href="../generic/accessors.html#vectorbt.generic.accessors.GenericAccessor.expanding_std">expanding_std</a></code></li>
 <li><code><a title="vectorbt.returns.accessors.ReturnsAccessor.ffill" href="../generic/accessors.html#vectorbt.generic.accessors.GenericAccessor.ffill">ffill</a></code></li>
 <li><code><a title="vectorbt.returns.accessors.ReturnsAccessor.fillna" href="../generic/accessors.html#vectorbt.generic.accessors.GenericAccessor.fillna">fillna</a></code></li>
@@ -2452,21 +3027,42 @@ Will broadcast per element.</dd>
 <li><code><a title="vectorbt.returns.accessors.ReturnsAccessor.pct_change" href="../generic/accessors.html#vectorbt.generic.accessors.GenericAccessor.pct_change">pct_change</a></code></li>
 <li><code><a title="vectorbt.returns.accessors.ReturnsAccessor.plot" href="../generic/accessors.html#vectorbt.generic.accessors.GenericAccessor.plot">plot</a></code></li>
 <li><code><a title="vectorbt.returns.accessors.ReturnsAccessor.product" href="../generic/accessors.html#vectorbt.generic.accessors.GenericAccessor.product">product</a></code></li>
+<li><code><a title="vectorbt.returns.accessors.ReturnsAccessor.range_split" href="../generic/accessors.html#vectorbt.generic.accessors.GenericAccessor.range_split">range_split</a></code></li>
 <li><code><a title="vectorbt.returns.accessors.ReturnsAccessor.reduce" href="../generic/accessors.html#vectorbt.generic.accessors.GenericAccessor.reduce">reduce</a></code></li>
 <li><code><a title="vectorbt.returns.accessors.ReturnsAccessor.rename_levels" href="../base/accessors.html#vectorbt.base.accessors.BaseAccessor.rename_levels">rename_levels</a></code></li>
 <li><code><a title="vectorbt.returns.accessors.ReturnsAccessor.repeat" href="../base/accessors.html#vectorbt.base.accessors.BaseAccessor.repeat">repeat</a></code></li>
 <li><code><a title="vectorbt.returns.accessors.ReturnsAccessor.resample_apply" href="../generic/accessors.html#vectorbt.generic.accessors.GenericAccessor.resample_apply">resample_apply</a></code></li>
+<li><code><a title="vectorbt.returns.accessors.ReturnsAccessor.rolling_alpha" href="#vectorbt.returns.accessors.ReturnsAccessor.rolling_alpha">rolling_alpha</a></code></li>
+<li><code><a title="vectorbt.returns.accessors.ReturnsAccessor.rolling_annualized" href="#vectorbt.returns.accessors.ReturnsAccessor.rolling_annualized">rolling_annualized</a></code></li>
+<li><code><a title="vectorbt.returns.accessors.ReturnsAccessor.rolling_annualized_volatility" href="#vectorbt.returns.accessors.ReturnsAccessor.rolling_annualized_volatility">rolling_annualized_volatility</a></code></li>
 <li><code><a title="vectorbt.returns.accessors.ReturnsAccessor.rolling_apply" href="../generic/accessors.html#vectorbt.generic.accessors.GenericAccessor.rolling_apply">rolling_apply</a></code></li>
+<li><code><a title="vectorbt.returns.accessors.ReturnsAccessor.rolling_beta" href="#vectorbt.returns.accessors.ReturnsAccessor.rolling_beta">rolling_beta</a></code></li>
+<li><code><a title="vectorbt.returns.accessors.ReturnsAccessor.rolling_calmar_ratio" href="#vectorbt.returns.accessors.ReturnsAccessor.rolling_calmar_ratio">rolling_calmar_ratio</a></code></li>
+<li><code><a title="vectorbt.returns.accessors.ReturnsAccessor.rolling_capture" href="#vectorbt.returns.accessors.ReturnsAccessor.rolling_capture">rolling_capture</a></code></li>
+<li><code><a title="vectorbt.returns.accessors.ReturnsAccessor.rolling_common_sense_ratio" href="#vectorbt.returns.accessors.ReturnsAccessor.rolling_common_sense_ratio">rolling_common_sense_ratio</a></code></li>
+<li><code><a title="vectorbt.returns.accessors.ReturnsAccessor.rolling_cond_value_at_risk" href="#vectorbt.returns.accessors.ReturnsAccessor.rolling_cond_value_at_risk">rolling_cond_value_at_risk</a></code></li>
+<li><code><a title="vectorbt.returns.accessors.ReturnsAccessor.rolling_down_capture" href="#vectorbt.returns.accessors.ReturnsAccessor.rolling_down_capture">rolling_down_capture</a></code></li>
+<li><code><a title="vectorbt.returns.accessors.ReturnsAccessor.rolling_downside_risk" href="#vectorbt.returns.accessors.ReturnsAccessor.rolling_downside_risk">rolling_downside_risk</a></code></li>
+<li><code><a title="vectorbt.returns.accessors.ReturnsAccessor.rolling_information_ratio" href="#vectorbt.returns.accessors.ReturnsAccessor.rolling_information_ratio">rolling_information_ratio</a></code></li>
 <li><code><a title="vectorbt.returns.accessors.ReturnsAccessor.rolling_max" href="../generic/accessors.html#vectorbt.generic.accessors.GenericAccessor.rolling_max">rolling_max</a></code></li>
+<li><code><a title="vectorbt.returns.accessors.ReturnsAccessor.rolling_max_drawdown" href="#vectorbt.returns.accessors.ReturnsAccessor.rolling_max_drawdown">rolling_max_drawdown</a></code></li>
 <li><code><a title="vectorbt.returns.accessors.ReturnsAccessor.rolling_mean" href="../generic/accessors.html#vectorbt.generic.accessors.GenericAccessor.rolling_mean">rolling_mean</a></code></li>
 <li><code><a title="vectorbt.returns.accessors.ReturnsAccessor.rolling_min" href="../generic/accessors.html#vectorbt.generic.accessors.GenericAccessor.rolling_min">rolling_min</a></code></li>
+<li><code><a title="vectorbt.returns.accessors.ReturnsAccessor.rolling_omega_ratio" href="#vectorbt.returns.accessors.ReturnsAccessor.rolling_omega_ratio">rolling_omega_ratio</a></code></li>
+<li><code><a title="vectorbt.returns.accessors.ReturnsAccessor.rolling_sharpe_ratio" href="#vectorbt.returns.accessors.ReturnsAccessor.rolling_sharpe_ratio">rolling_sharpe_ratio</a></code></li>
+<li><code><a title="vectorbt.returns.accessors.ReturnsAccessor.rolling_sortino_ratio" href="#vectorbt.returns.accessors.ReturnsAccessor.rolling_sortino_ratio">rolling_sortino_ratio</a></code></li>
+<li><code><a title="vectorbt.returns.accessors.ReturnsAccessor.rolling_split" href="../generic/accessors.html#vectorbt.generic.accessors.GenericAccessor.rolling_split">rolling_split</a></code></li>
 <li><code><a title="vectorbt.returns.accessors.ReturnsAccessor.rolling_std" href="../generic/accessors.html#vectorbt.generic.accessors.GenericAccessor.rolling_std">rolling_std</a></code></li>
+<li><code><a title="vectorbt.returns.accessors.ReturnsAccessor.rolling_tail_ratio" href="#vectorbt.returns.accessors.ReturnsAccessor.rolling_tail_ratio">rolling_tail_ratio</a></code></li>
+<li><code><a title="vectorbt.returns.accessors.ReturnsAccessor.rolling_total" href="#vectorbt.returns.accessors.ReturnsAccessor.rolling_total">rolling_total</a></code></li>
+<li><code><a title="vectorbt.returns.accessors.ReturnsAccessor.rolling_up_capture" href="#vectorbt.returns.accessors.ReturnsAccessor.rolling_up_capture">rolling_up_capture</a></code></li>
+<li><code><a title="vectorbt.returns.accessors.ReturnsAccessor.rolling_value_at_risk" href="#vectorbt.returns.accessors.ReturnsAccessor.rolling_value_at_risk">rolling_value_at_risk</a></code></li>
 <li><code><a title="vectorbt.returns.accessors.ReturnsAccessor.scatterplot" href="../generic/accessors.html#vectorbt.generic.accessors.GenericAccessor.scatterplot">scatterplot</a></code></li>
 <li><code><a title="vectorbt.returns.accessors.ReturnsAccessor.select_levels" href="../base/accessors.html#vectorbt.base.accessors.BaseAccessor.select_levels">select_levels</a></code></li>
 <li><code><a title="vectorbt.returns.accessors.ReturnsAccessor.sharpe_ratio" href="#vectorbt.returns.accessors.ReturnsAccessor.sharpe_ratio">sharpe_ratio</a></code></li>
 <li><code><a title="vectorbt.returns.accessors.ReturnsAccessor.shuffle" href="../generic/accessors.html#vectorbt.generic.accessors.GenericAccessor.shuffle">shuffle</a></code></li>
 <li><code><a title="vectorbt.returns.accessors.ReturnsAccessor.sortino_ratio" href="#vectorbt.returns.accessors.ReturnsAccessor.sortino_ratio">sortino_ratio</a></code></li>
-<li><code><a title="vectorbt.returns.accessors.ReturnsAccessor.split_into_ranges" href="../generic/accessors.html#vectorbt.generic.accessors.GenericAccessor.split_into_ranges">split_into_ranges</a></code></li>
+<li><code><a title="vectorbt.returns.accessors.ReturnsAccessor.split" href="../generic/accessors.html#vectorbt.generic.accessors.GenericAccessor.split">split</a></code></li>
 <li><code><a title="vectorbt.returns.accessors.ReturnsAccessor.squeeze_grouped" href="../generic/accessors.html#vectorbt.generic.accessors.GenericAccessor.squeeze_grouped">squeeze_grouped</a></code></li>
 <li><code><a title="vectorbt.returns.accessors.ReturnsAccessor.stack_index" href="../base/accessors.html#vectorbt.base.accessors.BaseAccessor.stack_index">stack_index</a></code></li>
 <li><code><a title="vectorbt.returns.accessors.ReturnsAccessor.stats" href="#vectorbt.returns.accessors.ReturnsAccessor.stats">stats</a></code></li>
@@ -2540,7 +3136,7 @@ title="Search"
 <li><code><a title="vectorbt.returns.accessors.ReturnsAccessor.calmar_ratio" href="#vectorbt.returns.accessors.ReturnsAccessor.calmar_ratio">calmar_ratio</a></code></li>
 <li><code><a title="vectorbt.returns.accessors.ReturnsAccessor.capture" href="#vectorbt.returns.accessors.ReturnsAccessor.capture">capture</a></code></li>
 <li><code><a title="vectorbt.returns.accessors.ReturnsAccessor.common_sense_ratio" href="#vectorbt.returns.accessors.ReturnsAccessor.common_sense_ratio">common_sense_ratio</a></code></li>
-<li><code><a title="vectorbt.returns.accessors.ReturnsAccessor.conditional_value_at_risk" href="#vectorbt.returns.accessors.ReturnsAccessor.conditional_value_at_risk">conditional_value_at_risk</a></code></li>
+<li><code><a title="vectorbt.returns.accessors.ReturnsAccessor.cond_value_at_risk" href="#vectorbt.returns.accessors.ReturnsAccessor.cond_value_at_risk">cond_value_at_risk</a></code></li>
 <li><code><a title="vectorbt.returns.accessors.ReturnsAccessor.cumulative" href="#vectorbt.returns.accessors.ReturnsAccessor.cumulative">cumulative</a></code></li>
 <li><code><a title="vectorbt.returns.accessors.ReturnsAccessor.daily" href="#vectorbt.returns.accessors.ReturnsAccessor.daily">daily</a></code></li>
 <li><code><a title="vectorbt.returns.accessors.ReturnsAccessor.deflated_sharpe_ratio" href="#vectorbt.returns.accessors.ReturnsAccessor.deflated_sharpe_ratio">deflated_sharpe_ratio</a></code></li>
@@ -2553,6 +3149,25 @@ title="Search"
 <li><code><a title="vectorbt.returns.accessors.ReturnsAccessor.information_ratio" href="#vectorbt.returns.accessors.ReturnsAccessor.information_ratio">information_ratio</a></code></li>
 <li><code><a title="vectorbt.returns.accessors.ReturnsAccessor.max_drawdown" href="#vectorbt.returns.accessors.ReturnsAccessor.max_drawdown">max_drawdown</a></code></li>
 <li><code><a title="vectorbt.returns.accessors.ReturnsAccessor.omega_ratio" href="#vectorbt.returns.accessors.ReturnsAccessor.omega_ratio">omega_ratio</a></code></li>
+<li><code><a title="vectorbt.returns.accessors.ReturnsAccessor.rolling_alpha" href="#vectorbt.returns.accessors.ReturnsAccessor.rolling_alpha">rolling_alpha</a></code></li>
+<li><code><a title="vectorbt.returns.accessors.ReturnsAccessor.rolling_annualized" href="#vectorbt.returns.accessors.ReturnsAccessor.rolling_annualized">rolling_annualized</a></code></li>
+<li><code><a title="vectorbt.returns.accessors.ReturnsAccessor.rolling_annualized_volatility" href="#vectorbt.returns.accessors.ReturnsAccessor.rolling_annualized_volatility">rolling_annualized_volatility</a></code></li>
+<li><code><a title="vectorbt.returns.accessors.ReturnsAccessor.rolling_beta" href="#vectorbt.returns.accessors.ReturnsAccessor.rolling_beta">rolling_beta</a></code></li>
+<li><code><a title="vectorbt.returns.accessors.ReturnsAccessor.rolling_calmar_ratio" href="#vectorbt.returns.accessors.ReturnsAccessor.rolling_calmar_ratio">rolling_calmar_ratio</a></code></li>
+<li><code><a title="vectorbt.returns.accessors.ReturnsAccessor.rolling_capture" href="#vectorbt.returns.accessors.ReturnsAccessor.rolling_capture">rolling_capture</a></code></li>
+<li><code><a title="vectorbt.returns.accessors.ReturnsAccessor.rolling_common_sense_ratio" href="#vectorbt.returns.accessors.ReturnsAccessor.rolling_common_sense_ratio">rolling_common_sense_ratio</a></code></li>
+<li><code><a title="vectorbt.returns.accessors.ReturnsAccessor.rolling_cond_value_at_risk" href="#vectorbt.returns.accessors.ReturnsAccessor.rolling_cond_value_at_risk">rolling_cond_value_at_risk</a></code></li>
+<li><code><a title="vectorbt.returns.accessors.ReturnsAccessor.rolling_down_capture" href="#vectorbt.returns.accessors.ReturnsAccessor.rolling_down_capture">rolling_down_capture</a></code></li>
+<li><code><a title="vectorbt.returns.accessors.ReturnsAccessor.rolling_downside_risk" href="#vectorbt.returns.accessors.ReturnsAccessor.rolling_downside_risk">rolling_downside_risk</a></code></li>
+<li><code><a title="vectorbt.returns.accessors.ReturnsAccessor.rolling_information_ratio" href="#vectorbt.returns.accessors.ReturnsAccessor.rolling_information_ratio">rolling_information_ratio</a></code></li>
+<li><code><a title="vectorbt.returns.accessors.ReturnsAccessor.rolling_max_drawdown" href="#vectorbt.returns.accessors.ReturnsAccessor.rolling_max_drawdown">rolling_max_drawdown</a></code></li>
+<li><code><a title="vectorbt.returns.accessors.ReturnsAccessor.rolling_omega_ratio" href="#vectorbt.returns.accessors.ReturnsAccessor.rolling_omega_ratio">rolling_omega_ratio</a></code></li>
+<li><code><a title="vectorbt.returns.accessors.ReturnsAccessor.rolling_sharpe_ratio" href="#vectorbt.returns.accessors.ReturnsAccessor.rolling_sharpe_ratio">rolling_sharpe_ratio</a></code></li>
+<li><code><a title="vectorbt.returns.accessors.ReturnsAccessor.rolling_sortino_ratio" href="#vectorbt.returns.accessors.ReturnsAccessor.rolling_sortino_ratio">rolling_sortino_ratio</a></code></li>
+<li><code><a title="vectorbt.returns.accessors.ReturnsAccessor.rolling_tail_ratio" href="#vectorbt.returns.accessors.ReturnsAccessor.rolling_tail_ratio">rolling_tail_ratio</a></code></li>
+<li><code><a title="vectorbt.returns.accessors.ReturnsAccessor.rolling_total" href="#vectorbt.returns.accessors.ReturnsAccessor.rolling_total">rolling_total</a></code></li>
+<li><code><a title="vectorbt.returns.accessors.ReturnsAccessor.rolling_up_capture" href="#vectorbt.returns.accessors.ReturnsAccessor.rolling_up_capture">rolling_up_capture</a></code></li>
+<li><code><a title="vectorbt.returns.accessors.ReturnsAccessor.rolling_value_at_risk" href="#vectorbt.returns.accessors.ReturnsAccessor.rolling_value_at_risk">rolling_value_at_risk</a></code></li>
 <li><code><a title="vectorbt.returns.accessors.ReturnsAccessor.sharpe_ratio" href="#vectorbt.returns.accessors.ReturnsAccessor.sharpe_ratio">sharpe_ratio</a></code></li>
 <li><code><a title="vectorbt.returns.accessors.ReturnsAccessor.sortino_ratio" href="#vectorbt.returns.accessors.ReturnsAccessor.sortino_ratio">sortino_ratio</a></code></li>
 <li><code><a title="vectorbt.returns.accessors.ReturnsAccessor.stats" href="#vectorbt.returns.accessors.ReturnsAccessor.stats">stats</a></code></li>

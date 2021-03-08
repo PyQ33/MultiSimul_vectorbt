@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1, minimum-scale=1" />
 <meta name="generator" content="pdoc 0.9.2" />
 <title>vectorbt.base.combine_fns API documentation</title>
-<meta name="description" content="Functions for combining arrays." />
+<meta name="description" content="Functions for combining arrays …" />
 <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/5.12.0-2/css/all.min.css" integrity="sha256-46r060N2LrChLLb5zowXQ72/iKKNiw/lAmygmHExk/o=" crossorigin="anonymous" />
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/docsearch.js@2/dist/cdn/docsearch.min.css" />
 <link href='https://cdnjs.cloudflare.com/ajax/libs/normalize/8.0.0/normalize.min.css' rel='stylesheet'>
@@ -35,17 +35,48 @@ ga('create', 'UA-142521178-3', 'auto'); ga('send', 'pageview');
 </header>
 <section id="section-intro">
 <p>Functions for combining arrays.</p>
+<p>Combine functions combine two or more NumPy arrays using a custom function. The emphasis here is
+done upon stacking the results into one NumPy array - since vectorbt is all about brute-forcing
+large spaces of hyperparameters, concatenating the results of each hyperparameter combination into
+a single DataFrame is important. All functions are available in both Python and Numba-compiled form.</p>
 <details class="source">
 <summary>
 <span>Expand source code</span>
 </summary>
-<pre><code class="python">&#34;&#34;&#34;Functions for combining arrays.&#34;&#34;&#34;
+<pre><code class="python">&#34;&#34;&#34;Functions for combining arrays.
+
+Combine functions combine two or more NumPy arrays using a custom function. The emphasis here is
+done upon stacking the results into one NumPy array - since vectorbt is all about brute-forcing
+large spaces of hyperparameters, concatenating the results of each hyperparameter combination into
+a single DataFrame is important. All functions are available in both Python and Numba-compiled form.&#34;&#34;&#34;
 
 import numpy as np
 from numba import njit
 from numba.typed import List
 
 from vectorbt.base import reshape_fns
+
+
+def apply_and_concat_none(n, apply_func, *args, **kwargs):
+    &#34;&#34;&#34;For each value `i` from 0 to `n`, apply `apply_func` with arguments `*args` and `**kwargs`,
+    and output nothing. Meant for in-place outputs.
+
+    `apply_func` must accept arguments `i`, `*args` and `**kwargs`.&#34;&#34;&#34;
+    for i in range(n):
+        apply_func(i, *args, **kwargs)
+
+
+@njit
+def apply_and_concat_none_nb(n, apply_func_nb, *args):
+    &#34;&#34;&#34;A Numba-compiled version of `apply_and_concat_none`.
+
+    !!! note
+        * `apply_func_nb` must be Numba-compiled
+        * `*args` must be Numba-compatible
+        * No support for `**kwargs`
+    &#34;&#34;&#34;
+    for i in range(n):
+        apply_func_nb(i, *args)
 
 
 def apply_and_concat_one(n, apply_func, *args, **kwargs):
@@ -55,7 +86,7 @@ def apply_and_concat_one(n, apply_func, *args, **kwargs):
     The result of `apply_func` must be a single 1-dim or 2-dim array.
     
     `apply_func` must accept arguments `i`, `*args` and `**kwargs`.&#34;&#34;&#34;
-    return np.hstack([reshape_fns.to_2d(apply_func(i, *args, **kwargs)) for i in range(n)])
+    return np.column_stack([reshape_fns.to_2d(apply_func(i, *args, **kwargs)) for i in range(n)])
 
 
 @njit
@@ -70,7 +101,7 @@ def to_2d_one_nb(a):
 
 
 @njit
-def apply_and_concat_one_nb(n, apply_func_nb, *args):  # numba doesn&#39;t accepts **kwargs
+def apply_and_concat_one_nb(n, apply_func_nb, *args):
     &#34;&#34;&#34;A Numba-compiled version of `apply_and_concat_one`.
     
     !!! note
@@ -94,7 +125,7 @@ def apply_and_concat_multiple(n, apply_func, *args, **kwargs):
     multiple 1-dim or 2-dim arrays. Each of these arrays at `i` will be concatenated with the
     array at the same position at `i+1`.&#34;&#34;&#34;
     outputs = [tuple(map(reshape_fns.to_2d, apply_func(i, *args, **kwargs))) for i in range(n)]
-    return list(map(np.hstack, list(zip(*outputs))))
+    return list(map(np.column_stack, list(zip(*outputs))))
 
 
 @njit
@@ -190,7 +221,62 @@ def combine_multiple_nb(objs, combine_func_nb, *args):
             result = combine_func_nb(objs[i - 1], objs[i], *args)
         else:
             result = combine_func_nb(result, objs[i], *args)
-    return result</code></pre>
+    return result
+
+
+def ray_apply(n, apply_func, *args, ray_force_init=False, ray_func_kwargs=None,
+              ray_init_kwargs=None, ray_shutdown=False, **kwargs):
+    &#34;&#34;&#34;Run `apply_func` in distributed manner.
+
+    Set `ray_reinit` to True to terminate the Ray runtime and initialize a new one.
+    `ray_func_kwargs` will be passed to `ray.remote` and `ray_init_kwargs` to `ray.init`.
+    Set `ray_shutdown` to True to terminate the Ray runtime upon the job end.
+
+    &#34;&#34;&#34;
+    import ray
+
+    if ray_init_kwargs is None:
+        ray_init_kwargs = {}
+    if ray_func_kwargs is None:
+        ray_func_kwargs = {}
+    if ray_force_init:
+        if ray.is_initialized():
+            ray.shutdown()
+    if not ray.is_initialized():
+        ray.init(**ray_init_kwargs)
+    if len(ray_func_kwargs) &gt; 0:
+        apply_func = ray.remote(**ray_func_kwargs)(apply_func)
+    else:
+        apply_func = ray.remote(apply_func)
+    # args and kwargs don&#39;t change -&gt; put to object store
+    arg_refs = ()
+    for v in args:
+        arg_refs += (ray.put(v),)
+    kwarg_refs = {}
+    for k, v in kwargs.items():
+        kwarg_refs[k] = ray.put(v)
+    futures = [apply_func.remote(i, *arg_refs, **kwarg_refs) for i in range(n)]
+    results = ray.get(futures)
+    if ray_shutdown:
+        ray.shutdown()
+    return results
+
+
+def apply_and_concat_one_ray(*args, **kwargs):
+    &#34;&#34;&#34;Distributed version of `apply_and_concat_one`.&#34;&#34;&#34;
+    results = ray_apply(*args, **kwargs)
+    return np.column_stack(list(map(reshape_fns.to_2d, results)))
+
+
+def apply_and_concat_multiple_ray(*args, **kwargs):
+    &#34;&#34;&#34;Distributed version of `apply_and_concat_multiple`.&#34;&#34;&#34;
+    results = ray_apply(*args, **kwargs)
+    return list(map(np.column_stack, list(zip(*results))))
+
+
+def combine_and_concat_ray(obj, others, combine_func, *args, **kwargs):
+    &#34;&#34;&#34;Distributed version of `combine_and_concat`.&#34;&#34;&#34;
+    return apply_and_concat_one_ray(len(others), select_and_combine, obj, others, combine_func, *args, **kwargs)</code></pre>
 </details>
 </section>
 <section>
@@ -216,7 +302,7 @@ array at the same position at <code>i+1</code>.</p></div>
     multiple 1-dim or 2-dim arrays. Each of these arrays at `i` will be concatenated with the
     array at the same position at `i+1`.&#34;&#34;&#34;
     outputs = [tuple(map(reshape_fns.to_2d, apply_func(i, *args, **kwargs))) for i in range(n)]
-    return list(map(np.hstack, list(zip(*outputs))))</code></pre>
+    return list(map(np.column_stack, list(zip(*outputs))))</code></pre>
 </details>
 </dd>
 <dt id="vectorbt.base.combine_fns.apply_and_concat_multiple_nb"><code class="name flex">
@@ -261,6 +347,71 @@ def apply_and_concat_multiple_nb(n, apply_func_nb, *args):
     return outputs</code></pre>
 </details>
 </dd>
+<dt id="vectorbt.base.combine_fns.apply_and_concat_multiple_ray"><code class="name flex">
+<span>def <span class="ident fname">apply_and_concat_multiple_ray</span></span>(<span>*args, **kwargs)</span>
+</code></dt>
+<dd>
+<div class="desc"><p>Distributed version of <code><a title="vectorbt.base.combine_fns.apply_and_concat_multiple" href="#vectorbt.base.combine_fns.apply_and_concat_multiple">apply_and_concat_multiple()</a></code>.</p></div>
+<details class="source">
+<summary>
+<span>Expand source code</span>
+</summary>
+<pre><code class="python">def apply_and_concat_multiple_ray(*args, **kwargs):
+    &#34;&#34;&#34;Distributed version of `apply_and_concat_multiple`.&#34;&#34;&#34;
+    results = ray_apply(*args, **kwargs)
+    return list(map(np.column_stack, list(zip(*results))))</code></pre>
+</details>
+</dd>
+<dt id="vectorbt.base.combine_fns.apply_and_concat_none"><code class="name flex">
+<span>def <span class="ident fname">apply_and_concat_none</span></span>(<span>n, apply_func, *args, **kwargs)</span>
+</code></dt>
+<dd>
+<div class="desc"><p>For each value <code>i</code> from 0 to <code>n</code>, apply <code>apply_func</code> with arguments <code>*args</code> and <code>**kwargs</code>,
+and output nothing. Meant for in-place outputs.</p>
+<p><code>apply_func</code> must accept arguments <code>i</code>, <code>*args</code> and <code>**kwargs</code>.</p></div>
+<details class="source">
+<summary>
+<span>Expand source code</span>
+</summary>
+<pre><code class="python">def apply_and_concat_none(n, apply_func, *args, **kwargs):
+    &#34;&#34;&#34;For each value `i` from 0 to `n`, apply `apply_func` with arguments `*args` and `**kwargs`,
+    and output nothing. Meant for in-place outputs.
+
+    `apply_func` must accept arguments `i`, `*args` and `**kwargs`.&#34;&#34;&#34;
+    for i in range(n):
+        apply_func(i, *args, **kwargs)</code></pre>
+</details>
+</dd>
+<dt id="vectorbt.base.combine_fns.apply_and_concat_none_nb"><code class="name flex">
+<span>def <span class="ident fname">apply_and_concat_none_nb</span></span>(<span>n, apply_func_nb, *args)</span>
+</code></dt>
+<dd>
+<div class="desc"><p>A Numba-compiled version of <code><a title="vectorbt.base.combine_fns.apply_and_concat_none" href="#vectorbt.base.combine_fns.apply_and_concat_none">apply_and_concat_none()</a></code>.</p>
+<div class="admonition note">
+<p class="admonition-title">Note</p>
+<ul>
+<li><code>apply_func_nb</code> must be Numba-compiled</li>
+<li><code>*args</code> must be Numba-compatible</li>
+<li>No support for <code>**kwargs</code></li>
+</ul>
+</div></div>
+<details class="source">
+<summary>
+<span>Expand source code</span>
+</summary>
+<pre><code class="python">@njit
+def apply_and_concat_none_nb(n, apply_func_nb, *args):
+    &#34;&#34;&#34;A Numba-compiled version of `apply_and_concat_none`.
+
+    !!! note
+        * `apply_func_nb` must be Numba-compiled
+        * `*args` must be Numba-compatible
+        * No support for `**kwargs`
+    &#34;&#34;&#34;
+    for i in range(n):
+        apply_func_nb(i, *args)</code></pre>
+</details>
+</dd>
 <dt id="vectorbt.base.combine_fns.apply_and_concat_one"><code class="name flex">
 <span>def <span class="ident fname">apply_and_concat_one</span></span>(<span>n, apply_func, *args, **kwargs)</span>
 </code></dt>
@@ -280,7 +431,7 @@ and concat the results along axis 1. </p>
     The result of `apply_func` must be a single 1-dim or 2-dim array.
     
     `apply_func` must accept arguments `i`, `*args` and `**kwargs`.&#34;&#34;&#34;
-    return np.hstack([reshape_fns.to_2d(apply_func(i, *args, **kwargs)) for i in range(n)])</code></pre>
+    return np.column_stack([reshape_fns.to_2d(apply_func(i, *args, **kwargs)) for i in range(n)])</code></pre>
 </details>
 </dd>
 <dt id="vectorbt.base.combine_fns.apply_and_concat_one_nb"><code class="name flex">
@@ -301,7 +452,7 @@ and concat the results along axis 1. </p>
 <span>Expand source code</span>
 </summary>
 <pre><code class="python">@njit
-def apply_and_concat_one_nb(n, apply_func_nb, *args):  # numba doesn&#39;t accepts **kwargs
+def apply_and_concat_one_nb(n, apply_func_nb, *args):
     &#34;&#34;&#34;A Numba-compiled version of `apply_and_concat_one`.
     
     !!! note
@@ -318,6 +469,21 @@ def apply_and_concat_one_nb(n, apply_func_nb, *args):  # numba doesn&#39;t accep
             outputs_i = to_2d_one_nb(apply_func_nb(i, *args))
         output[:, i * outputs_i.shape[1]:(i + 1) * outputs_i.shape[1]] = outputs_i
     return output</code></pre>
+</details>
+</dd>
+<dt id="vectorbt.base.combine_fns.apply_and_concat_one_ray"><code class="name flex">
+<span>def <span class="ident fname">apply_and_concat_one_ray</span></span>(<span>*args, **kwargs)</span>
+</code></dt>
+<dd>
+<div class="desc"><p>Distributed version of <code><a title="vectorbt.base.combine_fns.apply_and_concat_one" href="#vectorbt.base.combine_fns.apply_and_concat_one">apply_and_concat_one()</a></code>.</p></div>
+<details class="source">
+<summary>
+<span>Expand source code</span>
+</summary>
+<pre><code class="python">def apply_and_concat_one_ray(*args, **kwargs):
+    &#34;&#34;&#34;Distributed version of `apply_and_concat_one`.&#34;&#34;&#34;
+    results = ray_apply(*args, **kwargs)
+    return np.column_stack(list(map(reshape_fns.to_2d, results)))</code></pre>
 </details>
 </dd>
 <dt id="vectorbt.base.combine_fns.combine_and_concat"><code class="name flex">
@@ -347,6 +513,20 @@ def apply_and_concat_one_nb(n, apply_func_nb, *args):  # numba doesn&#39;t accep
 def combine_and_concat_nb(obj, others, combine_func_nb, *args):
     &#34;&#34;&#34;A Numba-compiled version of `combine_and_concat`.&#34;&#34;&#34;
     return apply_and_concat_one_nb(len(others), select_and_combine_nb, obj, others, combine_func_nb, *args)</code></pre>
+</details>
+</dd>
+<dt id="vectorbt.base.combine_fns.combine_and_concat_ray"><code class="name flex">
+<span>def <span class="ident fname">combine_and_concat_ray</span></span>(<span>obj, others, combine_func, *args, **kwargs)</span>
+</code></dt>
+<dd>
+<div class="desc"><p>Distributed version of <code><a title="vectorbt.base.combine_fns.combine_and_concat" href="#vectorbt.base.combine_fns.combine_and_concat">combine_and_concat()</a></code>.</p></div>
+<details class="source">
+<summary>
+<span>Expand source code</span>
+</summary>
+<pre><code class="python">def combine_and_concat_ray(obj, others, combine_func, *args, **kwargs):
+    &#34;&#34;&#34;Distributed version of `combine_and_concat`.&#34;&#34;&#34;
+    return apply_and_concat_one_ray(len(others), select_and_combine, obj, others, combine_func, *args, **kwargs)</code></pre>
 </details>
 </dd>
 <dt id="vectorbt.base.combine_fns.combine_multiple"><code class="name flex">
@@ -404,6 +584,56 @@ def combine_multiple_nb(objs, combine_func_nb, *args):
         else:
             result = combine_func_nb(result, objs[i], *args)
     return result</code></pre>
+</details>
+</dd>
+<dt id="vectorbt.base.combine_fns.ray_apply"><code class="name flex">
+<span>def <span class="ident fname">ray_apply</span></span>(<span>n, apply_func, *args, ray_force_init=False, ray_func_kwargs=None, ray_init_kwargs=None, ray_shutdown=False, **kwargs)</span>
+</code></dt>
+<dd>
+<div class="desc"><p>Run <code>apply_func</code> in distributed manner.</p>
+<p>Set <code>ray_reinit</code> to True to terminate the Ray runtime and initialize a new one.
+<code>ray_func_kwargs</code> will be passed to <code>ray.remote</code> and <code>ray_init_kwargs</code> to <code>ray.init</code>.
+Set <code>ray_shutdown</code> to True to terminate the Ray runtime upon the job end.</p></div>
+<details class="source">
+<summary>
+<span>Expand source code</span>
+</summary>
+<pre><code class="python">def ray_apply(n, apply_func, *args, ray_force_init=False, ray_func_kwargs=None,
+              ray_init_kwargs=None, ray_shutdown=False, **kwargs):
+    &#34;&#34;&#34;Run `apply_func` in distributed manner.
+
+    Set `ray_reinit` to True to terminate the Ray runtime and initialize a new one.
+    `ray_func_kwargs` will be passed to `ray.remote` and `ray_init_kwargs` to `ray.init`.
+    Set `ray_shutdown` to True to terminate the Ray runtime upon the job end.
+
+    &#34;&#34;&#34;
+    import ray
+
+    if ray_init_kwargs is None:
+        ray_init_kwargs = {}
+    if ray_func_kwargs is None:
+        ray_func_kwargs = {}
+    if ray_force_init:
+        if ray.is_initialized():
+            ray.shutdown()
+    if not ray.is_initialized():
+        ray.init(**ray_init_kwargs)
+    if len(ray_func_kwargs) &gt; 0:
+        apply_func = ray.remote(**ray_func_kwargs)(apply_func)
+    else:
+        apply_func = ray.remote(apply_func)
+    # args and kwargs don&#39;t change -&gt; put to object store
+    arg_refs = ()
+    for v in args:
+        arg_refs += (ray.put(v),)
+    kwarg_refs = {}
+    for k, v in kwargs.items():
+        kwarg_refs[k] = ray.put(v)
+    futures = [apply_func.remote(i, *arg_refs, **kwarg_refs) for i in range(n)]
+    results = ray.get(futures)
+    if ray_shutdown:
+        ray.shutdown()
+    return results</code></pre>
 </details>
 </dd>
 <dt id="vectorbt.base.combine_fns.select_and_combine"><code class="name flex">
@@ -539,12 +769,18 @@ title="Search"
 <ul class="">
 <li><code><a title="vectorbt.base.combine_fns.apply_and_concat_multiple" href="#vectorbt.base.combine_fns.apply_and_concat_multiple">apply_and_concat_multiple</a></code></li>
 <li><code><a title="vectorbt.base.combine_fns.apply_and_concat_multiple_nb" href="#vectorbt.base.combine_fns.apply_and_concat_multiple_nb">apply_and_concat_multiple_nb</a></code></li>
+<li><code><a title="vectorbt.base.combine_fns.apply_and_concat_multiple_ray" href="#vectorbt.base.combine_fns.apply_and_concat_multiple_ray">apply_and_concat_multiple_ray</a></code></li>
+<li><code><a title="vectorbt.base.combine_fns.apply_and_concat_none" href="#vectorbt.base.combine_fns.apply_and_concat_none">apply_and_concat_none</a></code></li>
+<li><code><a title="vectorbt.base.combine_fns.apply_and_concat_none_nb" href="#vectorbt.base.combine_fns.apply_and_concat_none_nb">apply_and_concat_none_nb</a></code></li>
 <li><code><a title="vectorbt.base.combine_fns.apply_and_concat_one" href="#vectorbt.base.combine_fns.apply_and_concat_one">apply_and_concat_one</a></code></li>
 <li><code><a title="vectorbt.base.combine_fns.apply_and_concat_one_nb" href="#vectorbt.base.combine_fns.apply_and_concat_one_nb">apply_and_concat_one_nb</a></code></li>
+<li><code><a title="vectorbt.base.combine_fns.apply_and_concat_one_ray" href="#vectorbt.base.combine_fns.apply_and_concat_one_ray">apply_and_concat_one_ray</a></code></li>
 <li><code><a title="vectorbt.base.combine_fns.combine_and_concat" href="#vectorbt.base.combine_fns.combine_and_concat">combine_and_concat</a></code></li>
 <li><code><a title="vectorbt.base.combine_fns.combine_and_concat_nb" href="#vectorbt.base.combine_fns.combine_and_concat_nb">combine_and_concat_nb</a></code></li>
+<li><code><a title="vectorbt.base.combine_fns.combine_and_concat_ray" href="#vectorbt.base.combine_fns.combine_and_concat_ray">combine_and_concat_ray</a></code></li>
 <li><code><a title="vectorbt.base.combine_fns.combine_multiple" href="#vectorbt.base.combine_fns.combine_multiple">combine_multiple</a></code></li>
 <li><code><a title="vectorbt.base.combine_fns.combine_multiple_nb" href="#vectorbt.base.combine_fns.combine_multiple_nb">combine_multiple_nb</a></code></li>
+<li><code><a title="vectorbt.base.combine_fns.ray_apply" href="#vectorbt.base.combine_fns.ray_apply">ray_apply</a></code></li>
 <li><code><a title="vectorbt.base.combine_fns.select_and_combine" href="#vectorbt.base.combine_fns.select_and_combine">select_and_combine</a></code></li>
 <li><code><a title="vectorbt.base.combine_fns.select_and_combine_nb" href="#vectorbt.base.combine_fns.select_and_combine_nb">select_and_combine_nb</a></code></li>
 <li><code><a title="vectorbt.base.combine_fns.to_2d_multiple_nb" href="#vectorbt.base.combine_fns.to_2d_multiple_nb">to_2d_multiple_nb</a></code></li>

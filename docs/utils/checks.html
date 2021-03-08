@@ -44,9 +44,12 @@ ga('create', 'UA-142521178-3', 'auto'); ga('send', 'pageview');
 import os
 import numpy as np
 import pandas as pd
+from pandas.core.dtypes.common import is_categorical_dtype, is_number
+from pandas.core.algorithms import safe_sort, take_1d
 from numba.core.registry import CPUDispatcher
 from collections.abc import Iterable
 from inspect import signature
+import dill
 
 # ############# Checks ############# #
 
@@ -66,7 +69,7 @@ def is_pandas(arg):
     return is_series(arg) or is_frame(arg)
 
 
-def is_array(arg):
+def is_any_array(arg):
     &#34;&#34;&#34;Check whether `arg` is any of `np.ndarray`, `pd.Series` or `pd.DataFrame`.&#34;&#34;&#34;
     return is_pandas(arg) or isinstance(arg, np.ndarray)
 
@@ -111,17 +114,6 @@ def is_default_index(arg):
     return is_index_equal(arg, pd.RangeIndex(start=0, stop=len(arg), step=1))
 
 
-def is_equal(arg1, arg2, equality_func):
-    &#34;&#34;&#34;Check whether two objects are equal.&#34;&#34;&#34;
-    if arg1 is None or arg2 is None:
-        if arg1 is not None or arg2 is not None:
-            return False
-    else:
-        if not equality_func(arg1, arg2):
-            return False
-    return True
-
-
 def is_namedtuple(x):
     &#34;&#34;&#34;Check whether object is an instance of namedtuple.&#34;&#34;&#34;
     t = type(x)
@@ -135,7 +127,7 @@ def is_namedtuple(x):
 
 
 def method_accepts_argument(method, arg_name):
-    &#34;&#34;&#34;Check whether method accepts a positional or keyword argument with name `arg_name`.&#34;&#34;&#34;
+    &#34;&#34;&#34;Check whether `method` accepts a positional or keyword argument with name `arg_name`.&#34;&#34;&#34;
     sig = signature(method)
     if arg_name.startswith(&#39;**&#39;):
         return arg_name[2:] in [
@@ -153,7 +145,83 @@ def method_accepts_argument(method, arg_name):
     ]
 
 
+def is_equal(arg1, arg2, equality_func=lambda x, y: x == y):
+    &#34;&#34;&#34;Check whether two objects are equal.&#34;&#34;&#34;
+    try:
+        return equality_func(arg1, arg2)
+    except:
+        pass
+    return False
+
+
+def is_deep_equal(arg1, arg2, check_exact=False, **kwargs):
+    &#34;&#34;&#34;Check whether two objects are equal (deep check).&#34;&#34;&#34;
+    def _select_kwargs(_method, _kwargs):
+        __kwargs = dict()
+        if len(kwargs) &gt; 0:
+            for k, v in _kwargs.items():
+                if method_accepts_argument(_method, k):
+                    __kwargs[k] = v
+        return __kwargs
+
+    def _check_array(assert_method):
+        __kwargs = _select_kwargs(assert_method, kwargs)
+        safe_assert(arg1.dtype == arg2.dtype)
+        if arg1.dtype.fields is not None:
+            for field in arg1.dtype.names:
+                assert_method(arg1[field], arg2[field], **__kwargs)
+        else:
+            assert_method(arg1, arg2, **__kwargs)
+
+    try:
+        safe_assert(type(arg1) == type(arg2))
+        if isinstance(arg1, pd.Series):
+            _kwargs = _select_kwargs(pd.testing.assert_series_equal, kwargs)
+            pd.testing.assert_series_equal(arg1, arg2, check_exact=check_exact, **_kwargs)
+        elif isinstance(arg1, pd.DataFrame):
+            _kwargs = _select_kwargs(pd.testing.assert_frame_equal, kwargs)
+            pd.testing.assert_frame_equal(arg1, arg2, check_exact=check_exact, **_kwargs)
+        elif isinstance(arg1, pd.Index):
+            _kwargs = _select_kwargs(pd.testing.assert_index_equal, kwargs)
+            pd.testing.assert_index_equal(arg1, arg2, check_exact=check_exact, **_kwargs)
+        elif isinstance(arg1, np.ndarray):
+            try:
+                _check_array(np.testing.assert_array_equal)
+            except:
+                if check_exact:
+                    return False
+                _check_array(np.testing.assert_allclose)
+        else:
+            if isinstance(arg1, (tuple, list)):
+                for i in range(len(arg1)):
+                    safe_assert(is_deep_equal(arg1[i], arg2[i], **kwargs))
+            elif isinstance(arg1, dict):
+                for k in arg1.keys():
+                    safe_assert(is_deep_equal(arg1[k], arg2[k], **kwargs))
+            else:
+                try:
+                    if arg1 == arg2:
+                        return True
+                except:
+                    pass
+                try:
+                    _kwargs = _select_kwargs(dill.dumps, kwargs)
+                    if dill.dumps(arg1, **_kwargs) == dill.dumps(arg2, **_kwargs):
+                        return True
+                except:
+                    pass
+                return False
+    except:
+        return False
+    return True
+
+
 # ############# Asserts ############# #
+
+def safe_assert(arg, msg=&#39;None&#39;):
+    if not arg:
+        raise AssertionError(msg)
+
 
 def assert_in(arg1, arg2):
     &#34;&#34;&#34;Raise exception if `arg1` is not in `arg2`.&#34;&#34;&#34;
@@ -199,7 +267,7 @@ def assert_type_equal(arg1, arg2):
 
 def assert_dtype(arg, dtype):
     &#34;&#34;&#34;Raise exception if `arg` is not of data type `dtype`.&#34;&#34;&#34;
-    if not is_array(arg):
+    if not is_any_array(arg):
         arg = np.asarray(arg)
     if is_frame(arg):
         for i, col_dtype in enumerate(arg.dtypes):
@@ -212,7 +280,7 @@ def assert_dtype(arg, dtype):
 
 def assert_subdtype(arg, dtype):
     &#34;&#34;&#34;Raise exception if `arg` is not a sub data type of `dtype`.&#34;&#34;&#34;
-    if not is_array(arg):
+    if not is_any_array(arg):
         arg = np.asarray(arg)
     if is_frame(arg):
         for i, col_dtype in enumerate(arg.dtypes):
@@ -225,9 +293,9 @@ def assert_subdtype(arg, dtype):
 
 def assert_dtype_equal(arg1, arg2):
     &#34;&#34;&#34;Raise exception if `arg1` and `arg2` have different data types.&#34;&#34;&#34;
-    if not is_array(arg1):
+    if not is_any_array(arg1):
         arg1 = np.asarray(arg1)
-    if not is_array(arg2):
+    if not is_any_array(arg2):
         arg2 = np.asarray(arg2)
     if is_frame(arg1):
         dtypes1 = arg1.dtypes.to_numpy()
@@ -248,7 +316,7 @@ def assert_dtype_equal(arg1, arg2):
 
 def assert_ndim(arg, ndims):
     &#34;&#34;&#34;Raise exception if `arg` has a different number of dimensions than `ndims`.&#34;&#34;&#34;
-    if not is_array(arg):
+    if not is_any_array(arg):
         arg = np.asarray(arg)
     if isinstance(ndims, Iterable):
         if arg.ndim not in ndims:
@@ -263,14 +331,14 @@ def assert_len_equal(arg1, arg2):
 
     Does not transform arguments to NumPy arrays.&#34;&#34;&#34;
     if len(arg1) != len(arg2):
-        raise AssertionError(f&#34;Lengths {len(arg1)} and {len(arg2)} do not match&#34;)
+        raise AssertionError(f&#34;Lengths of {arg1} and {arg2} do not match&#34;)
 
 
 def assert_shape_equal(arg1, arg2, axis=None):
     &#34;&#34;&#34;Raise exception if `arg1` and `arg2` have different shapes along `axis`.&#34;&#34;&#34;
-    if not is_array(arg1):
+    if not is_any_array(arg1):
         arg1 = np.asarray(arg1)
-    if not is_array(arg2):
+    if not is_any_array(arg2):
         arg2 = np.asarray(arg2)
     if axis is None:
         if arg1.shape != arg2.shape:
@@ -312,7 +380,7 @@ def assert_array_equal(arg1, arg2):
         arg2 = np.asarray(arg2)
         if np.array_equal(arg1, arg2):
             return
-    raise AssertionError(f&#34;Arrays do not match&#34;)
+    raise AssertionError(f&#34;Arrays {arg1} and {arg2} do not match&#34;)
 
 
 def assert_level_not_exists(arg, level_name):
@@ -325,10 +393,14 @@ def assert_level_not_exists(arg, level_name):
         raise AssertionError(f&#34;Level {level_name} already exists in {names}&#34;)
 
 
-def assert_equal(arg1, arg2):
+def assert_equal(arg1, arg2, deep=False):
     &#34;&#34;&#34;Raise exception if `arg1` and `arg2` are different.&#34;&#34;&#34;
-    if arg1 != arg2:
-        raise AssertionError(f&#34;{arg1} and {arg2} do not match&#34;)
+    if deep:
+        if not is_deep_equal(arg1, arg2):
+            raise AssertionError(f&#34;{arg1} and {arg2} do not match (deep check)&#34;)
+    else:
+        if not is_equal(arg1, arg2):
+            raise AssertionError(f&#34;{arg1} and {arg2} do not match&#34;)
 
 
 def assert_dict_valid(arg, lvl_keys):
@@ -340,7 +412,7 @@ def assert_dict_valid(arg, lvl_keys):
     set1 = set(arg.keys())
     set2 = set(lvl_keys[0])
     if not set1.issubset(set2):
-        raise AssertionError(f&#34;Not all keys from {set1} are in {set2}&#34;)
+        raise AssertionError(f&#34;Keys {set1.difference(set2)} are not recognized. Possible keys are {set2}.&#34;)
     for k, v in arg.items():
         if isinstance(v, dict):
             assert_dict_valid(v, lvl_keys[1:])</code></pre>
@@ -373,7 +445,7 @@ def assert_dict_valid(arg, lvl_keys):
         arg2 = np.asarray(arg2)
         if np.array_equal(arg1, arg2):
             return
-    raise AssertionError(f&#34;Arrays do not match&#34;)</code></pre>
+    raise AssertionError(f&#34;Arrays {arg1} and {arg2} do not match&#34;)</code></pre>
 </details>
 </dd>
 <dt id="vectorbt.utils.checks.assert_dict_valid"><code class="name flex">
@@ -395,7 +467,7 @@ def assert_dict_valid(arg, lvl_keys):
     set1 = set(arg.keys())
     set2 = set(lvl_keys[0])
     if not set1.issubset(set2):
-        raise AssertionError(f&#34;Not all keys from {set1} are in {set2}&#34;)
+        raise AssertionError(f&#34;Keys {set1.difference(set2)} are not recognized. Possible keys are {set2}.&#34;)
     for k, v in arg.items():
         if isinstance(v, dict):
             assert_dict_valid(v, lvl_keys[1:])</code></pre>
@@ -412,7 +484,7 @@ def assert_dict_valid(arg, lvl_keys):
 </summary>
 <pre><code class="python">def assert_dtype(arg, dtype):
     &#34;&#34;&#34;Raise exception if `arg` is not of data type `dtype`.&#34;&#34;&#34;
-    if not is_array(arg):
+    if not is_any_array(arg):
         arg = np.asarray(arg)
     if is_frame(arg):
         for i, col_dtype in enumerate(arg.dtypes):
@@ -434,9 +506,9 @@ def assert_dict_valid(arg, lvl_keys):
 </summary>
 <pre><code class="python">def assert_dtype_equal(arg1, arg2):
     &#34;&#34;&#34;Raise exception if `arg1` and `arg2` have different data types.&#34;&#34;&#34;
-    if not is_array(arg1):
+    if not is_any_array(arg1):
         arg1 = np.asarray(arg1)
-    if not is_array(arg2):
+    if not is_any_array(arg2):
         arg2 = np.asarray(arg2)
     if is_frame(arg1):
         dtypes1 = arg1.dtypes.to_numpy()
@@ -456,7 +528,7 @@ def assert_dict_valid(arg, lvl_keys):
 </details>
 </dd>
 <dt id="vectorbt.utils.checks.assert_equal"><code class="name flex">
-<span>def <span class="ident fname">assert_equal</span></span>(<span>arg1, arg2)</span>
+<span>def <span class="ident fname">assert_equal</span></span>(<span>arg1, arg2, deep=False)</span>
 </code></dt>
 <dd>
 <div class="desc"><p>Raise exception if <code>arg1</code> and <code>arg2</code> are different.</p></div>
@@ -464,10 +536,14 @@ def assert_dict_valid(arg, lvl_keys):
 <summary>
 <span>Expand source code</span>
 </summary>
-<pre><code class="python">def assert_equal(arg1, arg2):
+<pre><code class="python">def assert_equal(arg1, arg2, deep=False):
     &#34;&#34;&#34;Raise exception if `arg1` and `arg2` are different.&#34;&#34;&#34;
-    if arg1 != arg2:
-        raise AssertionError(f&#34;{arg1} and {arg2} do not match&#34;)</code></pre>
+    if deep:
+        if not is_deep_equal(arg1, arg2):
+            raise AssertionError(f&#34;{arg1} and {arg2} do not match (deep check)&#34;)
+    else:
+        if not is_equal(arg1, arg2):
+            raise AssertionError(f&#34;{arg1} and {arg2} do not match&#34;)</code></pre>
 </details>
 </dd>
 <dt id="vectorbt.utils.checks.assert_in"><code class="name flex">
@@ -515,7 +591,7 @@ def assert_dict_valid(arg, lvl_keys):
 
     Does not transform arguments to NumPy arrays.&#34;&#34;&#34;
     if len(arg1) != len(arg2):
-        raise AssertionError(f&#34;Lengths {len(arg1)} and {len(arg2)} do not match&#34;)</code></pre>
+        raise AssertionError(f&#34;Lengths of {arg1} and {arg2} do not match&#34;)</code></pre>
 </details>
 </dd>
 <dt id="vectorbt.utils.checks.assert_level_not_exists"><code class="name flex">
@@ -567,7 +643,7 @@ def assert_dict_valid(arg, lvl_keys):
 </summary>
 <pre><code class="python">def assert_ndim(arg, ndims):
     &#34;&#34;&#34;Raise exception if `arg` has a different number of dimensions than `ndims`.&#34;&#34;&#34;
-    if not is_array(arg):
+    if not is_any_array(arg):
         arg = np.asarray(arg)
     if isinstance(ndims, Iterable):
         if arg.ndim not in ndims:
@@ -618,9 +694,9 @@ def assert_dict_valid(arg, lvl_keys):
 </summary>
 <pre><code class="python">def assert_shape_equal(arg1, arg2, axis=None):
     &#34;&#34;&#34;Raise exception if `arg1` and `arg2` have different shapes along `axis`.&#34;&#34;&#34;
-    if not is_array(arg1):
+    if not is_any_array(arg1):
         arg1 = np.asarray(arg1)
-    if not is_array(arg2):
+    if not is_any_array(arg2):
         arg2 = np.asarray(arg2)
     if axis is None:
         if arg1.shape != arg2.shape:
@@ -664,7 +740,7 @@ def assert_dict_valid(arg, lvl_keys):
 </summary>
 <pre><code class="python">def assert_subdtype(arg, dtype):
     &#34;&#34;&#34;Raise exception if `arg` is not a sub data type of `dtype`.&#34;&#34;&#34;
-    if not is_array(arg):
+    if not is_any_array(arg):
         arg = np.asarray(arg)
     if is_frame(arg):
         for i, col_dtype in enumerate(arg.dtypes):
@@ -708,8 +784,8 @@ def assert_dict_valid(arg, lvl_keys):
         raise AssertionError(f&#34;Types {type(arg1)} and {type(arg2)} do not match&#34;)</code></pre>
 </details>
 </dd>
-<dt id="vectorbt.utils.checks.is_array"><code class="name flex">
-<span>def <span class="ident fname">is_array</span></span>(<span>arg)</span>
+<dt id="vectorbt.utils.checks.is_any_array"><code class="name flex">
+<span>def <span class="ident fname">is_any_array</span></span>(<span>arg)</span>
 </code></dt>
 <dd>
 <div class="desc"><p>Check whether <code>arg</code> is any of <code>np.ndarray</code>, <code>pd.Series</code> or <code>pd.DataFrame</code>.</p></div>
@@ -717,9 +793,80 @@ def assert_dict_valid(arg, lvl_keys):
 <summary>
 <span>Expand source code</span>
 </summary>
-<pre><code class="python">def is_array(arg):
+<pre><code class="python">def is_any_array(arg):
     &#34;&#34;&#34;Check whether `arg` is any of `np.ndarray`, `pd.Series` or `pd.DataFrame`.&#34;&#34;&#34;
     return is_pandas(arg) or isinstance(arg, np.ndarray)</code></pre>
+</details>
+</dd>
+<dt id="vectorbt.utils.checks.is_deep_equal"><code class="name flex">
+<span>def <span class="ident fname">is_deep_equal</span></span>(<span>arg1, arg2, check_exact=False, **kwargs)</span>
+</code></dt>
+<dd>
+<div class="desc"><p>Check whether two objects are equal (deep check).</p></div>
+<details class="source">
+<summary>
+<span>Expand source code</span>
+</summary>
+<pre><code class="python">def is_deep_equal(arg1, arg2, check_exact=False, **kwargs):
+    &#34;&#34;&#34;Check whether two objects are equal (deep check).&#34;&#34;&#34;
+    def _select_kwargs(_method, _kwargs):
+        __kwargs = dict()
+        if len(kwargs) &gt; 0:
+            for k, v in _kwargs.items():
+                if method_accepts_argument(_method, k):
+                    __kwargs[k] = v
+        return __kwargs
+
+    def _check_array(assert_method):
+        __kwargs = _select_kwargs(assert_method, kwargs)
+        safe_assert(arg1.dtype == arg2.dtype)
+        if arg1.dtype.fields is not None:
+            for field in arg1.dtype.names:
+                assert_method(arg1[field], arg2[field], **__kwargs)
+        else:
+            assert_method(arg1, arg2, **__kwargs)
+
+    try:
+        safe_assert(type(arg1) == type(arg2))
+        if isinstance(arg1, pd.Series):
+            _kwargs = _select_kwargs(pd.testing.assert_series_equal, kwargs)
+            pd.testing.assert_series_equal(arg1, arg2, check_exact=check_exact, **_kwargs)
+        elif isinstance(arg1, pd.DataFrame):
+            _kwargs = _select_kwargs(pd.testing.assert_frame_equal, kwargs)
+            pd.testing.assert_frame_equal(arg1, arg2, check_exact=check_exact, **_kwargs)
+        elif isinstance(arg1, pd.Index):
+            _kwargs = _select_kwargs(pd.testing.assert_index_equal, kwargs)
+            pd.testing.assert_index_equal(arg1, arg2, check_exact=check_exact, **_kwargs)
+        elif isinstance(arg1, np.ndarray):
+            try:
+                _check_array(np.testing.assert_array_equal)
+            except:
+                if check_exact:
+                    return False
+                _check_array(np.testing.assert_allclose)
+        else:
+            if isinstance(arg1, (tuple, list)):
+                for i in range(len(arg1)):
+                    safe_assert(is_deep_equal(arg1[i], arg2[i], **kwargs))
+            elif isinstance(arg1, dict):
+                for k in arg1.keys():
+                    safe_assert(is_deep_equal(arg1[k], arg2[k], **kwargs))
+            else:
+                try:
+                    if arg1 == arg2:
+                        return True
+                except:
+                    pass
+                try:
+                    _kwargs = _select_kwargs(dill.dumps, kwargs)
+                    if dill.dumps(arg1, **_kwargs) == dill.dumps(arg2, **_kwargs):
+                        return True
+                except:
+                    pass
+                return False
+    except:
+        return False
+    return True</code></pre>
 </details>
 </dd>
 <dt id="vectorbt.utils.checks.is_default_index"><code class="name flex">
@@ -737,7 +884,7 @@ def assert_dict_valid(arg, lvl_keys):
 </details>
 </dd>
 <dt id="vectorbt.utils.checks.is_equal"><code class="name flex">
-<span>def <span class="ident fname">is_equal</span></span>(<span>arg1, arg2, equality_func)</span>
+<span>def <span class="ident fname">is_equal</span></span>(<span>arg1, arg2, equality_func=&lt;function &lt;lambda&gt;&gt;)</span>
 </code></dt>
 <dd>
 <div class="desc"><p>Check whether two objects are equal.</p></div>
@@ -745,15 +892,13 @@ def assert_dict_valid(arg, lvl_keys):
 <summary>
 <span>Expand source code</span>
 </summary>
-<pre><code class="python">def is_equal(arg1, arg2, equality_func):
+<pre><code class="python">def is_equal(arg1, arg2, equality_func=lambda x, y: x == y):
     &#34;&#34;&#34;Check whether two objects are equal.&#34;&#34;&#34;
-    if arg1 is None or arg2 is None:
-        if arg1 is not None or arg2 is not None:
-            return False
-    else:
-        if not equality_func(arg1, arg2):
-            return False
-    return True</code></pre>
+    try:
+        return equality_func(arg1, arg2)
+    except:
+        pass
+    return False</code></pre>
 </details>
 </dd>
 <dt id="vectorbt.utils.checks.is_frame"><code class="name flex">
@@ -886,13 +1031,13 @@ def assert_dict_valid(arg, lvl_keys):
 <span>def <span class="ident fname">method_accepts_argument</span></span>(<span>method, arg_name)</span>
 </code></dt>
 <dd>
-<div class="desc"><p>Check whether method accepts a positional or keyword argument with name <code>arg_name</code>.</p></div>
+<div class="desc"><p>Check whether <code>method</code> accepts a positional or keyword argument with name <code>arg_name</code>.</p></div>
 <details class="source">
 <summary>
 <span>Expand source code</span>
 </summary>
 <pre><code class="python">def method_accepts_argument(method, arg_name):
-    &#34;&#34;&#34;Check whether method accepts a positional or keyword argument with name `arg_name`.&#34;&#34;&#34;
+    &#34;&#34;&#34;Check whether `method` accepts a positional or keyword argument with name `arg_name`.&#34;&#34;&#34;
     sig = signature(method)
     if arg_name.startswith(&#39;**&#39;):
         return arg_name[2:] in [
@@ -908,6 +1053,20 @@ def assert_dict_valid(arg, lvl_keys):
         p.name for p in sig.parameters.values()
         if p.kind != p.VAR_POSITIONAL and p.kind != p.VAR_KEYWORD
     ]</code></pre>
+</details>
+</dd>
+<dt id="vectorbt.utils.checks.safe_assert"><code class="name flex">
+<span>def <span class="ident fname">safe_assert</span></span>(<span>arg, msg='None')</span>
+</code></dt>
+<dd>
+<div class="desc"></div>
+<details class="source">
+<summary>
+<span>Expand source code</span>
+</summary>
+<pre><code class="python">def safe_assert(arg, msg=&#39;None&#39;):
+    if not arg:
+        raise AssertionError(msg)</code></pre>
 </details>
 </dd>
 </dl>
@@ -960,7 +1119,8 @@ title="Search"
 <li><code><a title="vectorbt.utils.checks.assert_subdtype" href="#vectorbt.utils.checks.assert_subdtype">assert_subdtype</a></code></li>
 <li><code><a title="vectorbt.utils.checks.assert_type" href="#vectorbt.utils.checks.assert_type">assert_type</a></code></li>
 <li><code><a title="vectorbt.utils.checks.assert_type_equal" href="#vectorbt.utils.checks.assert_type_equal">assert_type_equal</a></code></li>
-<li><code><a title="vectorbt.utils.checks.is_array" href="#vectorbt.utils.checks.is_array">is_array</a></code></li>
+<li><code><a title="vectorbt.utils.checks.is_any_array" href="#vectorbt.utils.checks.is_any_array">is_any_array</a></code></li>
+<li><code><a title="vectorbt.utils.checks.is_deep_equal" href="#vectorbt.utils.checks.is_deep_equal">is_deep_equal</a></code></li>
 <li><code><a title="vectorbt.utils.checks.is_default_index" href="#vectorbt.utils.checks.is_default_index">is_default_index</a></code></li>
 <li><code><a title="vectorbt.utils.checks.is_equal" href="#vectorbt.utils.checks.is_equal">is_equal</a></code></li>
 <li><code><a title="vectorbt.utils.checks.is_frame" href="#vectorbt.utils.checks.is_frame">is_frame</a></code></li>
@@ -971,6 +1131,7 @@ title="Search"
 <li><code><a title="vectorbt.utils.checks.is_pandas" href="#vectorbt.utils.checks.is_pandas">is_pandas</a></code></li>
 <li><code><a title="vectorbt.utils.checks.is_series" href="#vectorbt.utils.checks.is_series">is_series</a></code></li>
 <li><code><a title="vectorbt.utils.checks.method_accepts_argument" href="#vectorbt.utils.checks.method_accepts_argument">method_accepts_argument</a></code></li>
+<li><code><a title="vectorbt.utils.checks.safe_assert" href="#vectorbt.utils.checks.safe_assert">safe_assert</a></code></li>
 </ul>
 </li>
 </ul>

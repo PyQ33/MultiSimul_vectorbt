@@ -35,6 +35,17 @@ ga('create', 'UA-142521178-3', 'auto'); ga('send', 'pageview');
 </header>
 <section id="section-intro">
 <p>Numba-compiled functions.</p>
+<p>Provides an arsenal of Numba-compiled functions that are used by accessors
+and in many other parts of the backtesting pipeline, such as technical indicators.
+These only accept NumPy arrays and other Numba-compatible types.</p>
+<p>The module can be accessed directly via <code>vbt.nb</code>.</p>
+<pre><code class="language-python-repl">&gt;&gt;&gt; import numpy as np
+&gt;&gt;&gt; import vectorbt as vbt
+
+&gt;&gt;&gt; # vectorbt.generic.nb.rolling_mean_1d_nb
+&gt;&gt;&gt; vbt.nb.rolling_mean_1d_nb(np.array([1, 2, 3, 4]), 2)
+array([nan, 1.5, 2.5, 3.5])
+</code></pre>
 <div class="admonition note">
 <p class="admonition-title">Note</p>
 <p>vectorbt treats matrices as first-class citizens and expects input arrays to be
@@ -49,6 +60,21 @@ Data is processed along index (axis 0).</p>
 <span>Expand source code</span>
 </summary>
 <pre><code class="python">&#34;&#34;&#34;Numba-compiled functions.
+
+Provides an arsenal of Numba-compiled functions that are used by accessors
+and in many other parts of the backtesting pipeline, such as technical indicators.
+These only accept NumPy arrays and other Numba-compatible types.
+
+The module can be accessed directly via `vbt.nb`.
+
+```python-repl
+&gt;&gt;&gt; import numpy as np
+&gt;&gt;&gt; import vectorbt as vbt
+
+&gt;&gt;&gt; # vectorbt.generic.nb.rolling_mean_1d_nb
+&gt;&gt;&gt; vbt.nb.rolling_mean_1d_nb(np.array([1, 2, 3, 4]), 2)
+array([nan, 1.5, 2.5, 3.5])
+```
 
 !!! note
     vectorbt treats matrices as first-class citizens and expects input arrays to be
@@ -265,7 +291,7 @@ def product_1d_nb(a):
     Numba equivalent to `pd.Series(a).prod()`.&#34;&#34;&#34;
     out = a[0]
     for i in range(1, a.shape[0]):
-        if ~np.isnan(a[i]):
+        if not np.isnan(a[i]):
             if np.isnan(out):
                 out = a[i]
             else:
@@ -290,7 +316,7 @@ def cumsum_1d_nb(a):
     out = np.empty_like(a, dtype=np.float_)
     cumsum = 0
     for i in range(a.shape[0]):
-        if ~np.isnan(a[i]):
+        if not np.isnan(a[i]):
             cumsum += a[i]
             out[i] = cumsum
         else:
@@ -315,7 +341,7 @@ def cumprod_1d_nb(a):
     out = np.empty_like(a, dtype=np.float_)
     cumprod = 1
     for i in range(a.shape[0]):
-        if ~np.isnan(a[i]):
+        if not np.isnan(a[i]):
             cumprod *= a[i]
             out[i] = cumprod
         else:
@@ -403,30 +429,6 @@ def nanstd_nb(a, ddof=0):
     out = np.empty(a.shape[1], dtype=np.float_)
     for col in range(a.shape[1]):
         out[col] = nanstd_1d_nb(a[:, col], ddof=ddof)
-    return out
-
-
-# ############# Range functions ############# #
-
-
-@njit(cache=True)
-def concat_ranges_1d_nb(a, start_idxs, end_idxs):
-    &#34;&#34;&#34;Roll a window.
-
-    For each index pair from `start_idxs` and `end_idxs`, slices `a` along index and concatenates.&#34;&#34;&#34;
-    out = np.empty((end_idxs[0] - start_idxs[0], start_idxs.shape[0]), dtype=a.dtype)
-    for idx in range(start_idxs.shape[0]):
-        out[:, idx] = a[start_idxs[idx]:end_idxs[idx]]
-    return out
-
-
-@njit(cache=True)
-def concat_ranges_nb(a, start_idxs, end_idxs):
-    &#34;&#34;&#34;2-dim version of `range_1d_nb`.&#34;&#34;&#34;
-    out = np.empty((end_idxs[0] - start_idxs[0], start_idxs.shape[0] * a.shape[1]), dtype=a.dtype)
-    for col in range(a.shape[1]):
-        out[:, col * start_idxs.shape[0]:(col + 1) * start_idxs.shape[0]] = \
-            concat_ranges_1d_nb(a[:, col], start_idxs, end_idxs)
     return out
 
 
@@ -562,7 +564,6 @@ def rolling_std_1d_nb(a, window, minp=None, ddof=0):
     cumsum_sq = 0
     nancnt_arr = np.zeros_like(a)
     nancnt = 0
-    mean = 0
     for i in range(a.shape[0]):
         if np.isnan(a[i]):
             nancnt = nancnt + 1
@@ -599,7 +600,7 @@ def rolling_std_nb(a, window, minp=None, ddof=0):
 
 
 @njit(cache=True)
-def ewm_mean_1d_nb(a, span, minp=None, adjust=False):
+def ewm_mean_1d_nb(a, span, minp=0, adjust=False):
     &#34;&#34;&#34;Return exponential weighted average.
 
     Numba equivalent to `pd.Series(a).ewm(span=span, min_periods=minp, adjust=adjust).mean()`.
@@ -644,7 +645,7 @@ def ewm_mean_1d_nb(a, span, minp=None, adjust=False):
 
 
 @njit(cache=True)
-def ewm_mean_nb(a, span, minp=None, adjust=False):
+def ewm_mean_nb(a, span, minp=0, adjust=False):
     &#34;&#34;&#34;2-dim version of `ewm_mean_1d_nb`.&#34;&#34;&#34;
     out = np.empty_like(a, dtype=np.float_)
     for col in range(a.shape[1]):
@@ -653,7 +654,7 @@ def ewm_mean_nb(a, span, minp=None, adjust=False):
 
 
 @njit(cache=True)
-def ewm_std_1d_nb(a, span, minp=None, adjust=False, ddof=0):
+def ewm_std_1d_nb(a, span, minp=0, adjust=False, ddof=0):
     &#34;&#34;&#34;Return exponential weighted standard deviation.
 
     Numba equivalent to `pd.Series(a).ewm(span=span, min_periods=minp).std(ddof=ddof)`.
@@ -734,7 +735,7 @@ def ewm_std_1d_nb(a, span, minp=None, adjust=False, ddof=0):
 
 
 @njit(cache=True)
-def ewm_std_nb(a, span, minp=None, adjust=False, ddof=0):
+def ewm_std_nb(a, span, minp=0, adjust=False, ddof=0):
     &#34;&#34;&#34;2-dim version of `ewm_std_1d_nb`.&#34;&#34;&#34;
     out = np.empty_like(a, dtype=np.float_)
     for col in range(a.shape[1]):
@@ -756,7 +757,7 @@ def expanding_min_1d_nb(a, minp=1):
     for i in range(a.shape[0]):
         if np.isnan(minv) or a[i] &lt; minv:
             minv = a[i]
-        if ~np.isnan(a[i]):
+        if not np.isnan(a[i]):
             cnt += 1
         if cnt &lt; minp:
             out[i] = np.nan
@@ -785,7 +786,7 @@ def expanding_max_1d_nb(a, minp=1):
     for i in range(a.shape[0]):
         if np.isnan(maxv) or a[i] &gt; maxv:
             maxv = a[i]
-        if ~np.isnan(a[i]):
+        if not np.isnan(a[i]):
             cnt += 1
         if cnt &lt; minp:
             out[i] = np.nan
@@ -857,42 +858,71 @@ def apply_along_1_nb(a, apply_func_nb, *args):
 
 
 @njit
-def rolling_apply_nb(a, window, apply_func_nb, *args):
+def rolling_apply_nb(a, window, minp, apply_func_nb, *args):
     &#34;&#34;&#34;Provide rolling window calculations.
 
     `apply_func_nb` should accept index of the row, index of the column,
     the array, and `*args`. Should return a single value.&#34;&#34;&#34;
+    if minp is None:
+        minp = window
     out = np.empty_like(a, dtype=np.float_)
+    nancnt_arr = np.empty((a.shape[0],), dtype=np.int_)
     for col in range(a.shape[1]):
+        nancnt = 0
         for i in range(a.shape[0]):
-            window_a = a[max(0, i + 1 - window):i + 1, col]
-            out[i, col] = apply_func_nb(i, col, window_a, *args)
+            if np.isnan(a[i, col]):
+                nancnt = nancnt + 1
+            nancnt_arr[i] = nancnt
+            if i &lt; window:
+                valid_cnt = i + 1 - nancnt
+            else:
+                valid_cnt = window - (nancnt - nancnt_arr[i - window])
+            if valid_cnt &lt; minp:
+                out[i, col] = np.nan
+            else:
+                window_a = a[max(0, i + 1 - window):i + 1, col]
+                out[i, col] = apply_func_nb(i, col, window_a, *args)
     return out
 
 
 @njit
-def rolling_apply_matrix_nb(a, window, apply_func_nb, *args):
+def rolling_matrix_apply_nb(a, window, minp, apply_func_nb, *args):
     &#34;&#34;&#34;`rolling_apply_nb` with `apply_func_nb` being applied on all columns at once.
 
     `apply_func_nb` should accept index of the row, the 2-dim array, and `*args`.
     Should return a single value or an array of shape `a.shape[1]`.&#34;&#34;&#34;
+    if minp is None:
+        minp = window
     out = np.empty_like(a, dtype=np.float_)
+    nancnt_arr = np.empty((a.shape[0],), dtype=np.int_)
     for i in range(a.shape[0]):
-        window_a = a[max(0, i + 1 - window):i + 1, :]
-        out[i, :] = apply_func_nb(i, window_a, *args)
+        nancnt = 0
+        for col in range(a.shape[1]):
+            if np.isnan(a[i, col]):
+                nancnt = nancnt + 1
+        nancnt_arr[i] = nancnt
+        if i &lt; window:
+            valid_cnt = i + 1 - nancnt
+        else:
+            valid_cnt = window - (nancnt - nancnt_arr[i - window])
+        if valid_cnt &lt; minp:
+            out[i, :] = np.nan
+        else:
+            window_a = a[max(0, i + 1 - window):i + 1, :]
+            out[i, :] = apply_func_nb(i, window_a, *args)
     return out
 
 
 @njit
-def expanding_apply_nb(a, apply_func_nb, *args):
+def expanding_apply_nb(a, minp, apply_func_nb, *args):
     &#34;&#34;&#34;Expanding version of `rolling_apply_nb`.&#34;&#34;&#34;
-    return rolling_apply_nb(a, a.shape[0], apply_func_nb, *args)
+    return rolling_apply_nb(a, a.shape[0], minp, apply_func_nb, *args)
 
 
 @njit
-def expanding_apply_matrix_nb(a, apply_func_nb, *args):
-    &#34;&#34;&#34;Expanding version of `rolling_apply_matrix_nb`.&#34;&#34;&#34;
-    return rolling_apply_matrix_nb(a, a.shape[0], apply_func_nb, *args)
+def expanding_matrix_apply_nb(a, minp, apply_func_nb, *args):
+    &#34;&#34;&#34;Expanding version of `rolling_matrix_apply_nb`.&#34;&#34;&#34;
+    return rolling_matrix_apply_nb(a, a.shape[0], minp, apply_func_nb, *args)
 
 
 @njit
@@ -931,8 +961,8 @@ def groupby_apply_matrix_nb(a, groups, apply_func_nb, *args):
 def applymap_nb(a, map_func_nb, *args):
     &#34;&#34;&#34;Map non-NA elements elementwise using `map_func_nb`.
 
-    `map_func_nb` should accept index of the row, index of the column,
-    the element itself, and `*args`. Should return an array of same size.&#34;&#34;&#34;
+    `map_func_nb` should accept the element itself, and `*args`.
+    Should return an array of same size.&#34;&#34;&#34;
     out = np.full_like(a, np.nan, dtype=np.float_)
 
     for col in range(out.shape[1]):
@@ -1126,7 +1156,7 @@ def flatten_grouped_nb(a, group_lens, in_c_order):
 
 
 @njit(cache=True)
-def nst_reduce_nb(col, a, n, *args):
+def nst_reduce_nb(col, a, n):
     &#34;&#34;&#34;Return nst element.&#34;&#34;&#34;
     if n &gt;= a.shape[0]:
         raise ValueError(&#34;index is out of bounds&#34;)
@@ -1134,49 +1164,49 @@ def nst_reduce_nb(col, a, n, *args):
 
 
 @njit(cache=True)
-def min_reduce_nb(col, a, *args):
+def min_reduce_nb(col, a):
     &#34;&#34;&#34;Return min (ignores NaNs).&#34;&#34;&#34;
     return np.nanmin(a)
 
 
 @njit(cache=True)
-def max_reduce_nb(col, a, *args):
+def max_reduce_nb(col, a):
     &#34;&#34;&#34;Return max (ignores NaNs).&#34;&#34;&#34;
     return np.nanmax(a)
 
 
 @njit(cache=True)
-def mean_reduce_nb(col, a, *args):
+def mean_reduce_nb(col, a):
     &#34;&#34;&#34;Return mean (ignores NaNs).&#34;&#34;&#34;
     return np.nanmean(a)
 
 
 @njit(cache=True)
-def median_reduce_nb(col, a, *args):
+def median_reduce_nb(col, a):
     &#34;&#34;&#34;Return median (ignores NaNs).&#34;&#34;&#34;
     return np.nanmedian(a)
 
 
 @njit(cache=True)
-def sum_reduce_nb(col, a, *args):
+def sum_reduce_nb(col, a):
     &#34;&#34;&#34;Return sum (ignores NaNs).&#34;&#34;&#34;
     return np.nansum(a)
 
 
 @njit(cache=True)
-def count_reduce_nb(col, a, *args):
+def count_reduce_nb(col, a):
     &#34;&#34;&#34;Return count (ignores NaNs).&#34;&#34;&#34;
     return np.sum(~np.isnan(a))
 
 
 @njit(cache=True)
-def std_reduce_nb(col, a, ddof, *args):
+def std_reduce_nb(col, a, ddof):
     &#34;&#34;&#34;Return std (ignores NaNs).&#34;&#34;&#34;
     return nanstd_1d_nb(a, ddof=ddof)
 
 
 @njit(cache=True)
-def argmin_reduce_nb(col, a, *args):
+def argmin_reduce_nb(col, a):
     &#34;&#34;&#34;Return position of min.&#34;&#34;&#34;
     a = np.copy(a)
     mask = np.isnan(a)
@@ -1187,7 +1217,7 @@ def argmin_reduce_nb(col, a, *args):
 
 
 @njit(cache=True)
-def argmax_reduce_nb(col, a, *args):
+def argmax_reduce_nb(col, a):
     &#34;&#34;&#34;Return position of max.&#34;&#34;&#34;
     a = np.copy(a)
     mask = np.isnan(a)
@@ -1198,7 +1228,7 @@ def argmax_reduce_nb(col, a, *args):
 
 
 @njit(cache=True)
-def describe_reduce_nb(col, a, perc, ddof, *args):
+def describe_reduce_nb(col, a, perc, ddof):
     &#34;&#34;&#34;Return descriptive statistics (ignores NaNs).
 
     Numba equivalent to `pd.Series(a).describe(perc)`.&#34;&#34;&#34;
@@ -1458,8 +1488,8 @@ def apply_and_reduce_nb(a, apply_func_nb, apply_args, reduce_func_nb, reduce_arg
 </code></dt>
 <dd>
 <div class="desc"><p>Map non-NA elements elementwise using <code>map_func_nb</code>.</p>
-<p><code>map_func_nb</code> should accept index of the row, index of the column,
-the element itself, and <code>*args</code>. Should return an array of same size.</p></div>
+<p><code>map_func_nb</code> should accept the element itself, and <code>*args</code>.
+Should return an array of same size.</p></div>
 <details class="source">
 <summary>
 <span>Expand source code</span>
@@ -1468,8 +1498,8 @@ the element itself, and <code>*args</code>. Should return an array of same size.
 def applymap_nb(a, map_func_nb, *args):
     &#34;&#34;&#34;Map non-NA elements elementwise using `map_func_nb`.
 
-    `map_func_nb` should accept index of the row, index of the column,
-    the element itself, and `*args`. Should return an array of same size.&#34;&#34;&#34;
+    `map_func_nb` should accept the element itself, and `*args`.
+    Should return an array of same size.&#34;&#34;&#34;
     out = np.full_like(a, np.nan, dtype=np.float_)
 
     for col in range(out.shape[1]):
@@ -1480,7 +1510,7 @@ def applymap_nb(a, map_func_nb, *args):
 </details>
 </dd>
 <dt id="vectorbt.generic.nb.argmax_reduce_nb"><code class="name flex">
-<span>def <span class="ident fname">argmax_reduce_nb</span></span>(<span>col, a, *args)</span>
+<span>def <span class="ident fname">argmax_reduce_nb</span></span>(<span>col, a)</span>
 </code></dt>
 <dd>
 <div class="desc"><p>Return position of max.</p></div>
@@ -1489,7 +1519,7 @@ def applymap_nb(a, map_func_nb, *args):
 <span>Expand source code</span>
 </summary>
 <pre><code class="python">@njit(cache=True)
-def argmax_reduce_nb(col, a, *args):
+def argmax_reduce_nb(col, a):
     &#34;&#34;&#34;Return position of max.&#34;&#34;&#34;
     a = np.copy(a)
     mask = np.isnan(a)
@@ -1500,7 +1530,7 @@ def argmax_reduce_nb(col, a, *args):
 </details>
 </dd>
 <dt id="vectorbt.generic.nb.argmin_reduce_nb"><code class="name flex">
-<span>def <span class="ident fname">argmin_reduce_nb</span></span>(<span>col, a, *args)</span>
+<span>def <span class="ident fname">argmin_reduce_nb</span></span>(<span>col, a)</span>
 </code></dt>
 <dd>
 <div class="desc"><p>Return position of min.</p></div>
@@ -1509,7 +1539,7 @@ def argmax_reduce_nb(col, a, *args):
 <span>Expand source code</span>
 </summary>
 <pre><code class="python">@njit(cache=True)
-def argmin_reduce_nb(col, a, *args):
+def argmin_reduce_nb(col, a):
     &#34;&#34;&#34;Return position of min.&#34;&#34;&#34;
     a = np.copy(a)
     mask = np.isnan(a)
@@ -1562,48 +1592,8 @@ def bshift_nb(a, n):
     return bshift_1d_nb(a, n)</code></pre>
 </details>
 </dd>
-<dt id="vectorbt.generic.nb.concat_ranges_1d_nb"><code class="name flex">
-<span>def <span class="ident fname">concat_ranges_1d_nb</span></span>(<span>a, start_idxs, end_idxs)</span>
-</code></dt>
-<dd>
-<div class="desc"><p>Roll a window.</p>
-<p>For each index pair from <code>start_idxs</code> and <code>end_idxs</code>, slices <code>a</code> along index and concatenates.</p></div>
-<details class="source">
-<summary>
-<span>Expand source code</span>
-</summary>
-<pre><code class="python">@njit(cache=True)
-def concat_ranges_1d_nb(a, start_idxs, end_idxs):
-    &#34;&#34;&#34;Roll a window.
-
-    For each index pair from `start_idxs` and `end_idxs`, slices `a` along index and concatenates.&#34;&#34;&#34;
-    out = np.empty((end_idxs[0] - start_idxs[0], start_idxs.shape[0]), dtype=a.dtype)
-    for idx in range(start_idxs.shape[0]):
-        out[:, idx] = a[start_idxs[idx]:end_idxs[idx]]
-    return out</code></pre>
-</details>
-</dd>
-<dt id="vectorbt.generic.nb.concat_ranges_nb"><code class="name flex">
-<span>def <span class="ident fname">concat_ranges_nb</span></span>(<span>a, start_idxs, end_idxs)</span>
-</code></dt>
-<dd>
-<div class="desc"><p>2-dim version of <code>range_1d_nb</code>.</p></div>
-<details class="source">
-<summary>
-<span>Expand source code</span>
-</summary>
-<pre><code class="python">@njit(cache=True)
-def concat_ranges_nb(a, start_idxs, end_idxs):
-    &#34;&#34;&#34;2-dim version of `range_1d_nb`.&#34;&#34;&#34;
-    out = np.empty((end_idxs[0] - start_idxs[0], start_idxs.shape[0] * a.shape[1]), dtype=a.dtype)
-    for col in range(a.shape[1]):
-        out[:, col * start_idxs.shape[0]:(col + 1) * start_idxs.shape[0]] = \
-            concat_ranges_1d_nb(a[:, col], start_idxs, end_idxs)
-    return out</code></pre>
-</details>
-</dd>
 <dt id="vectorbt.generic.nb.count_reduce_nb"><code class="name flex">
-<span>def <span class="ident fname">count_reduce_nb</span></span>(<span>col, a, *args)</span>
+<span>def <span class="ident fname">count_reduce_nb</span></span>(<span>col, a)</span>
 </code></dt>
 <dd>
 <div class="desc"><p>Return count (ignores NaNs).</p></div>
@@ -1612,7 +1602,7 @@ def concat_ranges_nb(a, start_idxs, end_idxs):
 <span>Expand source code</span>
 </summary>
 <pre><code class="python">@njit(cache=True)
-def count_reduce_nb(col, a, *args):
+def count_reduce_nb(col, a):
     &#34;&#34;&#34;Return count (ignores NaNs).&#34;&#34;&#34;
     return np.sum(~np.isnan(a))</code></pre>
 </details>
@@ -1635,7 +1625,7 @@ def cumprod_1d_nb(a):
     out = np.empty_like(a, dtype=np.float_)
     cumprod = 1
     for i in range(a.shape[0]):
-        if ~np.isnan(a[i]):
+        if not np.isnan(a[i]):
             cumprod *= a[i]
             out[i] = cumprod
         else:
@@ -1679,7 +1669,7 @@ def cumsum_1d_nb(a):
     out = np.empty_like(a, dtype=np.float_)
     cumsum = 0
     for i in range(a.shape[0]):
-        if ~np.isnan(a[i]):
+        if not np.isnan(a[i]):
             cumsum += a[i]
             out[i] = cumsum
         else:
@@ -1848,7 +1838,7 @@ def dd_vtr_duration_ratio_map_nb(record):
 </details>
 </dd>
 <dt id="vectorbt.generic.nb.describe_reduce_nb"><code class="name flex">
-<span>def <span class="ident fname">describe_reduce_nb</span></span>(<span>col, a, perc, ddof, *args)</span>
+<span>def <span class="ident fname">describe_reduce_nb</span></span>(<span>col, a, perc, ddof)</span>
 </code></dt>
 <dd>
 <div class="desc"><p>Return descriptive statistics (ignores NaNs).</p>
@@ -1858,7 +1848,7 @@ def dd_vtr_duration_ratio_map_nb(record):
 <span>Expand source code</span>
 </summary>
 <pre><code class="python">@njit(cache=True)
-def describe_reduce_nb(col, a, perc, ddof, *args):
+def describe_reduce_nb(col, a, perc, ddof):
     &#34;&#34;&#34;Return descriptive statistics (ignores NaNs).
 
     Numba equivalent to `pd.Series(a).describe(perc)`.&#34;&#34;&#34;
@@ -1916,7 +1906,7 @@ def diff_nb(a):
 </details>
 </dd>
 <dt id="vectorbt.generic.nb.ewm_mean_1d_nb"><code class="name flex">
-<span>def <span class="ident fname">ewm_mean_1d_nb</span></span>(<span>a, span, minp=None, adjust=False)</span>
+<span>def <span class="ident fname">ewm_mean_1d_nb</span></span>(<span>a, span, minp=0, adjust=False)</span>
 </code></dt>
 <dd>
 <div class="desc"><p>Return exponential weighted average.</p>
@@ -1927,7 +1917,7 @@ def diff_nb(a):
 <span>Expand source code</span>
 </summary>
 <pre><code class="python">@njit(cache=True)
-def ewm_mean_1d_nb(a, span, minp=None, adjust=False):
+def ewm_mean_1d_nb(a, span, minp=0, adjust=False):
     &#34;&#34;&#34;Return exponential weighted average.
 
     Numba equivalent to `pd.Series(a).ewm(span=span, min_periods=minp, adjust=adjust).mean()`.
@@ -1972,7 +1962,7 @@ def ewm_mean_1d_nb(a, span, minp=None, adjust=False):
 </details>
 </dd>
 <dt id="vectorbt.generic.nb.ewm_mean_nb"><code class="name flex">
-<span>def <span class="ident fname">ewm_mean_nb</span></span>(<span>a, span, minp=None, adjust=False)</span>
+<span>def <span class="ident fname">ewm_mean_nb</span></span>(<span>a, span, minp=0, adjust=False)</span>
 </code></dt>
 <dd>
 <div class="desc"><p>2-dim version of <code><a title="vectorbt.generic.nb.ewm_mean_1d_nb" href="#vectorbt.generic.nb.ewm_mean_1d_nb">ewm_mean_1d_nb()</a></code>.</p></div>
@@ -1981,7 +1971,7 @@ def ewm_mean_1d_nb(a, span, minp=None, adjust=False):
 <span>Expand source code</span>
 </summary>
 <pre><code class="python">@njit(cache=True)
-def ewm_mean_nb(a, span, minp=None, adjust=False):
+def ewm_mean_nb(a, span, minp=0, adjust=False):
     &#34;&#34;&#34;2-dim version of `ewm_mean_1d_nb`.&#34;&#34;&#34;
     out = np.empty_like(a, dtype=np.float_)
     for col in range(a.shape[1]):
@@ -1990,7 +1980,7 @@ def ewm_mean_nb(a, span, minp=None, adjust=False):
 </details>
 </dd>
 <dt id="vectorbt.generic.nb.ewm_std_1d_nb"><code class="name flex">
-<span>def <span class="ident fname">ewm_std_1d_nb</span></span>(<span>a, span, minp=None, adjust=False, ddof=0)</span>
+<span>def <span class="ident fname">ewm_std_1d_nb</span></span>(<span>a, span, minp=0, adjust=False, ddof=0)</span>
 </code></dt>
 <dd>
 <div class="desc"><p>Return exponential weighted standard deviation.</p>
@@ -2001,7 +1991,7 @@ def ewm_mean_nb(a, span, minp=None, adjust=False):
 <span>Expand source code</span>
 </summary>
 <pre><code class="python">@njit(cache=True)
-def ewm_std_1d_nb(a, span, minp=None, adjust=False, ddof=0):
+def ewm_std_1d_nb(a, span, minp=0, adjust=False, ddof=0):
     &#34;&#34;&#34;Return exponential weighted standard deviation.
 
     Numba equivalent to `pd.Series(a).ewm(span=span, min_periods=minp).std(ddof=ddof)`.
@@ -2082,7 +2072,7 @@ def ewm_std_1d_nb(a, span, minp=None, adjust=False, ddof=0):
 </details>
 </dd>
 <dt id="vectorbt.generic.nb.ewm_std_nb"><code class="name flex">
-<span>def <span class="ident fname">ewm_std_nb</span></span>(<span>a, span, minp=None, adjust=False, ddof=0)</span>
+<span>def <span class="ident fname">ewm_std_nb</span></span>(<span>a, span, minp=0, adjust=False, ddof=0)</span>
 </code></dt>
 <dd>
 <div class="desc"><p>2-dim version of <code><a title="vectorbt.generic.nb.ewm_std_1d_nb" href="#vectorbt.generic.nb.ewm_std_1d_nb">ewm_std_1d_nb()</a></code>.</p></div>
@@ -2091,7 +2081,7 @@ def ewm_std_1d_nb(a, span, minp=None, adjust=False, ddof=0):
 <span>Expand source code</span>
 </summary>
 <pre><code class="python">@njit(cache=True)
-def ewm_std_nb(a, span, minp=None, adjust=False, ddof=0):
+def ewm_std_nb(a, span, minp=0, adjust=False, ddof=0):
     &#34;&#34;&#34;2-dim version of `ewm_std_1d_nb`.&#34;&#34;&#34;
     out = np.empty_like(a, dtype=np.float_)
     for col in range(a.shape[1]):
@@ -2099,23 +2089,8 @@ def ewm_std_nb(a, span, minp=None, adjust=False, ddof=0):
     return out</code></pre>
 </details>
 </dd>
-<dt id="vectorbt.generic.nb.expanding_apply_matrix_nb"><code class="name flex">
-<span>def <span class="ident fname">expanding_apply_matrix_nb</span></span>(<span>a, apply_func_nb, *args)</span>
-</code></dt>
-<dd>
-<div class="desc"><p>Expanding version of <code><a title="vectorbt.generic.nb.rolling_apply_matrix_nb" href="#vectorbt.generic.nb.rolling_apply_matrix_nb">rolling_apply_matrix_nb()</a></code>.</p></div>
-<details class="source">
-<summary>
-<span>Expand source code</span>
-</summary>
-<pre><code class="python">@njit
-def expanding_apply_matrix_nb(a, apply_func_nb, *args):
-    &#34;&#34;&#34;Expanding version of `rolling_apply_matrix_nb`.&#34;&#34;&#34;
-    return rolling_apply_matrix_nb(a, a.shape[0], apply_func_nb, *args)</code></pre>
-</details>
-</dd>
 <dt id="vectorbt.generic.nb.expanding_apply_nb"><code class="name flex">
-<span>def <span class="ident fname">expanding_apply_nb</span></span>(<span>a, apply_func_nb, *args)</span>
+<span>def <span class="ident fname">expanding_apply_nb</span></span>(<span>a, minp, apply_func_nb, *args)</span>
 </code></dt>
 <dd>
 <div class="desc"><p>Expanding version of <code><a title="vectorbt.generic.nb.rolling_apply_nb" href="#vectorbt.generic.nb.rolling_apply_nb">rolling_apply_nb()</a></code>.</p></div>
@@ -2124,9 +2099,24 @@ def expanding_apply_matrix_nb(a, apply_func_nb, *args):
 <span>Expand source code</span>
 </summary>
 <pre><code class="python">@njit
-def expanding_apply_nb(a, apply_func_nb, *args):
+def expanding_apply_nb(a, minp, apply_func_nb, *args):
     &#34;&#34;&#34;Expanding version of `rolling_apply_nb`.&#34;&#34;&#34;
-    return rolling_apply_nb(a, a.shape[0], apply_func_nb, *args)</code></pre>
+    return rolling_apply_nb(a, a.shape[0], minp, apply_func_nb, *args)</code></pre>
+</details>
+</dd>
+<dt id="vectorbt.generic.nb.expanding_matrix_apply_nb"><code class="name flex">
+<span>def <span class="ident fname">expanding_matrix_apply_nb</span></span>(<span>a, minp, apply_func_nb, *args)</span>
+</code></dt>
+<dd>
+<div class="desc"><p>Expanding version of <code><a title="vectorbt.generic.nb.rolling_matrix_apply_nb" href="#vectorbt.generic.nb.rolling_matrix_apply_nb">rolling_matrix_apply_nb()</a></code>.</p></div>
+<details class="source">
+<summary>
+<span>Expand source code</span>
+</summary>
+<pre><code class="python">@njit
+def expanding_matrix_apply_nb(a, minp, apply_func_nb, *args):
+    &#34;&#34;&#34;Expanding version of `rolling_matrix_apply_nb`.&#34;&#34;&#34;
+    return rolling_matrix_apply_nb(a, a.shape[0], minp, apply_func_nb, *args)</code></pre>
 </details>
 </dd>
 <dt id="vectorbt.generic.nb.expanding_max_1d_nb"><code class="name flex">
@@ -2150,7 +2140,7 @@ def expanding_max_1d_nb(a, minp=1):
     for i in range(a.shape[0]):
         if np.isnan(maxv) or a[i] &gt; maxv:
             maxv = a[i]
-        if ~np.isnan(a[i]):
+        if not np.isnan(a[i]):
             cnt += 1
         if cnt &lt; minp:
             out[i] = np.nan
@@ -2231,7 +2221,7 @@ def expanding_min_1d_nb(a, minp=1):
     for i in range(a.shape[0]):
         if np.isnan(minv) or a[i] &lt; minv:
             minv = a[i]
-        if ~np.isnan(a[i]):
+        if not np.isnan(a[i]):
             cnt += 1
         if cnt &lt; minp:
             out[i] = np.nan
@@ -2709,7 +2699,7 @@ def groupby_apply_nb(a, groups, apply_func_nb, *args):
 </details>
 </dd>
 <dt id="vectorbt.generic.nb.max_reduce_nb"><code class="name flex">
-<span>def <span class="ident fname">max_reduce_nb</span></span>(<span>col, a, *args)</span>
+<span>def <span class="ident fname">max_reduce_nb</span></span>(<span>col, a)</span>
 </code></dt>
 <dd>
 <div class="desc"><p>Return max (ignores NaNs).</p></div>
@@ -2718,13 +2708,13 @@ def groupby_apply_nb(a, groups, apply_func_nb, *args):
 <span>Expand source code</span>
 </summary>
 <pre><code class="python">@njit(cache=True)
-def max_reduce_nb(col, a, *args):
+def max_reduce_nb(col, a):
     &#34;&#34;&#34;Return max (ignores NaNs).&#34;&#34;&#34;
     return np.nanmax(a)</code></pre>
 </details>
 </dd>
 <dt id="vectorbt.generic.nb.mean_reduce_nb"><code class="name flex">
-<span>def <span class="ident fname">mean_reduce_nb</span></span>(<span>col, a, *args)</span>
+<span>def <span class="ident fname">mean_reduce_nb</span></span>(<span>col, a)</span>
 </code></dt>
 <dd>
 <div class="desc"><p>Return mean (ignores NaNs).</p></div>
@@ -2733,13 +2723,13 @@ def max_reduce_nb(col, a, *args):
 <span>Expand source code</span>
 </summary>
 <pre><code class="python">@njit(cache=True)
-def mean_reduce_nb(col, a, *args):
+def mean_reduce_nb(col, a):
     &#34;&#34;&#34;Return mean (ignores NaNs).&#34;&#34;&#34;
     return np.nanmean(a)</code></pre>
 </details>
 </dd>
 <dt id="vectorbt.generic.nb.median_reduce_nb"><code class="name flex">
-<span>def <span class="ident fname">median_reduce_nb</span></span>(<span>col, a, *args)</span>
+<span>def <span class="ident fname">median_reduce_nb</span></span>(<span>col, a)</span>
 </code></dt>
 <dd>
 <div class="desc"><p>Return median (ignores NaNs).</p></div>
@@ -2748,13 +2738,13 @@ def mean_reduce_nb(col, a, *args):
 <span>Expand source code</span>
 </summary>
 <pre><code class="python">@njit(cache=True)
-def median_reduce_nb(col, a, *args):
+def median_reduce_nb(col, a):
     &#34;&#34;&#34;Return median (ignores NaNs).&#34;&#34;&#34;
     return np.nanmedian(a)</code></pre>
 </details>
 </dd>
 <dt id="vectorbt.generic.nb.min_reduce_nb"><code class="name flex">
-<span>def <span class="ident fname">min_reduce_nb</span></span>(<span>col, a, *args)</span>
+<span>def <span class="ident fname">min_reduce_nb</span></span>(<span>col, a)</span>
 </code></dt>
 <dd>
 <div class="desc"><p>Return min (ignores NaNs).</p></div>
@@ -2763,7 +2753,7 @@ def median_reduce_nb(col, a, *args):
 <span>Expand source code</span>
 </summary>
 <pre><code class="python">@njit(cache=True)
-def min_reduce_nb(col, a, *args):
+def min_reduce_nb(col, a):
     &#34;&#34;&#34;Return min (ignores NaNs).&#34;&#34;&#34;
     return np.nanmin(a)</code></pre>
 </details>
@@ -2915,7 +2905,7 @@ def nansum_nb(a):
 </details>
 </dd>
 <dt id="vectorbt.generic.nb.nst_reduce_nb"><code class="name flex">
-<span>def <span class="ident fname">nst_reduce_nb</span></span>(<span>col, a, n, *args)</span>
+<span>def <span class="ident fname">nst_reduce_nb</span></span>(<span>col, a, n)</span>
 </code></dt>
 <dd>
 <div class="desc"><p>Return nst element.</p></div>
@@ -2924,7 +2914,7 @@ def nansum_nb(a):
 <span>Expand source code</span>
 </summary>
 <pre><code class="python">@njit(cache=True)
-def nst_reduce_nb(col, a, n, *args):
+def nst_reduce_nb(col, a, n):
     &#34;&#34;&#34;Return nst element.&#34;&#34;&#34;
     if n &gt;= a.shape[0]:
         raise ValueError(&#34;index is out of bounds&#34;)
@@ -3023,7 +3013,7 @@ def product_1d_nb(a):
     Numba equivalent to `pd.Series(a).prod()`.&#34;&#34;&#34;
     out = a[0]
     for i in range(1, a.shape[0]):
-        if ~np.isnan(a[i]):
+        if not np.isnan(a[i]):
             if np.isnan(out):
                 out = a[i]
             else:
@@ -3167,32 +3157,8 @@ def reduce_to_array_nb(a, reduce_func_nb, *args):
     return out</code></pre>
 </details>
 </dd>
-<dt id="vectorbt.generic.nb.rolling_apply_matrix_nb"><code class="name flex">
-<span>def <span class="ident fname">rolling_apply_matrix_nb</span></span>(<span>a, window, apply_func_nb, *args)</span>
-</code></dt>
-<dd>
-<div class="desc"><p><code><a title="vectorbt.generic.nb.rolling_apply_nb" href="#vectorbt.generic.nb.rolling_apply_nb">rolling_apply_nb()</a></code> with <code>apply_func_nb</code> being applied on all columns at once.</p>
-<p><code>apply_func_nb</code> should accept index of the row, the 2-dim array, and <code>*args</code>.
-Should return a single value or an array of shape <code>a.shape[1]</code>.</p></div>
-<details class="source">
-<summary>
-<span>Expand source code</span>
-</summary>
-<pre><code class="python">@njit
-def rolling_apply_matrix_nb(a, window, apply_func_nb, *args):
-    &#34;&#34;&#34;`rolling_apply_nb` with `apply_func_nb` being applied on all columns at once.
-
-    `apply_func_nb` should accept index of the row, the 2-dim array, and `*args`.
-    Should return a single value or an array of shape `a.shape[1]`.&#34;&#34;&#34;
-    out = np.empty_like(a, dtype=np.float_)
-    for i in range(a.shape[0]):
-        window_a = a[max(0, i + 1 - window):i + 1, :]
-        out[i, :] = apply_func_nb(i, window_a, *args)
-    return out</code></pre>
-</details>
-</dd>
 <dt id="vectorbt.generic.nb.rolling_apply_nb"><code class="name flex">
-<span>def <span class="ident fname">rolling_apply_nb</span></span>(<span>a, window, apply_func_nb, *args)</span>
+<span>def <span class="ident fname">rolling_apply_nb</span></span>(<span>a, window, minp, apply_func_nb, *args)</span>
 </code></dt>
 <dd>
 <div class="desc"><p>Provide rolling window calculations.</p>
@@ -3203,16 +3169,69 @@ the array, and <code>*args</code>. Should return a single value.</p></div>
 <span>Expand source code</span>
 </summary>
 <pre><code class="python">@njit
-def rolling_apply_nb(a, window, apply_func_nb, *args):
+def rolling_apply_nb(a, window, minp, apply_func_nb, *args):
     &#34;&#34;&#34;Provide rolling window calculations.
 
     `apply_func_nb` should accept index of the row, index of the column,
     the array, and `*args`. Should return a single value.&#34;&#34;&#34;
+    if minp is None:
+        minp = window
     out = np.empty_like(a, dtype=np.float_)
+    nancnt_arr = np.empty((a.shape[0],), dtype=np.int_)
     for col in range(a.shape[1]):
+        nancnt = 0
         for i in range(a.shape[0]):
-            window_a = a[max(0, i + 1 - window):i + 1, col]
-            out[i, col] = apply_func_nb(i, col, window_a, *args)
+            if np.isnan(a[i, col]):
+                nancnt = nancnt + 1
+            nancnt_arr[i] = nancnt
+            if i &lt; window:
+                valid_cnt = i + 1 - nancnt
+            else:
+                valid_cnt = window - (nancnt - nancnt_arr[i - window])
+            if valid_cnt &lt; minp:
+                out[i, col] = np.nan
+            else:
+                window_a = a[max(0, i + 1 - window):i + 1, col]
+                out[i, col] = apply_func_nb(i, col, window_a, *args)
+    return out</code></pre>
+</details>
+</dd>
+<dt id="vectorbt.generic.nb.rolling_matrix_apply_nb"><code class="name flex">
+<span>def <span class="ident fname">rolling_matrix_apply_nb</span></span>(<span>a, window, minp, apply_func_nb, *args)</span>
+</code></dt>
+<dd>
+<div class="desc"><p><code><a title="vectorbt.generic.nb.rolling_apply_nb" href="#vectorbt.generic.nb.rolling_apply_nb">rolling_apply_nb()</a></code> with <code>apply_func_nb</code> being applied on all columns at once.</p>
+<p><code>apply_func_nb</code> should accept index of the row, the 2-dim array, and <code>*args</code>.
+Should return a single value or an array of shape <code>a.shape[1]</code>.</p></div>
+<details class="source">
+<summary>
+<span>Expand source code</span>
+</summary>
+<pre><code class="python">@njit
+def rolling_matrix_apply_nb(a, window, minp, apply_func_nb, *args):
+    &#34;&#34;&#34;`rolling_apply_nb` with `apply_func_nb` being applied on all columns at once.
+
+    `apply_func_nb` should accept index of the row, the 2-dim array, and `*args`.
+    Should return a single value or an array of shape `a.shape[1]`.&#34;&#34;&#34;
+    if minp is None:
+        minp = window
+    out = np.empty_like(a, dtype=np.float_)
+    nancnt_arr = np.empty((a.shape[0],), dtype=np.int_)
+    for i in range(a.shape[0]):
+        nancnt = 0
+        for col in range(a.shape[1]):
+            if np.isnan(a[i, col]):
+                nancnt = nancnt + 1
+        nancnt_arr[i] = nancnt
+        if i &lt; window:
+            valid_cnt = i + 1 - nancnt
+        else:
+            valid_cnt = window - (nancnt - nancnt_arr[i - window])
+        if valid_cnt &lt; minp:
+            out[i, :] = np.nan
+        else:
+            window_a = a[max(0, i + 1 - window):i + 1, :]
+            out[i, :] = apply_func_nb(i, window_a, *args)
     return out</code></pre>
 </details>
 </dd>
@@ -3412,7 +3431,6 @@ def rolling_std_1d_nb(a, window, minp=None, ddof=0):
     cumsum_sq = 0
     nancnt_arr = np.zeros_like(a)
     nancnt = 0
-    mean = 0
     for i in range(a.shape[0]):
         if np.isnan(a[i]):
             nancnt = nancnt + 1
@@ -3599,7 +3617,7 @@ def squeeze_grouped_nb(a, group_lens, reduce_func_nb, *args):
 </details>
 </dd>
 <dt id="vectorbt.generic.nb.std_reduce_nb"><code class="name flex">
-<span>def <span class="ident fname">std_reduce_nb</span></span>(<span>col, a, ddof, *args)</span>
+<span>def <span class="ident fname">std_reduce_nb</span></span>(<span>col, a, ddof)</span>
 </code></dt>
 <dd>
 <div class="desc"><p>Return std (ignores NaNs).</p></div>
@@ -3608,13 +3626,13 @@ def squeeze_grouped_nb(a, group_lens, reduce_func_nb, *args):
 <span>Expand source code</span>
 </summary>
 <pre><code class="python">@njit(cache=True)
-def std_reduce_nb(col, a, ddof, *args):
+def std_reduce_nb(col, a, ddof):
     &#34;&#34;&#34;Return std (ignores NaNs).&#34;&#34;&#34;
     return nanstd_1d_nb(a, ddof=ddof)</code></pre>
 </details>
 </dd>
 <dt id="vectorbt.generic.nb.sum_reduce_nb"><code class="name flex">
-<span>def <span class="ident fname">sum_reduce_nb</span></span>(<span>col, a, *args)</span>
+<span>def <span class="ident fname">sum_reduce_nb</span></span>(<span>col, a)</span>
 </code></dt>
 <dd>
 <div class="desc"><p>Return sum (ignores NaNs).</p></div>
@@ -3623,7 +3641,7 @@ def std_reduce_nb(col, a, ddof, *args):
 <span>Expand source code</span>
 </summary>
 <pre><code class="python">@njit(cache=True)
-def sum_reduce_nb(col, a, *args):
+def sum_reduce_nb(col, a):
     &#34;&#34;&#34;Return sum (ignores NaNs).&#34;&#34;&#34;
     return np.nansum(a)</code></pre>
 </details>
@@ -3668,8 +3686,6 @@ title="Search"
 <li><code><a title="vectorbt.generic.nb.argmin_reduce_nb" href="#vectorbt.generic.nb.argmin_reduce_nb">argmin_reduce_nb</a></code></li>
 <li><code><a title="vectorbt.generic.nb.bshift_1d_nb" href="#vectorbt.generic.nb.bshift_1d_nb">bshift_1d_nb</a></code></li>
 <li><code><a title="vectorbt.generic.nb.bshift_nb" href="#vectorbt.generic.nb.bshift_nb">bshift_nb</a></code></li>
-<li><code><a title="vectorbt.generic.nb.concat_ranges_1d_nb" href="#vectorbt.generic.nb.concat_ranges_1d_nb">concat_ranges_1d_nb</a></code></li>
-<li><code><a title="vectorbt.generic.nb.concat_ranges_nb" href="#vectorbt.generic.nb.concat_ranges_nb">concat_ranges_nb</a></code></li>
 <li><code><a title="vectorbt.generic.nb.count_reduce_nb" href="#vectorbt.generic.nb.count_reduce_nb">count_reduce_nb</a></code></li>
 <li><code><a title="vectorbt.generic.nb.cumprod_1d_nb" href="#vectorbt.generic.nb.cumprod_1d_nb">cumprod_1d_nb</a></code></li>
 <li><code><a title="vectorbt.generic.nb.cumprod_nb" href="#vectorbt.generic.nb.cumprod_nb">cumprod_nb</a></code></li>
@@ -3691,8 +3707,8 @@ title="Search"
 <li><code><a title="vectorbt.generic.nb.ewm_mean_nb" href="#vectorbt.generic.nb.ewm_mean_nb">ewm_mean_nb</a></code></li>
 <li><code><a title="vectorbt.generic.nb.ewm_std_1d_nb" href="#vectorbt.generic.nb.ewm_std_1d_nb">ewm_std_1d_nb</a></code></li>
 <li><code><a title="vectorbt.generic.nb.ewm_std_nb" href="#vectorbt.generic.nb.ewm_std_nb">ewm_std_nb</a></code></li>
-<li><code><a title="vectorbt.generic.nb.expanding_apply_matrix_nb" href="#vectorbt.generic.nb.expanding_apply_matrix_nb">expanding_apply_matrix_nb</a></code></li>
 <li><code><a title="vectorbt.generic.nb.expanding_apply_nb" href="#vectorbt.generic.nb.expanding_apply_nb">expanding_apply_nb</a></code></li>
+<li><code><a title="vectorbt.generic.nb.expanding_matrix_apply_nb" href="#vectorbt.generic.nb.expanding_matrix_apply_nb">expanding_matrix_apply_nb</a></code></li>
 <li><code><a title="vectorbt.generic.nb.expanding_max_1d_nb" href="#vectorbt.generic.nb.expanding_max_1d_nb">expanding_max_1d_nb</a></code></li>
 <li><code><a title="vectorbt.generic.nb.expanding_max_nb" href="#vectorbt.generic.nb.expanding_max_nb">expanding_max_nb</a></code></li>
 <li><code><a title="vectorbt.generic.nb.expanding_mean_1d_nb" href="#vectorbt.generic.nb.expanding_mean_1d_nb">expanding_mean_1d_nb</a></code></li>
@@ -3738,8 +3754,8 @@ title="Search"
 <li><code><a title="vectorbt.generic.nb.reduce_grouped_to_array_nb" href="#vectorbt.generic.nb.reduce_grouped_to_array_nb">reduce_grouped_to_array_nb</a></code></li>
 <li><code><a title="vectorbt.generic.nb.reduce_nb" href="#vectorbt.generic.nb.reduce_nb">reduce_nb</a></code></li>
 <li><code><a title="vectorbt.generic.nb.reduce_to_array_nb" href="#vectorbt.generic.nb.reduce_to_array_nb">reduce_to_array_nb</a></code></li>
-<li><code><a title="vectorbt.generic.nb.rolling_apply_matrix_nb" href="#vectorbt.generic.nb.rolling_apply_matrix_nb">rolling_apply_matrix_nb</a></code></li>
 <li><code><a title="vectorbt.generic.nb.rolling_apply_nb" href="#vectorbt.generic.nb.rolling_apply_nb">rolling_apply_nb</a></code></li>
+<li><code><a title="vectorbt.generic.nb.rolling_matrix_apply_nb" href="#vectorbt.generic.nb.rolling_matrix_apply_nb">rolling_matrix_apply_nb</a></code></li>
 <li><code><a title="vectorbt.generic.nb.rolling_max_1d_nb" href="#vectorbt.generic.nb.rolling_max_1d_nb">rolling_max_1d_nb</a></code></li>
 <li><code><a title="vectorbt.generic.nb.rolling_max_nb" href="#vectorbt.generic.nb.rolling_max_nb">rolling_max_nb</a></code></li>
 <li><code><a title="vectorbt.generic.nb.rolling_mean_1d_nb" href="#vectorbt.generic.nb.rolling_mean_1d_nb">rolling_mean_1d_nb</a></code></li>

@@ -35,8 +35,52 @@ ga('create', 'UA-142521178-3', 'auto'); ga('send', 'pageview');
 </header>
 <section id="section-intro">
 <p>Custom pandas accessors.</p>
+<p>Methods can be accessed as follows:</p>
+<ul>
+<li><code><a title="vectorbt.base.accessors.BaseSRAccessor" href="#vectorbt.base.accessors.BaseSRAccessor">BaseSRAccessor</a></code> -&gt; <code>pd.Series.vbt.*</code></li>
+<li><code><a title="vectorbt.base.accessors.BaseDFAccessor" href="#vectorbt.base.accessors.BaseDFAccessor">BaseDFAccessor</a></code> -&gt; <code>pd.DataFrame.vbt.*</code></li>
+</ul>
+<p>For example:</p>
+<pre><code class="language-python-repl">&gt;&gt;&gt; import pandas as pd
+&gt;&gt;&gt; import vectorbt as vbt
+
+&gt;&gt;&gt; # vectorbt.base.accessors.BaseAccessor.make_symmetric
+&gt;&gt;&gt; pd.Series([1, 2, 3]).vbt.make_symmetric()
+     0    1    2
+0  1.0  2.0  3.0
+1  2.0  NaN  NaN
+2  3.0  NaN  NaN
+</code></pre>
+<p>It contains base methods for working with pandas objects. Most of these methods are adaptations
+of combine/reshape/index functions that can work with pandas objects. For example,
+<code><a title="vectorbt.base.reshape_fns.broadcast" href="reshape_fns.html#vectorbt.base.reshape_fns.broadcast">broadcast()</a></code> can take an arbitrary number of pandas objects, thus
+you can find its variations as accessor methods.</p>
+<pre><code class="language-python-repl">&gt;&gt;&gt; sr = pd.Series([1])
+&gt;&gt;&gt; df = pd.DataFrame([1, 2, 3])
+
+&gt;&gt;&gt; vbt.base.reshape_fns.broadcast_to(sr, df)
+   0
+0  1
+1  1
+2  1
+&gt;&gt;&gt; sr.vbt.broadcast_to(df)
+   0
+0  1
+1  1
+2  1
+</code></pre>
+<p>Additionally, <code><a title="vectorbt.base.accessors.BaseAccessor" href="#vectorbt.base.accessors.BaseAccessor">BaseAccessor</a></code> implements arithmetic (such as <code>+</code>), comparison (such as <code>&gt;</code>) and
+logical operators (such as <code>&amp;</code>) by doing 1) NumPy-like broadcasting and 2) the compuation with NumPy
+under the hood, which is mostly much faster than with pandas.</p>
+<pre><code class="language-python-repl">&gt;&gt;&gt; df = pd.DataFrame(np.random.uniform(size=(1000, 1000)))
+&gt;&gt;&gt; %timeit df * 2
+296 ms ± 27.4 ms per loop (mean ± std. dev. of 7 runs, 1 loop each)
+&gt;&gt;&gt; %timeit df.vbt * 2
+5.48 ms ± 1.12 ms per loop (mean ± std. dev. of 7 runs, 100 loops each)
+</code></pre>
 <div class="admonition note">
 <p class="admonition-title">Note</p>
+<p>You should ensure that your <code>*.vbt</code> operand is on the left if the other operand is an array.</p>
 <p>Accessors do not utilize caching.</p>
 </div>
 <details class="source">
@@ -45,7 +89,61 @@ ga('create', 'UA-142521178-3', 'auto'); ga('send', 'pageview');
 </summary>
 <pre><code class="python">&#34;&#34;&#34;Custom pandas accessors.
 
+Methods can be accessed as follows:
+
+* `BaseSRAccessor` -&gt; `pd.Series.vbt.*`
+* `BaseDFAccessor` -&gt; `pd.DataFrame.vbt.*`
+
+For example:
+
+```python-repl
+&gt;&gt;&gt; import pandas as pd
+&gt;&gt;&gt; import vectorbt as vbt
+
+&gt;&gt;&gt; # vectorbt.base.accessors.BaseAccessor.make_symmetric
+&gt;&gt;&gt; pd.Series([1, 2, 3]).vbt.make_symmetric()
+     0    1    2
+0  1.0  2.0  3.0
+1  2.0  NaN  NaN
+2  3.0  NaN  NaN
+```
+
+It contains base methods for working with pandas objects. Most of these methods are adaptations
+of combine/reshape/index functions that can work with pandas objects. For example,
+`vectorbt.base.reshape_fns.broadcast` can take an arbitrary number of pandas objects, thus
+you can find its variations as accessor methods.
+
+```python-repl
+&gt;&gt;&gt; sr = pd.Series([1])
+&gt;&gt;&gt; df = pd.DataFrame([1, 2, 3])
+
+&gt;&gt;&gt; vbt.base.reshape_fns.broadcast_to(sr, df)
+   0
+0  1
+1  1
+2  1
+&gt;&gt;&gt; sr.vbt.broadcast_to(df)
+   0
+0  1
+1  1
+2  1
+```
+
+Additionally, `BaseAccessor` implements arithmetic (such as `+`), comparison (such as `&gt;`) and
+logical operators (such as `&amp;`) by doing 1) NumPy-like broadcasting and 2) the compuation with NumPy
+under the hood, which is mostly much faster than with pandas.
+
+```python-repl
+&gt;&gt;&gt; df = pd.DataFrame(np.random.uniform(size=(1000, 1000)))
+&gt;&gt;&gt; %timeit df * 2
+296 ms ± 27.4 ms per loop (mean ± std. dev. of 7 runs, 1 loop each)
+&gt;&gt;&gt; %timeit df.vbt * 2
+5.48 ms ± 1.12 ms per loop (mean ± std. dev. of 7 runs, 100 loops each)
+```
+
 !!! note
+    You should ensure that your `*.vbt` operand is on the left if the other operand is an array.
+
     Accessors do not utilize caching.&#34;&#34;&#34;
 
 import numpy as np
@@ -97,7 +195,7 @@ class BaseAccessor:
 
     @property
     def wrapper(self):
-        &#34;&#34;&#34;Array wrapper (read-only).&#34;&#34;&#34;
+        &#34;&#34;&#34;Array wrapper.&#34;&#34;&#34;
         return self._wrapper
 
     # ############# Creation ############# #
@@ -144,7 +242,7 @@ class BaseAccessor:
                 obj.index = obj_index
             return obj
 
-    def stack_index(self, index, on_top=True, axis=1, inplace=False):
+    def stack_index(self, index, on_top=True, axis=1, inplace=False, **kwargs):
         &#34;&#34;&#34;See `vectorbt.base.index_fns.stack_indexes`.
 
         Set `on_top` to False to stack at bottom.
@@ -153,8 +251,8 @@ class BaseAccessor:
 
         def apply_func(obj_index):
             if on_top:
-                return index_fns.stack_indexes(index, obj_index)
-            return index_fns.stack_indexes(obj_index, index)
+                return index_fns.stack_indexes(index, obj_index, **kwargs)
+            return index_fns.stack_indexes(obj_index, index, **kwargs)
 
         return self.apply_on_index(apply_func, axis=axis, inplace=inplace)
 
@@ -325,11 +423,18 @@ class BaseAccessor:
 
     # ############# Combining ############# #
 
-    def apply(self, *args, apply_func=None, to_2d=False, wrap_kwargs=None, **kwargs):
+    def apply(self, *args, apply_func=None, keep_pd=False, to_2d=False, wrap_kwargs=None, **kwargs):
         &#34;&#34;&#34;Apply a function `apply_func`.
 
-        Arguments `*args` and `**kwargs` will be directly passed to `apply_func`.
-        If `to_2d` is True, 2-dimensional NumPy arrays will be passed, otherwise as is.
+        Args:
+            *args: Variable arguments passed to `apply_func`.
+            apply_func (callable): Apply function.
+
+                Can be Numba-compiled.
+            keep_pd (bool): Whether to keep inputs as pandas objects, otherwise convert to NumPy arrays.
+            to_2d (bool): Whether to reshape inputs to 2-dim arrays, otherwise keep as-is.
+            wrap_kwargs (dict): Keyword arguments passed to `vectorbt.base.array_wrapper.ArrayWrapper.wrap`.
+            **kwargs: Keyword arguments passed to `combine_func`.
 
         !!! note
             The resulted array must have the same shape as the original array.
@@ -352,18 +457,24 @@ class BaseAccessor:
         checks.assert_not_none(apply_func)
         # Optionally cast to 2d array
         if to_2d:
-            obj = reshape_fns.to_2d(self._obj, raw=True)
+            obj = reshape_fns.to_2d(self._obj, raw=not keep_pd)
         else:
-            obj = np.asarray(self._obj)
+            if not keep_pd:
+                obj = np.asarray(self._obj)
+            else:
+                obj = self._obj
         result = apply_func(obj, *args, **kwargs)
         return self.wrapper.wrap(result, group_by=False, **merge_dicts({}, wrap_kwargs))
 
     @class_or_instancemethod
-    def concat(self_or_cls, *others, keys=None, broadcast_kwargs=None):
+    def concat(self_or_cls, *others, broadcast_kwargs=None, keys=None):
         &#34;&#34;&#34;Concatenate with `others` along columns.
 
-        All arguments will be broadcast using `vectorbt.base.reshape_fns.broadcast`
-        with `broadcast_kwargs`. Use `keys` as the outermost level.
+        Args:
+            others (list of array_like): List of objects to be concatenated with this array.
+            broadcast_kwargs (dict): Keyword arguments passed to `vectorbt.base.reshape_fns.broadcast`.
+            keys (list of str or pd.Index): Outermost column level.
+            convert_dtypes (bool): Whether to convert to inferred data types.
 
         ## Example
 
@@ -394,13 +505,30 @@ class BaseAccessor:
             out.columns = pd.RangeIndex(start=0, stop=len(out.columns), step=1)
         return out
 
-    def apply_and_concat(self, ntimes, *args, apply_func=None, to_2d=False, keys=None, wrap_kwargs=None, **kwargs):
+    def apply_and_concat(self, ntimes, *args, apply_func=None, keep_pd=False, to_2d=False,
+                         numba_loop=False, use_ray=False, keys=None, wrap_kwargs=None, **kwargs):
         &#34;&#34;&#34;Apply `apply_func` `ntimes` times and concatenate the results along columns.
         See `vectorbt.base.combine_fns.apply_and_concat_one`.
 
-        Arguments `*args` and `**kwargs` will be directly passed to `apply_func`.
-        If `to_2d` is True, 2-dimensional NumPy arrays will be passed, otherwise as is.
-        Use `keys` as the outermost level.
+        Args:
+            ntimes (int): Number of times to call `apply_func`.
+            *args: Variable arguments passed to `apply_func`.
+            apply_func (callable): Apply function.
+
+                Can be Numba-compiled.
+            keep_pd (bool): Whether to keep inputs as pandas objects, otherwise convert to NumPy arrays.
+            to_2d (bool): Whether to reshape inputs to 2-dim arrays, otherwise keep as-is.
+            numba_loop (bool): Whether to loop using Numba.
+
+                Set to True when iterating large number of times over small input,
+                but note that Numba doesn&#39;t support variable keyword arguments.
+            use_ray (bool): Whether to use Ray to execute `combine_func` in parallel.
+
+                Only works with `numba_loop` set to False and `concat` is set to True.
+                See `vectorbt.base.combine_fns.ray_apply` for related keyword arguments.
+            keys (list of str or pd.Index): Outermost column level.
+            wrap_kwargs (dict): Keyword arguments passed to `vectorbt.base.array_wrapper.ArrayWrapper.wrap`.
+            **kwargs: Keyword arguments passed to `combine_func`.
 
         !!! note
             The resulted arrays to be concatenated must have the same shape as broadcast input arrays.
@@ -419,17 +547,41 @@ class BaseAccessor:
         x  3  4   6   8   9  12
         y  5  6  10  12  15  18
         ```
+
+        Use Ray for small inputs and large processing times:
+
+        ```python-repl
+        &gt;&gt;&gt; def apply_func(i, a):
+        ...     time.sleep(1)
+        ...     return a
+
+        &gt;&gt;&gt; sr = pd.Series([1, 2, 3])
+
+        &gt;&gt;&gt; %timeit sr.vbt.apply_and_concat(3, apply_func=apply_func)
+        3.01 s ± 2.15 ms per loop (mean ± std. dev. of 7 runs, 1 loop each)
+
+        &gt;&gt;&gt; %timeit sr.vbt.apply_and_concat(3, apply_func=apply_func, use_ray=True)
+        1.01 s ± 2.31 ms per loop (mean ± std. dev. of 7 runs, 1 loop each)
+        ```
         &#34;&#34;&#34;
         checks.assert_not_none(apply_func)
         # Optionally cast to 2d array
         if to_2d:
-            obj_arr = reshape_fns.to_2d(self._obj, raw=True)
+            obj = reshape_fns.to_2d(self._obj, raw=not keep_pd)
         else:
-            obj_arr = np.asarray(self._obj)
-        if checks.is_numba_func(apply_func):
-            result = combine_fns.apply_and_concat_one_nb(ntimes, apply_func, obj_arr, *args, **kwargs)
+            if not keep_pd:
+                obj = np.asarray(self._obj)
+            else:
+                obj = self._obj
+        if checks.is_numba_func(apply_func) and numba_loop:
+            if use_ray:
+                raise ValueError(&#34;Ray cannot be used within Numba&#34;)
+            result = combine_fns.apply_and_concat_one_nb(ntimes, apply_func, obj, *args, **kwargs)
         else:
-            result = combine_fns.apply_and_concat_one(ntimes, apply_func, obj_arr, *args, **kwargs)
+            if use_ray:
+                result = combine_fns.apply_and_concat_one_ray(ntimes, apply_func, obj, *args, **kwargs)
+            else:
+                result = combine_fns.apply_and_concat_one(ntimes, apply_func, obj, *args, **kwargs)
         # Build column hierarchy
         if keys is not None:
             new_columns = index_fns.combine_indexes(keys, self.wrapper.columns)
@@ -438,15 +590,22 @@ class BaseAccessor:
             new_columns = index_fns.combine_indexes(top_columns, self.wrapper.columns)
         return self.wrapper.wrap(result, group_by=False, **merge_dicts(dict(columns=new_columns), wrap_kwargs))
 
-    def combine_with(self, other, *args, combine_func=None, to_2d=False,
-                     broadcast_kwargs=None, wrap_kwargs=None, **kwargs):
+    def combine_with(self, other, *args, combine_func=None, keep_pd=False, to_2d=False,
+                     broadcast=True, broadcast_kwargs=None, wrap_kwargs=None, **kwargs):
         &#34;&#34;&#34;Combine both using `combine_func` into a Series/DataFrame of the same shape.
 
-        All arguments will be broadcast using `vectorbt.base.reshape_fns.broadcast`
-        with `broadcast_kwargs`.
+        Args:
+            other (array_like): Object to be combined with this array.
+            *args: Variable arguments passed to `combine_func`.
+            combine_func (callable): Function to combine two arrays.
 
-        Arguments `*args` and `**kwargs` will be directly passed to `combine_func`.
-        If `to_2d` is True, 2-dimensional NumPy arrays will be passed, otherwise as is.
+                Can be Numba-compiled.
+            keep_pd (bool): Whether to keep inputs as pandas objects, otherwise convert to NumPy arrays.
+            to_2d (bool): Whether to reshape inputs to 2-dim arrays, otherwise keep as-is.
+            broadcast (bool): Whether to broadcast all inputs.
+            broadcast_kwargs (dict): Keyword arguments passed to `vectorbt.base.reshape_fns.broadcast`.
+            wrap_kwargs (dict): Keyword arguments passed to `vectorbt.base.array_wrapper.ArrayWrapper.wrap`.
+            **kwargs: Keyword arguments passed to `combine_func`.
 
         !!! note
             The resulted array must have the same shape as broadcast input arrays.
@@ -468,37 +627,57 @@ class BaseAccessor:
         if isinstance(other, BaseAccessor):
             other = other._obj
         checks.assert_not_none(combine_func)
-        if broadcast_kwargs is None:
-            broadcast_kwargs = {}
-        if checks.is_numba_func(combine_func):
-            # Numba requires writable arrays
-            broadcast_kwargs = merge_dicts(dict(require_kwargs=dict(requirements=&#39;W&#39;)), broadcast_kwargs)
-        new_obj, new_other = reshape_fns.broadcast(self._obj, other, **broadcast_kwargs)
+        if broadcast:
+            if broadcast_kwargs is None:
+                broadcast_kwargs = {}
+            if checks.is_numba_func(combine_func):
+                # Numba requires writable arrays
+                broadcast_kwargs = merge_dicts(dict(require_kwargs=dict(requirements=&#39;W&#39;)), broadcast_kwargs)
+            new_obj, new_other = reshape_fns.broadcast(self._obj, other, **broadcast_kwargs)
+        else:
+            new_obj, new_other = self._obj, other
         # Optionally cast to 2d array
         if to_2d:
-            new_obj_arr = reshape_fns.to_2d(new_obj, raw=True)
-            new_other_arr = reshape_fns.to_2d(new_other, raw=True)
+            inputs = tuple(map(lambda x: reshape_fns.to_2d(x, raw=not keep_pd), (new_obj, new_other)))
         else:
-            new_obj_arr = np.asarray(new_obj)
-            new_other_arr = np.asarray(new_other)
-        result = combine_func(new_obj_arr, new_other_arr, *args, **kwargs)
+            if not keep_pd:
+                inputs = tuple(map(lambda x: np.asarray(x), (new_obj, new_other)))
+            else:
+                inputs = new_obj, new_other
+        result = combine_func(inputs[0], inputs[1], *args, **kwargs)
         return new_obj.vbt.wrapper.wrap(result, **merge_dicts({}, wrap_kwargs))
 
-    def combine_with_multiple(self, others, *args, combine_func=None, to_2d=False,
-                              concat=False, broadcast_kwargs=None, keys=None, wrap_kwargs=None, **kwargs):
+    def combine_with_multiple(self, others, *args, combine_func=None, keep_pd=False, to_2d=False, concat=False,
+                              numba_loop=False, use_ray=False, broadcast=True, broadcast_kwargs=None, keys=None,
+                              wrap_kwargs=None, **kwargs):
         &#34;&#34;&#34;Combine with `others` using `combine_func`.
 
-        All arguments will be broadcast using `vectorbt.base.reshape_fns.broadcast`
-        with `broadcast_kwargs`.
+        Args:
+            others (list of array_like): List of objects to be combined with this array.
+            *args: Variable arguments passed to `combine_func`.
+            combine_func (callable): Function to combine two arrays.
 
-        If `concat` is True, concatenate the results along columns,
-        see `vectorbt.base.combine_fns.combine_and_concat`.
-        Otherwise, pairwise combine into a Series/DataFrame of the same shape, 
-        see `vectorbt.base.combine_fns.combine_multiple`.
+                Can be Numba-compiled.
+            keep_pd (bool): Whether to keep inputs as pandas objects, otherwise convert to NumPy arrays.
+            to_2d (bool): Whether to reshape inputs to 2-dim arrays, otherwise keep as-is.
+            concat (bool): Whether to concatenate the results along the column axis.
+                therwise, pairwise combine into a Series/DataFrame of the same shape.
 
-        Arguments `*args` and `**kwargs` will be directly passed to `combine_func`. 
-        If `to_2d` is True, 2-dimensional NumPy arrays will be passed, otherwise as is.
-        Use `keys` as the outermost level.
+                If True, see `vectorbt.base.combine_fns.combine_and_concat`.
+                If False, see `vectorbt.base.combine_fns.combine_multiple`.
+            numba_loop (bool): Whether to loop using Numba.
+
+                Set to True when iterating large number of times over small input,
+                but note that Numba doesn&#39;t support variable keyword arguments.
+            use_ray (bool): Whether to use Ray to execute `combine_func` in parallel.
+
+                Only works with `numba_loop` set to False and `concat` is set to True.
+                See `vectorbt.base.combine_fns.ray_apply` for related keyword arguments.
+            broadcast (bool): Whether to broadcast all inputs.
+            broadcast_kwargs (dict): Keyword arguments passed to `vectorbt.base.reshape_fns.broadcast`.
+            keys (list of str or pd.Index): Outermost column level.
+            wrap_kwargs (dict): Keyword arguments passed to `vectorbt.base.array_wrapper.ArrayWrapper.wrap`.
+            **kwargs: Keyword arguments passed to `combine_func`.
 
         !!! note
             If `combine_func` is Numba-compiled, will broadcast using `WRITEABLE` and `C_CONTIGUOUS`
@@ -529,31 +708,63 @@ class BaseAccessor:
         x  4  5   7   9
         y  7  8  12  14
         ```
+
+        Use Ray for small inputs and large processing times:
+
+        ```python-repl
+        &gt;&gt;&gt; def combine_func(a, b):
+        ...     time.sleep(1)
+        ...     return a + b
+
+        &gt;&gt;&gt; sr = pd.Series([1, 2, 3])
+
+        &gt;&gt;&gt; %timeit sr.vbt.combine_with_multiple(\
+        ...     [1, 1, 1], combine_func=combine_func)
+        3.01 s ± 2.98 ms per loop (mean ± std. dev. of 7 runs, 1 loop each)
+
+        &gt;&gt;&gt; %timeit sr.vbt.combine_with_multiple(\
+        ...     [1, 1, 1], combine_func=combine_func, concat=True, use_ray=True)
+        1.02 s ± 2.32 ms per loop (mean ± std. dev. of 7 runs, 1 loop each)
+        ```
         &#34;&#34;&#34;
         others = tuple(map(lambda x: x._obj if isinstance(x, BaseAccessor) else x, others))
         checks.assert_not_none(combine_func)
         checks.assert_type(others, Iterable)
         # Broadcast arguments
-        if broadcast_kwargs is None:
-            broadcast_kwargs = {}
-        if checks.is_numba_func(combine_func):
-            # Numba requires writeable arrays
-            # Plus all of our arrays must be in the same order
-            broadcast_kwargs = merge_dicts(dict(require_kwargs=dict(requirements=[&#39;W&#39;, &#39;C&#39;])), broadcast_kwargs)
-        new_obj, *new_others = reshape_fns.broadcast(self._obj, *others, **broadcast_kwargs)
+        if broadcast:
+            if broadcast_kwargs is None:
+                broadcast_kwargs = {}
+            if checks.is_numba_func(combine_func):
+                # Numba requires writeable arrays
+                # Plus all of our arrays must be in the same order
+                broadcast_kwargs = merge_dicts(dict(require_kwargs=dict(requirements=[&#39;W&#39;, &#39;C&#39;])), broadcast_kwargs)
+            new_obj, *new_others = reshape_fns.broadcast(self._obj, *others, **broadcast_kwargs)
+        else:
+            new_obj, new_others = self._obj, others
         # Optionally cast to 2d array
         if to_2d:
-            bc_arrays = tuple(map(lambda x: reshape_fns.to_2d(x, raw=True), (new_obj, *new_others)))
+            inputs = tuple(map(lambda x: reshape_fns.to_2d(x, raw=not keep_pd), (new_obj, *new_others)))
         else:
-            bc_arrays = tuple(map(lambda x: np.asarray(x), (new_obj, *new_others)))
+            if not keep_pd:
+                inputs = tuple(map(lambda x: np.asarray(x), (new_obj, *new_others)))
+            else:
+                inputs = new_obj, *new_others
         if concat:
             # Concat the results horizontally
-            if checks.is_numba_func(combine_func):
-                for i in range(1, len(bc_arrays)):
-                    checks.assert_meta_equal(bc_arrays[i - 1], bc_arrays[i])
-                result = combine_fns.combine_and_concat_nb(bc_arrays[0], bc_arrays[1:], combine_func, *args, **kwargs)
+            if checks.is_numba_func(combine_func) and numba_loop:
+                if use_ray:
+                    raise ValueError(&#34;Ray cannot be used within Numba&#34;)
+                for i in range(1, len(inputs)):
+                    checks.assert_meta_equal(inputs[i - 1], inputs[i])
+                result = combine_fns.combine_and_concat_nb(
+                    inputs[0], inputs[1:], combine_func, *args, **kwargs)
             else:
-                result = combine_fns.combine_and_concat(bc_arrays[0], bc_arrays[1:], combine_func, *args, **kwargs)
+                if use_ray:
+                    result = combine_fns.combine_and_concat_ray(
+                        inputs[0], inputs[1:], combine_func, *args, **kwargs)
+                else:
+                    result = combine_fns.combine_and_concat(
+                        inputs[0], inputs[1:], combine_func, *args, **kwargs)
             columns = new_obj.vbt.wrapper.columns
             if keys is not None:
                 new_columns = index_fns.combine_indexes(keys, columns)
@@ -563,12 +774,14 @@ class BaseAccessor:
             return new_obj.vbt.wrapper.wrap(result, **merge_dicts(dict(columns=new_columns), wrap_kwargs))
         else:
             # Combine arguments pairwise into one object
-            if checks.is_numba_func(combine_func):
-                for i in range(1, len(bc_arrays)):
-                    checks.assert_dtype_equal(bc_arrays[i - 1], bc_arrays[i])
-                result = combine_fns.combine_multiple_nb(bc_arrays, combine_func, *args, **kwargs)
+            if use_ray:
+                raise ValueError(&#34;Ray cannot be used with concat=False&#34;)
+            if checks.is_numba_func(combine_func) and numba_loop:
+                for i in range(1, len(inputs)):
+                    checks.assert_dtype_equal(inputs[i - 1], inputs[i])
+                result = combine_fns.combine_multiple_nb(inputs, combine_func, *args, **kwargs)
             else:
-                result = combine_fns.combine_multiple(bc_arrays, combine_func, *args, **kwargs)
+                result = combine_fns.combine_multiple(inputs, combine_func, *args, **kwargs)
             return new_obj.vbt.wrapper.wrap(result, **merge_dicts({}, wrap_kwargs))
 
 
@@ -662,7 +875,7 @@ by using <code><a title="vectorbt.base.accessors.BaseAccessor.wrapper" href="#ve
 
     @property
     def wrapper(self):
-        &#34;&#34;&#34;Array wrapper (read-only).&#34;&#34;&#34;
+        &#34;&#34;&#34;Array wrapper.&#34;&#34;&#34;
         return self._wrapper
 
     # ############# Creation ############# #
@@ -709,7 +922,7 @@ by using <code><a title="vectorbt.base.accessors.BaseAccessor.wrapper" href="#ve
                 obj.index = obj_index
             return obj
 
-    def stack_index(self, index, on_top=True, axis=1, inplace=False):
+    def stack_index(self, index, on_top=True, axis=1, inplace=False, **kwargs):
         &#34;&#34;&#34;See `vectorbt.base.index_fns.stack_indexes`.
 
         Set `on_top` to False to stack at bottom.
@@ -718,8 +931,8 @@ by using <code><a title="vectorbt.base.accessors.BaseAccessor.wrapper" href="#ve
 
         def apply_func(obj_index):
             if on_top:
-                return index_fns.stack_indexes(index, obj_index)
-            return index_fns.stack_indexes(obj_index, index)
+                return index_fns.stack_indexes(index, obj_index, **kwargs)
+            return index_fns.stack_indexes(obj_index, index, **kwargs)
 
         return self.apply_on_index(apply_func, axis=axis, inplace=inplace)
 
@@ -890,11 +1103,18 @@ by using <code><a title="vectorbt.base.accessors.BaseAccessor.wrapper" href="#ve
 
     # ############# Combining ############# #
 
-    def apply(self, *args, apply_func=None, to_2d=False, wrap_kwargs=None, **kwargs):
+    def apply(self, *args, apply_func=None, keep_pd=False, to_2d=False, wrap_kwargs=None, **kwargs):
         &#34;&#34;&#34;Apply a function `apply_func`.
 
-        Arguments `*args` and `**kwargs` will be directly passed to `apply_func`.
-        If `to_2d` is True, 2-dimensional NumPy arrays will be passed, otherwise as is.
+        Args:
+            *args: Variable arguments passed to `apply_func`.
+            apply_func (callable): Apply function.
+
+                Can be Numba-compiled.
+            keep_pd (bool): Whether to keep inputs as pandas objects, otherwise convert to NumPy arrays.
+            to_2d (bool): Whether to reshape inputs to 2-dim arrays, otherwise keep as-is.
+            wrap_kwargs (dict): Keyword arguments passed to `vectorbt.base.array_wrapper.ArrayWrapper.wrap`.
+            **kwargs: Keyword arguments passed to `combine_func`.
 
         !!! note
             The resulted array must have the same shape as the original array.
@@ -917,18 +1137,24 @@ by using <code><a title="vectorbt.base.accessors.BaseAccessor.wrapper" href="#ve
         checks.assert_not_none(apply_func)
         # Optionally cast to 2d array
         if to_2d:
-            obj = reshape_fns.to_2d(self._obj, raw=True)
+            obj = reshape_fns.to_2d(self._obj, raw=not keep_pd)
         else:
-            obj = np.asarray(self._obj)
+            if not keep_pd:
+                obj = np.asarray(self._obj)
+            else:
+                obj = self._obj
         result = apply_func(obj, *args, **kwargs)
         return self.wrapper.wrap(result, group_by=False, **merge_dicts({}, wrap_kwargs))
 
     @class_or_instancemethod
-    def concat(self_or_cls, *others, keys=None, broadcast_kwargs=None):
+    def concat(self_or_cls, *others, broadcast_kwargs=None, keys=None):
         &#34;&#34;&#34;Concatenate with `others` along columns.
 
-        All arguments will be broadcast using `vectorbt.base.reshape_fns.broadcast`
-        with `broadcast_kwargs`. Use `keys` as the outermost level.
+        Args:
+            others (list of array_like): List of objects to be concatenated with this array.
+            broadcast_kwargs (dict): Keyword arguments passed to `vectorbt.base.reshape_fns.broadcast`.
+            keys (list of str or pd.Index): Outermost column level.
+            convert_dtypes (bool): Whether to convert to inferred data types.
 
         ## Example
 
@@ -959,13 +1185,30 @@ by using <code><a title="vectorbt.base.accessors.BaseAccessor.wrapper" href="#ve
             out.columns = pd.RangeIndex(start=0, stop=len(out.columns), step=1)
         return out
 
-    def apply_and_concat(self, ntimes, *args, apply_func=None, to_2d=False, keys=None, wrap_kwargs=None, **kwargs):
+    def apply_and_concat(self, ntimes, *args, apply_func=None, keep_pd=False, to_2d=False,
+                         numba_loop=False, use_ray=False, keys=None, wrap_kwargs=None, **kwargs):
         &#34;&#34;&#34;Apply `apply_func` `ntimes` times and concatenate the results along columns.
         See `vectorbt.base.combine_fns.apply_and_concat_one`.
 
-        Arguments `*args` and `**kwargs` will be directly passed to `apply_func`.
-        If `to_2d` is True, 2-dimensional NumPy arrays will be passed, otherwise as is.
-        Use `keys` as the outermost level.
+        Args:
+            ntimes (int): Number of times to call `apply_func`.
+            *args: Variable arguments passed to `apply_func`.
+            apply_func (callable): Apply function.
+
+                Can be Numba-compiled.
+            keep_pd (bool): Whether to keep inputs as pandas objects, otherwise convert to NumPy arrays.
+            to_2d (bool): Whether to reshape inputs to 2-dim arrays, otherwise keep as-is.
+            numba_loop (bool): Whether to loop using Numba.
+
+                Set to True when iterating large number of times over small input,
+                but note that Numba doesn&#39;t support variable keyword arguments.
+            use_ray (bool): Whether to use Ray to execute `combine_func` in parallel.
+
+                Only works with `numba_loop` set to False and `concat` is set to True.
+                See `vectorbt.base.combine_fns.ray_apply` for related keyword arguments.
+            keys (list of str or pd.Index): Outermost column level.
+            wrap_kwargs (dict): Keyword arguments passed to `vectorbt.base.array_wrapper.ArrayWrapper.wrap`.
+            **kwargs: Keyword arguments passed to `combine_func`.
 
         !!! note
             The resulted arrays to be concatenated must have the same shape as broadcast input arrays.
@@ -984,17 +1227,41 @@ by using <code><a title="vectorbt.base.accessors.BaseAccessor.wrapper" href="#ve
         x  3  4   6   8   9  12
         y  5  6  10  12  15  18
         ```
+
+        Use Ray for small inputs and large processing times:
+
+        ```python-repl
+        &gt;&gt;&gt; def apply_func(i, a):
+        ...     time.sleep(1)
+        ...     return a
+
+        &gt;&gt;&gt; sr = pd.Series([1, 2, 3])
+
+        &gt;&gt;&gt; %timeit sr.vbt.apply_and_concat(3, apply_func=apply_func)
+        3.01 s ± 2.15 ms per loop (mean ± std. dev. of 7 runs, 1 loop each)
+
+        &gt;&gt;&gt; %timeit sr.vbt.apply_and_concat(3, apply_func=apply_func, use_ray=True)
+        1.01 s ± 2.31 ms per loop (mean ± std. dev. of 7 runs, 1 loop each)
+        ```
         &#34;&#34;&#34;
         checks.assert_not_none(apply_func)
         # Optionally cast to 2d array
         if to_2d:
-            obj_arr = reshape_fns.to_2d(self._obj, raw=True)
+            obj = reshape_fns.to_2d(self._obj, raw=not keep_pd)
         else:
-            obj_arr = np.asarray(self._obj)
-        if checks.is_numba_func(apply_func):
-            result = combine_fns.apply_and_concat_one_nb(ntimes, apply_func, obj_arr, *args, **kwargs)
+            if not keep_pd:
+                obj = np.asarray(self._obj)
+            else:
+                obj = self._obj
+        if checks.is_numba_func(apply_func) and numba_loop:
+            if use_ray:
+                raise ValueError(&#34;Ray cannot be used within Numba&#34;)
+            result = combine_fns.apply_and_concat_one_nb(ntimes, apply_func, obj, *args, **kwargs)
         else:
-            result = combine_fns.apply_and_concat_one(ntimes, apply_func, obj_arr, *args, **kwargs)
+            if use_ray:
+                result = combine_fns.apply_and_concat_one_ray(ntimes, apply_func, obj, *args, **kwargs)
+            else:
+                result = combine_fns.apply_and_concat_one(ntimes, apply_func, obj, *args, **kwargs)
         # Build column hierarchy
         if keys is not None:
             new_columns = index_fns.combine_indexes(keys, self.wrapper.columns)
@@ -1003,15 +1270,22 @@ by using <code><a title="vectorbt.base.accessors.BaseAccessor.wrapper" href="#ve
             new_columns = index_fns.combine_indexes(top_columns, self.wrapper.columns)
         return self.wrapper.wrap(result, group_by=False, **merge_dicts(dict(columns=new_columns), wrap_kwargs))
 
-    def combine_with(self, other, *args, combine_func=None, to_2d=False,
-                     broadcast_kwargs=None, wrap_kwargs=None, **kwargs):
+    def combine_with(self, other, *args, combine_func=None, keep_pd=False, to_2d=False,
+                     broadcast=True, broadcast_kwargs=None, wrap_kwargs=None, **kwargs):
         &#34;&#34;&#34;Combine both using `combine_func` into a Series/DataFrame of the same shape.
 
-        All arguments will be broadcast using `vectorbt.base.reshape_fns.broadcast`
-        with `broadcast_kwargs`.
+        Args:
+            other (array_like): Object to be combined with this array.
+            *args: Variable arguments passed to `combine_func`.
+            combine_func (callable): Function to combine two arrays.
 
-        Arguments `*args` and `**kwargs` will be directly passed to `combine_func`.
-        If `to_2d` is True, 2-dimensional NumPy arrays will be passed, otherwise as is.
+                Can be Numba-compiled.
+            keep_pd (bool): Whether to keep inputs as pandas objects, otherwise convert to NumPy arrays.
+            to_2d (bool): Whether to reshape inputs to 2-dim arrays, otherwise keep as-is.
+            broadcast (bool): Whether to broadcast all inputs.
+            broadcast_kwargs (dict): Keyword arguments passed to `vectorbt.base.reshape_fns.broadcast`.
+            wrap_kwargs (dict): Keyword arguments passed to `vectorbt.base.array_wrapper.ArrayWrapper.wrap`.
+            **kwargs: Keyword arguments passed to `combine_func`.
 
         !!! note
             The resulted array must have the same shape as broadcast input arrays.
@@ -1033,37 +1307,57 @@ by using <code><a title="vectorbt.base.accessors.BaseAccessor.wrapper" href="#ve
         if isinstance(other, BaseAccessor):
             other = other._obj
         checks.assert_not_none(combine_func)
-        if broadcast_kwargs is None:
-            broadcast_kwargs = {}
-        if checks.is_numba_func(combine_func):
-            # Numba requires writable arrays
-            broadcast_kwargs = merge_dicts(dict(require_kwargs=dict(requirements=&#39;W&#39;)), broadcast_kwargs)
-        new_obj, new_other = reshape_fns.broadcast(self._obj, other, **broadcast_kwargs)
+        if broadcast:
+            if broadcast_kwargs is None:
+                broadcast_kwargs = {}
+            if checks.is_numba_func(combine_func):
+                # Numba requires writable arrays
+                broadcast_kwargs = merge_dicts(dict(require_kwargs=dict(requirements=&#39;W&#39;)), broadcast_kwargs)
+            new_obj, new_other = reshape_fns.broadcast(self._obj, other, **broadcast_kwargs)
+        else:
+            new_obj, new_other = self._obj, other
         # Optionally cast to 2d array
         if to_2d:
-            new_obj_arr = reshape_fns.to_2d(new_obj, raw=True)
-            new_other_arr = reshape_fns.to_2d(new_other, raw=True)
+            inputs = tuple(map(lambda x: reshape_fns.to_2d(x, raw=not keep_pd), (new_obj, new_other)))
         else:
-            new_obj_arr = np.asarray(new_obj)
-            new_other_arr = np.asarray(new_other)
-        result = combine_func(new_obj_arr, new_other_arr, *args, **kwargs)
+            if not keep_pd:
+                inputs = tuple(map(lambda x: np.asarray(x), (new_obj, new_other)))
+            else:
+                inputs = new_obj, new_other
+        result = combine_func(inputs[0], inputs[1], *args, **kwargs)
         return new_obj.vbt.wrapper.wrap(result, **merge_dicts({}, wrap_kwargs))
 
-    def combine_with_multiple(self, others, *args, combine_func=None, to_2d=False,
-                              concat=False, broadcast_kwargs=None, keys=None, wrap_kwargs=None, **kwargs):
+    def combine_with_multiple(self, others, *args, combine_func=None, keep_pd=False, to_2d=False, concat=False,
+                              numba_loop=False, use_ray=False, broadcast=True, broadcast_kwargs=None, keys=None,
+                              wrap_kwargs=None, **kwargs):
         &#34;&#34;&#34;Combine with `others` using `combine_func`.
 
-        All arguments will be broadcast using `vectorbt.base.reshape_fns.broadcast`
-        with `broadcast_kwargs`.
+        Args:
+            others (list of array_like): List of objects to be combined with this array.
+            *args: Variable arguments passed to `combine_func`.
+            combine_func (callable): Function to combine two arrays.
 
-        If `concat` is True, concatenate the results along columns,
-        see `vectorbt.base.combine_fns.combine_and_concat`.
-        Otherwise, pairwise combine into a Series/DataFrame of the same shape, 
-        see `vectorbt.base.combine_fns.combine_multiple`.
+                Can be Numba-compiled.
+            keep_pd (bool): Whether to keep inputs as pandas objects, otherwise convert to NumPy arrays.
+            to_2d (bool): Whether to reshape inputs to 2-dim arrays, otherwise keep as-is.
+            concat (bool): Whether to concatenate the results along the column axis.
+                therwise, pairwise combine into a Series/DataFrame of the same shape.
 
-        Arguments `*args` and `**kwargs` will be directly passed to `combine_func`. 
-        If `to_2d` is True, 2-dimensional NumPy arrays will be passed, otherwise as is.
-        Use `keys` as the outermost level.
+                If True, see `vectorbt.base.combine_fns.combine_and_concat`.
+                If False, see `vectorbt.base.combine_fns.combine_multiple`.
+            numba_loop (bool): Whether to loop using Numba.
+
+                Set to True when iterating large number of times over small input,
+                but note that Numba doesn&#39;t support variable keyword arguments.
+            use_ray (bool): Whether to use Ray to execute `combine_func` in parallel.
+
+                Only works with `numba_loop` set to False and `concat` is set to True.
+                See `vectorbt.base.combine_fns.ray_apply` for related keyword arguments.
+            broadcast (bool): Whether to broadcast all inputs.
+            broadcast_kwargs (dict): Keyword arguments passed to `vectorbt.base.reshape_fns.broadcast`.
+            keys (list of str or pd.Index): Outermost column level.
+            wrap_kwargs (dict): Keyword arguments passed to `vectorbt.base.array_wrapper.ArrayWrapper.wrap`.
+            **kwargs: Keyword arguments passed to `combine_func`.
 
         !!! note
             If `combine_func` is Numba-compiled, will broadcast using `WRITEABLE` and `C_CONTIGUOUS`
@@ -1094,31 +1388,63 @@ by using <code><a title="vectorbt.base.accessors.BaseAccessor.wrapper" href="#ve
         x  4  5   7   9
         y  7  8  12  14
         ```
+
+        Use Ray for small inputs and large processing times:
+
+        ```python-repl
+        &gt;&gt;&gt; def combine_func(a, b):
+        ...     time.sleep(1)
+        ...     return a + b
+
+        &gt;&gt;&gt; sr = pd.Series([1, 2, 3])
+
+        &gt;&gt;&gt; %timeit sr.vbt.combine_with_multiple(\
+        ...     [1, 1, 1], combine_func=combine_func)
+        3.01 s ± 2.98 ms per loop (mean ± std. dev. of 7 runs, 1 loop each)
+
+        &gt;&gt;&gt; %timeit sr.vbt.combine_with_multiple(\
+        ...     [1, 1, 1], combine_func=combine_func, concat=True, use_ray=True)
+        1.02 s ± 2.32 ms per loop (mean ± std. dev. of 7 runs, 1 loop each)
+        ```
         &#34;&#34;&#34;
         others = tuple(map(lambda x: x._obj if isinstance(x, BaseAccessor) else x, others))
         checks.assert_not_none(combine_func)
         checks.assert_type(others, Iterable)
         # Broadcast arguments
-        if broadcast_kwargs is None:
-            broadcast_kwargs = {}
-        if checks.is_numba_func(combine_func):
-            # Numba requires writeable arrays
-            # Plus all of our arrays must be in the same order
-            broadcast_kwargs = merge_dicts(dict(require_kwargs=dict(requirements=[&#39;W&#39;, &#39;C&#39;])), broadcast_kwargs)
-        new_obj, *new_others = reshape_fns.broadcast(self._obj, *others, **broadcast_kwargs)
+        if broadcast:
+            if broadcast_kwargs is None:
+                broadcast_kwargs = {}
+            if checks.is_numba_func(combine_func):
+                # Numba requires writeable arrays
+                # Plus all of our arrays must be in the same order
+                broadcast_kwargs = merge_dicts(dict(require_kwargs=dict(requirements=[&#39;W&#39;, &#39;C&#39;])), broadcast_kwargs)
+            new_obj, *new_others = reshape_fns.broadcast(self._obj, *others, **broadcast_kwargs)
+        else:
+            new_obj, new_others = self._obj, others
         # Optionally cast to 2d array
         if to_2d:
-            bc_arrays = tuple(map(lambda x: reshape_fns.to_2d(x, raw=True), (new_obj, *new_others)))
+            inputs = tuple(map(lambda x: reshape_fns.to_2d(x, raw=not keep_pd), (new_obj, *new_others)))
         else:
-            bc_arrays = tuple(map(lambda x: np.asarray(x), (new_obj, *new_others)))
+            if not keep_pd:
+                inputs = tuple(map(lambda x: np.asarray(x), (new_obj, *new_others)))
+            else:
+                inputs = new_obj, *new_others
         if concat:
             # Concat the results horizontally
-            if checks.is_numba_func(combine_func):
-                for i in range(1, len(bc_arrays)):
-                    checks.assert_meta_equal(bc_arrays[i - 1], bc_arrays[i])
-                result = combine_fns.combine_and_concat_nb(bc_arrays[0], bc_arrays[1:], combine_func, *args, **kwargs)
+            if checks.is_numba_func(combine_func) and numba_loop:
+                if use_ray:
+                    raise ValueError(&#34;Ray cannot be used within Numba&#34;)
+                for i in range(1, len(inputs)):
+                    checks.assert_meta_equal(inputs[i - 1], inputs[i])
+                result = combine_fns.combine_and_concat_nb(
+                    inputs[0], inputs[1:], combine_func, *args, **kwargs)
             else:
-                result = combine_fns.combine_and_concat(bc_arrays[0], bc_arrays[1:], combine_func, *args, **kwargs)
+                if use_ray:
+                    result = combine_fns.combine_and_concat_ray(
+                        inputs[0], inputs[1:], combine_func, *args, **kwargs)
+                else:
+                    result = combine_fns.combine_and_concat(
+                        inputs[0], inputs[1:], combine_func, *args, **kwargs)
             columns = new_obj.vbt.wrapper.columns
             if keys is not None:
                 new_columns = index_fns.combine_indexes(keys, columns)
@@ -1128,12 +1454,14 @@ by using <code><a title="vectorbt.base.accessors.BaseAccessor.wrapper" href="#ve
             return new_obj.vbt.wrapper.wrap(result, **merge_dicts(dict(columns=new_columns), wrap_kwargs))
         else:
             # Combine arguments pairwise into one object
-            if checks.is_numba_func(combine_func):
-                for i in range(1, len(bc_arrays)):
-                    checks.assert_dtype_equal(bc_arrays[i - 1], bc_arrays[i])
-                result = combine_fns.combine_multiple_nb(bc_arrays, combine_func, *args, **kwargs)
+            if use_ray:
+                raise ValueError(&#34;Ray cannot be used with concat=False&#34;)
+            if checks.is_numba_func(combine_func) and numba_loop:
+                for i in range(1, len(inputs)):
+                    checks.assert_dtype_equal(inputs[i - 1], inputs[i])
+                result = combine_fns.combine_multiple_nb(inputs, combine_func, *args, **kwargs)
             else:
-                result = combine_fns.combine_multiple(bc_arrays, combine_func, *args, **kwargs)
+                result = combine_fns.combine_multiple(inputs, combine_func, *args, **kwargs)
             return new_obj.vbt.wrapper.wrap(result, **merge_dicts({}, wrap_kwargs))</code></pre>
 </details>
 <h3 class="section-subtitle">Subclasses</h3>
@@ -1164,12 +1492,21 @@ def broadcast(self_or_cls, *others, **kwargs):
 </details>
 </dd>
 <dt id="vectorbt.base.accessors.BaseAccessor.concat"><code class="name flex">
-<span>def <span class="ident fname">concat</span></span>(<span>*others, keys=None, broadcast_kwargs=None)</span>
+<span>def <span class="ident fname">concat</span></span>(<span>*others, broadcast_kwargs=None, keys=None)</span>
 </code></dt>
 <dd>
 <div class="desc"><p>Concatenate with <code>others</code> along columns.</p>
-<p>All arguments will be broadcast using <code><a title="vectorbt.base.reshape_fns.broadcast" href="reshape_fns.html#vectorbt.base.reshape_fns.broadcast">broadcast()</a></code>
-with <code>broadcast_kwargs</code>. Use <code>keys</code> as the outermost level.</p>
+<h2 id="args">Args</h2>
+<dl>
+<dt><strong><code>others</code></strong> :&ensp;<code>list</code> of <code>array_like</code></dt>
+<dd>List of objects to be concatenated with this array.</dd>
+<dt><strong><code>broadcast_kwargs</code></strong> :&ensp;<code>dict</code></dt>
+<dd>Keyword arguments passed to <code><a title="vectorbt.base.reshape_fns.broadcast" href="reshape_fns.html#vectorbt.base.reshape_fns.broadcast">broadcast()</a></code>.</dd>
+<dt><strong><code>keys</code></strong> :&ensp;<code>list</code> of <code>str</code> or <code>pd.Index</code></dt>
+<dd>Outermost column level.</dd>
+<dt><strong><code>convert_dtypes</code></strong> :&ensp;<code>bool</code></dt>
+<dd>Whether to convert to inferred data types.</dd>
+</dl>
 <h2 id="example">Example</h2>
 <pre><code class="language-python-repl">&gt;&gt;&gt; import vectorbt as vbt
 &gt;&gt;&gt; import pandas as pd
@@ -1187,11 +1524,14 @@ y  2  2  5  6
 <span>Expand source code</span>
 </summary>
 <pre><code class="python">@class_or_instancemethod
-def concat(self_or_cls, *others, keys=None, broadcast_kwargs=None):
+def concat(self_or_cls, *others, broadcast_kwargs=None, keys=None):
     &#34;&#34;&#34;Concatenate with `others` along columns.
 
-    All arguments will be broadcast using `vectorbt.base.reshape_fns.broadcast`
-    with `broadcast_kwargs`. Use `keys` as the outermost level.
+    Args:
+        others (list of array_like): List of objects to be concatenated with this array.
+        broadcast_kwargs (dict): Keyword arguments passed to `vectorbt.base.reshape_fns.broadcast`.
+        keys (list of str or pd.Index): Outermost column level.
+        convert_dtypes (bool): Whether to convert to inferred data types.
 
     ## Example
 
@@ -1262,14 +1602,14 @@ def empty_like(cls, other, fill_value=np.nan, **kwargs):
 <dl>
 <dt id="vectorbt.base.accessors.BaseAccessor.wrapper"><code class="name">var <span class="ident fname">wrapper</span></code></dt>
 <dd>
-<div class="desc"><p>Array wrapper (read-only).</p></div>
+<div class="desc"><p>Array wrapper.</p></div>
 <details class="source">
 <summary>
 <span>Expand source code</span>
 </summary>
 <pre><code class="python">@property
 def wrapper(self):
-    &#34;&#34;&#34;Array wrapper (read-only).&#34;&#34;&#34;
+    &#34;&#34;&#34;Array wrapper.&#34;&#34;&#34;
     return self._wrapper</code></pre>
 </details>
 </dd>
@@ -1352,12 +1692,28 @@ y  3  4  3  4
 </details>
 </dd>
 <dt id="vectorbt.base.accessors.BaseAccessor.apply"><code class="name flex">
-<span>def <span class="ident fname">apply</span></span>(<span>self, *args, apply_func=None, to_2d=False, wrap_kwargs=None, **kwargs)</span>
+<span>def <span class="ident fname">apply</span></span>(<span>self, *args, apply_func=None, keep_pd=False, to_2d=False, wrap_kwargs=None, **kwargs)</span>
 </code></dt>
 <dd>
 <div class="desc"><p>Apply a function <code>apply_func</code>.</p>
-<p>Arguments <code>*args</code> and <code>**kwargs</code> will be directly passed to <code>apply_func</code>.
-If <code>to_2d</code> is True, 2-dimensional NumPy arrays will be passed, otherwise as is.</p>
+<h2 id="args">Args</h2>
+<dl>
+<dt><strong><code>*args</code></strong></dt>
+<dd>Variable arguments passed to <code>apply_func</code>.</dd>
+<dt><strong><code>apply_func</code></strong> :&ensp;<code>callable</code></dt>
+<dd>
+<p>Apply function.</p>
+<p>Can be Numba-compiled.</p>
+</dd>
+<dt><strong><code>keep_pd</code></strong> :&ensp;<code>bool</code></dt>
+<dd>Whether to keep inputs as pandas objects, otherwise convert to NumPy arrays.</dd>
+<dt><strong><code>to_2d</code></strong> :&ensp;<code>bool</code></dt>
+<dd>Whether to reshape inputs to 2-dim arrays, otherwise keep as-is.</dd>
+<dt><strong><code>wrap_kwargs</code></strong> :&ensp;<code>dict</code></dt>
+<dd>Keyword arguments passed to <code><a title="vectorbt.base.array_wrapper.ArrayWrapper.wrap" href="array_wrapper.html#vectorbt.base.array_wrapper.ArrayWrapper.wrap">ArrayWrapper.wrap()</a></code>.</dd>
+<dt><strong><code>**kwargs</code></strong></dt>
+<dd>Keyword arguments passed to <code>combine_func</code>.</dd>
+</dl>
 <div class="admonition note">
 <p class="admonition-title">Note</p>
 <p>The resulted array must have the same shape as the original array.</p>
@@ -1378,11 +1734,18 @@ Name: a2, dtype: int64
 <summary>
 <span>Expand source code</span>
 </summary>
-<pre><code class="python">def apply(self, *args, apply_func=None, to_2d=False, wrap_kwargs=None, **kwargs):
+<pre><code class="python">def apply(self, *args, apply_func=None, keep_pd=False, to_2d=False, wrap_kwargs=None, **kwargs):
     &#34;&#34;&#34;Apply a function `apply_func`.
 
-    Arguments `*args` and `**kwargs` will be directly passed to `apply_func`.
-    If `to_2d` is True, 2-dimensional NumPy arrays will be passed, otherwise as is.
+    Args:
+        *args: Variable arguments passed to `apply_func`.
+        apply_func (callable): Apply function.
+
+            Can be Numba-compiled.
+        keep_pd (bool): Whether to keep inputs as pandas objects, otherwise convert to NumPy arrays.
+        to_2d (bool): Whether to reshape inputs to 2-dim arrays, otherwise keep as-is.
+        wrap_kwargs (dict): Keyword arguments passed to `vectorbt.base.array_wrapper.ArrayWrapper.wrap`.
+        **kwargs: Keyword arguments passed to `combine_func`.
 
     !!! note
         The resulted array must have the same shape as the original array.
@@ -1405,22 +1768,56 @@ Name: a2, dtype: int64
     checks.assert_not_none(apply_func)
     # Optionally cast to 2d array
     if to_2d:
-        obj = reshape_fns.to_2d(self._obj, raw=True)
+        obj = reshape_fns.to_2d(self._obj, raw=not keep_pd)
     else:
-        obj = np.asarray(self._obj)
+        if not keep_pd:
+            obj = np.asarray(self._obj)
+        else:
+            obj = self._obj
     result = apply_func(obj, *args, **kwargs)
     return self.wrapper.wrap(result, group_by=False, **merge_dicts({}, wrap_kwargs))</code></pre>
 </details>
 </dd>
 <dt id="vectorbt.base.accessors.BaseAccessor.apply_and_concat"><code class="name flex">
-<span>def <span class="ident fname">apply_and_concat</span></span>(<span>self, ntimes, *args, apply_func=None, to_2d=False, keys=None, wrap_kwargs=None, **kwargs)</span>
+<span>def <span class="ident fname">apply_and_concat</span></span>(<span>self, ntimes, *args, apply_func=None, keep_pd=False, to_2d=False, numba_loop=False, use_ray=False, keys=None, wrap_kwargs=None, **kwargs)</span>
 </code></dt>
 <dd>
 <div class="desc"><p>Apply <code>apply_func</code> <code>ntimes</code> times and concatenate the results along columns.
 See <code><a title="vectorbt.base.combine_fns.apply_and_concat_one" href="combine_fns.html#vectorbt.base.combine_fns.apply_and_concat_one">apply_and_concat_one()</a></code>.</p>
-<p>Arguments <code>*args</code> and <code>**kwargs</code> will be directly passed to <code>apply_func</code>.
-If <code>to_2d</code> is True, 2-dimensional NumPy arrays will be passed, otherwise as is.
-Use <code>keys</code> as the outermost level.</p>
+<h2 id="args">Args</h2>
+<dl>
+<dt><strong><code>ntimes</code></strong> :&ensp;<code>int</code></dt>
+<dd>Number of times to call <code>apply_func</code>.</dd>
+<dt><strong><code>*args</code></strong></dt>
+<dd>Variable arguments passed to <code>apply_func</code>.</dd>
+<dt><strong><code>apply_func</code></strong> :&ensp;<code>callable</code></dt>
+<dd>
+<p>Apply function.</p>
+<p>Can be Numba-compiled.</p>
+</dd>
+<dt><strong><code>keep_pd</code></strong> :&ensp;<code>bool</code></dt>
+<dd>Whether to keep inputs as pandas objects, otherwise convert to NumPy arrays.</dd>
+<dt><strong><code>to_2d</code></strong> :&ensp;<code>bool</code></dt>
+<dd>Whether to reshape inputs to 2-dim arrays, otherwise keep as-is.</dd>
+<dt><strong><code>numba_loop</code></strong> :&ensp;<code>bool</code></dt>
+<dd>
+<p>Whether to loop using Numba.</p>
+<p>Set to True when iterating large number of times over small input,
+but note that Numba doesn't support variable keyword arguments.</p>
+</dd>
+<dt><strong><code>use_ray</code></strong> :&ensp;<code>bool</code></dt>
+<dd>
+<p>Whether to use Ray to execute <code>combine_func</code> in parallel.</p>
+<p>Only works with <code>numba_loop</code> set to False and <code>concat</code> is set to True.
+See <code><a title="vectorbt.base.combine_fns.ray_apply" href="combine_fns.html#vectorbt.base.combine_fns.ray_apply">ray_apply()</a></code> for related keyword arguments.</p>
+</dd>
+<dt><strong><code>keys</code></strong> :&ensp;<code>list</code> of <code>str</code> or <code>pd.Index</code></dt>
+<dd>Outermost column level.</dd>
+<dt><strong><code>wrap_kwargs</code></strong> :&ensp;<code>dict</code></dt>
+<dd>Keyword arguments passed to <code><a title="vectorbt.base.array_wrapper.ArrayWrapper.wrap" href="array_wrapper.html#vectorbt.base.array_wrapper.ArrayWrapper.wrap">ArrayWrapper.wrap()</a></code>.</dd>
+<dt><strong><code>**kwargs</code></strong></dt>
+<dd>Keyword arguments passed to <code>combine_func</code>.</dd>
+</dl>
 <div class="admonition note">
 <p class="admonition-title">Note</p>
 <p>The resulted arrays to be concatenated must have the same shape as broadcast input arrays.</p>
@@ -1436,18 +1833,48 @@ Use <code>keys</code> as the outermost level.</p>
    a  b   a   b   a   b
 x  3  4   6   8   9  12
 y  5  6  10  12  15  18
+</code></pre>
+<p>Use Ray for small inputs and large processing times:</p>
+<pre><code class="language-python-repl">&gt;&gt;&gt; def apply_func(i, a):
+...     time.sleep(1)
+...     return a
+
+&gt;&gt;&gt; sr = pd.Series([1, 2, 3])
+
+&gt;&gt;&gt; %timeit sr.vbt.apply_and_concat(3, apply_func=apply_func)
+3.01 s ± 2.15 ms per loop (mean ± std. dev. of 7 runs, 1 loop each)
+
+&gt;&gt;&gt; %timeit sr.vbt.apply_and_concat(3, apply_func=apply_func, use_ray=True)
+1.01 s ± 2.31 ms per loop (mean ± std. dev. of 7 runs, 1 loop each)
 </code></pre></div>
 <details class="source">
 <summary>
 <span>Expand source code</span>
 </summary>
-<pre><code class="python">def apply_and_concat(self, ntimes, *args, apply_func=None, to_2d=False, keys=None, wrap_kwargs=None, **kwargs):
+<pre><code class="python">def apply_and_concat(self, ntimes, *args, apply_func=None, keep_pd=False, to_2d=False,
+                     numba_loop=False, use_ray=False, keys=None, wrap_kwargs=None, **kwargs):
     &#34;&#34;&#34;Apply `apply_func` `ntimes` times and concatenate the results along columns.
     See `vectorbt.base.combine_fns.apply_and_concat_one`.
 
-    Arguments `*args` and `**kwargs` will be directly passed to `apply_func`.
-    If `to_2d` is True, 2-dimensional NumPy arrays will be passed, otherwise as is.
-    Use `keys` as the outermost level.
+    Args:
+        ntimes (int): Number of times to call `apply_func`.
+        *args: Variable arguments passed to `apply_func`.
+        apply_func (callable): Apply function.
+
+            Can be Numba-compiled.
+        keep_pd (bool): Whether to keep inputs as pandas objects, otherwise convert to NumPy arrays.
+        to_2d (bool): Whether to reshape inputs to 2-dim arrays, otherwise keep as-is.
+        numba_loop (bool): Whether to loop using Numba.
+
+            Set to True when iterating large number of times over small input,
+            but note that Numba doesn&#39;t support variable keyword arguments.
+        use_ray (bool): Whether to use Ray to execute `combine_func` in parallel.
+
+            Only works with `numba_loop` set to False and `concat` is set to True.
+            See `vectorbt.base.combine_fns.ray_apply` for related keyword arguments.
+        keys (list of str or pd.Index): Outermost column level.
+        wrap_kwargs (dict): Keyword arguments passed to `vectorbt.base.array_wrapper.ArrayWrapper.wrap`.
+        **kwargs: Keyword arguments passed to `combine_func`.
 
     !!! note
         The resulted arrays to be concatenated must have the same shape as broadcast input arrays.
@@ -1466,17 +1893,41 @@ y  5  6  10  12  15  18
     x  3  4   6   8   9  12
     y  5  6  10  12  15  18
     ```
+
+    Use Ray for small inputs and large processing times:
+
+    ```python-repl
+    &gt;&gt;&gt; def apply_func(i, a):
+    ...     time.sleep(1)
+    ...     return a
+
+    &gt;&gt;&gt; sr = pd.Series([1, 2, 3])
+
+    &gt;&gt;&gt; %timeit sr.vbt.apply_and_concat(3, apply_func=apply_func)
+    3.01 s ± 2.15 ms per loop (mean ± std. dev. of 7 runs, 1 loop each)
+
+    &gt;&gt;&gt; %timeit sr.vbt.apply_and_concat(3, apply_func=apply_func, use_ray=True)
+    1.01 s ± 2.31 ms per loop (mean ± std. dev. of 7 runs, 1 loop each)
+    ```
     &#34;&#34;&#34;
     checks.assert_not_none(apply_func)
     # Optionally cast to 2d array
     if to_2d:
-        obj_arr = reshape_fns.to_2d(self._obj, raw=True)
+        obj = reshape_fns.to_2d(self._obj, raw=not keep_pd)
     else:
-        obj_arr = np.asarray(self._obj)
-    if checks.is_numba_func(apply_func):
-        result = combine_fns.apply_and_concat_one_nb(ntimes, apply_func, obj_arr, *args, **kwargs)
+        if not keep_pd:
+            obj = np.asarray(self._obj)
+        else:
+            obj = self._obj
+    if checks.is_numba_func(apply_func) and numba_loop:
+        if use_ray:
+            raise ValueError(&#34;Ray cannot be used within Numba&#34;)
+        result = combine_fns.apply_and_concat_one_nb(ntimes, apply_func, obj, *args, **kwargs)
     else:
-        result = combine_fns.apply_and_concat_one(ntimes, apply_func, obj_arr, *args, **kwargs)
+        if use_ray:
+            result = combine_fns.apply_and_concat_one_ray(ntimes, apply_func, obj, *args, **kwargs)
+        else:
+            result = combine_fns.apply_and_concat_one(ntimes, apply_func, obj, *args, **kwargs)
     # Build column hierarchy
     if keys is not None:
         new_columns = index_fns.combine_indexes(keys, self.wrapper.columns)
@@ -1541,14 +1992,34 @@ If <code>inplace</code> is True, modifies the pandas object. Otherwise, returns 
 </details>
 </dd>
 <dt id="vectorbt.base.accessors.BaseAccessor.combine_with"><code class="name flex">
-<span>def <span class="ident fname">combine_with</span></span>(<span>self, other, *args, combine_func=None, to_2d=False, broadcast_kwargs=None, wrap_kwargs=None, **kwargs)</span>
+<span>def <span class="ident fname">combine_with</span></span>(<span>self, other, *args, combine_func=None, keep_pd=False, to_2d=False, broadcast=True, broadcast_kwargs=None, wrap_kwargs=None, **kwargs)</span>
 </code></dt>
 <dd>
 <div class="desc"><p>Combine both using <code>combine_func</code> into a Series/DataFrame of the same shape.</p>
-<p>All arguments will be broadcast using <code><a title="vectorbt.base.reshape_fns.broadcast" href="reshape_fns.html#vectorbt.base.reshape_fns.broadcast">broadcast()</a></code>
-with <code>broadcast_kwargs</code>.</p>
-<p>Arguments <code>*args</code> and <code>**kwargs</code> will be directly passed to <code>combine_func</code>.
-If <code>to_2d</code> is True, 2-dimensional NumPy arrays will be passed, otherwise as is.</p>
+<h2 id="args">Args</h2>
+<dl>
+<dt><strong><code>other</code></strong> :&ensp;<code>array_like</code></dt>
+<dd>Object to be combined with this array.</dd>
+<dt><strong><code>*args</code></strong></dt>
+<dd>Variable arguments passed to <code>combine_func</code>.</dd>
+<dt><strong><code>combine_func</code></strong> :&ensp;<code>callable</code></dt>
+<dd>
+<p>Function to combine two arrays.</p>
+<p>Can be Numba-compiled.</p>
+</dd>
+<dt><strong><code>keep_pd</code></strong> :&ensp;<code>bool</code></dt>
+<dd>Whether to keep inputs as pandas objects, otherwise convert to NumPy arrays.</dd>
+<dt><strong><code>to_2d</code></strong> :&ensp;<code>bool</code></dt>
+<dd>Whether to reshape inputs to 2-dim arrays, otherwise keep as-is.</dd>
+<dt><strong><code>broadcast</code></strong> :&ensp;<code>bool</code></dt>
+<dd>Whether to broadcast all inputs.</dd>
+<dt><strong><code>broadcast_kwargs</code></strong> :&ensp;<code>dict</code></dt>
+<dd>Keyword arguments passed to <code><a title="vectorbt.base.reshape_fns.broadcast" href="reshape_fns.html#vectorbt.base.reshape_fns.broadcast">broadcast()</a></code>.</dd>
+<dt><strong><code>wrap_kwargs</code></strong> :&ensp;<code>dict</code></dt>
+<dd>Keyword arguments passed to <code><a title="vectorbt.base.array_wrapper.ArrayWrapper.wrap" href="array_wrapper.html#vectorbt.base.array_wrapper.ArrayWrapper.wrap">ArrayWrapper.wrap()</a></code>.</dd>
+<dt><strong><code>**kwargs</code></strong></dt>
+<dd>Keyword arguments passed to <code>combine_func</code>.</dd>
+</dl>
 <div class="admonition note">
 <p class="admonition-title">Note</p>
 <p>The resulted array must have the same shape as broadcast input arrays.</p>
@@ -1568,15 +2039,22 @@ y  7  8
 <summary>
 <span>Expand source code</span>
 </summary>
-<pre><code class="python">def combine_with(self, other, *args, combine_func=None, to_2d=False,
-                 broadcast_kwargs=None, wrap_kwargs=None, **kwargs):
+<pre><code class="python">def combine_with(self, other, *args, combine_func=None, keep_pd=False, to_2d=False,
+                 broadcast=True, broadcast_kwargs=None, wrap_kwargs=None, **kwargs):
     &#34;&#34;&#34;Combine both using `combine_func` into a Series/DataFrame of the same shape.
 
-    All arguments will be broadcast using `vectorbt.base.reshape_fns.broadcast`
-    with `broadcast_kwargs`.
+    Args:
+        other (array_like): Object to be combined with this array.
+        *args: Variable arguments passed to `combine_func`.
+        combine_func (callable): Function to combine two arrays.
 
-    Arguments `*args` and `**kwargs` will be directly passed to `combine_func`.
-    If `to_2d` is True, 2-dimensional NumPy arrays will be passed, otherwise as is.
+            Can be Numba-compiled.
+        keep_pd (bool): Whether to keep inputs as pandas objects, otherwise convert to NumPy arrays.
+        to_2d (bool): Whether to reshape inputs to 2-dim arrays, otherwise keep as-is.
+        broadcast (bool): Whether to broadcast all inputs.
+        broadcast_kwargs (dict): Keyword arguments passed to `vectorbt.base.reshape_fns.broadcast`.
+        wrap_kwargs (dict): Keyword arguments passed to `vectorbt.base.array_wrapper.ArrayWrapper.wrap`.
+        **kwargs: Keyword arguments passed to `combine_func`.
 
     !!! note
         The resulted array must have the same shape as broadcast input arrays.
@@ -1598,37 +2076,77 @@ y  7  8
     if isinstance(other, BaseAccessor):
         other = other._obj
     checks.assert_not_none(combine_func)
-    if broadcast_kwargs is None:
-        broadcast_kwargs = {}
-    if checks.is_numba_func(combine_func):
-        # Numba requires writable arrays
-        broadcast_kwargs = merge_dicts(dict(require_kwargs=dict(requirements=&#39;W&#39;)), broadcast_kwargs)
-    new_obj, new_other = reshape_fns.broadcast(self._obj, other, **broadcast_kwargs)
+    if broadcast:
+        if broadcast_kwargs is None:
+            broadcast_kwargs = {}
+        if checks.is_numba_func(combine_func):
+            # Numba requires writable arrays
+            broadcast_kwargs = merge_dicts(dict(require_kwargs=dict(requirements=&#39;W&#39;)), broadcast_kwargs)
+        new_obj, new_other = reshape_fns.broadcast(self._obj, other, **broadcast_kwargs)
+    else:
+        new_obj, new_other = self._obj, other
     # Optionally cast to 2d array
     if to_2d:
-        new_obj_arr = reshape_fns.to_2d(new_obj, raw=True)
-        new_other_arr = reshape_fns.to_2d(new_other, raw=True)
+        inputs = tuple(map(lambda x: reshape_fns.to_2d(x, raw=not keep_pd), (new_obj, new_other)))
     else:
-        new_obj_arr = np.asarray(new_obj)
-        new_other_arr = np.asarray(new_other)
-    result = combine_func(new_obj_arr, new_other_arr, *args, **kwargs)
+        if not keep_pd:
+            inputs = tuple(map(lambda x: np.asarray(x), (new_obj, new_other)))
+        else:
+            inputs = new_obj, new_other
+    result = combine_func(inputs[0], inputs[1], *args, **kwargs)
     return new_obj.vbt.wrapper.wrap(result, **merge_dicts({}, wrap_kwargs))</code></pre>
 </details>
 </dd>
 <dt id="vectorbt.base.accessors.BaseAccessor.combine_with_multiple"><code class="name flex">
-<span>def <span class="ident fname">combine_with_multiple</span></span>(<span>self, others, *args, combine_func=None, to_2d=False, concat=False, broadcast_kwargs=None, keys=None, wrap_kwargs=None, **kwargs)</span>
+<span>def <span class="ident fname">combine_with_multiple</span></span>(<span>self, others, *args, combine_func=None, keep_pd=False, to_2d=False, concat=False, numba_loop=False, use_ray=False, broadcast=True, broadcast_kwargs=None, keys=None, wrap_kwargs=None, **kwargs)</span>
 </code></dt>
 <dd>
 <div class="desc"><p>Combine with <code>others</code> using <code>combine_func</code>.</p>
-<p>All arguments will be broadcast using <code><a title="vectorbt.base.reshape_fns.broadcast" href="reshape_fns.html#vectorbt.base.reshape_fns.broadcast">broadcast()</a></code>
-with <code>broadcast_kwargs</code>.</p>
-<p>If <code>concat</code> is True, concatenate the results along columns,
-see <code><a title="vectorbt.base.combine_fns.combine_and_concat" href="combine_fns.html#vectorbt.base.combine_fns.combine_and_concat">combine_and_concat()</a></code>.
-Otherwise, pairwise combine into a Series/DataFrame of the same shape,
-see <code><a title="vectorbt.base.combine_fns.combine_multiple" href="combine_fns.html#vectorbt.base.combine_fns.combine_multiple">combine_multiple()</a></code>.</p>
-<p>Arguments <code>*args</code> and <code>**kwargs</code> will be directly passed to <code>combine_func</code>.
-If <code>to_2d</code> is True, 2-dimensional NumPy arrays will be passed, otherwise as is.
-Use <code>keys</code> as the outermost level.</p>
+<h2 id="args">Args</h2>
+<dl>
+<dt><strong><code>others</code></strong> :&ensp;<code>list</code> of <code>array_like</code></dt>
+<dd>List of objects to be combined with this array.</dd>
+<dt><strong><code>*args</code></strong></dt>
+<dd>Variable arguments passed to <code>combine_func</code>.</dd>
+<dt><strong><code>combine_func</code></strong> :&ensp;<code>callable</code></dt>
+<dd>
+<p>Function to combine two arrays.</p>
+<p>Can be Numba-compiled.</p>
+</dd>
+<dt><strong><code>keep_pd</code></strong> :&ensp;<code>bool</code></dt>
+<dd>Whether to keep inputs as pandas objects, otherwise convert to NumPy arrays.</dd>
+<dt><strong><code>to_2d</code></strong> :&ensp;<code>bool</code></dt>
+<dd>Whether to reshape inputs to 2-dim arrays, otherwise keep as-is.</dd>
+<dt><strong><code>concat</code></strong> :&ensp;<code>bool</code></dt>
+<dd>
+<p>Whether to concatenate the results along the column axis.
+therwise, pairwise combine into a Series/DataFrame of the same shape.</p>
+<p>If True, see <code><a title="vectorbt.base.combine_fns.combine_and_concat" href="combine_fns.html#vectorbt.base.combine_fns.combine_and_concat">combine_and_concat()</a></code>.
+If False, see <code><a title="vectorbt.base.combine_fns.combine_multiple" href="combine_fns.html#vectorbt.base.combine_fns.combine_multiple">combine_multiple()</a></code>.</p>
+</dd>
+<dt><strong><code>numba_loop</code></strong> :&ensp;<code>bool</code></dt>
+<dd>
+<p>Whether to loop using Numba.</p>
+<p>Set to True when iterating large number of times over small input,
+but note that Numba doesn't support variable keyword arguments.</p>
+</dd>
+<dt><strong><code>use_ray</code></strong> :&ensp;<code>bool</code></dt>
+<dd>
+<p>Whether to use Ray to execute <code>combine_func</code> in parallel.</p>
+<p>Only works with <code>numba_loop</code> set to False and <code>concat</code> is set to True.
+See <code><a title="vectorbt.base.combine_fns.ray_apply" href="combine_fns.html#vectorbt.base.combine_fns.ray_apply">ray_apply()</a></code> for related keyword arguments.</p>
+</dd>
+<dt><strong><code>broadcast</code></strong> :&ensp;<code>bool</code></dt>
+<dd>Whether to broadcast all inputs.</dd>
+<dt><strong><code>broadcast_kwargs</code></strong> :&ensp;<code>dict</code></dt>
+<dd>Keyword arguments passed to <code><a title="vectorbt.base.reshape_fns.broadcast" href="reshape_fns.html#vectorbt.base.reshape_fns.broadcast">broadcast()</a></code>.</dd>
+<dt><strong><code>keys</code></strong> :&ensp;<code>list</code> of <code>str</code> or <code>pd.Index</code></dt>
+<dd>Outermost column level.</dd>
+<dt><strong><code>wrap_kwargs</code></strong> :&ensp;<code>dict</code></dt>
+<dd>Keyword arguments passed to <code><a title="vectorbt.base.array_wrapper.ArrayWrapper.wrap" href="array_wrapper.html#vectorbt.base.array_wrapper.ArrayWrapper.wrap">ArrayWrapper.wrap()</a></code>.</dd>
+<dt><strong><code>**kwargs</code></strong></dt>
+<dd>Keyword arguments passed to <code>combine_func</code>.</dd>
+</dl>
 <div class="admonition note">
 <p class="admonition-title">Note</p>
 <p>If <code>combine_func</code> is Numba-compiled, will broadcast using <code>WRITEABLE</code> and <code>C_CONTIGUOUS</code>
@@ -1655,26 +2173,55 @@ y  17  20
    a  b   a   b
 x  4  5   7   9
 y  7  8  12  14
+</code></pre>
+<p>Use Ray for small inputs and large processing times:</p>
+<pre><code class="language-python-repl">&gt;&gt;&gt; def combine_func(a, b):
+...     time.sleep(1)
+...     return a + b
+
+&gt;&gt;&gt; sr = pd.Series([1, 2, 3])
+
+&gt;&gt;&gt; %timeit sr.vbt.combine_with_multiple(        ...     [1, 1, 1], combine_func=combine_func)
+3.01 s ± 2.98 ms per loop (mean ± std. dev. of 7 runs, 1 loop each)
+
+&gt;&gt;&gt; %timeit sr.vbt.combine_with_multiple(        ...     [1, 1, 1], combine_func=combine_func, concat=True, use_ray=True)
+1.02 s ± 2.32 ms per loop (mean ± std. dev. of 7 runs, 1 loop each)
 </code></pre></div>
 <details class="source">
 <summary>
 <span>Expand source code</span>
 </summary>
-<pre><code class="python">def combine_with_multiple(self, others, *args, combine_func=None, to_2d=False,
-                          concat=False, broadcast_kwargs=None, keys=None, wrap_kwargs=None, **kwargs):
+<pre><code class="python">def combine_with_multiple(self, others, *args, combine_func=None, keep_pd=False, to_2d=False, concat=False,
+                          numba_loop=False, use_ray=False, broadcast=True, broadcast_kwargs=None, keys=None,
+                          wrap_kwargs=None, **kwargs):
     &#34;&#34;&#34;Combine with `others` using `combine_func`.
 
-    All arguments will be broadcast using `vectorbt.base.reshape_fns.broadcast`
-    with `broadcast_kwargs`.
+    Args:
+        others (list of array_like): List of objects to be combined with this array.
+        *args: Variable arguments passed to `combine_func`.
+        combine_func (callable): Function to combine two arrays.
 
-    If `concat` is True, concatenate the results along columns,
-    see `vectorbt.base.combine_fns.combine_and_concat`.
-    Otherwise, pairwise combine into a Series/DataFrame of the same shape, 
-    see `vectorbt.base.combine_fns.combine_multiple`.
+            Can be Numba-compiled.
+        keep_pd (bool): Whether to keep inputs as pandas objects, otherwise convert to NumPy arrays.
+        to_2d (bool): Whether to reshape inputs to 2-dim arrays, otherwise keep as-is.
+        concat (bool): Whether to concatenate the results along the column axis.
+            therwise, pairwise combine into a Series/DataFrame of the same shape.
 
-    Arguments `*args` and `**kwargs` will be directly passed to `combine_func`. 
-    If `to_2d` is True, 2-dimensional NumPy arrays will be passed, otherwise as is.
-    Use `keys` as the outermost level.
+            If True, see `vectorbt.base.combine_fns.combine_and_concat`.
+            If False, see `vectorbt.base.combine_fns.combine_multiple`.
+        numba_loop (bool): Whether to loop using Numba.
+
+            Set to True when iterating large number of times over small input,
+            but note that Numba doesn&#39;t support variable keyword arguments.
+        use_ray (bool): Whether to use Ray to execute `combine_func` in parallel.
+
+            Only works with `numba_loop` set to False and `concat` is set to True.
+            See `vectorbt.base.combine_fns.ray_apply` for related keyword arguments.
+        broadcast (bool): Whether to broadcast all inputs.
+        broadcast_kwargs (dict): Keyword arguments passed to `vectorbt.base.reshape_fns.broadcast`.
+        keys (list of str or pd.Index): Outermost column level.
+        wrap_kwargs (dict): Keyword arguments passed to `vectorbt.base.array_wrapper.ArrayWrapper.wrap`.
+        **kwargs: Keyword arguments passed to `combine_func`.
 
     !!! note
         If `combine_func` is Numba-compiled, will broadcast using `WRITEABLE` and `C_CONTIGUOUS`
@@ -1705,31 +2252,63 @@ y  7  8  12  14
     x  4  5   7   9
     y  7  8  12  14
     ```
+
+    Use Ray for small inputs and large processing times:
+
+    ```python-repl
+    &gt;&gt;&gt; def combine_func(a, b):
+    ...     time.sleep(1)
+    ...     return a + b
+
+    &gt;&gt;&gt; sr = pd.Series([1, 2, 3])
+
+    &gt;&gt;&gt; %timeit sr.vbt.combine_with_multiple(\
+    ...     [1, 1, 1], combine_func=combine_func)
+    3.01 s ± 2.98 ms per loop (mean ± std. dev. of 7 runs, 1 loop each)
+
+    &gt;&gt;&gt; %timeit sr.vbt.combine_with_multiple(\
+    ...     [1, 1, 1], combine_func=combine_func, concat=True, use_ray=True)
+    1.02 s ± 2.32 ms per loop (mean ± std. dev. of 7 runs, 1 loop each)
+    ```
     &#34;&#34;&#34;
     others = tuple(map(lambda x: x._obj if isinstance(x, BaseAccessor) else x, others))
     checks.assert_not_none(combine_func)
     checks.assert_type(others, Iterable)
     # Broadcast arguments
-    if broadcast_kwargs is None:
-        broadcast_kwargs = {}
-    if checks.is_numba_func(combine_func):
-        # Numba requires writeable arrays
-        # Plus all of our arrays must be in the same order
-        broadcast_kwargs = merge_dicts(dict(require_kwargs=dict(requirements=[&#39;W&#39;, &#39;C&#39;])), broadcast_kwargs)
-    new_obj, *new_others = reshape_fns.broadcast(self._obj, *others, **broadcast_kwargs)
+    if broadcast:
+        if broadcast_kwargs is None:
+            broadcast_kwargs = {}
+        if checks.is_numba_func(combine_func):
+            # Numba requires writeable arrays
+            # Plus all of our arrays must be in the same order
+            broadcast_kwargs = merge_dicts(dict(require_kwargs=dict(requirements=[&#39;W&#39;, &#39;C&#39;])), broadcast_kwargs)
+        new_obj, *new_others = reshape_fns.broadcast(self._obj, *others, **broadcast_kwargs)
+    else:
+        new_obj, new_others = self._obj, others
     # Optionally cast to 2d array
     if to_2d:
-        bc_arrays = tuple(map(lambda x: reshape_fns.to_2d(x, raw=True), (new_obj, *new_others)))
+        inputs = tuple(map(lambda x: reshape_fns.to_2d(x, raw=not keep_pd), (new_obj, *new_others)))
     else:
-        bc_arrays = tuple(map(lambda x: np.asarray(x), (new_obj, *new_others)))
+        if not keep_pd:
+            inputs = tuple(map(lambda x: np.asarray(x), (new_obj, *new_others)))
+        else:
+            inputs = new_obj, *new_others
     if concat:
         # Concat the results horizontally
-        if checks.is_numba_func(combine_func):
-            for i in range(1, len(bc_arrays)):
-                checks.assert_meta_equal(bc_arrays[i - 1], bc_arrays[i])
-            result = combine_fns.combine_and_concat_nb(bc_arrays[0], bc_arrays[1:], combine_func, *args, **kwargs)
+        if checks.is_numba_func(combine_func) and numba_loop:
+            if use_ray:
+                raise ValueError(&#34;Ray cannot be used within Numba&#34;)
+            for i in range(1, len(inputs)):
+                checks.assert_meta_equal(inputs[i - 1], inputs[i])
+            result = combine_fns.combine_and_concat_nb(
+                inputs[0], inputs[1:], combine_func, *args, **kwargs)
         else:
-            result = combine_fns.combine_and_concat(bc_arrays[0], bc_arrays[1:], combine_func, *args, **kwargs)
+            if use_ray:
+                result = combine_fns.combine_and_concat_ray(
+                    inputs[0], inputs[1:], combine_func, *args, **kwargs)
+            else:
+                result = combine_fns.combine_and_concat(
+                    inputs[0], inputs[1:], combine_func, *args, **kwargs)
         columns = new_obj.vbt.wrapper.columns
         if keys is not None:
             new_columns = index_fns.combine_indexes(keys, columns)
@@ -1739,12 +2318,14 @@ y  7  8  12  14
         return new_obj.vbt.wrapper.wrap(result, **merge_dicts(dict(columns=new_columns), wrap_kwargs))
     else:
         # Combine arguments pairwise into one object
-        if checks.is_numba_func(combine_func):
-            for i in range(1, len(bc_arrays)):
-                checks.assert_dtype_equal(bc_arrays[i - 1], bc_arrays[i])
-            result = combine_fns.combine_multiple_nb(bc_arrays, combine_func, *args, **kwargs)
+        if use_ray:
+            raise ValueError(&#34;Ray cannot be used with concat=False&#34;)
+        if checks.is_numba_func(combine_func) and numba_loop:
+            for i in range(1, len(inputs)):
+                checks.assert_dtype_equal(inputs[i - 1], inputs[i])
+            result = combine_fns.combine_multiple_nb(inputs, combine_func, *args, **kwargs)
         else:
-            result = combine_fns.combine_multiple(bc_arrays, combine_func, *args, **kwargs)
+            result = combine_fns.combine_multiple(inputs, combine_func, *args, **kwargs)
         return new_obj.vbt.wrapper.wrap(result, **merge_dicts({}, wrap_kwargs))</code></pre>
 </details>
 </dd>
@@ -1897,7 +2478,7 @@ Use <code>keys</code> as the outermost level.</p></div>
 </details>
 </dd>
 <dt id="vectorbt.base.accessors.BaseAccessor.stack_index"><code class="name flex">
-<span>def <span class="ident fname">stack_index</span></span>(<span>self, index, on_top=True, axis=1, inplace=False)</span>
+<span>def <span class="ident fname">stack_index</span></span>(<span>self, index, on_top=True, axis=1, inplace=False, **kwargs)</span>
 </code></dt>
 <dd>
 <div class="desc"><p>See <code><a title="vectorbt.base.index_fns.stack_indexes" href="index_fns.html#vectorbt.base.index_fns.stack_indexes">stack_indexes()</a></code>.</p>
@@ -1907,7 +2488,7 @@ Use <code>keys</code> as the outermost level.</p></div>
 <summary>
 <span>Expand source code</span>
 </summary>
-<pre><code class="python">def stack_index(self, index, on_top=True, axis=1, inplace=False):
+<pre><code class="python">def stack_index(self, index, on_top=True, axis=1, inplace=False, **kwargs):
     &#34;&#34;&#34;See `vectorbt.base.index_fns.stack_indexes`.
 
     Set `on_top` to False to stack at bottom.
@@ -1916,8 +2497,8 @@ Use <code>keys</code> as the outermost level.</p></div>
 
     def apply_func(obj_index):
         if on_top:
-            return index_fns.stack_indexes(index, obj_index)
-        return index_fns.stack_indexes(obj_index, index)
+            return index_fns.stack_indexes(index, obj_index, **kwargs)
+        return index_fns.stack_indexes(obj_index, index, **kwargs)
 
     return self.apply_on_index(apply_func, axis=axis, inplace=inplace)</code></pre>
 </details>
