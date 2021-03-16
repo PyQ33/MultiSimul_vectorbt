@@ -4,8 +4,8 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, minimum-scale=1" />
 <meta name="generator" content="pdoc 0.9.2" />
-<title>vectorbt.utils.array API documentation</title>
-<meta name="description" content="Utilities for working with arrays." />
+<title>vectorbt.utils.image API documentation</title>
+<meta name="description" content="Utilities for images." />
 <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/5.12.0-2/css/all.min.css" integrity="sha256-46r060N2LrChLLb5zowXQ72/iKKNiw/lAmygmHExk/o=" crossorigin="anonymous" />
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/docsearch.js@2/dist/cdn/docsearch.min.css" />
 <link href='https://cdnjs.cloudflare.com/ajax/libs/normalize/8.0.0/normalize.min.css' rel='stylesheet'>
@@ -31,139 +31,74 @@ ga('create', 'UA-142521178-3', 'auto'); ga('send', 'pageview');
 <main>
 <article id="content">
 <header>
-<h1 class="title">Module <code>vectorbt.utils.array</code></h1>
+<h1 class="title">Module <code>vectorbt.utils.image</code></h1>
 </header>
 <section id="section-intro">
-<p>Utilities for working with arrays.</p>
+<p>Utilities for images.</p>
 <details class="source">
 <summary>
 <span>Expand source code</span>
 </summary>
-<pre><code class="python">&#34;&#34;&#34;Utilities for working with arrays.&#34;&#34;&#34;
+<pre><code class="python">&#34;&#34;&#34;Utilities for images.&#34;&#34;&#34;
 
 import numpy as np
-from numba import njit
+import imageio
+from tqdm import tqdm
+import plotly.graph_objects as go
 
 
-def is_sorted(a):
-    &#34;&#34;&#34;Checks if array is sorted.&#34;&#34;&#34;
-    return np.all(a[:-1] &lt;= a[1:])
+def hstack_image_arrays(a, b):
+    &#34;&#34;&#34;Stack NumPy images horizontally.&#34;&#34;&#34;
+    h1, w1, d = a.shape
+    h2, w2, _ = b.shape
+    c = np.full((max(h1, h2), w1 + w2, d), 255, np.uint8)
+    c[:h1, :w1, :] = a
+    c[:h2, w1:w1 + w2, :] = b
+    return c
 
 
-@njit(cache=True)
-def is_sorted_nb(a):
-    &#34;&#34;&#34;Numba-compiled version of `is_sorted`.&#34;&#34;&#34;
-    for i in range(a.size - 1):
-        if a[i + 1] &lt; a[i]:
-            return False
-    return True
+def vstack_image_arrays(a, b):
+    &#34;&#34;&#34;Stack NumPy images vertically.&#34;&#34;&#34;
+    h1, w1, d = a.shape
+    h2, w2, _ = b.shape
+    c = np.full((h1 + h2, max(w1, w2), d), 255, np.uint8)
+    c[:h1, :w1, :] = a
+    c[h1:h1 + h2, :w2, :] = b
+    return c
 
 
-@njit(cache=True)
-def insert_argsort_nb(A, I):
-    &#34;&#34;&#34;Perform argsort using insertion sort.
+def save_animation(fname, index, plot_func, *args, delta=None, step=1,
+                   fps=3, writer_kwargs=None, show_progress=True, **kwargs):
+    &#34;&#34;&#34;Save animation to a file.
 
-    In-memory and without recursion -&gt; very fast for smaller arrays.&#34;&#34;&#34;
-    for j in range(1, len(A)):
-        A_j = A[j]
-        I_j = I[j]
-        i = j - 1
-        while i &gt;= 0 and (A[i] &gt; A_j or np.isnan(A[i])):
-            A[i + 1] = A[i]
-            I[i + 1] = I[i]
-            i = i - 1
-        A[i + 1] = A_j
-        I[i + 1] = I_j
+    Args:
+        fname (str): File name.
+        index (iterable): Index to iterate over.
+        plot_func (callable): Plotting function.
 
+            Should take subset of `index`, `*args`, and `**kwargs`, and return either a Plotly figure,
+            image that can be read by `imageio.imread`, or a NumPy array.
+        *args: Positional arguments passed to `plot_func`.
+        delta (int): Window size of each iteration.
+        step (int): Step of each iteration.
+        fps (int): Frames per second.
+        writer_kwargs (dict): Keyword arguments passed to `imageio.get_writer`.
+        show_progress (bool): Whether to show the progress bar.
+        **kwargs: Keyword arguments passed to `plot_func`.
+    &#34;&#34;&#34;
+    if writer_kwargs is None:
+        writer_kwargs = {}
+    if delta is None:
+        delta = len(index) // 2
 
-def get_ranges_arr(starts, ends):
-    &#34;&#34;&#34;Build array from start and end indices.
-
-    Based on https://stackoverflow.com/a/37626057&#34;&#34;&#34;
-    starts = np.asarray(starts)
-    if starts.ndim == 0:
-        starts = np.array([starts])
-    ends = np.asarray(ends)
-    if ends.ndim == 0:
-        ends = np.array([ends])
-    starts, end = np.broadcast_arrays(starts, ends)
-    counts = ends - starts
-    counts_csum = counts.cumsum()
-    id_arr = np.ones(counts_csum[-1], dtype=int)
-    id_arr[0] = starts[0]
-    id_arr[counts_csum[:-1]] = starts[1:] - ends[:-1] + 1
-    return id_arr.cumsum()
-
-
-@njit(cache=True)
-def uniform_summing_to_one_nb(n):
-    &#34;&#34;&#34;Generate random floats summing to one.
-
-    See # https://stackoverflow.com/a/2640067/8141780&#34;&#34;&#34;
-    rand_floats = np.empty(n + 1, dtype=np.float_)
-    rand_floats[0] = 0.
-    rand_floats[1] = 1.
-    rand_floats[2:] = np.random.uniform(0, 1, n - 1)
-    rand_floats = np.sort(rand_floats)
-    rand_floats = rand_floats[1:] - rand_floats[:-1]
-    return rand_floats
-
-
-def renormalize(a, from_range, to_range):
-    &#34;&#34;&#34;Renormalize `a` from one range to another.&#34;&#34;&#34;
-    delta1 = from_range[1] - from_range[0]
-    delta2 = to_range[1] - to_range[0]
-    return (delta2 * (a - from_range[0]) / delta1) + to_range[0]
-
-
-renormalize_nb = njit(cache=True)(renormalize)
-&#34;&#34;&#34;Numba-compiled version of `renormalize`.&#34;&#34;&#34;
-
-
-def min_rel_rescale(a, to_range):
-    &#34;&#34;&#34;Rescale elements in `a` relatively to minimum.&#34;&#34;&#34;
-    a_min = np.min(a)
-    a_max = np.max(a)
-    if a_max - a_min == 0:
-        return np.full(a.shape, to_range[0])
-    from_range = (a_min, a_max)
-
-    from_range_ratio = np.inf
-    if a_min != 0:
-        from_range_ratio = a_max / a_min
-
-    to_range_ratio = to_range[1] / to_range[0]
-    if from_range_ratio &lt; to_range_ratio:
-        to_range = (to_range[0], to_range[0] * from_range_ratio)
-    return renormalize(a, from_range, to_range)
-
-
-def max_rel_rescale(a, to_range):
-    &#34;&#34;&#34;Rescale elements in `a` relatively to maximum.&#34;&#34;&#34;
-    a_min = np.min(a)
-    a_max = np.max(a)
-    if a_max - a_min == 0:
-        return np.full(a.shape, to_range[1])
-    from_range = (a_min, a_max)
-
-    from_range_ratio = np.inf
-    if a_min != 0:
-        from_range_ratio = a_max / a_min
-
-    to_range_ratio = to_range[1] / to_range[0]
-    if from_range_ratio &lt; to_range_ratio:
-        to_range = (to_range[1] / from_range_ratio, to_range[1])
-    return renormalize(a, from_range, to_range)
-
-
-@njit(cache=True)
-def rescale_float_to_int_nb(floats, int_range, total):
-    &#34;&#34;&#34;Rescale a float array into an int array.&#34;&#34;&#34;
-    ints = np.floor(renormalize_nb(floats, [0., 1.], int_range))
-    leftover = int(total - ints.sum())
-    for i in range(leftover):
-        ints[np.random.choice(len(ints))] += 1
-    return ints</code></pre>
+    with imageio.get_writer(fname, fps=fps, **writer_kwargs) as writer:
+        for i in tqdm(range(0, len(index) - delta, step), disable=not show_progress):
+            fig = plot_func(index[i:i + delta], *args, **kwargs)
+            if isinstance(fig, (go.Figure, go.FigureWidget)):
+                fig = fig.to_image(format=&#34;png&#34;)
+            if not isinstance(fig, np.ndarray):
+                fig = imageio.imread(fig)
+            writer.append_data(fig)</code></pre>
 </details>
 </section>
 <section>
@@ -173,221 +108,112 @@ def rescale_float_to_int_nb(floats, int_range, total):
 <section>
 <h2 class="section-title" id="header-functions">Functions</h2>
 <dl>
-<dt id="vectorbt.utils.array.get_ranges_arr"><code class="name flex">
-<span>def <span class="ident fname">get_ranges_arr</span></span>(<span>starts, ends)</span>
+<dt id="vectorbt.utils.image.hstack_image_arrays"><code class="name flex">
+<span>def <span class="ident fname">hstack_image_arrays</span></span>(<span>a, b)</span>
 </code></dt>
 <dd>
-<div class="desc"><p>Build array from start and end indices.</p>
-<p>Based on <a href="https://stackoverflow.com/a/37626057">https://stackoverflow.com/a/37626057</a></p></div>
+<div class="desc"><p>Stack NumPy images horizontally.</p></div>
 <details class="source">
 <summary>
 <span>Expand source code</span>
 </summary>
-<pre><code class="python">def get_ranges_arr(starts, ends):
-    &#34;&#34;&#34;Build array from start and end indices.
+<pre><code class="python">def hstack_image_arrays(a, b):
+    &#34;&#34;&#34;Stack NumPy images horizontally.&#34;&#34;&#34;
+    h1, w1, d = a.shape
+    h2, w2, _ = b.shape
+    c = np.full((max(h1, h2), w1 + w2, d), 255, np.uint8)
+    c[:h1, :w1, :] = a
+    c[:h2, w1:w1 + w2, :] = b
+    return c</code></pre>
+</details>
+</dd>
+<dt id="vectorbt.utils.image.save_animation"><code class="name flex">
+<span>def <span class="ident fname">save_animation</span></span>(<span>fname, index, plot_func, *args, delta=None, step=1, fps=3, writer_kwargs=None, show_progress=True, **kwargs)</span>
+</code></dt>
+<dd>
+<div class="desc"><p>Save animation to a file.</p>
+<h2 id="args">Args</h2>
+<dl>
+<dt><strong><code>fname</code></strong> :&ensp;<code>str</code></dt>
+<dd>File name.</dd>
+<dt><strong><code>index</code></strong> :&ensp;<code>iterable</code></dt>
+<dd>Index to iterate over.</dd>
+<dt><strong><code>plot_func</code></strong> :&ensp;<code>callable</code></dt>
+<dd>
+<p>Plotting function.</p>
+<p>Should take subset of <code>index</code>, <code>*args</code>, and <code>**kwargs</code>, and return either a Plotly figure,
+image that can be read by <code>imageio.imread</code>, or a NumPy array.</p>
+</dd>
+<dt><strong><code>*args</code></strong></dt>
+<dd>Positional arguments passed to <code>plot_func</code>.</dd>
+<dt><strong><code>delta</code></strong> :&ensp;<code>int</code></dt>
+<dd>Window size of each iteration.</dd>
+<dt><strong><code>step</code></strong> :&ensp;<code>int</code></dt>
+<dd>Step of each iteration.</dd>
+<dt><strong><code>fps</code></strong> :&ensp;<code>int</code></dt>
+<dd>Frames per second.</dd>
+<dt><strong><code>writer_kwargs</code></strong> :&ensp;<code>dict</code></dt>
+<dd>Keyword arguments passed to <code>imageio.get_writer</code>.</dd>
+<dt><strong><code>show_progress</code></strong> :&ensp;<code>bool</code></dt>
+<dd>Whether to show the progress bar.</dd>
+<dt><strong><code>**kwargs</code></strong></dt>
+<dd>Keyword arguments passed to <code>plot_func</code>.</dd>
+</dl></div>
+<details class="source">
+<summary>
+<span>Expand source code</span>
+</summary>
+<pre><code class="python">def save_animation(fname, index, plot_func, *args, delta=None, step=1,
+                   fps=3, writer_kwargs=None, show_progress=True, **kwargs):
+    &#34;&#34;&#34;Save animation to a file.
 
-    Based on https://stackoverflow.com/a/37626057&#34;&#34;&#34;
-    starts = np.asarray(starts)
-    if starts.ndim == 0:
-        starts = np.array([starts])
-    ends = np.asarray(ends)
-    if ends.ndim == 0:
-        ends = np.array([ends])
-    starts, end = np.broadcast_arrays(starts, ends)
-    counts = ends - starts
-    counts_csum = counts.cumsum()
-    id_arr = np.ones(counts_csum[-1], dtype=int)
-    id_arr[0] = starts[0]
-    id_arr[counts_csum[:-1]] = starts[1:] - ends[:-1] + 1
-    return id_arr.cumsum()</code></pre>
-</details>
-</dd>
-<dt id="vectorbt.utils.array.insert_argsort_nb"><code class="name flex">
-<span>def <span class="ident fname">insert_argsort_nb</span></span>(<span>A, I)</span>
-</code></dt>
-<dd>
-<div class="desc"><p>Perform argsort using insertion sort.</p>
-<p>In-memory and without recursion -&gt; very fast for smaller arrays.</p></div>
-<details class="source">
-<summary>
-<span>Expand source code</span>
-</summary>
-<pre><code class="python">@njit(cache=True)
-def insert_argsort_nb(A, I):
-    &#34;&#34;&#34;Perform argsort using insertion sort.
+    Args:
+        fname (str): File name.
+        index (iterable): Index to iterate over.
+        plot_func (callable): Plotting function.
 
-    In-memory and without recursion -&gt; very fast for smaller arrays.&#34;&#34;&#34;
-    for j in range(1, len(A)):
-        A_j = A[j]
-        I_j = I[j]
-        i = j - 1
-        while i &gt;= 0 and (A[i] &gt; A_j or np.isnan(A[i])):
-            A[i + 1] = A[i]
-            I[i + 1] = I[i]
-            i = i - 1
-        A[i + 1] = A_j
-        I[i + 1] = I_j</code></pre>
-</details>
-</dd>
-<dt id="vectorbt.utils.array.is_sorted"><code class="name flex">
-<span>def <span class="ident fname">is_sorted</span></span>(<span>a)</span>
-</code></dt>
-<dd>
-<div class="desc"><p>Checks if array is sorted.</p></div>
-<details class="source">
-<summary>
-<span>Expand source code</span>
-</summary>
-<pre><code class="python">def is_sorted(a):
-    &#34;&#34;&#34;Checks if array is sorted.&#34;&#34;&#34;
-    return np.all(a[:-1] &lt;= a[1:])</code></pre>
-</details>
-</dd>
-<dt id="vectorbt.utils.array.is_sorted_nb"><code class="name flex">
-<span>def <span class="ident fname">is_sorted_nb</span></span>(<span>a)</span>
-</code></dt>
-<dd>
-<div class="desc"><p>Numba-compiled version of <code><a title="vectorbt.utils.array.is_sorted" href="#vectorbt.utils.array.is_sorted">is_sorted()</a></code>.</p></div>
-<details class="source">
-<summary>
-<span>Expand source code</span>
-</summary>
-<pre><code class="python">@njit(cache=True)
-def is_sorted_nb(a):
-    &#34;&#34;&#34;Numba-compiled version of `is_sorted`.&#34;&#34;&#34;
-    for i in range(a.size - 1):
-        if a[i + 1] &lt; a[i]:
-            return False
-    return True</code></pre>
-</details>
-</dd>
-<dt id="vectorbt.utils.array.max_rel_rescale"><code class="name flex">
-<span>def <span class="ident fname">max_rel_rescale</span></span>(<span>a, to_range)</span>
-</code></dt>
-<dd>
-<div class="desc"><p>Rescale elements in <code>a</code> relatively to maximum.</p></div>
-<details class="source">
-<summary>
-<span>Expand source code</span>
-</summary>
-<pre><code class="python">def max_rel_rescale(a, to_range):
-    &#34;&#34;&#34;Rescale elements in `a` relatively to maximum.&#34;&#34;&#34;
-    a_min = np.min(a)
-    a_max = np.max(a)
-    if a_max - a_min == 0:
-        return np.full(a.shape, to_range[1])
-    from_range = (a_min, a_max)
+            Should take subset of `index`, `*args`, and `**kwargs`, and return either a Plotly figure,
+            image that can be read by `imageio.imread`, or a NumPy array.
+        *args: Positional arguments passed to `plot_func`.
+        delta (int): Window size of each iteration.
+        step (int): Step of each iteration.
+        fps (int): Frames per second.
+        writer_kwargs (dict): Keyword arguments passed to `imageio.get_writer`.
+        show_progress (bool): Whether to show the progress bar.
+        **kwargs: Keyword arguments passed to `plot_func`.
+    &#34;&#34;&#34;
+    if writer_kwargs is None:
+        writer_kwargs = {}
+    if delta is None:
+        delta = len(index) // 2
 
-    from_range_ratio = np.inf
-    if a_min != 0:
-        from_range_ratio = a_max / a_min
-
-    to_range_ratio = to_range[1] / to_range[0]
-    if from_range_ratio &lt; to_range_ratio:
-        to_range = (to_range[1] / from_range_ratio, to_range[1])
-    return renormalize(a, from_range, to_range)</code></pre>
+    with imageio.get_writer(fname, fps=fps, **writer_kwargs) as writer:
+        for i in tqdm(range(0, len(index) - delta, step), disable=not show_progress):
+            fig = plot_func(index[i:i + delta], *args, **kwargs)
+            if isinstance(fig, (go.Figure, go.FigureWidget)):
+                fig = fig.to_image(format=&#34;png&#34;)
+            if not isinstance(fig, np.ndarray):
+                fig = imageio.imread(fig)
+            writer.append_data(fig)</code></pre>
 </details>
 </dd>
-<dt id="vectorbt.utils.array.min_rel_rescale"><code class="name flex">
-<span>def <span class="ident fname">min_rel_rescale</span></span>(<span>a, to_range)</span>
+<dt id="vectorbt.utils.image.vstack_image_arrays"><code class="name flex">
+<span>def <span class="ident fname">vstack_image_arrays</span></span>(<span>a, b)</span>
 </code></dt>
 <dd>
-<div class="desc"><p>Rescale elements in <code>a</code> relatively to minimum.</p></div>
+<div class="desc"><p>Stack NumPy images vertically.</p></div>
 <details class="source">
 <summary>
 <span>Expand source code</span>
 </summary>
-<pre><code class="python">def min_rel_rescale(a, to_range):
-    &#34;&#34;&#34;Rescale elements in `a` relatively to minimum.&#34;&#34;&#34;
-    a_min = np.min(a)
-    a_max = np.max(a)
-    if a_max - a_min == 0:
-        return np.full(a.shape, to_range[0])
-    from_range = (a_min, a_max)
-
-    from_range_ratio = np.inf
-    if a_min != 0:
-        from_range_ratio = a_max / a_min
-
-    to_range_ratio = to_range[1] / to_range[0]
-    if from_range_ratio &lt; to_range_ratio:
-        to_range = (to_range[0], to_range[0] * from_range_ratio)
-    return renormalize(a, from_range, to_range)</code></pre>
-</details>
-</dd>
-<dt id="vectorbt.utils.array.renormalize"><code class="name flex">
-<span>def <span class="ident fname">renormalize</span></span>(<span>a, from_range, to_range)</span>
-</code></dt>
-<dd>
-<div class="desc"><p>Renormalize <code>a</code> from one range to another.</p></div>
-<details class="source">
-<summary>
-<span>Expand source code</span>
-</summary>
-<pre><code class="python">def renormalize(a, from_range, to_range):
-    &#34;&#34;&#34;Renormalize `a` from one range to another.&#34;&#34;&#34;
-    delta1 = from_range[1] - from_range[0]
-    delta2 = to_range[1] - to_range[0]
-    return (delta2 * (a - from_range[0]) / delta1) + to_range[0]</code></pre>
-</details>
-</dd>
-<dt id="vectorbt.utils.array.renormalize_nb"><code class="name flex">
-<span>def <span class="ident fname">renormalize_nb</span></span>(<span>a, from_range, to_range)</span>
-</code></dt>
-<dd>
-<div class="desc"><p>Renormalize <code>a</code> from one range to another.</p></div>
-<details class="source">
-<summary>
-<span>Expand source code</span>
-</summary>
-<pre><code class="python">def renormalize(a, from_range, to_range):
-    &#34;&#34;&#34;Renormalize `a` from one range to another.&#34;&#34;&#34;
-    delta1 = from_range[1] - from_range[0]
-    delta2 = to_range[1] - to_range[0]
-    return (delta2 * (a - from_range[0]) / delta1) + to_range[0]</code></pre>
-</details>
-</dd>
-<dt id="vectorbt.utils.array.rescale_float_to_int_nb"><code class="name flex">
-<span>def <span class="ident fname">rescale_float_to_int_nb</span></span>(<span>floats, int_range, total)</span>
-</code></dt>
-<dd>
-<div class="desc"><p>Rescale a float array into an int array.</p></div>
-<details class="source">
-<summary>
-<span>Expand source code</span>
-</summary>
-<pre><code class="python">@njit(cache=True)
-def rescale_float_to_int_nb(floats, int_range, total):
-    &#34;&#34;&#34;Rescale a float array into an int array.&#34;&#34;&#34;
-    ints = np.floor(renormalize_nb(floats, [0., 1.], int_range))
-    leftover = int(total - ints.sum())
-    for i in range(leftover):
-        ints[np.random.choice(len(ints))] += 1
-    return ints</code></pre>
-</details>
-</dd>
-<dt id="vectorbt.utils.array.uniform_summing_to_one_nb"><code class="name flex">
-<span>def <span class="ident fname">uniform_summing_to_one_nb</span></span>(<span>n)</span>
-</code></dt>
-<dd>
-<div class="desc"><p>Generate random floats summing to one.</p>
-<p>See # <a href="https://stackoverflow.com/a/2640067/8141780">https://stackoverflow.com/a/2640067/8141780</a></p></div>
-<details class="source">
-<summary>
-<span>Expand source code</span>
-</summary>
-<pre><code class="python">@njit(cache=True)
-def uniform_summing_to_one_nb(n):
-    &#34;&#34;&#34;Generate random floats summing to one.
-
-    See # https://stackoverflow.com/a/2640067/8141780&#34;&#34;&#34;
-    rand_floats = np.empty(n + 1, dtype=np.float_)
-    rand_floats[0] = 0.
-    rand_floats[1] = 1.
-    rand_floats[2:] = np.random.uniform(0, 1, n - 1)
-    rand_floats = np.sort(rand_floats)
-    rand_floats = rand_floats[1:] - rand_floats[:-1]
-    return rand_floats</code></pre>
+<pre><code class="python">def vstack_image_arrays(a, b):
+    &#34;&#34;&#34;Stack NumPy images vertically.&#34;&#34;&#34;
+    h1, w1, d = a.shape
+    h2, w2, _ = b.shape
+    c = np.full((h1 + h2, max(w1, w2), d), 255, np.uint8)
+    c[:h1, :w1, :] = a
+    c[h1:h1 + h2, :w2, :] = b
+    return c</code></pre>
 </details>
 </dd>
 </dl>
@@ -422,16 +248,9 @@ title="Search"
 </li>
 <li><h3><a href="#header-functions">Functions</a></h3>
 <ul class="">
-<li><code><a title="vectorbt.utils.array.get_ranges_arr" href="#vectorbt.utils.array.get_ranges_arr">get_ranges_arr</a></code></li>
-<li><code><a title="vectorbt.utils.array.insert_argsort_nb" href="#vectorbt.utils.array.insert_argsort_nb">insert_argsort_nb</a></code></li>
-<li><code><a title="vectorbt.utils.array.is_sorted" href="#vectorbt.utils.array.is_sorted">is_sorted</a></code></li>
-<li><code><a title="vectorbt.utils.array.is_sorted_nb" href="#vectorbt.utils.array.is_sorted_nb">is_sorted_nb</a></code></li>
-<li><code><a title="vectorbt.utils.array.max_rel_rescale" href="#vectorbt.utils.array.max_rel_rescale">max_rel_rescale</a></code></li>
-<li><code><a title="vectorbt.utils.array.min_rel_rescale" href="#vectorbt.utils.array.min_rel_rescale">min_rel_rescale</a></code></li>
-<li><code><a title="vectorbt.utils.array.renormalize" href="#vectorbt.utils.array.renormalize">renormalize</a></code></li>
-<li><code><a title="vectorbt.utils.array.renormalize_nb" href="#vectorbt.utils.array.renormalize_nb">renormalize_nb</a></code></li>
-<li><code><a title="vectorbt.utils.array.rescale_float_to_int_nb" href="#vectorbt.utils.array.rescale_float_to_int_nb">rescale_float_to_int_nb</a></code></li>
-<li><code><a title="vectorbt.utils.array.uniform_summing_to_one_nb" href="#vectorbt.utils.array.uniform_summing_to_one_nb">uniform_summing_to_one_nb</a></code></li>
+<li><code><a title="vectorbt.utils.image.hstack_image_arrays" href="#vectorbt.utils.image.hstack_image_arrays">hstack_image_arrays</a></code></li>
+<li><code><a title="vectorbt.utils.image.save_animation" href="#vectorbt.utils.image.save_animation">save_animation</a></code></li>
+<li><code><a title="vectorbt.utils.image.vstack_image_arrays" href="#vectorbt.utils.image.vstack_image_arrays">vstack_image_arrays</a></code></li>
 </ul>
 </li>
 </ul>

@@ -4,8 +4,8 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, minimum-scale=1" />
 <meta name="generator" content="pdoc 0.9.2" />
-<title>vectorbt.utils.data API documentation</title>
-<meta name="description" content="" />
+<title>vectorbt.utils.attr API documentation</title>
+<meta name="description" content="Utilities for working with class/instance attributes." />
 <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/5.12.0-2/css/all.min.css" integrity="sha256-46r060N2LrChLLb5zowXQ72/iKKNiw/lAmygmHExk/o=" crossorigin="anonymous" />
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/docsearch.js@2/dist/cdn/docsearch.min.css" />
 <link href='https://cdnjs.cloudflare.com/ajax/libs/normalize/8.0.0/normalize.min.css' rel='stylesheet'>
@@ -31,91 +31,92 @@ ga('create', 'UA-142521178-3', 'auto'); ga('send', 'pageview');
 <main>
 <article id="content">
 <header>
-<h1 class="title">Module <code>vectorbt.utils.data</code></h1>
+<h1 class="title">Module <code>vectorbt.utils.attr</code></h1>
 </header>
 <section id="section-intro">
+<p>Utilities for working with class/instance attributes.</p>
 <details class="source">
 <summary>
 <span>Expand source code</span>
 </summary>
-<pre><code class="python">import pandas as pd
-import warnings
+<pre><code class="python">&#34;&#34;&#34;Utilities for working with class/instance attributes.&#34;&#34;&#34;
+
+import inspect
+
+from vectorbt.utils import checks
 
 
-def yf_downloader(symbols, **kwargs):  # pragma: no cover
-    &#34;&#34;&#34;Downloader that uses `yfinance`.&#34;&#34;&#34;
-    import yfinance as yf
+def deep_getattr(obj, attr_chain):
+    &#34;&#34;&#34;Retrieve attribute consecutively.
 
-    return {s: yf.Ticker(s).history(**kwargs) for s in symbols}
+    `attr_chain` can be:
+
+    * string -&gt; get variable/property or method without arguments
+    * tuple of string -&gt; call method without arguments
+    * tuple of string and tuple -&gt; call method and pass positional arguments (unpacked)
+    * tuple of string, tuple, and dict -&gt; call method and pass positional and keyword arguments (unpacked)
+    * tuple or list of any of the above
+    &#34;&#34;&#34;
+    checks.assert_type(attr_chain, (str, tuple, list))
+
+    if isinstance(attr_chain, str):
+        if &#39;.&#39; in attr_chain:
+            return deep_getattr(obj, attr_chain.split(&#39;.&#39;))
+        result = getattr(obj, attr_chain)
+        if inspect.ismethod(result):
+            return result()
+        return result
+    if isinstance(attr_chain, tuple):
+        if len(attr_chain) == 1 \
+                and isinstance(attr_chain[0], str):
+            return getattr(obj, attr_chain[0])()
+        if len(attr_chain) == 2 \
+                and isinstance(attr_chain[0], str) \
+                and isinstance(attr_chain[1], tuple):
+            return getattr(obj, attr_chain[0])(*attr_chain[1])
+        if len(attr_chain) == 3 \
+                and isinstance(attr_chain[0], str) \
+                and isinstance(attr_chain[1], tuple) \
+                and isinstance(attr_chain[2], dict):
+            return getattr(obj, attr_chain[0])(*attr_chain[1], **attr_chain[2])
+    result = obj
+    for attr in attr_chain:
+        result = deep_getattr(result, attr)
+    return result
 
 
-def download(symbols, downloader=yf_downloader, cols=None, **kwargs):
-    &#34;&#34;&#34;Download data for each symbol using `downloader` function.
+def traverse_attr_kwargs(cls, key=None, value=None):
+    &#34;&#34;&#34;Traverse the class `cls` and its attributes for properties/methods with attribute `kwargs`,
+    and optionally a specific `key` and `value`.
 
-    `downloader` should accept a list of symbols and optionally keyword arguments,
-    and return a dictionary of dataframes/series keyed by symbol.
+    Class attributes acting as children should have a key `child_cls`.
 
-    Returns a dictionary if `symbols` is a list, otherwise returns a single dataframe/series.&#34;&#34;&#34;
+    Returns a nested dict of attributes.&#34;&#34;&#34;
+    checks.assert_type(cls, type)
 
-    if isinstance(symbols, list):
-        data = downloader(symbols, **kwargs)
-        if cols is not None:
-            data = {k: v[cols] for k, v in data.items()}
-    else:
-        data = downloader([symbols], **kwargs)[symbols]
-        if cols is not None:
-            data = data[cols]
-    return data
-
-
-def concat_symbols(data, level_name=&#39;symbol&#39;, treat_missing=&#39;nan&#39;):
-    &#34;&#34;&#34;Return a dict of dataframes with symbols as columns.
-
-    The argument `treat_missing` accepts the following values:
-
-    * &#39;nan&#39;: set missing data points to NaN
-    * &#39;drop&#39;: remove missing data points
-
-    Returns a dictionary if `data` contains dataframes, otherwise returns a single dataframe.&#34;&#34;&#34;
-    if treat_missing not in [&#39;nan&#39;, &#39;drop&#39;]:
-        raise ValueError(&#34;treat_missing can be either &#39;nan&#39; or &#39;drop&#39;&#34;)
-    symbols = list(data.keys())
-    single_column = False
-    if isinstance(data[symbols[0]], pd.Series):
-        data = {k: v.to_frame() for k, v in data.items()}
-        single_column = True
-    columns = data[symbols[0]].columns
-    index = None
-    for s in symbols:
-        if index is None:
-            index = data[s].index
-        else:
-            if len(index.intersection(data[s].index)) != len(index.union(data[s].index)):
-                if treat_missing == &#39;nan&#39;:
-                    warnings.warn(&#34;Symbols have mismatching timestamps. &#34;
-                                  &#34;Setting missing data points to NaN.&#34;, stacklevel=2)
-                    index = index.union(data[s].index)
-                else:
-                    warnings.warn(&#34;Symbols have mismatching timestamps. &#34;
-                                  &#34;Dropping missing data points.&#34;, stacklevel=2)
-                    index = index.intersection(data[s].index)
-    if len(symbols) &gt; 1:
-        new_data = {c: pd.DataFrame(index=index, columns=pd.Index(symbols, name=level_name)) for c in columns}
-    else:
-        new_data = {c: pd.Series(index=index, name=symbols[0]) for c in columns}
-    for c in columns:
-        for s in symbols:
-            if treat_missing == &#39;nan&#39;:
-                col_data = data[s].loc[:, c]
+    if value is not None and not isinstance(value, tuple):
+        value = (value,)
+    attrs = {}
+    for attr in dir(cls):
+        prop = getattr(cls, attr)
+        if hasattr(prop, &#39;kwargs&#39;):
+            kwargs = getattr(prop, &#39;kwargs&#39;)
+            if key is None:
+                attrs[attr] = kwargs
             else:
-                col_data = data[s].loc[index, c]
-            if len(symbols) &gt; 1:
-                new_data[c].loc[:, s] = col_data
-            else:
-                new_data[c].loc[:] = col_data
-    if single_column:
-        return new_data[columns[0]]
-    return new_data</code></pre>
+                if key in kwargs:
+                    if value is None:
+                        attrs[attr] = kwargs
+                    else:
+                        _value = kwargs[key]
+                        if _value in value:
+                            attrs[attr] = kwargs
+            if &#39;child_cls&#39; in kwargs:
+                child_cls = kwargs[&#39;child_cls&#39;]
+                checks.assert_type(child_cls, type)
+                attrs[attr] = kwargs
+                attrs[attr][&#39;child_attrs&#39;] = traverse_attr_kwargs(child_cls, key, value)
+    return attrs</code></pre>
 </details>
 </section>
 <section>
@@ -125,116 +126,106 @@ def concat_symbols(data, level_name=&#39;symbol&#39;, treat_missing=&#39;nan&#39
 <section>
 <h2 class="section-title" id="header-functions">Functions</h2>
 <dl>
-<dt id="vectorbt.utils.data.concat_symbols"><code class="name flex">
-<span>def <span class="ident fname">concat_symbols</span></span>(<span>data, level_name='symbol', treat_missing='nan')</span>
+<dt id="vectorbt.utils.attr.deep_getattr"><code class="name flex">
+<span>def <span class="ident fname">deep_getattr</span></span>(<span>obj, attr_chain)</span>
 </code></dt>
 <dd>
-<div class="desc"><p>Return a dict of dataframes with symbols as columns.</p>
-<p>The argument <code>treat_missing</code> accepts the following values:</p>
+<div class="desc"><p>Retrieve attribute consecutively.</p>
+<p><code>attr_chain</code> can be:</p>
 <ul>
-<li>'nan': set missing data points to NaN</li>
-<li>'drop': remove missing data points</li>
-</ul>
-<p>Returns a dictionary if <code>data</code> contains dataframes, otherwise returns a single dataframe.</p></div>
+<li>string -&gt; get variable/property or method without arguments</li>
+<li>tuple of string -&gt; call method without arguments</li>
+<li>tuple of string and tuple -&gt; call method and pass positional arguments (unpacked)</li>
+<li>tuple of string, tuple, and dict -&gt; call method and pass positional and keyword arguments (unpacked)</li>
+<li>tuple or list of any of the above</li>
+</ul></div>
 <details class="source">
 <summary>
 <span>Expand source code</span>
 </summary>
-<pre><code class="python">def concat_symbols(data, level_name=&#39;symbol&#39;, treat_missing=&#39;nan&#39;):
-    &#34;&#34;&#34;Return a dict of dataframes with symbols as columns.
+<pre><code class="python">def deep_getattr(obj, attr_chain):
+    &#34;&#34;&#34;Retrieve attribute consecutively.
 
-    The argument `treat_missing` accepts the following values:
+    `attr_chain` can be:
 
-    * &#39;nan&#39;: set missing data points to NaN
-    * &#39;drop&#39;: remove missing data points
+    * string -&gt; get variable/property or method without arguments
+    * tuple of string -&gt; call method without arguments
+    * tuple of string and tuple -&gt; call method and pass positional arguments (unpacked)
+    * tuple of string, tuple, and dict -&gt; call method and pass positional and keyword arguments (unpacked)
+    * tuple or list of any of the above
+    &#34;&#34;&#34;
+    checks.assert_type(attr_chain, (str, tuple, list))
 
-    Returns a dictionary if `data` contains dataframes, otherwise returns a single dataframe.&#34;&#34;&#34;
-    if treat_missing not in [&#39;nan&#39;, &#39;drop&#39;]:
-        raise ValueError(&#34;treat_missing can be either &#39;nan&#39; or &#39;drop&#39;&#34;)
-    symbols = list(data.keys())
-    single_column = False
-    if isinstance(data[symbols[0]], pd.Series):
-        data = {k: v.to_frame() for k, v in data.items()}
-        single_column = True
-    columns = data[symbols[0]].columns
-    index = None
-    for s in symbols:
-        if index is None:
-            index = data[s].index
-        else:
-            if len(index.intersection(data[s].index)) != len(index.union(data[s].index)):
-                if treat_missing == &#39;nan&#39;:
-                    warnings.warn(&#34;Symbols have mismatching timestamps. &#34;
-                                  &#34;Setting missing data points to NaN.&#34;, stacklevel=2)
-                    index = index.union(data[s].index)
-                else:
-                    warnings.warn(&#34;Symbols have mismatching timestamps. &#34;
-                                  &#34;Dropping missing data points.&#34;, stacklevel=2)
-                    index = index.intersection(data[s].index)
-    if len(symbols) &gt; 1:
-        new_data = {c: pd.DataFrame(index=index, columns=pd.Index(symbols, name=level_name)) for c in columns}
-    else:
-        new_data = {c: pd.Series(index=index, name=symbols[0]) for c in columns}
-    for c in columns:
-        for s in symbols:
-            if treat_missing == &#39;nan&#39;:
-                col_data = data[s].loc[:, c]
-            else:
-                col_data = data[s].loc[index, c]
-            if len(symbols) &gt; 1:
-                new_data[c].loc[:, s] = col_data
-            else:
-                new_data[c].loc[:] = col_data
-    if single_column:
-        return new_data[columns[0]]
-    return new_data</code></pre>
+    if isinstance(attr_chain, str):
+        if &#39;.&#39; in attr_chain:
+            return deep_getattr(obj, attr_chain.split(&#39;.&#39;))
+        result = getattr(obj, attr_chain)
+        if inspect.ismethod(result):
+            return result()
+        return result
+    if isinstance(attr_chain, tuple):
+        if len(attr_chain) == 1 \
+                and isinstance(attr_chain[0], str):
+            return getattr(obj, attr_chain[0])()
+        if len(attr_chain) == 2 \
+                and isinstance(attr_chain[0], str) \
+                and isinstance(attr_chain[1], tuple):
+            return getattr(obj, attr_chain[0])(*attr_chain[1])
+        if len(attr_chain) == 3 \
+                and isinstance(attr_chain[0], str) \
+                and isinstance(attr_chain[1], tuple) \
+                and isinstance(attr_chain[2], dict):
+            return getattr(obj, attr_chain[0])(*attr_chain[1], **attr_chain[2])
+    result = obj
+    for attr in attr_chain:
+        result = deep_getattr(result, attr)
+    return result</code></pre>
 </details>
 </dd>
-<dt id="vectorbt.utils.data.download"><code class="name flex">
-<span>def <span class="ident fname">download</span></span>(<span>symbols, downloader=&lt;function yf_downloader&gt;, cols=None, **kwargs)</span>
+<dt id="vectorbt.utils.attr.traverse_attr_kwargs"><code class="name flex">
+<span>def <span class="ident fname">traverse_attr_kwargs</span></span>(<span>cls, key=None, value=None)</span>
 </code></dt>
 <dd>
-<div class="desc"><p>Download data for each symbol using <code>downloader</code> function.</p>
-<p><code>downloader</code> should accept a list of symbols and optionally keyword arguments,
-and return a dictionary of dataframes/series keyed by symbol.</p>
-<p>Returns a dictionary if <code>symbols</code> is a list, otherwise returns a single dataframe/series.</p></div>
+<div class="desc"><p>Traverse the class <code>cls</code> and its attributes for properties/methods with attribute <code>kwargs</code>,
+and optionally a specific <code>key</code> and <code>value</code>.</p>
+<p>Class attributes acting as children should have a key <code>child_cls</code>.</p>
+<p>Returns a nested dict of attributes.</p></div>
 <details class="source">
 <summary>
 <span>Expand source code</span>
 </summary>
-<pre><code class="python">def download(symbols, downloader=yf_downloader, cols=None, **kwargs):
-    &#34;&#34;&#34;Download data for each symbol using `downloader` function.
+<pre><code class="python">def traverse_attr_kwargs(cls, key=None, value=None):
+    &#34;&#34;&#34;Traverse the class `cls` and its attributes for properties/methods with attribute `kwargs`,
+    and optionally a specific `key` and `value`.
 
-    `downloader` should accept a list of symbols and optionally keyword arguments,
-    and return a dictionary of dataframes/series keyed by symbol.
+    Class attributes acting as children should have a key `child_cls`.
 
-    Returns a dictionary if `symbols` is a list, otherwise returns a single dataframe/series.&#34;&#34;&#34;
+    Returns a nested dict of attributes.&#34;&#34;&#34;
+    checks.assert_type(cls, type)
 
-    if isinstance(symbols, list):
-        data = downloader(symbols, **kwargs)
-        if cols is not None:
-            data = {k: v[cols] for k, v in data.items()}
-    else:
-        data = downloader([symbols], **kwargs)[symbols]
-        if cols is not None:
-            data = data[cols]
-    return data</code></pre>
-</details>
-</dd>
-<dt id="vectorbt.utils.data.yf_downloader"><code class="name flex">
-<span>def <span class="ident fname">yf_downloader</span></span>(<span>symbols, **kwargs)</span>
-</code></dt>
-<dd>
-<div class="desc"><p>Downloader that uses <code>yfinance</code>.</p></div>
-<details class="source">
-<summary>
-<span>Expand source code</span>
-</summary>
-<pre><code class="python">def yf_downloader(symbols, **kwargs):  # pragma: no cover
-    &#34;&#34;&#34;Downloader that uses `yfinance`.&#34;&#34;&#34;
-    import yfinance as yf
-
-    return {s: yf.Ticker(s).history(**kwargs) for s in symbols}</code></pre>
+    if value is not None and not isinstance(value, tuple):
+        value = (value,)
+    attrs = {}
+    for attr in dir(cls):
+        prop = getattr(cls, attr)
+        if hasattr(prop, &#39;kwargs&#39;):
+            kwargs = getattr(prop, &#39;kwargs&#39;)
+            if key is None:
+                attrs[attr] = kwargs
+            else:
+                if key in kwargs:
+                    if value is None:
+                        attrs[attr] = kwargs
+                    else:
+                        _value = kwargs[key]
+                        if _value in value:
+                            attrs[attr] = kwargs
+            if &#39;child_cls&#39; in kwargs:
+                child_cls = kwargs[&#39;child_cls&#39;]
+                checks.assert_type(child_cls, type)
+                attrs[attr] = kwargs
+                attrs[attr][&#39;child_attrs&#39;] = traverse_attr_kwargs(child_cls, key, value)
+    return attrs</code></pre>
 </details>
 </dd>
 </dl>
@@ -269,9 +260,8 @@ title="Search"
 </li>
 <li><h3><a href="#header-functions">Functions</a></h3>
 <ul class="">
-<li><code><a title="vectorbt.utils.data.concat_symbols" href="#vectorbt.utils.data.concat_symbols">concat_symbols</a></code></li>
-<li><code><a title="vectorbt.utils.data.download" href="#vectorbt.utils.data.download">download</a></code></li>
-<li><code><a title="vectorbt.utils.data.yf_downloader" href="#vectorbt.utils.data.yf_downloader">yf_downloader</a></code></li>
+<li><code><a title="vectorbt.utils.attr.deep_getattr" href="#vectorbt.utils.attr.deep_getattr">deep_getattr</a></code></li>
+<li><code><a title="vectorbt.utils.attr.traverse_attr_kwargs" href="#vectorbt.utils.attr.traverse_attr_kwargs">traverse_attr_kwargs</a></code></li>
 </ul>
 </li>
 </ul>
