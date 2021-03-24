@@ -439,6 +439,7 @@ import warnings
 
 from vectorbt.utils import checks
 from vectorbt.utils.decorators import cached_method
+from vectorbt.utils.datetime import is_tz_aware, to_timezone
 from vectorbt.base.array_wrapper import ArrayWrapper, Wrapping
 
 
@@ -450,12 +451,13 @@ class symbol_dict(dict):
 class Data(Wrapping):
     &#34;&#34;&#34;Class that downloads, updates, and manages data coming from a data source.&#34;&#34;&#34;
 
-    def __init__(self, wrapper, data, tz_convert=None, missing_index=None,
+    def __init__(self, wrapper, data, tz_localize=None, tz_convert=None, missing_index=None,
                  missing_columns=None, download_kwargs=None, **kwargs):
         Wrapping.__init__(
             self,
             wrapper,
             data=data,
+            tz_localize=tz_localize,
             tz_convert=tz_convert,
             missing_index=missing_index,
             missing_columns=missing_columns,
@@ -467,6 +469,7 @@ class Data(Wrapping):
         for k, v in data.items():
             checks.assert_meta_equal(v, data[list(data.keys())[0]])
         self._data = data
+        self._tz_localize = tz_localize
         self._tz_convert = tz_convert
         self._missing_index = missing_index
         self._missing_columns = missing_columns
@@ -490,6 +493,11 @@ class Data(Wrapping):
     def symbols(self):
         &#34;&#34;&#34;List of symbols.&#34;&#34;&#34;
         return list(self.data.keys())
+
+    @property
+    def tz_localize(self):
+        &#34;&#34;&#34;`tz_localize` initially passed to `Data.download_symbol`.&#34;&#34;&#34;
+        return self._tz_localize
 
     @property
     def tz_convert(self):
@@ -607,13 +615,18 @@ class Data(Wrapping):
         return _kwargs
 
     @classmethod
-    def from_data(cls, data, tz_convert=None, missing_index=None,
+    def from_data(cls, data, tz_localize=None, tz_convert=None, missing_index=None,
                   missing_columns=None, wrapper_kwargs=None, **kwargs):
         &#34;&#34;&#34;Create a new `Data` instance from (aligned) data.
 
         Args:
             data (dict): Dictionary of array-like objects keyed by symbol.
+            tz_localize (any): If the index is tz-naive, convert to a timezone.
+
+                See `vectorbt.utils.datetime.to_timezone`.
             tz_convert (any): Convert the index from one timezone to another.
+
+                See `vectorbt.utils.datetime.to_timezone`.
 
                 Defaults to `tz_convert` in `vectorbt.settings.data`.
             missing_index (str): See `Data.align_index`.
@@ -627,6 +640,8 @@ class Data(Wrapping):
         from vectorbt import settings
 
         # Get global defaults
+        if tz_localize is None:
+            tz_localize = settings.data[&#39;tz_localize&#39;]
         if tz_convert is None:
             tz_convert = settings.data[&#39;tz_convert&#39;]
         if missing_index is None:
@@ -647,9 +662,12 @@ class Data(Wrapping):
                     v = pd.DataFrame(v)
 
             # Perform operations with datetime-like index
-            if tz_convert is not None:
-                v = v.tz_convert(tz_convert)
             if isinstance(v.index, pd.DatetimeIndex):
+                if tz_localize is not None:
+                    if not is_tz_aware(v.index):
+                        v = v.tz_localize(to_timezone(tz_localize))
+                if tz_convert is not None:
+                    v = v.tz_convert(to_timezone(tz_convert))
                 v.index.freq = v.index.inferred_freq
             data[k] = v
 
@@ -663,6 +681,7 @@ class Data(Wrapping):
         return cls(
             wrapper,
             data,
+            tz_localize=tz_localize,
             tz_convert=tz_convert,
             missing_index=missing_index,
             missing_columns=missing_columns,
@@ -675,7 +694,7 @@ class Data(Wrapping):
         raise NotImplementedError
 
     @classmethod
-    def download(cls, symbols, tz_convert=None, missing_index=None,
+    def download(cls, symbols, tz_localize=None, tz_convert=None, missing_index=None,
                  missing_columns=None, wrapper_kwargs=None, **kwargs):
         &#34;&#34;&#34;Download data using `Data.download_symbol`.
 
@@ -684,6 +703,7 @@ class Data(Wrapping):
 
                 !!! note
                     Tuple is considered as a single symbol.
+            tz_localize (any): See `Data.from_data`.
             tz_convert (any): See `Data.from_data`.
             missing_index (str): See `Data.from_data`.
             missing_columns (str): See `Data.from_data`.
@@ -706,6 +726,7 @@ class Data(Wrapping):
         # Create new instance from data
         return cls.from_data(
             data,
+            tz_localize=tz_localize,
             tz_convert=tz_convert,
             missing_index=missing_index,
             missing_columns=missing_columns,
@@ -749,8 +770,12 @@ class Data(Wrapping):
                     new_obj = pd.DataFrame(new_obj, index=index)
 
             # Perform operations with datetime-like index
-            if self.tz_convert is not None:
-                new_obj = new_obj.tz_convert(self.tz_convert)
+            if isinstance(new_obj.index, pd.DatetimeIndex):
+                if self.tz_localize is not None:
+                    if not is_tz_aware(new_obj.index):
+                        new_obj = new_obj.tz_localize(to_timezone(self.tz_localize))
+                if self.tz_convert is not None:
+                    new_obj = new_obj.tz_convert(to_timezone(self.tz_convert))
 
             new_data[k] = new_obj
 
@@ -842,7 +867,7 @@ class Data(Wrapping):
 <dl>
 <dt id="vectorbt.data.base.Data"><code class="flex name class">
 <span>class <span class="ident parent-fname">Data</span></span>
-<span>(</span><span>wrapper, data, tz_convert=None, missing_index=None, missing_columns=None, download_kwargs=None, **kwargs)</span>
+<span>(</span><span>wrapper, data, tz_localize=None, tz_convert=None, missing_index=None, missing_columns=None, download_kwargs=None, **kwargs)</span>
 </code></dt>
 <dd>
 <div class="desc"><p>Class that downloads, updates, and manages data coming from a data source.</p></div>
@@ -853,12 +878,13 @@ class Data(Wrapping):
 <pre><code class="python">class Data(Wrapping):
     &#34;&#34;&#34;Class that downloads, updates, and manages data coming from a data source.&#34;&#34;&#34;
 
-    def __init__(self, wrapper, data, tz_convert=None, missing_index=None,
+    def __init__(self, wrapper, data, tz_localize=None, tz_convert=None, missing_index=None,
                  missing_columns=None, download_kwargs=None, **kwargs):
         Wrapping.__init__(
             self,
             wrapper,
             data=data,
+            tz_localize=tz_localize,
             tz_convert=tz_convert,
             missing_index=missing_index,
             missing_columns=missing_columns,
@@ -870,6 +896,7 @@ class Data(Wrapping):
         for k, v in data.items():
             checks.assert_meta_equal(v, data[list(data.keys())[0]])
         self._data = data
+        self._tz_localize = tz_localize
         self._tz_convert = tz_convert
         self._missing_index = missing_index
         self._missing_columns = missing_columns
@@ -893,6 +920,11 @@ class Data(Wrapping):
     def symbols(self):
         &#34;&#34;&#34;List of symbols.&#34;&#34;&#34;
         return list(self.data.keys())
+
+    @property
+    def tz_localize(self):
+        &#34;&#34;&#34;`tz_localize` initially passed to `Data.download_symbol`.&#34;&#34;&#34;
+        return self._tz_localize
 
     @property
     def tz_convert(self):
@@ -1010,13 +1042,18 @@ class Data(Wrapping):
         return _kwargs
 
     @classmethod
-    def from_data(cls, data, tz_convert=None, missing_index=None,
+    def from_data(cls, data, tz_localize=None, tz_convert=None, missing_index=None,
                   missing_columns=None, wrapper_kwargs=None, **kwargs):
         &#34;&#34;&#34;Create a new `Data` instance from (aligned) data.
 
         Args:
             data (dict): Dictionary of array-like objects keyed by symbol.
+            tz_localize (any): If the index is tz-naive, convert to a timezone.
+
+                See `vectorbt.utils.datetime.to_timezone`.
             tz_convert (any): Convert the index from one timezone to another.
+
+                See `vectorbt.utils.datetime.to_timezone`.
 
                 Defaults to `tz_convert` in `vectorbt.settings.data`.
             missing_index (str): See `Data.align_index`.
@@ -1030,6 +1067,8 @@ class Data(Wrapping):
         from vectorbt import settings
 
         # Get global defaults
+        if tz_localize is None:
+            tz_localize = settings.data[&#39;tz_localize&#39;]
         if tz_convert is None:
             tz_convert = settings.data[&#39;tz_convert&#39;]
         if missing_index is None:
@@ -1050,9 +1089,12 @@ class Data(Wrapping):
                     v = pd.DataFrame(v)
 
             # Perform operations with datetime-like index
-            if tz_convert is not None:
-                v = v.tz_convert(tz_convert)
             if isinstance(v.index, pd.DatetimeIndex):
+                if tz_localize is not None:
+                    if not is_tz_aware(v.index):
+                        v = v.tz_localize(to_timezone(tz_localize))
+                if tz_convert is not None:
+                    v = v.tz_convert(to_timezone(tz_convert))
                 v.index.freq = v.index.inferred_freq
             data[k] = v
 
@@ -1066,6 +1108,7 @@ class Data(Wrapping):
         return cls(
             wrapper,
             data,
+            tz_localize=tz_localize,
             tz_convert=tz_convert,
             missing_index=missing_index,
             missing_columns=missing_columns,
@@ -1078,7 +1121,7 @@ class Data(Wrapping):
         raise NotImplementedError
 
     @classmethod
-    def download(cls, symbols, tz_convert=None, missing_index=None,
+    def download(cls, symbols, tz_localize=None, tz_convert=None, missing_index=None,
                  missing_columns=None, wrapper_kwargs=None, **kwargs):
         &#34;&#34;&#34;Download data using `Data.download_symbol`.
 
@@ -1087,6 +1130,7 @@ class Data(Wrapping):
 
                 !!! note
                     Tuple is considered as a single symbol.
+            tz_localize (any): See `Data.from_data`.
             tz_convert (any): See `Data.from_data`.
             missing_index (str): See `Data.from_data`.
             missing_columns (str): See `Data.from_data`.
@@ -1109,6 +1153,7 @@ class Data(Wrapping):
         # Create new instance from data
         return cls.from_data(
             data,
+            tz_localize=tz_localize,
             tz_convert=tz_convert,
             missing_index=missing_index,
             missing_columns=missing_columns,
@@ -1152,8 +1197,12 @@ class Data(Wrapping):
                     new_obj = pd.DataFrame(new_obj, index=index)
 
             # Perform operations with datetime-like index
-            if self.tz_convert is not None:
-                new_obj = new_obj.tz_convert(self.tz_convert)
+            if isinstance(new_obj.index, pd.DatetimeIndex):
+                if self.tz_localize is not None:
+                    if not is_tz_aware(new_obj.index):
+                        new_obj = new_obj.tz_localize(to_timezone(self.tz_localize))
+                if self.tz_convert is not None:
+                    new_obj = new_obj.tz_convert(to_timezone(self.tz_convert))
 
             new_data[k] = new_obj
 
@@ -1360,7 +1409,7 @@ def align_index(cls, data, missing=&#39;nan&#39;):
 </details>
 </dd>
 <dt id="vectorbt.data.base.Data.download"><code class="name flex">
-<span>def <span class="ident fname">download</span></span>(<span>symbols, tz_convert=None, missing_index=None, missing_columns=None, wrapper_kwargs=None, **kwargs)</span>
+<span>def <span class="ident fname">download</span></span>(<span>symbols, tz_localize=None, tz_convert=None, missing_index=None, missing_columns=None, wrapper_kwargs=None, **kwargs)</span>
 </code></dt>
 <dd>
 <div class="desc"><p>Download data using <code><a title="vectorbt.data.base.Data.download_symbol" href="#vectorbt.data.base.Data.download_symbol">Data.download_symbol()</a></code>.</p>
@@ -1374,6 +1423,8 @@ def align_index(cls, data, missing=&#39;nan&#39;):
 <p>Tuple is considered as a single symbol.</p>
 </div>
 </dd>
+<dt><strong><code>tz_localize</code></strong> :&ensp;<code>any</code></dt>
+<dd>See <code><a title="vectorbt.data.base.Data.from_data" href="#vectorbt.data.base.Data.from_data">Data.from_data()</a></code>.</dd>
 <dt><strong><code>tz_convert</code></strong> :&ensp;<code>any</code></dt>
 <dd>See <code><a title="vectorbt.data.base.Data.from_data" href="#vectorbt.data.base.Data.from_data">Data.from_data()</a></code>.</dd>
 <dt><strong><code>missing_index</code></strong> :&ensp;<code>str</code></dt>
@@ -1393,7 +1444,7 @@ def align_index(cls, data, missing=&#39;nan&#39;):
 <span>Expand source code</span>
 </summary>
 <pre><code class="python">@classmethod
-def download(cls, symbols, tz_convert=None, missing_index=None,
+def download(cls, symbols, tz_localize=None, tz_convert=None, missing_index=None,
              missing_columns=None, wrapper_kwargs=None, **kwargs):
     &#34;&#34;&#34;Download data using `Data.download_symbol`.
 
@@ -1402,6 +1453,7 @@ def download(cls, symbols, tz_convert=None, missing_index=None,
 
             !!! note
                 Tuple is considered as a single symbol.
+        tz_localize (any): See `Data.from_data`.
         tz_convert (any): See `Data.from_data`.
         missing_index (str): See `Data.from_data`.
         missing_columns (str): See `Data.from_data`.
@@ -1424,6 +1476,7 @@ def download(cls, symbols, tz_convert=None, missing_index=None,
     # Create new instance from data
     return cls.from_data(
         data,
+        tz_localize=tz_localize,
         tz_convert=tz_convert,
         missing_index=missing_index,
         missing_columns=missing_columns,
@@ -1448,7 +1501,7 @@ def download_symbol(cls, symbol, **kwargs):
 </details>
 </dd>
 <dt id="vectorbt.data.base.Data.from_data"><code class="name flex">
-<span>def <span class="ident fname">from_data</span></span>(<span>data, tz_convert=None, missing_index=None, missing_columns=None, wrapper_kwargs=None, **kwargs)</span>
+<span>def <span class="ident fname">from_data</span></span>(<span>data, tz_localize=None, tz_convert=None, missing_index=None, missing_columns=None, wrapper_kwargs=None, **kwargs)</span>
 </code></dt>
 <dd>
 <div class="desc"><p>Create a new <code><a title="vectorbt.data.base.Data" href="#vectorbt.data.base.Data">Data</a></code> instance from (aligned) data.</p>
@@ -1456,9 +1509,15 @@ def download_symbol(cls, symbol, **kwargs):
 <dl>
 <dt><strong><code>data</code></strong> :&ensp;<code>dict</code></dt>
 <dd>Dictionary of array-like objects keyed by symbol.</dd>
+<dt><strong><code>tz_localize</code></strong> :&ensp;<code>any</code></dt>
+<dd>
+<p>If the index is tz-naive, convert to a timezone.</p>
+<p>See <code><a title="vectorbt.utils.datetime.to_timezone" href="../utils/datetime.html#vectorbt.utils.datetime.to_timezone">to_timezone()</a></code>.</p>
+</dd>
 <dt><strong><code>tz_convert</code></strong> :&ensp;<code>any</code></dt>
 <dd>
 <p>Convert the index from one timezone to another.</p>
+<p>See <code><a title="vectorbt.utils.datetime.to_timezone" href="../utils/datetime.html#vectorbt.utils.datetime.to_timezone">to_timezone()</a></code>.</p>
 <p>Defaults to <code>tz_convert</code> in <code><a title="vectorbt.settings.data" href="../settings.html#vectorbt.settings.data">data</a></code>.</p>
 </dd>
 <dt><strong><code>missing_index</code></strong> :&ensp;<code>str</code></dt>
@@ -1481,13 +1540,18 @@ def download_symbol(cls, symbol, **kwargs):
 <span>Expand source code</span>
 </summary>
 <pre><code class="python">@classmethod
-def from_data(cls, data, tz_convert=None, missing_index=None,
+def from_data(cls, data, tz_localize=None, tz_convert=None, missing_index=None,
               missing_columns=None, wrapper_kwargs=None, **kwargs):
     &#34;&#34;&#34;Create a new `Data` instance from (aligned) data.
 
     Args:
         data (dict): Dictionary of array-like objects keyed by symbol.
+        tz_localize (any): If the index is tz-naive, convert to a timezone.
+
+            See `vectorbt.utils.datetime.to_timezone`.
         tz_convert (any): Convert the index from one timezone to another.
+
+            See `vectorbt.utils.datetime.to_timezone`.
 
             Defaults to `tz_convert` in `vectorbt.settings.data`.
         missing_index (str): See `Data.align_index`.
@@ -1501,6 +1565,8 @@ def from_data(cls, data, tz_convert=None, missing_index=None,
     from vectorbt import settings
 
     # Get global defaults
+    if tz_localize is None:
+        tz_localize = settings.data[&#39;tz_localize&#39;]
     if tz_convert is None:
         tz_convert = settings.data[&#39;tz_convert&#39;]
     if missing_index is None:
@@ -1521,9 +1587,12 @@ def from_data(cls, data, tz_convert=None, missing_index=None,
                 v = pd.DataFrame(v)
 
         # Perform operations with datetime-like index
-        if tz_convert is not None:
-            v = v.tz_convert(tz_convert)
         if isinstance(v.index, pd.DatetimeIndex):
+            if tz_localize is not None:
+                if not is_tz_aware(v.index):
+                    v = v.tz_localize(to_timezone(tz_localize))
+            if tz_convert is not None:
+                v = v.tz_convert(to_timezone(tz_convert))
             v.index.freq = v.index.inferred_freq
         data[k] = v
 
@@ -1537,6 +1606,7 @@ def from_data(cls, data, tz_convert=None, missing_index=None,
     return cls(
         wrapper,
         data,
+        tz_localize=tz_localize,
         tz_convert=tz_convert,
         missing_index=missing_index,
         missing_columns=missing_columns,
@@ -1645,6 +1715,19 @@ def symbols(self):
 def tz_convert(self):
     &#34;&#34;&#34;`tz_convert` initially passed to `Data.download_symbol`.&#34;&#34;&#34;
     return self._tz_convert</code></pre>
+</details>
+</dd>
+<dt id="vectorbt.data.base.Data.tz_localize"><code class="name">var <span class="ident fname">tz_localize</span></code></dt>
+<dd>
+<div class="desc"><p><code>tz_localize</code> initially passed to <code><a title="vectorbt.data.base.Data.download_symbol" href="#vectorbt.data.base.Data.download_symbol">Data.download_symbol()</a></code>.</p></div>
+<details class="source">
+<summary>
+<span>Expand source code</span>
+</summary>
+<pre><code class="python">@property
+def tz_localize(self):
+    &#34;&#34;&#34;`tz_localize` initially passed to `Data.download_symbol`.&#34;&#34;&#34;
+    return self._tz_localize</code></pre>
 </details>
 </dd>
 </dl>
@@ -1778,8 +1861,12 @@ and a tuple of DataFrames if a list of columns passed.</p></div>
                 new_obj = pd.DataFrame(new_obj, index=index)
 
         # Perform operations with datetime-like index
-        if self.tz_convert is not None:
-            new_obj = new_obj.tz_convert(self.tz_convert)
+        if isinstance(new_obj.index, pd.DatetimeIndex):
+            if self.tz_localize is not None:
+                if not is_tz_aware(new_obj.index):
+                    new_obj = new_obj.tz_localize(to_timezone(self.tz_localize))
+            if self.tz_convert is not None:
+                new_obj = new_obj.tz_convert(to_timezone(self.tz_convert))
 
         new_data[k] = new_obj
 
@@ -1917,6 +2004,7 @@ title="Search"
 <li><code><a title="vectorbt.data.base.Data.select_symbol_kwargs" href="#vectorbt.data.base.Data.select_symbol_kwargs">select_symbol_kwargs</a></code></li>
 <li><code><a title="vectorbt.data.base.Data.symbols" href="#vectorbt.data.base.Data.symbols">symbols</a></code></li>
 <li><code><a title="vectorbt.data.base.Data.tz_convert" href="#vectorbt.data.base.Data.tz_convert">tz_convert</a></code></li>
+<li><code><a title="vectorbt.data.base.Data.tz_localize" href="#vectorbt.data.base.Data.tz_localize">tz_localize</a></code></li>
 <li><code><a title="vectorbt.data.base.Data.update" href="#vectorbt.data.base.Data.update">update</a></code></li>
 <li><code><a title="vectorbt.data.base.Data.update_symbol" href="#vectorbt.data.base.Data.update_symbol">update_symbol</a></code></li>
 </ul>

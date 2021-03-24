@@ -44,7 +44,9 @@ ga('create', 'UA-142521178-3', 'auto'); ga('send', 'pageview');
 import numpy as np
 import pandas as pd
 import dateparser
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta, tzinfo
+import pytz
+import copy
 
 DatetimeTypes = (pd.DatetimeIndex, pd.TimedeltaIndex, pd.PeriodIndex)
 
@@ -95,13 +97,41 @@ def convert_naive_time(t, tz_out):
     return datetime.combine(datetime.today(), t).astimezone(tz_out).time()
 
 
+def is_tz_aware(dt):
+    &#34;&#34;&#34;Whether datetime is timezone-aware.&#34;&#34;&#34;
+    return dt.tzinfo is not None and dt.tzinfo.utcoffset(dt) is not None
+
+
+def to_timezone(tz):
+    &#34;&#34;&#34;Parse the timezone.
+
+    Strings are parsed by `pytz` and `dateparser`, while integers and floats are treated as hour offsets.
+
+    If the timezone object can&#39;t be checked for equality based on its properties,
+    it&#39;s automatically converted to `datetime.timezone`.&#34;&#34;&#34;
+    if isinstance(tz, str):
+        try:
+            tz = pytz.timezone(tz)
+        except pytz.UnknownTimeZoneError:
+            dt = dateparser.parse(&#39;now %s&#39; % tz)
+            if dt is not None:
+                tz = dt.tzinfo
+    if isinstance(tz, (int, float)):
+        tz = timezone(timedelta(hours=tz))
+    if isinstance(tz, tzinfo):
+        if tz != copy.copy(tz):
+            return timezone(tz.utcoffset(datetime.now()))
+        return tz
+    raise TypeError(&#34;Couldn&#39;t parse the timezone&#34;)
+
+
 def to_tzaware_datetime(dt, tz=None):
-    &#34;&#34;&#34;Convert any value to a timezone-aware `datetime.datetime`.
+    &#34;&#34;&#34;Parse the datetime as a timezone-aware `datetime.datetime`.
 
     See [dateparser docs](http://dateparser.readthedocs.io/en/latest/) for valid string formats.
 
     Timestamps are localized to UTC, while naive datetime is localized to the local time.
-    To explicitly convert the datetime to a timezone, use `tz`.&#34;&#34;&#34;
+    To explicitly convert the datetime to a timezone, use `tz` (uses `to_timezone`).&#34;&#34;&#34;
     if isinstance(dt, float):
         dt = datetime.fromtimestamp(dt, timezone.utc)
     elif isinstance(dt, int):
@@ -111,17 +141,19 @@ def to_tzaware_datetime(dt, tz=None):
             dt = datetime.fromtimestamp(dt, timezone.utc)
     elif isinstance(dt, str):
         dt = dateparser.parse(dt)
+        if dt is None:
+            raise ValueError(&#34;Couldn&#39;t parse the datetime&#34;)
     elif isinstance(dt, pd.Timestamp):
         dt = dt.to_pydatetime()
     elif isinstance(dt, np.datetime64):
         dt = dt.astype(datetime)
 
-    if dt.tzinfo is None or dt.tzinfo.utcoffset(dt) is None:
+    if not is_tz_aware(dt):
         dt = dt.astimezone()
     else:
         dt = dt.replace(tzinfo=timezone(dt.tzinfo.utcoffset(dt)))
     if tz is not None:
-        dt = dt.astimezone(tz)
+        dt = dt.astimezone(to_timezone(tz))
     return dt
 
 
@@ -252,6 +284,20 @@ def interval_to_ms(interval):
         return None</code></pre>
 </details>
 </dd>
+<dt id="vectorbt.utils.datetime.is_tz_aware"><code class="name flex">
+<span>def <span class="ident fname">is_tz_aware</span></span>(<span>dt)</span>
+</code></dt>
+<dd>
+<div class="desc"><p>Whether datetime is timezone-aware.</p></div>
+<details class="source">
+<summary>
+<span>Expand source code</span>
+</summary>
+<pre><code class="python">def is_tz_aware(dt):
+    &#34;&#34;&#34;Whether datetime is timezone-aware.&#34;&#34;&#34;
+    return dt.tzinfo is not None and dt.tzinfo.utcoffset(dt) is not None</code></pre>
+</details>
+</dd>
 <dt id="vectorbt.utils.datetime.naive_to_tzaware_time"><code class="name flex">
 <span>def <span class="ident fname">naive_to_tzaware_time</span></span>(<span>t, tz_out)</span>
 </code></dt>
@@ -286,25 +332,60 @@ def interval_to_ms(interval):
     return pd.to_timedelta(arg, **kwargs)</code></pre>
 </details>
 </dd>
+<dt id="vectorbt.utils.datetime.to_timezone"><code class="name flex">
+<span>def <span class="ident fname">to_timezone</span></span>(<span>tz)</span>
+</code></dt>
+<dd>
+<div class="desc"><p>Parse the timezone.</p>
+<p>Strings are parsed by <code>pytz</code> and <code>dateparser</code>, while integers and floats are treated as hour offsets.</p>
+<p>If the timezone object can't be checked for equality based on its properties,
+it's automatically converted to <code>datetime.timezone</code>.</p></div>
+<details class="source">
+<summary>
+<span>Expand source code</span>
+</summary>
+<pre><code class="python">def to_timezone(tz):
+    &#34;&#34;&#34;Parse the timezone.
+
+    Strings are parsed by `pytz` and `dateparser`, while integers and floats are treated as hour offsets.
+
+    If the timezone object can&#39;t be checked for equality based on its properties,
+    it&#39;s automatically converted to `datetime.timezone`.&#34;&#34;&#34;
+    if isinstance(tz, str):
+        try:
+            tz = pytz.timezone(tz)
+        except pytz.UnknownTimeZoneError:
+            dt = dateparser.parse(&#39;now %s&#39; % tz)
+            if dt is not None:
+                tz = dt.tzinfo
+    if isinstance(tz, (int, float)):
+        tz = timezone(timedelta(hours=tz))
+    if isinstance(tz, tzinfo):
+        if tz != copy.copy(tz):
+            return timezone(tz.utcoffset(datetime.now()))
+        return tz
+    raise TypeError(&#34;Couldn&#39;t parse the timezone&#34;)</code></pre>
+</details>
+</dd>
 <dt id="vectorbt.utils.datetime.to_tzaware_datetime"><code class="name flex">
 <span>def <span class="ident fname">to_tzaware_datetime</span></span>(<span>dt, tz=None)</span>
 </code></dt>
 <dd>
-<div class="desc"><p>Convert any value to a timezone-aware <code>datetime.datetime</code>.</p>
+<div class="desc"><p>Parse the datetime as a timezone-aware <code>datetime.datetime</code>.</p>
 <p>See <a href="http://dateparser.readthedocs.io/en/latest/">dateparser docs</a> for valid string formats.</p>
 <p>Timestamps are localized to UTC, while naive datetime is localized to the local time.
-To explicitly convert the datetime to a timezone, use <code>tz</code>.</p></div>
+To explicitly convert the datetime to a timezone, use <code>tz</code> (uses <code><a title="vectorbt.utils.datetime.to_timezone" href="#vectorbt.utils.datetime.to_timezone">to_timezone()</a></code>).</p></div>
 <details class="source">
 <summary>
 <span>Expand source code</span>
 </summary>
 <pre><code class="python">def to_tzaware_datetime(dt, tz=None):
-    &#34;&#34;&#34;Convert any value to a timezone-aware `datetime.datetime`.
+    &#34;&#34;&#34;Parse the datetime as a timezone-aware `datetime.datetime`.
 
     See [dateparser docs](http://dateparser.readthedocs.io/en/latest/) for valid string formats.
 
     Timestamps are localized to UTC, while naive datetime is localized to the local time.
-    To explicitly convert the datetime to a timezone, use `tz`.&#34;&#34;&#34;
+    To explicitly convert the datetime to a timezone, use `tz` (uses `to_timezone`).&#34;&#34;&#34;
     if isinstance(dt, float):
         dt = datetime.fromtimestamp(dt, timezone.utc)
     elif isinstance(dt, int):
@@ -314,17 +395,19 @@ To explicitly convert the datetime to a timezone, use <code>tz</code>.</p></div>
             dt = datetime.fromtimestamp(dt, timezone.utc)
     elif isinstance(dt, str):
         dt = dateparser.parse(dt)
+        if dt is None:
+            raise ValueError(&#34;Couldn&#39;t parse the datetime&#34;)
     elif isinstance(dt, pd.Timestamp):
         dt = dt.to_pydatetime()
     elif isinstance(dt, np.datetime64):
         dt = dt.astype(datetime)
 
-    if dt.tzinfo is None or dt.tzinfo.utcoffset(dt) is None:
+    if not is_tz_aware(dt):
         dt = dt.astimezone()
     else:
         dt = dt.replace(tzinfo=timezone(dt.tzinfo.utcoffset(dt)))
     if tz is not None:
-        dt = dt.astimezone(tz)
+        dt = dt.astimezone(to_timezone(tz))
     return dt</code></pre>
 </details>
 </dd>
@@ -383,8 +466,10 @@ title="Search"
 <li><code><a title="vectorbt.utils.datetime.get_local_tz" href="#vectorbt.utils.datetime.get_local_tz">get_local_tz</a></code></li>
 <li><code><a title="vectorbt.utils.datetime.get_utc_tz" href="#vectorbt.utils.datetime.get_utc_tz">get_utc_tz</a></code></li>
 <li><code><a title="vectorbt.utils.datetime.interval_to_ms" href="#vectorbt.utils.datetime.interval_to_ms">interval_to_ms</a></code></li>
+<li><code><a title="vectorbt.utils.datetime.is_tz_aware" href="#vectorbt.utils.datetime.is_tz_aware">is_tz_aware</a></code></li>
 <li><code><a title="vectorbt.utils.datetime.naive_to_tzaware_time" href="#vectorbt.utils.datetime.naive_to_tzaware_time">naive_to_tzaware_time</a></code></li>
 <li><code><a title="vectorbt.utils.datetime.to_timedelta" href="#vectorbt.utils.datetime.to_timedelta">to_timedelta</a></code></li>
+<li><code><a title="vectorbt.utils.datetime.to_timezone" href="#vectorbt.utils.datetime.to_timezone">to_timezone</a></code></li>
 <li><code><a title="vectorbt.utils.datetime.to_tzaware_datetime" href="#vectorbt.utils.datetime.to_tzaware_datetime">to_tzaware_datetime</a></code></li>
 <li><code><a title="vectorbt.utils.datetime.tzaware_to_naive_time" href="#vectorbt.utils.datetime.tzaware_to_naive_time">tzaware_to_naive_time</a></code></li>
 </ul>
