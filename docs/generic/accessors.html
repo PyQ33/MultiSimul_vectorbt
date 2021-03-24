@@ -181,6 +181,18 @@ from scipy import stats
 from numba.typed import Dict
 import warnings
 from datetime import datetime, timedelta
+from sklearn.utils.validation import check_is_fitted
+from sklearn.exceptions import NotFittedError
+from sklearn.preprocessing import (
+    Binarizer,
+    MinMaxScaler,
+    MaxAbsScaler,
+    Normalizer,
+    RobustScaler,
+    StandardScaler,
+    QuantileTransformer,
+    PowerTransformer
+)
 
 from vectorbt.utils import checks
 from vectorbt.utils.config import merge_dicts
@@ -217,6 +229,21 @@ except ImportError:
     nanargmin = np.nanargmin
 
 
+def add_transform_methods(transformers):
+    &#34;&#34;&#34;Class decorator to add scikit-learn transformers as transform methods.&#34;&#34;&#34;
+
+    def wrapper(cls):
+        for fname, transformer in transformers:
+            def transform(self, wrap_kwargs=None, _transformer=transformer, **kwargs):
+                return self.transform(_transformer(**kwargs), wrap_kwargs=wrap_kwargs)
+
+            transform.__doc__ = f&#34;Transform using `sklearn.preprocessing.{transformer.__name__}`.&#34;
+            setattr(cls, fname, transform)
+        return cls
+
+    return wrapper
+
+
 @add_nb_methods([
     (nb.shuffle_nb, False),
     (nb.fillna_nb, False),
@@ -235,6 +262,16 @@ except ImportError:
     (nb.expanding_mean_nb, False),
     (nb.product_nb, True, &#39;product&#39;)
 ], module_name=&#39;vectorbt.generic.nb&#39;)
+@add_transform_methods([
+    (&#39;binarize&#39;, Binarizer),
+    (&#39;minmax_scale&#39;, MinMaxScaler),
+    (&#39;maxabs_scale&#39;, MaxAbsScaler),
+    (&#39;normalize&#39;, Normalizer),
+    (&#39;robust_scale&#39;, RobustScaler),
+    (&#39;scale&#39;, StandardScaler),
+    (&#39;quantile_transform&#39;, QuantileTransformer),
+    (&#39;power_transform&#39;, PowerTransformer)
+])
 class GenericAccessor(BaseAccessor):
     &#34;&#34;&#34;Accessor on top of data of any type. For both, Series and DataFrames.
 
@@ -885,6 +922,55 @@ class GenericAccessor(BaseAccessor):
             group_by = self.wrapper.grouper.group_by
         return MappedArray(self.wrapper, mapped_arr, col_arr, idx_arr=idx_arr, **kwargs).regroup(group_by)
 
+    # ############# Transforming ############# #
+
+    def transform(self, transformer, wrap_kwargs=None, **kwargs):
+        &#34;&#34;&#34;Transform using a transformer.
+
+        A transformer can be any class instance that has `transform` and `fit_transform` methods,
+        ideally subclassing `sklearn.base.TransformerMixin` and `sklearn.base.BaseEstimator`.
+
+        Will fit `transformer` if not fitted.
+
+        `**kwargs` are passed to the `transform` or `fit_transform` method.
+
+        ## Example
+
+        ```python-repl
+        &gt;&gt;&gt; from sklearn.preprocessing import MinMaxScaler
+
+        &gt;&gt;&gt; df.vbt.transform(MinMaxScaler((-1, 1)))
+                      a    b    c
+        2020-01-01 -1.0  1.0 -1.0
+        2020-01-02 -0.5  0.5  0.0
+        2020-01-03  0.0  0.0  1.0
+        2020-01-04  0.5 -0.5  0.0
+        2020-01-05  1.0 -1.0 -1.0
+
+        &gt;&gt;&gt; fitted_scaler = MinMaxScaler((-1, 1)).fit(np.array([[2], [4]]))
+        &gt;&gt;&gt; df.vbt.transform(fitted_scaler)
+                      a    b    c
+        2020-01-01 -2.0  2.0 -2.0
+        2020-01-02 -1.0  1.0 -1.0
+        2020-01-03  0.0  0.0  0.0
+        2020-01-04  1.0 -1.0 -1.0
+        2020-01-05  2.0 -2.0 -2.0
+        ```&#34;&#34;&#34;
+        is_fitted = True
+        try:
+            check_is_fitted(transformer)
+        except NotFittedError:
+            is_fitted = False
+        if not is_fitted:
+            result = transformer.fit_transform(self.to_2d_array(), **kwargs)
+        else:
+            result = transformer.transform(self.to_2d_array(), **kwargs)
+        return self.wrapper.wrap(result, **merge_dicts({}, wrap_kwargs))
+
+    def zscore(self, **kwargs):
+        &#34;&#34;&#34;Compute z-score using `sklearn.preprocessing.StandardScaler`.&#34;&#34;&#34;
+        return self.scale(with_mean=True, with_std=True, **kwargs)
+
     # ############# Splitting ############# #
 
     def split(self, splitter, stack_kwargs=None, keys=None, plot=False,
@@ -893,13 +979,13 @@ class GenericAccessor(BaseAccessor):
 
         Returns a tuple of tuples, each corresponding to a set and composed of a dataframe and split indexes.
 
-        A splitter can be any class instance that has `split` method, such as
+        A splitter can be any class instance that has `split` method, ideally subclassing
         `sklearn.model_selection.BaseCrossValidator` or `vectorbt.generic.splitters.BaseSplitter`.
 
-        `heatmap_kwargs` will be passed to `vectorbt.generic.plotting.Heatmap` if `plot` is True,
+        `heatmap_kwargs` are passed to `vectorbt.generic.plotting.Heatmap` if `plot` is True,
         can be a dictionary or a list per set, for example, to set trace name for each set (&#39;train&#39;, &#39;test&#39;, etc.).
 
-        `**kwargs` will be passed to the `splitter.split` method.
+        `**kwargs` are passed to the `split` method.
 
         !!! note
             The datetime-like format of the index will be lost as result of this operation.
@@ -1764,7 +1850,7 @@ class GenericSRAccessor(GenericAccessor, BaseSRAccessor):
                xref=&#39;x&#39;, yref=&#39;y&#39;, fig=None, **kwargs):  # pragma: no cover
         &#34;&#34;&#34;Plot probability plot using `scipy.stats.probplot`.
 
-        `**kwargs` will be passed to `GenericAccessor.scatterplot`.
+        `**kwargs` are passed to `GenericAccessor.scatterplot`.
 
         ## Example
 
@@ -1848,6 +1934,33 @@ class GenericDFAccessor(GenericAccessor, BaseDFAccessor):
 <section>
 </section>
 <section>
+<h2 class="section-title" id="header-functions">Functions</h2>
+<dl>
+<dt id="vectorbt.generic.accessors.add_transform_methods"><code class="name flex">
+<span>def <span class="ident fname">add_transform_methods</span></span>(<span>transformers)</span>
+</code></dt>
+<dd>
+<div class="desc"><p>Class decorator to add scikit-learn transformers as transform methods.</p></div>
+<details class="source">
+<summary>
+<span>Expand source code</span>
+</summary>
+<pre><code class="python">def add_transform_methods(transformers):
+    &#34;&#34;&#34;Class decorator to add scikit-learn transformers as transform methods.&#34;&#34;&#34;
+
+    def wrapper(cls):
+        for fname, transformer in transformers:
+            def transform(self, wrap_kwargs=None, _transformer=transformer, **kwargs):
+                return self.transform(_transformer(**kwargs), wrap_kwargs=wrap_kwargs)
+
+            transform.__doc__ = f&#34;Transform using `sklearn.preprocessing.{transformer.__name__}`.&#34;
+            setattr(cls, fname, transform)
+        return cls
+
+    return wrapper</code></pre>
+</details>
+</dd>
+</dl>
 </section>
 <section>
 <h2 class="section-title" id="header-classes">Classes</h2>
@@ -2513,6 +2626,55 @@ class GenericDFAccessor(GenericAccessor, BaseDFAccessor):
             group_by = self.wrapper.grouper.group_by
         return MappedArray(self.wrapper, mapped_arr, col_arr, idx_arr=idx_arr, **kwargs).regroup(group_by)
 
+    # ############# Transforming ############# #
+
+    def transform(self, transformer, wrap_kwargs=None, **kwargs):
+        &#34;&#34;&#34;Transform using a transformer.
+
+        A transformer can be any class instance that has `transform` and `fit_transform` methods,
+        ideally subclassing `sklearn.base.TransformerMixin` and `sklearn.base.BaseEstimator`.
+
+        Will fit `transformer` if not fitted.
+
+        `**kwargs` are passed to the `transform` or `fit_transform` method.
+
+        ## Example
+
+        ```python-repl
+        &gt;&gt;&gt; from sklearn.preprocessing import MinMaxScaler
+
+        &gt;&gt;&gt; df.vbt.transform(MinMaxScaler((-1, 1)))
+                      a    b    c
+        2020-01-01 -1.0  1.0 -1.0
+        2020-01-02 -0.5  0.5  0.0
+        2020-01-03  0.0  0.0  1.0
+        2020-01-04  0.5 -0.5  0.0
+        2020-01-05  1.0 -1.0 -1.0
+
+        &gt;&gt;&gt; fitted_scaler = MinMaxScaler((-1, 1)).fit(np.array([[2], [4]]))
+        &gt;&gt;&gt; df.vbt.transform(fitted_scaler)
+                      a    b    c
+        2020-01-01 -2.0  2.0 -2.0
+        2020-01-02 -1.0  1.0 -1.0
+        2020-01-03  0.0  0.0  0.0
+        2020-01-04  1.0 -1.0 -1.0
+        2020-01-05  2.0 -2.0 -2.0
+        ```&#34;&#34;&#34;
+        is_fitted = True
+        try:
+            check_is_fitted(transformer)
+        except NotFittedError:
+            is_fitted = False
+        if not is_fitted:
+            result = transformer.fit_transform(self.to_2d_array(), **kwargs)
+        else:
+            result = transformer.transform(self.to_2d_array(), **kwargs)
+        return self.wrapper.wrap(result, **merge_dicts({}, wrap_kwargs))
+
+    def zscore(self, **kwargs):
+        &#34;&#34;&#34;Compute z-score using `sklearn.preprocessing.StandardScaler`.&#34;&#34;&#34;
+        return self.scale(with_mean=True, with_std=True, **kwargs)
+
     # ############# Splitting ############# #
 
     def split(self, splitter, stack_kwargs=None, keys=None, plot=False,
@@ -2521,13 +2683,13 @@ class GenericDFAccessor(GenericAccessor, BaseDFAccessor):
 
         Returns a tuple of tuples, each corresponding to a set and composed of a dataframe and split indexes.
 
-        A splitter can be any class instance that has `split` method, such as
+        A splitter can be any class instance that has `split` method, ideally subclassing
         `sklearn.model_selection.BaseCrossValidator` or `vectorbt.generic.splitters.BaseSplitter`.
 
-        `heatmap_kwargs` will be passed to `vectorbt.generic.plotting.Heatmap` if `plot` is True,
+        `heatmap_kwargs` are passed to `vectorbt.generic.plotting.Heatmap` if `plot` is True,
         can be a dictionary or a list per set, for example, to set trace name for each set (&#39;train&#39;, &#39;test&#39;, etc.).
 
-        `**kwargs` will be passed to the `splitter.split` method.
+        `**kwargs` are passed to the `split` method.
 
         !!! note
             The datetime-like format of the index will be lost as result of this operation.
@@ -3097,6 +3259,19 @@ dtype: float64
     if return_fig:
         return bar.fig
     return bar</code></pre>
+</details>
+</dd>
+<dt id="vectorbt.generic.accessors.GenericAccessor.binarize"><code class="name flex">
+<span>def <span class="ident fname">binarize</span></span>(<span>self, wrap_kwargs=None, **kwargs)</span>
+</code></dt>
+<dd>
+<div class="desc"><p>Transform using <code>sklearn.preprocessing.Binarizer</code>.</p></div>
+<details class="source">
+<summary>
+<span>Expand source code</span>
+</summary>
+<pre><code class="python">def transform(self, wrap_kwargs=None, _transformer=transformer, **kwargs):
+    return self.transform(_transformer(**kwargs), wrap_kwargs=wrap_kwargs)</code></pre>
 </details>
 </dd>
 <dt id="vectorbt.generic.accessors.GenericAccessor.boxplot"><code class="name flex">
@@ -4105,6 +4280,19 @@ def get_drawdowns(self, group_by=None, **kwargs):
     return self.wrapper.wrap_reduced(_nanmax(arr, axis=0), **wrap_kwargs)</code></pre>
 </details>
 </dd>
+<dt id="vectorbt.generic.accessors.GenericAccessor.maxabs_scale"><code class="name flex">
+<span>def <span class="ident fname">maxabs_scale</span></span>(<span>self, wrap_kwargs=None, **kwargs)</span>
+</code></dt>
+<dd>
+<div class="desc"><p>Transform using <code>sklearn.preprocessing.MaxAbsScaler</code>.</p></div>
+<details class="source">
+<summary>
+<span>Expand source code</span>
+</summary>
+<pre><code class="python">def transform(self, wrap_kwargs=None, _transformer=transformer, **kwargs):
+    return self.transform(_transformer(**kwargs), wrap_kwargs=wrap_kwargs)</code></pre>
+</details>
+</dd>
 <dt id="vectorbt.generic.accessors.GenericAccessor.mean"><code class="name flex">
 <span>def <span class="ident fname">mean</span></span>(<span>self, group_by=None, wrap_kwargs=None)</span>
 </code></dt>
@@ -4176,6 +4364,32 @@ def get_drawdowns(self, group_by=None, **kwargs):
     else:
         _nanmin = nanmin
     return self.wrapper.wrap_reduced(_nanmin(arr, axis=0), **wrap_kwargs)</code></pre>
+</details>
+</dd>
+<dt id="vectorbt.generic.accessors.GenericAccessor.minmax_scale"><code class="name flex">
+<span>def <span class="ident fname">minmax_scale</span></span>(<span>self, wrap_kwargs=None, **kwargs)</span>
+</code></dt>
+<dd>
+<div class="desc"><p>Transform using <code>sklearn.preprocessing.MinMaxScaler</code>.</p></div>
+<details class="source">
+<summary>
+<span>Expand source code</span>
+</summary>
+<pre><code class="python">def transform(self, wrap_kwargs=None, _transformer=transformer, **kwargs):
+    return self.transform(_transformer(**kwargs), wrap_kwargs=wrap_kwargs)</code></pre>
+</details>
+</dd>
+<dt id="vectorbt.generic.accessors.GenericAccessor.normalize"><code class="name flex">
+<span>def <span class="ident fname">normalize</span></span>(<span>self, wrap_kwargs=None, **kwargs)</span>
+</code></dt>
+<dd>
+<div class="desc"><p>Transform using <code>sklearn.preprocessing.Normalizer</code>.</p></div>
+<details class="source">
+<summary>
+<span>Expand source code</span>
+</summary>
+<pre><code class="python">def transform(self, wrap_kwargs=None, _transformer=transformer, **kwargs):
+    return self.transform(_transformer(**kwargs), wrap_kwargs=wrap_kwargs)</code></pre>
 </details>
 </dd>
 <dt id="vectorbt.generic.accessors.GenericAccessor.pct_change"><code class="name flex">
@@ -4250,6 +4464,19 @@ def get_drawdowns(self, group_by=None, **kwargs):
     return scatter</code></pre>
 </details>
 </dd>
+<dt id="vectorbt.generic.accessors.GenericAccessor.power_transform"><code class="name flex">
+<span>def <span class="ident fname">power_transform</span></span>(<span>self, wrap_kwargs=None, **kwargs)</span>
+</code></dt>
+<dd>
+<div class="desc"><p>Transform using <code>sklearn.preprocessing.PowerTransformer</code>.</p></div>
+<details class="source">
+<summary>
+<span>Expand source code</span>
+</summary>
+<pre><code class="python">def transform(self, wrap_kwargs=None, _transformer=transformer, **kwargs):
+    return self.transform(_transformer(**kwargs), wrap_kwargs=wrap_kwargs)</code></pre>
+</details>
+</dd>
 <dt id="vectorbt.generic.accessors.GenericAccessor.product"><code class="name flex">
 <span>def <span class="ident fname">product</span></span>(<span>self)</span>
 </code></dt>
@@ -4280,6 +4507,19 @@ def get_drawdowns(self, group_by=None, **kwargs):
         if _is_reducing:
             return self.wrapper.wrap_reduced(a, name_or_index=_name_or_index, **wrap_kwargs)
         return self.wrapper.wrap(a, **wrap_kwargs)</code></pre>
+</details>
+</dd>
+<dt id="vectorbt.generic.accessors.GenericAccessor.quantile_transform"><code class="name flex">
+<span>def <span class="ident fname">quantile_transform</span></span>(<span>self, wrap_kwargs=None, **kwargs)</span>
+</code></dt>
+<dd>
+<div class="desc"><p>Transform using <code>sklearn.preprocessing.QuantileTransformer</code>.</p></div>
+<details class="source">
+<summary>
+<span>Expand source code</span>
+</summary>
+<pre><code class="python">def transform(self, wrap_kwargs=None, _transformer=transformer, **kwargs):
+    return self.transform(_transformer(**kwargs), wrap_kwargs=wrap_kwargs)</code></pre>
 </details>
 </dd>
 <dt id="vectorbt.generic.accessors.GenericAccessor.range_split"><code class="name flex">
@@ -4686,6 +4926,19 @@ max      5.0     3.0
     return resampled_obj</code></pre>
 </details>
 </dd>
+<dt id="vectorbt.generic.accessors.GenericAccessor.robust_scale"><code class="name flex">
+<span>def <span class="ident fname">robust_scale</span></span>(<span>self, wrap_kwargs=None, **kwargs)</span>
+</code></dt>
+<dd>
+<div class="desc"><p>Transform using <code>sklearn.preprocessing.RobustScaler</code>.</p></div>
+<details class="source">
+<summary>
+<span>Expand source code</span>
+</summary>
+<pre><code class="python">def transform(self, wrap_kwargs=None, _transformer=transformer, **kwargs):
+    return self.transform(_transformer(**kwargs), wrap_kwargs=wrap_kwargs)</code></pre>
+</details>
+</dd>
 <dt id="vectorbt.generic.accessors.GenericAccessor.rolling_apply"><code class="name flex">
 <span>def <span class="ident fname">rolling_apply</span></span>(<span>self, window, apply_func_nb, *args, minp=None, on_matrix=False, wrap_kwargs=None)</span>
 </code></dt>
@@ -4920,6 +5173,19 @@ split_idx  0  1  2  3  4  5
     return self.wrapper.wrap(out, **merge_dicts({}, wrap_kwargs))</code></pre>
 </details>
 </dd>
+<dt id="vectorbt.generic.accessors.GenericAccessor.scale"><code class="name flex">
+<span>def <span class="ident fname">scale</span></span>(<span>self, wrap_kwargs=None, **kwargs)</span>
+</code></dt>
+<dd>
+<div class="desc"><p>Transform using <code>sklearn.preprocessing.StandardScaler</code>.</p></div>
+<details class="source">
+<summary>
+<span>Expand source code</span>
+</summary>
+<pre><code class="python">def transform(self, wrap_kwargs=None, _transformer=transformer, **kwargs):
+    return self.transform(_transformer(**kwargs), wrap_kwargs=wrap_kwargs)</code></pre>
+</details>
+</dd>
 <dt id="vectorbt.generic.accessors.GenericAccessor.scatterplot"><code class="name flex">
 <span>def <span class="ident fname">scatterplot</span></span>(<span>self, **kwargs)</span>
 </code></dt>
@@ -4985,11 +5251,11 @@ split_idx  0  1  2  3  4  5
 <dd>
 <div class="desc"><p>Split using a splitter.</p>
 <p>Returns a tuple of tuples, each corresponding to a set and composed of a dataframe and split indexes.</p>
-<p>A splitter can be any class instance that has <code>split</code> method, such as
+<p>A splitter can be any class instance that has <code>split</code> method, ideally subclassing
 <code>sklearn.model_selection.BaseCrossValidator</code> or <code><a title="vectorbt.generic.splitters.BaseSplitter" href="splitters.html#vectorbt.generic.splitters.BaseSplitter">BaseSplitter</a></code>.</p>
-<p><code>heatmap_kwargs</code> will be passed to <code><a title="vectorbt.generic.plotting.Heatmap" href="plotting.html#vectorbt.generic.plotting.Heatmap">Heatmap</a></code> if <code>plot</code> is True,
+<p><code>heatmap_kwargs</code> are passed to <code><a title="vectorbt.generic.plotting.Heatmap" href="plotting.html#vectorbt.generic.plotting.Heatmap">Heatmap</a></code> if <code>plot</code> is True,
 can be a dictionary or a list per set, for example, to set trace name for each set ('train', 'test', etc.).</p>
-<p><code>**kwargs</code> will be passed to the <code>splitter.split</code> method.</p>
+<p><code>**kwargs</code> are passed to the <code>split</code> method.</p>
 <div class="admonition note">
 <p class="admonition-title">Note</p>
 <p>The datetime-like format of the index will be lost as result of this operation.
@@ -5037,13 +5303,13 @@ split_idx  0  1  2
 
     Returns a tuple of tuples, each corresponding to a set and composed of a dataframe and split indexes.
 
-    A splitter can be any class instance that has `split` method, such as
+    A splitter can be any class instance that has `split` method, ideally subclassing
     `sklearn.model_selection.BaseCrossValidator` or `vectorbt.generic.splitters.BaseSplitter`.
 
-    `heatmap_kwargs` will be passed to `vectorbt.generic.plotting.Heatmap` if `plot` is True,
+    `heatmap_kwargs` are passed to `vectorbt.generic.plotting.Heatmap` if `plot` is True,
     can be a dictionary or a list per set, for example, to set trace name for each set (&#39;train&#39;, &#39;test&#39;, etc.).
 
-    `**kwargs` will be passed to the `splitter.split` method.
+    `**kwargs` are passed to the `split` method.
 
     !!! note
         The datetime-like format of the index will be lost as result of this operation.
@@ -5271,6 +5537,97 @@ group       first  second
     return MappedArray(self.wrapper, mapped_arr, col_arr, idx_arr=idx_arr, **kwargs).regroup(group_by)</code></pre>
 </details>
 </dd>
+<dt id="vectorbt.generic.accessors.GenericAccessor.transform"><code class="name flex">
+<span>def <span class="ident fname">transform</span></span>(<span>self, transformer, wrap_kwargs=None, **kwargs)</span>
+</code></dt>
+<dd>
+<div class="desc"><p>Transform using a transformer.</p>
+<p>A transformer can be any class instance that has <code>transform</code> and <code>fit_transform</code> methods,
+ideally subclassing <code>sklearn.base.TransformerMixin</code> and <code>sklearn.base.BaseEstimator</code>.</p>
+<p>Will fit <code>transformer</code> if not fitted.</p>
+<p><code>**kwargs</code> are passed to the <code>transform</code> or <code>fit_transform</code> method.</p>
+<h2 id="example">Example</h2>
+<pre><code class="language-python-repl">&gt;&gt;&gt; from sklearn.preprocessing import MinMaxScaler
+
+&gt;&gt;&gt; df.vbt.transform(MinMaxScaler((-1, 1)))
+              a    b    c
+2020-01-01 -1.0  1.0 -1.0
+2020-01-02 -0.5  0.5  0.0
+2020-01-03  0.0  0.0  1.0
+2020-01-04  0.5 -0.5  0.0
+2020-01-05  1.0 -1.0 -1.0
+
+&gt;&gt;&gt; fitted_scaler = MinMaxScaler((-1, 1)).fit(np.array([[2], [4]]))
+&gt;&gt;&gt; df.vbt.transform(fitted_scaler)
+              a    b    c
+2020-01-01 -2.0  2.0 -2.0
+2020-01-02 -1.0  1.0 -1.0
+2020-01-03  0.0  0.0  0.0
+2020-01-04  1.0 -1.0 -1.0
+2020-01-05  2.0 -2.0 -2.0
+</code></pre></div>
+<details class="source">
+<summary>
+<span>Expand source code</span>
+</summary>
+<pre><code class="python">def transform(self, transformer, wrap_kwargs=None, **kwargs):
+    &#34;&#34;&#34;Transform using a transformer.
+
+    A transformer can be any class instance that has `transform` and `fit_transform` methods,
+    ideally subclassing `sklearn.base.TransformerMixin` and `sklearn.base.BaseEstimator`.
+
+    Will fit `transformer` if not fitted.
+
+    `**kwargs` are passed to the `transform` or `fit_transform` method.
+
+    ## Example
+
+    ```python-repl
+    &gt;&gt;&gt; from sklearn.preprocessing import MinMaxScaler
+
+    &gt;&gt;&gt; df.vbt.transform(MinMaxScaler((-1, 1)))
+                  a    b    c
+    2020-01-01 -1.0  1.0 -1.0
+    2020-01-02 -0.5  0.5  0.0
+    2020-01-03  0.0  0.0  1.0
+    2020-01-04  0.5 -0.5  0.0
+    2020-01-05  1.0 -1.0 -1.0
+
+    &gt;&gt;&gt; fitted_scaler = MinMaxScaler((-1, 1)).fit(np.array([[2], [4]]))
+    &gt;&gt;&gt; df.vbt.transform(fitted_scaler)
+                  a    b    c
+    2020-01-01 -2.0  2.0 -2.0
+    2020-01-02 -1.0  1.0 -1.0
+    2020-01-03  0.0  0.0  0.0
+    2020-01-04  1.0 -1.0 -1.0
+    2020-01-05  2.0 -2.0 -2.0
+    ```&#34;&#34;&#34;
+    is_fitted = True
+    try:
+        check_is_fitted(transformer)
+    except NotFittedError:
+        is_fitted = False
+    if not is_fitted:
+        result = transformer.fit_transform(self.to_2d_array(), **kwargs)
+    else:
+        result = transformer.transform(self.to_2d_array(), **kwargs)
+    return self.wrapper.wrap(result, **merge_dicts({}, wrap_kwargs))</code></pre>
+</details>
+</dd>
+<dt id="vectorbt.generic.accessors.GenericAccessor.zscore"><code class="name flex">
+<span>def <span class="ident fname">zscore</span></span>(<span>self, **kwargs)</span>
+</code></dt>
+<dd>
+<div class="desc"><p>Compute z-score using <code>sklearn.preprocessing.StandardScaler</code>.</p></div>
+<details class="source">
+<summary>
+<span>Expand source code</span>
+</summary>
+<pre><code class="python">def zscore(self, **kwargs):
+    &#34;&#34;&#34;Compute z-score using `sklearn.preprocessing.StandardScaler`.&#34;&#34;&#34;
+    return self.scale(with_mean=True, with_std=True, **kwargs)</code></pre>
+</details>
+</dd>
 </dl>
 <h3 class="section-subtitle">Inherited members</h3>
 <ul class="hlist">
@@ -5282,8 +5639,7 @@ group       first  second
 <li><code><a title="vectorbt.base.accessors.BaseAccessor.apply_on_index" href="../base/accessors.html#vectorbt.base.accessors.BaseAccessor.apply_on_index">apply_on_index</a></code></li>
 <li><code><a title="vectorbt.base.accessors.BaseAccessor.broadcast" href="../base/accessors.html#vectorbt.base.accessors.BaseAccessor.broadcast">broadcast</a></code></li>
 <li><code><a title="vectorbt.base.accessors.BaseAccessor.broadcast_to" href="../base/accessors.html#vectorbt.base.accessors.BaseAccessor.broadcast_to">broadcast_to</a></code></li>
-<li><code><a title="vectorbt.base.accessors.BaseAccessor.combine_with" href="../base/accessors.html#vectorbt.base.accessors.BaseAccessor.combine_with">combine_with</a></code></li>
-<li><code><a title="vectorbt.base.accessors.BaseAccessor.combine_with_multiple" href="../base/accessors.html#vectorbt.base.accessors.BaseAccessor.combine_with_multiple">combine_with_multiple</a></code></li>
+<li><code><a title="vectorbt.base.accessors.BaseAccessor.combine" href="../base/accessors.html#vectorbt.base.accessors.BaseAccessor.combine">combine</a></code></li>
 <li><code><a title="vectorbt.base.accessors.BaseAccessor.concat" href="../base/accessors.html#vectorbt.base.accessors.BaseAccessor.concat">concat</a></code></li>
 <li><code><a title="vectorbt.base.accessors.BaseAccessor.drop_duplicate_levels" href="../base/accessors.html#vectorbt.base.accessors.BaseAccessor.drop_duplicate_levels">drop_duplicate_levels</a></code></li>
 <li><code><a title="vectorbt.base.accessors.BaseAccessor.drop_levels" href="../base/accessors.html#vectorbt.base.accessors.BaseAccessor.drop_levels">drop_levels</a></code></li>
@@ -5453,12 +5809,12 @@ group       first  second
 <li><code><a title="vectorbt.generic.accessors.GenericAccessor.apply_on_index" href="../base/accessors.html#vectorbt.base.accessors.BaseAccessor.apply_on_index">apply_on_index</a></code></li>
 <li><code><a title="vectorbt.generic.accessors.GenericAccessor.applymap" href="#vectorbt.generic.accessors.GenericAccessor.applymap">applymap</a></code></li>
 <li><code><a title="vectorbt.generic.accessors.GenericAccessor.barplot" href="#vectorbt.generic.accessors.GenericAccessor.barplot">barplot</a></code></li>
+<li><code><a title="vectorbt.generic.accessors.GenericAccessor.binarize" href="#vectorbt.generic.accessors.GenericAccessor.binarize">binarize</a></code></li>
 <li><code><a title="vectorbt.generic.accessors.GenericAccessor.boxplot" href="#vectorbt.generic.accessors.GenericAccessor.boxplot">boxplot</a></code></li>
 <li><code><a title="vectorbt.generic.accessors.GenericAccessor.broadcast" href="../base/accessors.html#vectorbt.base.accessors.BaseAccessor.broadcast">broadcast</a></code></li>
 <li><code><a title="vectorbt.generic.accessors.GenericAccessor.broadcast_to" href="../base/accessors.html#vectorbt.base.accessors.BaseAccessor.broadcast_to">broadcast_to</a></code></li>
 <li><code><a title="vectorbt.generic.accessors.GenericAccessor.bshift" href="#vectorbt.generic.accessors.GenericAccessor.bshift">bshift</a></code></li>
-<li><code><a title="vectorbt.generic.accessors.GenericAccessor.combine_with" href="../base/accessors.html#vectorbt.base.accessors.BaseAccessor.combine_with">combine_with</a></code></li>
-<li><code><a title="vectorbt.generic.accessors.GenericAccessor.combine_with_multiple" href="../base/accessors.html#vectorbt.base.accessors.BaseAccessor.combine_with_multiple">combine_with_multiple</a></code></li>
+<li><code><a title="vectorbt.generic.accessors.GenericAccessor.combine" href="../base/accessors.html#vectorbt.base.accessors.BaseAccessor.combine">combine</a></code></li>
 <li><code><a title="vectorbt.generic.accessors.GenericAccessor.concat" href="../base/accessors.html#vectorbt.base.accessors.BaseAccessor.concat">concat</a></code></li>
 <li><code><a title="vectorbt.generic.accessors.GenericAccessor.count" href="#vectorbt.generic.accessors.GenericAccessor.count">count</a></code></li>
 <li><code><a title="vectorbt.generic.accessors.GenericAccessor.cumprod" href="#vectorbt.generic.accessors.GenericAccessor.cumprod">cumprod</a></code></li>
@@ -5493,23 +5849,30 @@ group       first  second
 <li><code><a title="vectorbt.generic.accessors.GenericAccessor.lineplot" href="#vectorbt.generic.accessors.GenericAccessor.lineplot">lineplot</a></code></li>
 <li><code><a title="vectorbt.generic.accessors.GenericAccessor.make_symmetric" href="../base/accessors.html#vectorbt.base.accessors.BaseAccessor.make_symmetric">make_symmetric</a></code></li>
 <li><code><a title="vectorbt.generic.accessors.GenericAccessor.max" href="#vectorbt.generic.accessors.GenericAccessor.max">max</a></code></li>
+<li><code><a title="vectorbt.generic.accessors.GenericAccessor.maxabs_scale" href="#vectorbt.generic.accessors.GenericAccessor.maxabs_scale">maxabs_scale</a></code></li>
 <li><code><a title="vectorbt.generic.accessors.GenericAccessor.mean" href="#vectorbt.generic.accessors.GenericAccessor.mean">mean</a></code></li>
 <li><code><a title="vectorbt.generic.accessors.GenericAccessor.median" href="#vectorbt.generic.accessors.GenericAccessor.median">median</a></code></li>
 <li><code><a title="vectorbt.generic.accessors.GenericAccessor.min" href="#vectorbt.generic.accessors.GenericAccessor.min">min</a></code></li>
+<li><code><a title="vectorbt.generic.accessors.GenericAccessor.minmax_scale" href="#vectorbt.generic.accessors.GenericAccessor.minmax_scale">minmax_scale</a></code></li>
+<li><code><a title="vectorbt.generic.accessors.GenericAccessor.normalize" href="#vectorbt.generic.accessors.GenericAccessor.normalize">normalize</a></code></li>
 <li><code><a title="vectorbt.generic.accessors.GenericAccessor.pct_change" href="#vectorbt.generic.accessors.GenericAccessor.pct_change">pct_change</a></code></li>
 <li><code><a title="vectorbt.generic.accessors.GenericAccessor.plot" href="#vectorbt.generic.accessors.GenericAccessor.plot">plot</a></code></li>
+<li><code><a title="vectorbt.generic.accessors.GenericAccessor.power_transform" href="#vectorbt.generic.accessors.GenericAccessor.power_transform">power_transform</a></code></li>
 <li><code><a title="vectorbt.generic.accessors.GenericAccessor.product" href="#vectorbt.generic.accessors.GenericAccessor.product">product</a></code></li>
+<li><code><a title="vectorbt.generic.accessors.GenericAccessor.quantile_transform" href="#vectorbt.generic.accessors.GenericAccessor.quantile_transform">quantile_transform</a></code></li>
 <li><code><a title="vectorbt.generic.accessors.GenericAccessor.range_split" href="#vectorbt.generic.accessors.GenericAccessor.range_split">range_split</a></code></li>
 <li><code><a title="vectorbt.generic.accessors.GenericAccessor.reduce" href="#vectorbt.generic.accessors.GenericAccessor.reduce">reduce</a></code></li>
 <li><code><a title="vectorbt.generic.accessors.GenericAccessor.rename_levels" href="../base/accessors.html#vectorbt.base.accessors.BaseAccessor.rename_levels">rename_levels</a></code></li>
 <li><code><a title="vectorbt.generic.accessors.GenericAccessor.repeat" href="../base/accessors.html#vectorbt.base.accessors.BaseAccessor.repeat">repeat</a></code></li>
 <li><code><a title="vectorbt.generic.accessors.GenericAccessor.resample_apply" href="#vectorbt.generic.accessors.GenericAccessor.resample_apply">resample_apply</a></code></li>
+<li><code><a title="vectorbt.generic.accessors.GenericAccessor.robust_scale" href="#vectorbt.generic.accessors.GenericAccessor.robust_scale">robust_scale</a></code></li>
 <li><code><a title="vectorbt.generic.accessors.GenericAccessor.rolling_apply" href="#vectorbt.generic.accessors.GenericAccessor.rolling_apply">rolling_apply</a></code></li>
 <li><code><a title="vectorbt.generic.accessors.GenericAccessor.rolling_max" href="#vectorbt.generic.accessors.GenericAccessor.rolling_max">rolling_max</a></code></li>
 <li><code><a title="vectorbt.generic.accessors.GenericAccessor.rolling_mean" href="#vectorbt.generic.accessors.GenericAccessor.rolling_mean">rolling_mean</a></code></li>
 <li><code><a title="vectorbt.generic.accessors.GenericAccessor.rolling_min" href="#vectorbt.generic.accessors.GenericAccessor.rolling_min">rolling_min</a></code></li>
 <li><code><a title="vectorbt.generic.accessors.GenericAccessor.rolling_split" href="#vectorbt.generic.accessors.GenericAccessor.rolling_split">rolling_split</a></code></li>
 <li><code><a title="vectorbt.generic.accessors.GenericAccessor.rolling_std" href="#vectorbt.generic.accessors.GenericAccessor.rolling_std">rolling_std</a></code></li>
+<li><code><a title="vectorbt.generic.accessors.GenericAccessor.scale" href="#vectorbt.generic.accessors.GenericAccessor.scale">scale</a></code></li>
 <li><code><a title="vectorbt.generic.accessors.GenericAccessor.scatterplot" href="#vectorbt.generic.accessors.GenericAccessor.scatterplot">scatterplot</a></code></li>
 <li><code><a title="vectorbt.generic.accessors.GenericAccessor.select_levels" href="../base/accessors.html#vectorbt.base.accessors.BaseAccessor.select_levels">select_levels</a></code></li>
 <li><code><a title="vectorbt.generic.accessors.GenericAccessor.shuffle" href="#vectorbt.generic.accessors.GenericAccessor.shuffle">shuffle</a></code></li>
@@ -5522,9 +5885,11 @@ group       first  second
 <li><code><a title="vectorbt.generic.accessors.GenericAccessor.to_1d_array" href="../base/accessors.html#vectorbt.base.accessors.BaseAccessor.to_1d_array">to_1d_array</a></code></li>
 <li><code><a title="vectorbt.generic.accessors.GenericAccessor.to_2d_array" href="../base/accessors.html#vectorbt.base.accessors.BaseAccessor.to_2d_array">to_2d_array</a></code></li>
 <li><code><a title="vectorbt.generic.accessors.GenericAccessor.to_mapped_array" href="#vectorbt.generic.accessors.GenericAccessor.to_mapped_array">to_mapped_array</a></code></li>
+<li><code><a title="vectorbt.generic.accessors.GenericAccessor.transform" href="#vectorbt.generic.accessors.GenericAccessor.transform">transform</a></code></li>
 <li><code><a title="vectorbt.generic.accessors.GenericAccessor.unstack_to_array" href="../base/accessors.html#vectorbt.base.accessors.BaseAccessor.unstack_to_array">unstack_to_array</a></code></li>
 <li><code><a title="vectorbt.generic.accessors.GenericAccessor.unstack_to_df" href="../base/accessors.html#vectorbt.base.accessors.BaseAccessor.unstack_to_df">unstack_to_df</a></code></li>
 <li><code><a title="vectorbt.generic.accessors.GenericAccessor.wrapper" href="../base/accessors.html#vectorbt.base.accessors.BaseAccessor.wrapper">wrapper</a></code></li>
+<li><code><a title="vectorbt.generic.accessors.GenericAccessor.zscore" href="#vectorbt.generic.accessors.GenericAccessor.zscore">zscore</a></code></li>
 </ul>
 </li>
 </ul>
@@ -6020,7 +6385,7 @@ group       first  second
                xref=&#39;x&#39;, yref=&#39;y&#39;, fig=None, **kwargs):  # pragma: no cover
         &#34;&#34;&#34;Plot probability plot using `scipy.stats.probplot`.
 
-        `**kwargs` will be passed to `GenericAccessor.scatterplot`.
+        `**kwargs` are passed to `GenericAccessor.scatterplot`.
 
         ## Example
 
@@ -6505,7 +6870,7 @@ dtype: int64
 </code></dt>
 <dd>
 <div class="desc"><p>Plot probability plot using <code>scipy.stats.probplot</code>.</p>
-<p><code>**kwargs</code> will be passed to <code><a title="vectorbt.generic.accessors.GenericAccessor.scatterplot" href="#vectorbt.generic.accessors.GenericAccessor.scatterplot">GenericAccessor.scatterplot()</a></code>.</p>
+<p><code>**kwargs</code> are passed to <code><a title="vectorbt.generic.accessors.GenericAccessor.scatterplot" href="#vectorbt.generic.accessors.GenericAccessor.scatterplot">GenericAccessor.scatterplot()</a></code>.</p>
 <h2 id="example">Example</h2>
 <pre><code class="language-python-repl">&gt;&gt;&gt; pd.Series(np.random.standard_normal(100)).vbt.qqplot()
 </code></pre>
@@ -6518,7 +6883,7 @@ dtype: int64
            xref=&#39;x&#39;, yref=&#39;y&#39;, fig=None, **kwargs):  # pragma: no cover
     &#34;&#34;&#34;Plot probability plot using `scipy.stats.probplot`.
 
-    `**kwargs` will be passed to `GenericAccessor.scatterplot`.
+    `**kwargs` are passed to `GenericAccessor.scatterplot`.
 
     ## Example
 
@@ -6752,12 +7117,12 @@ dtype: int64
 <li><code><a title="vectorbt.generic.accessors.GenericAccessor.apply_on_index" href="../base/accessors.html#vectorbt.base.accessors.BaseAccessor.apply_on_index">apply_on_index</a></code></li>
 <li><code><a title="vectorbt.generic.accessors.GenericAccessor.applymap" href="#vectorbt.generic.accessors.GenericAccessor.applymap">applymap</a></code></li>
 <li><code><a title="vectorbt.generic.accessors.GenericAccessor.barplot" href="#vectorbt.generic.accessors.GenericAccessor.barplot">barplot</a></code></li>
+<li><code><a title="vectorbt.generic.accessors.GenericAccessor.binarize" href="#vectorbt.generic.accessors.GenericAccessor.binarize">binarize</a></code></li>
 <li><code><a title="vectorbt.generic.accessors.GenericAccessor.boxplot" href="#vectorbt.generic.accessors.GenericAccessor.boxplot">boxplot</a></code></li>
 <li><code><a title="vectorbt.generic.accessors.GenericAccessor.broadcast" href="../base/accessors.html#vectorbt.base.accessors.BaseAccessor.broadcast">broadcast</a></code></li>
 <li><code><a title="vectorbt.generic.accessors.GenericAccessor.broadcast_to" href="../base/accessors.html#vectorbt.base.accessors.BaseAccessor.broadcast_to">broadcast_to</a></code></li>
 <li><code><a title="vectorbt.generic.accessors.GenericAccessor.bshift" href="#vectorbt.generic.accessors.GenericAccessor.bshift">bshift</a></code></li>
-<li><code><a title="vectorbt.generic.accessors.GenericAccessor.combine_with" href="../base/accessors.html#vectorbt.base.accessors.BaseAccessor.combine_with">combine_with</a></code></li>
-<li><code><a title="vectorbt.generic.accessors.GenericAccessor.combine_with_multiple" href="../base/accessors.html#vectorbt.base.accessors.BaseAccessor.combine_with_multiple">combine_with_multiple</a></code></li>
+<li><code><a title="vectorbt.generic.accessors.GenericAccessor.combine" href="../base/accessors.html#vectorbt.base.accessors.BaseAccessor.combine">combine</a></code></li>
 <li><code><a title="vectorbt.generic.accessors.GenericAccessor.concat" href="../base/accessors.html#vectorbt.base.accessors.BaseAccessor.concat">concat</a></code></li>
 <li><code><a title="vectorbt.generic.accessors.GenericAccessor.count" href="#vectorbt.generic.accessors.GenericAccessor.count">count</a></code></li>
 <li><code><a title="vectorbt.generic.accessors.GenericAccessor.cumprod" href="#vectorbt.generic.accessors.GenericAccessor.cumprod">cumprod</a></code></li>
@@ -6792,23 +7157,30 @@ dtype: int64
 <li><code><a title="vectorbt.generic.accessors.GenericAccessor.lineplot" href="#vectorbt.generic.accessors.GenericAccessor.lineplot">lineplot</a></code></li>
 <li><code><a title="vectorbt.generic.accessors.GenericAccessor.make_symmetric" href="../base/accessors.html#vectorbt.base.accessors.BaseAccessor.make_symmetric">make_symmetric</a></code></li>
 <li><code><a title="vectorbt.generic.accessors.GenericAccessor.max" href="#vectorbt.generic.accessors.GenericAccessor.max">max</a></code></li>
+<li><code><a title="vectorbt.generic.accessors.GenericAccessor.maxabs_scale" href="#vectorbt.generic.accessors.GenericAccessor.maxabs_scale">maxabs_scale</a></code></li>
 <li><code><a title="vectorbt.generic.accessors.GenericAccessor.mean" href="#vectorbt.generic.accessors.GenericAccessor.mean">mean</a></code></li>
 <li><code><a title="vectorbt.generic.accessors.GenericAccessor.median" href="#vectorbt.generic.accessors.GenericAccessor.median">median</a></code></li>
 <li><code><a title="vectorbt.generic.accessors.GenericAccessor.min" href="#vectorbt.generic.accessors.GenericAccessor.min">min</a></code></li>
+<li><code><a title="vectorbt.generic.accessors.GenericAccessor.minmax_scale" href="#vectorbt.generic.accessors.GenericAccessor.minmax_scale">minmax_scale</a></code></li>
+<li><code><a title="vectorbt.generic.accessors.GenericAccessor.normalize" href="#vectorbt.generic.accessors.GenericAccessor.normalize">normalize</a></code></li>
 <li><code><a title="vectorbt.generic.accessors.GenericAccessor.pct_change" href="#vectorbt.generic.accessors.GenericAccessor.pct_change">pct_change</a></code></li>
 <li><code><a title="vectorbt.generic.accessors.GenericAccessor.plot" href="#vectorbt.generic.accessors.GenericAccessor.plot">plot</a></code></li>
+<li><code><a title="vectorbt.generic.accessors.GenericAccessor.power_transform" href="#vectorbt.generic.accessors.GenericAccessor.power_transform">power_transform</a></code></li>
 <li><code><a title="vectorbt.generic.accessors.GenericAccessor.product" href="#vectorbt.generic.accessors.GenericAccessor.product">product</a></code></li>
+<li><code><a title="vectorbt.generic.accessors.GenericAccessor.quantile_transform" href="#vectorbt.generic.accessors.GenericAccessor.quantile_transform">quantile_transform</a></code></li>
 <li><code><a title="vectorbt.generic.accessors.GenericAccessor.range_split" href="#vectorbt.generic.accessors.GenericAccessor.range_split">range_split</a></code></li>
 <li><code><a title="vectorbt.generic.accessors.GenericAccessor.reduce" href="#vectorbt.generic.accessors.GenericAccessor.reduce">reduce</a></code></li>
 <li><code><a title="vectorbt.generic.accessors.GenericAccessor.rename_levels" href="../base/accessors.html#vectorbt.base.accessors.BaseAccessor.rename_levels">rename_levels</a></code></li>
 <li><code><a title="vectorbt.generic.accessors.GenericAccessor.repeat" href="../base/accessors.html#vectorbt.base.accessors.BaseAccessor.repeat">repeat</a></code></li>
 <li><code><a title="vectorbt.generic.accessors.GenericAccessor.resample_apply" href="#vectorbt.generic.accessors.GenericAccessor.resample_apply">resample_apply</a></code></li>
+<li><code><a title="vectorbt.generic.accessors.GenericAccessor.robust_scale" href="#vectorbt.generic.accessors.GenericAccessor.robust_scale">robust_scale</a></code></li>
 <li><code><a title="vectorbt.generic.accessors.GenericAccessor.rolling_apply" href="#vectorbt.generic.accessors.GenericAccessor.rolling_apply">rolling_apply</a></code></li>
 <li><code><a title="vectorbt.generic.accessors.GenericAccessor.rolling_max" href="#vectorbt.generic.accessors.GenericAccessor.rolling_max">rolling_max</a></code></li>
 <li><code><a title="vectorbt.generic.accessors.GenericAccessor.rolling_mean" href="#vectorbt.generic.accessors.GenericAccessor.rolling_mean">rolling_mean</a></code></li>
 <li><code><a title="vectorbt.generic.accessors.GenericAccessor.rolling_min" href="#vectorbt.generic.accessors.GenericAccessor.rolling_min">rolling_min</a></code></li>
 <li><code><a title="vectorbt.generic.accessors.GenericAccessor.rolling_split" href="#vectorbt.generic.accessors.GenericAccessor.rolling_split">rolling_split</a></code></li>
 <li><code><a title="vectorbt.generic.accessors.GenericAccessor.rolling_std" href="#vectorbt.generic.accessors.GenericAccessor.rolling_std">rolling_std</a></code></li>
+<li><code><a title="vectorbt.generic.accessors.GenericAccessor.scale" href="#vectorbt.generic.accessors.GenericAccessor.scale">scale</a></code></li>
 <li><code><a title="vectorbt.generic.accessors.GenericAccessor.scatterplot" href="#vectorbt.generic.accessors.GenericAccessor.scatterplot">scatterplot</a></code></li>
 <li><code><a title="vectorbt.generic.accessors.GenericAccessor.select_levels" href="../base/accessors.html#vectorbt.base.accessors.BaseAccessor.select_levels">select_levels</a></code></li>
 <li><code><a title="vectorbt.generic.accessors.GenericAccessor.shuffle" href="#vectorbt.generic.accessors.GenericAccessor.shuffle">shuffle</a></code></li>
@@ -6821,9 +7193,11 @@ dtype: int64
 <li><code><a title="vectorbt.generic.accessors.GenericAccessor.to_1d_array" href="../base/accessors.html#vectorbt.base.accessors.BaseAccessor.to_1d_array">to_1d_array</a></code></li>
 <li><code><a title="vectorbt.generic.accessors.GenericAccessor.to_2d_array" href="../base/accessors.html#vectorbt.base.accessors.BaseAccessor.to_2d_array">to_2d_array</a></code></li>
 <li><code><a title="vectorbt.generic.accessors.GenericAccessor.to_mapped_array" href="#vectorbt.generic.accessors.GenericAccessor.to_mapped_array">to_mapped_array</a></code></li>
+<li><code><a title="vectorbt.generic.accessors.GenericAccessor.transform" href="#vectorbt.generic.accessors.GenericAccessor.transform">transform</a></code></li>
 <li><code><a title="vectorbt.generic.accessors.GenericAccessor.unstack_to_array" href="../base/accessors.html#vectorbt.base.accessors.BaseAccessor.unstack_to_array">unstack_to_array</a></code></li>
 <li><code><a title="vectorbt.generic.accessors.GenericAccessor.unstack_to_df" href="../base/accessors.html#vectorbt.base.accessors.BaseAccessor.unstack_to_df">unstack_to_df</a></code></li>
 <li><code><a title="vectorbt.generic.accessors.GenericAccessor.wrapper" href="../base/accessors.html#vectorbt.base.accessors.BaseAccessor.wrapper">wrapper</a></code></li>
+<li><code><a title="vectorbt.generic.accessors.GenericAccessor.zscore" href="#vectorbt.generic.accessors.GenericAccessor.zscore">zscore</a></code></li>
 </ul>
 </li>
 </ul>
@@ -6856,6 +7230,11 @@ title="Search"
 <li><code><a title="vectorbt.generic" href="index.html">vectorbt.generic</a></code></li>
 </ul>
 </li>
+<li><h3><a href="#header-functions">Functions</a></h3>
+<ul class="">
+<li><code><a title="vectorbt.generic.accessors.add_transform_methods" href="#vectorbt.generic.accessors.add_transform_methods">add_transform_methods</a></code></li>
+</ul>
+</li>
 <li><h3><a href="#header-classes">Classes</a></h3>
 <ul>
 <li>
@@ -6865,6 +7244,7 @@ title="Search"
 <li><code><a title="vectorbt.generic.accessors.GenericAccessor.apply_and_reduce" href="#vectorbt.generic.accessors.GenericAccessor.apply_and_reduce">apply_and_reduce</a></code></li>
 <li><code><a title="vectorbt.generic.accessors.GenericAccessor.applymap" href="#vectorbt.generic.accessors.GenericAccessor.applymap">applymap</a></code></li>
 <li><code><a title="vectorbt.generic.accessors.GenericAccessor.barplot" href="#vectorbt.generic.accessors.GenericAccessor.barplot">barplot</a></code></li>
+<li><code><a title="vectorbt.generic.accessors.GenericAccessor.binarize" href="#vectorbt.generic.accessors.GenericAccessor.binarize">binarize</a></code></li>
 <li><code><a title="vectorbt.generic.accessors.GenericAccessor.boxplot" href="#vectorbt.generic.accessors.GenericAccessor.boxplot">boxplot</a></code></li>
 <li><code><a title="vectorbt.generic.accessors.GenericAccessor.bshift" href="#vectorbt.generic.accessors.GenericAccessor.bshift">bshift</a></code></li>
 <li><code><a title="vectorbt.generic.accessors.GenericAccessor.count" href="#vectorbt.generic.accessors.GenericAccessor.count">count</a></code></li>
@@ -6894,21 +7274,28 @@ title="Search"
 <li><code><a title="vectorbt.generic.accessors.GenericAccessor.idxmin" href="#vectorbt.generic.accessors.GenericAccessor.idxmin">idxmin</a></code></li>
 <li><code><a title="vectorbt.generic.accessors.GenericAccessor.lineplot" href="#vectorbt.generic.accessors.GenericAccessor.lineplot">lineplot</a></code></li>
 <li><code><a title="vectorbt.generic.accessors.GenericAccessor.max" href="#vectorbt.generic.accessors.GenericAccessor.max">max</a></code></li>
+<li><code><a title="vectorbt.generic.accessors.GenericAccessor.maxabs_scale" href="#vectorbt.generic.accessors.GenericAccessor.maxabs_scale">maxabs_scale</a></code></li>
 <li><code><a title="vectorbt.generic.accessors.GenericAccessor.mean" href="#vectorbt.generic.accessors.GenericAccessor.mean">mean</a></code></li>
 <li><code><a title="vectorbt.generic.accessors.GenericAccessor.median" href="#vectorbt.generic.accessors.GenericAccessor.median">median</a></code></li>
 <li><code><a title="vectorbt.generic.accessors.GenericAccessor.min" href="#vectorbt.generic.accessors.GenericAccessor.min">min</a></code></li>
+<li><code><a title="vectorbt.generic.accessors.GenericAccessor.minmax_scale" href="#vectorbt.generic.accessors.GenericAccessor.minmax_scale">minmax_scale</a></code></li>
+<li><code><a title="vectorbt.generic.accessors.GenericAccessor.normalize" href="#vectorbt.generic.accessors.GenericAccessor.normalize">normalize</a></code></li>
 <li><code><a title="vectorbt.generic.accessors.GenericAccessor.pct_change" href="#vectorbt.generic.accessors.GenericAccessor.pct_change">pct_change</a></code></li>
 <li><code><a title="vectorbt.generic.accessors.GenericAccessor.plot" href="#vectorbt.generic.accessors.GenericAccessor.plot">plot</a></code></li>
+<li><code><a title="vectorbt.generic.accessors.GenericAccessor.power_transform" href="#vectorbt.generic.accessors.GenericAccessor.power_transform">power_transform</a></code></li>
 <li><code><a title="vectorbt.generic.accessors.GenericAccessor.product" href="#vectorbt.generic.accessors.GenericAccessor.product">product</a></code></li>
+<li><code><a title="vectorbt.generic.accessors.GenericAccessor.quantile_transform" href="#vectorbt.generic.accessors.GenericAccessor.quantile_transform">quantile_transform</a></code></li>
 <li><code><a title="vectorbt.generic.accessors.GenericAccessor.range_split" href="#vectorbt.generic.accessors.GenericAccessor.range_split">range_split</a></code></li>
 <li><code><a title="vectorbt.generic.accessors.GenericAccessor.reduce" href="#vectorbt.generic.accessors.GenericAccessor.reduce">reduce</a></code></li>
 <li><code><a title="vectorbt.generic.accessors.GenericAccessor.resample_apply" href="#vectorbt.generic.accessors.GenericAccessor.resample_apply">resample_apply</a></code></li>
+<li><code><a title="vectorbt.generic.accessors.GenericAccessor.robust_scale" href="#vectorbt.generic.accessors.GenericAccessor.robust_scale">robust_scale</a></code></li>
 <li><code><a title="vectorbt.generic.accessors.GenericAccessor.rolling_apply" href="#vectorbt.generic.accessors.GenericAccessor.rolling_apply">rolling_apply</a></code></li>
 <li><code><a title="vectorbt.generic.accessors.GenericAccessor.rolling_max" href="#vectorbt.generic.accessors.GenericAccessor.rolling_max">rolling_max</a></code></li>
 <li><code><a title="vectorbt.generic.accessors.GenericAccessor.rolling_mean" href="#vectorbt.generic.accessors.GenericAccessor.rolling_mean">rolling_mean</a></code></li>
 <li><code><a title="vectorbt.generic.accessors.GenericAccessor.rolling_min" href="#vectorbt.generic.accessors.GenericAccessor.rolling_min">rolling_min</a></code></li>
 <li><code><a title="vectorbt.generic.accessors.GenericAccessor.rolling_split" href="#vectorbt.generic.accessors.GenericAccessor.rolling_split">rolling_split</a></code></li>
 <li><code><a title="vectorbt.generic.accessors.GenericAccessor.rolling_std" href="#vectorbt.generic.accessors.GenericAccessor.rolling_std">rolling_std</a></code></li>
+<li><code><a title="vectorbt.generic.accessors.GenericAccessor.scale" href="#vectorbt.generic.accessors.GenericAccessor.scale">scale</a></code></li>
 <li><code><a title="vectorbt.generic.accessors.GenericAccessor.scatterplot" href="#vectorbt.generic.accessors.GenericAccessor.scatterplot">scatterplot</a></code></li>
 <li><code><a title="vectorbt.generic.accessors.GenericAccessor.shuffle" href="#vectorbt.generic.accessors.GenericAccessor.shuffle">shuffle</a></code></li>
 <li><code><a title="vectorbt.generic.accessors.GenericAccessor.split" href="#vectorbt.generic.accessors.GenericAccessor.split">split</a></code></li>
@@ -6916,6 +7303,8 @@ title="Search"
 <li><code><a title="vectorbt.generic.accessors.GenericAccessor.std" href="#vectorbt.generic.accessors.GenericAccessor.std">std</a></code></li>
 <li><code><a title="vectorbt.generic.accessors.GenericAccessor.sum" href="#vectorbt.generic.accessors.GenericAccessor.sum">sum</a></code></li>
 <li><code><a title="vectorbt.generic.accessors.GenericAccessor.to_mapped_array" href="#vectorbt.generic.accessors.GenericAccessor.to_mapped_array">to_mapped_array</a></code></li>
+<li><code><a title="vectorbt.generic.accessors.GenericAccessor.transform" href="#vectorbt.generic.accessors.GenericAccessor.transform">transform</a></code></li>
+<li><code><a title="vectorbt.generic.accessors.GenericAccessor.zscore" href="#vectorbt.generic.accessors.GenericAccessor.zscore">zscore</a></code></li>
 </ul>
 </li>
 <li>

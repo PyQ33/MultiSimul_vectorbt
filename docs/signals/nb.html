@@ -89,7 +89,7 @@ from vectorbt.base.reshape_fns import flex_select_auto_nb
 from vectorbt.signals.enums import StopType
 
 
-# ############# Signal generation ############# #
+# ############# Generation ############# #
 
 
 @njit
@@ -212,6 +212,44 @@ def generate_enex_nb(shape, entry_wait, exit_wait, entry_choice_func_nb,
             prev_i = found_i
             i += 1
     return entries, exits
+
+
+# ############# Filtering ############# #
+
+
+@njit(cache=True)
+def clean_enex_1d_nb(entries, exits, entry_first):
+    &#34;&#34;&#34;Clean entry and exit arrays by picking the first signal out of each.
+
+    Entry signal must be picked first. If both signals are present, selects none.&#34;&#34;&#34;
+    entries_out = np.full(entries.shape, False, dtype=np.bool_)
+    exits_out = np.full(entries.shape, False, dtype=np.bool_)
+
+    phase = -1
+    for i in range(entries.shape[0]):
+        if entries[i] and exits[i]:
+            continue
+        if entries[i]:
+            if phase == -1 or phase == 0:
+                phase = 1
+                entries_out[i] = True
+        if exits[i]:
+            if (not entry_first and phase == -1) or phase == 1:
+                phase = 0
+                exits_out[i] = True
+
+    return entries_out, exits_out
+
+
+@njit(cache=True)
+def clean_enex_nb(entries, exits, entry_first):
+    &#34;&#34;&#34;2-dim version of `clean_enex_1d_nb`.&#34;&#34;&#34;
+    entries_out = np.empty(entries.shape, dtype=np.bool_)
+    exits_out = np.empty(entries.shape, dtype=np.bool_)
+
+    for col in range(entries.shape[1]):
+        entries_out[:, col], exits_out[:, col] = clean_enex_1d_nb(entries[:, col], exits[:, col], entry_first)
+    return entries_out, exits_out
 
 
 # ############# Random ############# #
@@ -541,7 +579,7 @@ def generate_stop_ex_iter_nb(entries, ts, stop, trailing, entry_wait, exit_wait,
 
 @njit(cache=True)
 def ohlc_stop_choice_nb(from_i, to_i, col, open, high, low, close, hit_price_out, stop_type_out,
-                       sl_stop, ts_stop, tp_stop, is_open_safe, wait, first, temp_idx_arr, flex_2d):
+                        sl_stop, ts_stop, tp_stop, is_open_safe, wait, first, temp_idx_arr, flex_2d):
     &#34;&#34;&#34;`choice_func_nb` that returns the indices of the stop price being reached.
 
     Compared to `stop_choice_nb`, takes into account the whole bar, can check for both
@@ -711,8 +749,8 @@ def generate_ohlc_stop_ex_nb(entries, open, high, low, close, hit_price_out, sto
 
 @njit
 def generate_ohlc_stop_ex_iter_nb(entries, open, high, low, close, hit_price_out, stop_type_out,
-                                 sl_stop, ts_stop, tp_stop, is_open_safe, entry_wait,
-                                 exit_wait, first, flex_2d):
+                                  sl_stop, ts_stop, tp_stop, is_open_safe, entry_wait,
+                                  exit_wait, first, flex_2d):
     &#34;&#34;&#34;Generate iteratively using `generate_enex_nb` and `ohlc_stop_choice_nb`.
 
     Returns two arrays: new entries and exits.&#34;&#34;&#34;
@@ -1006,6 +1044,60 @@ def fshift_nb(a, n):
 <section>
 <h2 class="section-title" id="header-functions">Functions</h2>
 <dl>
+<dt id="vectorbt.signals.nb.clean_enex_1d_nb"><code class="name flex">
+<span>def <span class="ident fname">clean_enex_1d_nb</span></span>(<span>entries, exits, entry_first)</span>
+</code></dt>
+<dd>
+<div class="desc"><p>Clean entry and exit arrays by picking the first signal out of each.</p>
+<p>Entry signal must be picked first. If both signals are present, selects none.</p></div>
+<details class="source">
+<summary>
+<span>Expand source code</span>
+</summary>
+<pre><code class="python">@njit(cache=True)
+def clean_enex_1d_nb(entries, exits, entry_first):
+    &#34;&#34;&#34;Clean entry and exit arrays by picking the first signal out of each.
+
+    Entry signal must be picked first. If both signals are present, selects none.&#34;&#34;&#34;
+    entries_out = np.full(entries.shape, False, dtype=np.bool_)
+    exits_out = np.full(entries.shape, False, dtype=np.bool_)
+
+    phase = -1
+    for i in range(entries.shape[0]):
+        if entries[i] and exits[i]:
+            continue
+        if entries[i]:
+            if phase == -1 or phase == 0:
+                phase = 1
+                entries_out[i] = True
+        if exits[i]:
+            if (not entry_first and phase == -1) or phase == 1:
+                phase = 0
+                exits_out[i] = True
+
+    return entries_out, exits_out</code></pre>
+</details>
+</dd>
+<dt id="vectorbt.signals.nb.clean_enex_nb"><code class="name flex">
+<span>def <span class="ident fname">clean_enex_nb</span></span>(<span>entries, exits, entry_first)</span>
+</code></dt>
+<dd>
+<div class="desc"><p>2-dim version of <code><a title="vectorbt.signals.nb.clean_enex_1d_nb" href="#vectorbt.signals.nb.clean_enex_1d_nb">clean_enex_1d_nb()</a></code>.</p></div>
+<details class="source">
+<summary>
+<span>Expand source code</span>
+</summary>
+<pre><code class="python">@njit(cache=True)
+def clean_enex_nb(entries, exits, entry_first):
+    &#34;&#34;&#34;2-dim version of `clean_enex_1d_nb`.&#34;&#34;&#34;
+    entries_out = np.empty(entries.shape, dtype=np.bool_)
+    exits_out = np.empty(entries.shape, dtype=np.bool_)
+
+    for col in range(entries.shape[1]):
+        entries_out[:, col], exits_out[:, col] = clean_enex_1d_nb(entries[:, col], exits[:, col], entry_first)
+    return entries_out, exits_out</code></pre>
+</details>
+</dd>
 <dt id="vectorbt.signals.nb.distance_map_nb"><code class="name flex">
 <span>def <span class="ident fname">distance_map_nb</span></span>(<span>from_i, to_i, col)</span>
 </code></dt>
@@ -1270,8 +1362,8 @@ def generate_nb(shape, choice_func_nb, *args):
 </summary>
 <pre><code class="python">@njit
 def generate_ohlc_stop_ex_iter_nb(entries, open, high, low, close, hit_price_out, stop_type_out,
-                                 sl_stop, ts_stop, tp_stop, is_open_safe, entry_wait,
-                                 exit_wait, first, flex_2d):
+                                  sl_stop, ts_stop, tp_stop, is_open_safe, entry_wait,
+                                  exit_wait, first, flex_2d):
     &#34;&#34;&#34;Generate iteratively using `generate_enex_nb` and `ohlc_stop_choice_nb`.
 
     Returns two arrays: new entries and exits.&#34;&#34;&#34;
@@ -1970,7 +2062,7 @@ need to be made: 1) trailing stop can only be based on previous close/high, and
 </summary>
 <pre><code class="python">@njit(cache=True)
 def ohlc_stop_choice_nb(from_i, to_i, col, open, high, low, close, hit_price_out, stop_type_out,
-                       sl_stop, ts_stop, tp_stop, is_open_safe, wait, first, temp_idx_arr, flex_2d):
+                        sl_stop, ts_stop, tp_stop, is_open_safe, wait, first, temp_idx_arr, flex_2d):
     &#34;&#34;&#34;`choice_func_nb` that returns the indices of the stop price being reached.
 
     Compared to `stop_choice_nb`, takes into account the whole bar, can check for both
@@ -2482,6 +2574,8 @@ title="Search"
 </li>
 <li><h3><a href="#header-functions">Functions</a></h3>
 <ul class="">
+<li><code><a title="vectorbt.signals.nb.clean_enex_1d_nb" href="#vectorbt.signals.nb.clean_enex_1d_nb">clean_enex_1d_nb</a></code></li>
+<li><code><a title="vectorbt.signals.nb.clean_enex_nb" href="#vectorbt.signals.nb.clean_enex_nb">clean_enex_nb</a></code></li>
 <li><code><a title="vectorbt.signals.nb.distance_map_nb" href="#vectorbt.signals.nb.distance_map_nb">distance_map_nb</a></code></li>
 <li><code><a title="vectorbt.signals.nb.first_choice_nb" href="#vectorbt.signals.nb.first_choice_nb">first_choice_nb</a></code></li>
 <li><code><a title="vectorbt.signals.nb.fshift_1d_nb" href="#vectorbt.signals.nb.fshift_1d_nb">fshift_1d_nb</a></code></li>

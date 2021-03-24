@@ -4,8 +4,8 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, minimum-scale=1" />
 <meta name="generator" content="pdoc 0.9.2" />
-<title>vectorbt.utils.datetime API documentation</title>
-<meta name="description" content="Utilities for working with dates and time." />
+<title>vectorbt.data API documentation</title>
+<meta name="description" content="Modules for working with data sources." />
 <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/5.12.0-2/css/all.min.css" integrity="sha256-46r060N2LrChLLb5zowXQ72/iKKNiw/lAmygmHExk/o=" crossorigin="anonymous" />
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/docsearch.js@2/dist/cdn/docsearch.min.css" />
 <link href='https://cdnjs.cloudflare.com/ajax/libs/normalize/8.0.0/normalize.min.css' rel='stylesheet'>
@@ -31,321 +31,54 @@ ga('create', 'UA-142521178-3', 'auto'); ga('send', 'pageview');
 <main>
 <article id="content">
 <header>
-<h1 class="title">Module <code>vectorbt.utils.datetime</code></h1>
+<h1 class="title">Module <code>vectorbt.data</code></h1>
 </header>
 <section id="section-intro">
-<p>Utilities for working with dates and time.</p>
+<p>Modules for working with data sources.</p>
 <details class="source">
 <summary>
 <span>Expand source code</span>
 </summary>
-<pre><code class="python">&#34;&#34;&#34;Utilities for working with dates and time.&#34;&#34;&#34;
+<pre><code class="python">&#34;&#34;&#34;Modules for working with data sources.&#34;&#34;&#34;
 
-import numpy as np
-import pandas as pd
-import dateparser
-from datetime import datetime, timezone
+from vectorbt.data.base import symbol_dict, Data
+from vectorbt.data.updater import DataUpdater
+from vectorbt.data.custom import SyntheticData, GBMData, YFData, BinanceData, CCXTData
 
-DatetimeTypes = (pd.DatetimeIndex, pd.TimedeltaIndex, pd.PeriodIndex)
+__all__ = [
+    &#39;symbol_dict&#39;,
+    &#39;Data&#39;,
+    &#39;DataUpdater&#39;,
+    &#39;SyntheticData&#39;,
+    &#39;GBMData&#39;,
+    &#39;YFData&#39;,
+    &#39;BinanceData&#39;,
+    &#39;CCXTData&#39;
+]
 
-
-def to_timedelta(arg, **kwargs):
-    &#34;&#34;&#34;`pd.to_timedelta` that uses unit abbreviation with number.&#34;&#34;&#34;
-    if isinstance(arg, str) and not arg[0].isdigit():
-        # Otherwise &#34;ValueError: unit abbreviation w/o a number&#34;
-        arg = &#39;1&#39; + arg
-    return pd.to_timedelta(arg, **kwargs)
-
-
-def get_utc_tz():
-    &#34;&#34;&#34;Get UTC timezone.&#34;&#34;&#34;
-    return timezone.utc
-
-
-def get_local_tz():
-    &#34;&#34;&#34;Get local timezone.&#34;&#34;&#34;
-    return timezone(datetime.now(timezone.utc).astimezone().utcoffset())
-
-
-def convert_tzaware_time(t, tz_out):
-    &#34;&#34;&#34;Return as non-naive time.
-
-    `datetime.time` should have `tzinfo` set.&#34;&#34;&#34;
-    return datetime.combine(datetime.today(), t).astimezone(tz_out).timetz()
-
-
-def tzaware_to_naive_time(t, tz_out):
-    &#34;&#34;&#34;Return as naive time.
-
-    `datetime.time` should have `tzinfo` set.&#34;&#34;&#34;
-    return datetime.combine(datetime.today(), t).astimezone(tz_out).time()
-
-
-def naive_to_tzaware_time(t, tz_out):
-    &#34;&#34;&#34;Return as non-naive time.
-
-    `datetime.time` should not have `tzinfo` set.&#34;&#34;&#34;
-    return datetime.combine(datetime.today(), t).astimezone(tz_out).time().replace(tzinfo=tz_out)
-
-
-def convert_naive_time(t, tz_out):
-    &#34;&#34;&#34;Return as naive time.
-
-    `datetime.time` should not have `tzinfo` set.&#34;&#34;&#34;
-    return datetime.combine(datetime.today(), t).astimezone(tz_out).time()
-
-
-def to_tzaware_datetime(dt, tz=None):
-    &#34;&#34;&#34;Convert any value to a timezone-aware `datetime.datetime`.
-
-    See [dateparser docs](http://dateparser.readthedocs.io/en/latest/) for valid string formats.
-
-    Timestamps are localized to UTC, while naive datetime is localized to the local time.
-    To explicitly convert the datetime to a timezone, use `tz`.&#34;&#34;&#34;
-    if isinstance(dt, float):
-        dt = datetime.fromtimestamp(dt, timezone.utc)
-    elif isinstance(dt, int):
-        if len(str(dt)) &gt; 10:
-            dt = datetime.fromtimestamp(dt / 10 ** (len(str(dt)) - 10), timezone.utc)
-        else:
-            dt = datetime.fromtimestamp(dt, timezone.utc)
-    elif isinstance(dt, str):
-        dt = dateparser.parse(dt)
-    elif isinstance(dt, pd.Timestamp):
-        dt = dt.to_pydatetime()
-    elif isinstance(dt, np.datetime64):
-        dt = dt.astype(datetime)
-
-    if dt.tzinfo is None or dt.tzinfo.utcoffset(dt) is None:
-        dt = dt.astimezone()
-    else:
-        dt = dt.replace(tzinfo=timezone(dt.tzinfo.utcoffset(dt)))
-    if tz is not None:
-        dt = dt.astimezone(tz)
-    return dt
-
-
-def datetime_to_ms(dt):
-    &#34;&#34;&#34;Convert a datetime to milliseconds.&#34;&#34;&#34;
-    epoch = datetime.fromtimestamp(0, dt.tzinfo)
-    return int((dt - epoch).total_seconds() * 1000.0)
-
-
-def interval_to_ms(interval):
-    &#34;&#34;&#34;Convert an interval string to milliseconds.&#34;&#34;&#34;
-    seconds_per_unit = {
-        &#34;m&#34;: 60,
-        &#34;h&#34;: 60 * 60,
-        &#34;d&#34;: 24 * 60 * 60,
-        &#34;w&#34;: 7 * 24 * 60 * 60,
-    }
-    try:
-        return int(interval[:-1]) * seconds_per_unit[interval[-1]] * 1000
-    except (ValueError, KeyError):
-        return None</code></pre>
+__pdoc__ = {k: False for k in __all__}</code></pre>
 </details>
 </section>
 <section>
-</section>
-<section>
-</section>
-<section>
-<h2 class="section-title" id="header-functions">Functions</h2>
+<h2 class="section-title" id="header-submodules">Sub-modules</h2>
 <dl>
-<dt id="vectorbt.utils.datetime.convert_naive_time"><code class="name flex">
-<span>def <span class="ident fname">convert_naive_time</span></span>(<span>t, tz_out)</span>
-</code></dt>
+<dt><code class="name"><a title="vectorbt.data.base" href="base.html">vectorbt.data.base</a></code></dt>
 <dd>
-<div class="desc"><p>Return as naive time.</p>
-<p><code>datetime.time</code> should not have <code>tzinfo</code> set.</p></div>
-<details class="source">
-<summary>
-<span>Expand source code</span>
-</summary>
-<pre><code class="python">def convert_naive_time(t, tz_out):
-    &#34;&#34;&#34;Return as naive time.
-
-    `datetime.time` should not have `tzinfo` set.&#34;&#34;&#34;
-    return datetime.combine(datetime.today(), t).astimezone(tz_out).time()</code></pre>
-</details>
+<div class="desc"><p>Base data class …</p></div>
 </dd>
-<dt id="vectorbt.utils.datetime.convert_tzaware_time"><code class="name flex">
-<span>def <span class="ident fname">convert_tzaware_time</span></span>(<span>t, tz_out)</span>
-</code></dt>
+<dt><code class="name"><a title="vectorbt.data.custom" href="custom.html">vectorbt.data.custom</a></code></dt>
 <dd>
-<div class="desc"><p>Return as non-naive time.</p>
-<p><code>datetime.time</code> should have <code>tzinfo</code> set.</p></div>
-<details class="source">
-<summary>
-<span>Expand source code</span>
-</summary>
-<pre><code class="python">def convert_tzaware_time(t, tz_out):
-    &#34;&#34;&#34;Return as non-naive time.
-
-    `datetime.time` should have `tzinfo` set.&#34;&#34;&#34;
-    return datetime.combine(datetime.today(), t).astimezone(tz_out).timetz()</code></pre>
-</details>
+<div class="desc"><p>Custom data classes that subclass <code><a title="vectorbt.data.base.Data" href="base.html#vectorbt.data.base.Data">Data</a></code>.</p></div>
 </dd>
-<dt id="vectorbt.utils.datetime.datetime_to_ms"><code class="name flex">
-<span>def <span class="ident fname">datetime_to_ms</span></span>(<span>dt)</span>
-</code></dt>
+<dt><code class="name"><a title="vectorbt.data.updater" href="updater.html">vectorbt.data.updater</a></code></dt>
 <dd>
-<div class="desc"><p>Convert a datetime to milliseconds.</p></div>
-<details class="source">
-<summary>
-<span>Expand source code</span>
-</summary>
-<pre><code class="python">def datetime_to_ms(dt):
-    &#34;&#34;&#34;Convert a datetime to milliseconds.&#34;&#34;&#34;
-    epoch = datetime.fromtimestamp(0, dt.tzinfo)
-    return int((dt - epoch).total_seconds() * 1000.0)</code></pre>
-</details>
-</dd>
-<dt id="vectorbt.utils.datetime.get_local_tz"><code class="name flex">
-<span>def <span class="ident fname">get_local_tz</span></span>(<span>)</span>
-</code></dt>
-<dd>
-<div class="desc"><p>Get local timezone.</p></div>
-<details class="source">
-<summary>
-<span>Expand source code</span>
-</summary>
-<pre><code class="python">def get_local_tz():
-    &#34;&#34;&#34;Get local timezone.&#34;&#34;&#34;
-    return timezone(datetime.now(timezone.utc).astimezone().utcoffset())</code></pre>
-</details>
-</dd>
-<dt id="vectorbt.utils.datetime.get_utc_tz"><code class="name flex">
-<span>def <span class="ident fname">get_utc_tz</span></span>(<span>)</span>
-</code></dt>
-<dd>
-<div class="desc"><p>Get UTC timezone.</p></div>
-<details class="source">
-<summary>
-<span>Expand source code</span>
-</summary>
-<pre><code class="python">def get_utc_tz():
-    &#34;&#34;&#34;Get UTC timezone.&#34;&#34;&#34;
-    return timezone.utc</code></pre>
-</details>
-</dd>
-<dt id="vectorbt.utils.datetime.interval_to_ms"><code class="name flex">
-<span>def <span class="ident fname">interval_to_ms</span></span>(<span>interval)</span>
-</code></dt>
-<dd>
-<div class="desc"><p>Convert an interval string to milliseconds.</p></div>
-<details class="source">
-<summary>
-<span>Expand source code</span>
-</summary>
-<pre><code class="python">def interval_to_ms(interval):
-    &#34;&#34;&#34;Convert an interval string to milliseconds.&#34;&#34;&#34;
-    seconds_per_unit = {
-        &#34;m&#34;: 60,
-        &#34;h&#34;: 60 * 60,
-        &#34;d&#34;: 24 * 60 * 60,
-        &#34;w&#34;: 7 * 24 * 60 * 60,
-    }
-    try:
-        return int(interval[:-1]) * seconds_per_unit[interval[-1]] * 1000
-    except (ValueError, KeyError):
-        return None</code></pre>
-</details>
-</dd>
-<dt id="vectorbt.utils.datetime.naive_to_tzaware_time"><code class="name flex">
-<span>def <span class="ident fname">naive_to_tzaware_time</span></span>(<span>t, tz_out)</span>
-</code></dt>
-<dd>
-<div class="desc"><p>Return as non-naive time.</p>
-<p><code>datetime.time</code> should not have <code>tzinfo</code> set.</p></div>
-<details class="source">
-<summary>
-<span>Expand source code</span>
-</summary>
-<pre><code class="python">def naive_to_tzaware_time(t, tz_out):
-    &#34;&#34;&#34;Return as non-naive time.
-
-    `datetime.time` should not have `tzinfo` set.&#34;&#34;&#34;
-    return datetime.combine(datetime.today(), t).astimezone(tz_out).time().replace(tzinfo=tz_out)</code></pre>
-</details>
-</dd>
-<dt id="vectorbt.utils.datetime.to_timedelta"><code class="name flex">
-<span>def <span class="ident fname">to_timedelta</span></span>(<span>arg, **kwargs)</span>
-</code></dt>
-<dd>
-<div class="desc"><p><code>pd.to_timedelta</code> that uses unit abbreviation with number.</p></div>
-<details class="source">
-<summary>
-<span>Expand source code</span>
-</summary>
-<pre><code class="python">def to_timedelta(arg, **kwargs):
-    &#34;&#34;&#34;`pd.to_timedelta` that uses unit abbreviation with number.&#34;&#34;&#34;
-    if isinstance(arg, str) and not arg[0].isdigit():
-        # Otherwise &#34;ValueError: unit abbreviation w/o a number&#34;
-        arg = &#39;1&#39; + arg
-    return pd.to_timedelta(arg, **kwargs)</code></pre>
-</details>
-</dd>
-<dt id="vectorbt.utils.datetime.to_tzaware_datetime"><code class="name flex">
-<span>def <span class="ident fname">to_tzaware_datetime</span></span>(<span>dt, tz=None)</span>
-</code></dt>
-<dd>
-<div class="desc"><p>Convert any value to a timezone-aware <code>datetime.datetime</code>.</p>
-<p>See <a href="http://dateparser.readthedocs.io/en/latest/">dateparser docs</a> for valid string formats.</p>
-<p>Timestamps are localized to UTC, while naive datetime is localized to the local time.
-To explicitly convert the datetime to a timezone, use <code>tz</code>.</p></div>
-<details class="source">
-<summary>
-<span>Expand source code</span>
-</summary>
-<pre><code class="python">def to_tzaware_datetime(dt, tz=None):
-    &#34;&#34;&#34;Convert any value to a timezone-aware `datetime.datetime`.
-
-    See [dateparser docs](http://dateparser.readthedocs.io/en/latest/) for valid string formats.
-
-    Timestamps are localized to UTC, while naive datetime is localized to the local time.
-    To explicitly convert the datetime to a timezone, use `tz`.&#34;&#34;&#34;
-    if isinstance(dt, float):
-        dt = datetime.fromtimestamp(dt, timezone.utc)
-    elif isinstance(dt, int):
-        if len(str(dt)) &gt; 10:
-            dt = datetime.fromtimestamp(dt / 10 ** (len(str(dt)) - 10), timezone.utc)
-        else:
-            dt = datetime.fromtimestamp(dt, timezone.utc)
-    elif isinstance(dt, str):
-        dt = dateparser.parse(dt)
-    elif isinstance(dt, pd.Timestamp):
-        dt = dt.to_pydatetime()
-    elif isinstance(dt, np.datetime64):
-        dt = dt.astype(datetime)
-
-    if dt.tzinfo is None or dt.tzinfo.utcoffset(dt) is None:
-        dt = dt.astimezone()
-    else:
-        dt = dt.replace(tzinfo=timezone(dt.tzinfo.utcoffset(dt)))
-    if tz is not None:
-        dt = dt.astimezone(tz)
-    return dt</code></pre>
-</details>
-</dd>
-<dt id="vectorbt.utils.datetime.tzaware_to_naive_time"><code class="name flex">
-<span>def <span class="ident fname">tzaware_to_naive_time</span></span>(<span>t, tz_out)</span>
-</code></dt>
-<dd>
-<div class="desc"><p>Return as naive time.</p>
-<p><code>datetime.time</code> should have <code>tzinfo</code> set.</p></div>
-<details class="source">
-<summary>
-<span>Expand source code</span>
-</summary>
-<pre><code class="python">def tzaware_to_naive_time(t, tz_out):
-    &#34;&#34;&#34;Return as naive time.
-
-    `datetime.time` should have `tzinfo` set.&#34;&#34;&#34;
-    return datetime.combine(datetime.today(), t).astimezone(tz_out).time()</code></pre>
-</details>
+<div class="desc"><p>Class for scheduling data updates.</p></div>
 </dd>
 </dl>
+</section>
+<section>
+</section>
+<section>
 </section>
 <section>
 </section>
@@ -372,21 +105,14 @@ title="Search"
 <ul id="index">
 <li><h3>Super-module</h3>
 <ul>
-<li><code><a title="vectorbt.utils" href="index.html">vectorbt.utils</a></code></li>
+<li><code><a title="vectorbt" href="../index.html">vectorbt</a></code></li>
 </ul>
 </li>
-<li><h3><a href="#header-functions">Functions</a></h3>
-<ul class="">
-<li><code><a title="vectorbt.utils.datetime.convert_naive_time" href="#vectorbt.utils.datetime.convert_naive_time">convert_naive_time</a></code></li>
-<li><code><a title="vectorbt.utils.datetime.convert_tzaware_time" href="#vectorbt.utils.datetime.convert_tzaware_time">convert_tzaware_time</a></code></li>
-<li><code><a title="vectorbt.utils.datetime.datetime_to_ms" href="#vectorbt.utils.datetime.datetime_to_ms">datetime_to_ms</a></code></li>
-<li><code><a title="vectorbt.utils.datetime.get_local_tz" href="#vectorbt.utils.datetime.get_local_tz">get_local_tz</a></code></li>
-<li><code><a title="vectorbt.utils.datetime.get_utc_tz" href="#vectorbt.utils.datetime.get_utc_tz">get_utc_tz</a></code></li>
-<li><code><a title="vectorbt.utils.datetime.interval_to_ms" href="#vectorbt.utils.datetime.interval_to_ms">interval_to_ms</a></code></li>
-<li><code><a title="vectorbt.utils.datetime.naive_to_tzaware_time" href="#vectorbt.utils.datetime.naive_to_tzaware_time">naive_to_tzaware_time</a></code></li>
-<li><code><a title="vectorbt.utils.datetime.to_timedelta" href="#vectorbt.utils.datetime.to_timedelta">to_timedelta</a></code></li>
-<li><code><a title="vectorbt.utils.datetime.to_tzaware_datetime" href="#vectorbt.utils.datetime.to_tzaware_datetime">to_tzaware_datetime</a></code></li>
-<li><code><a title="vectorbt.utils.datetime.tzaware_to_naive_time" href="#vectorbt.utils.datetime.tzaware_to_naive_time">tzaware_to_naive_time</a></code></li>
+<li><h3><a href="#header-submodules">Sub-modules</a></h3>
+<ul>
+<li><code><a title="vectorbt.data.base" href="base.html">vectorbt.data.base</a></code></li>
+<li><code><a title="vectorbt.data.custom" href="custom.html">vectorbt.data.custom</a></code></li>
+<li><code><a title="vectorbt.data.updater" href="updater.html">vectorbt.data.updater</a></code></li>
 </ul>
 </li>
 </ul>
