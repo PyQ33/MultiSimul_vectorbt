@@ -664,11 +664,11 @@ we can set <code>keep_pd</code> to True to pass all inputs as pandas objects ins
 same index and columns.</p>
 </div>
 <p>Let's demonstrate this by wrapping a basic composed <a href="https://github.com/twopirllc/pandas-ta">pandas_ta</a> strategy:</p>
-<pre><code class="language-python-repl">&gt;&gt;&gt; import pandas_ta as ta
+<pre><code class="language-python-repl">&gt;&gt;&gt; import pandas_ta
 
 &gt;&gt;&gt; def apply_func(open, high, low, close, volume, ema_len, linreg_len):
 ...     df = pd.DataFrame(dict(open=open, high=high, low=low, close=close, volume=volume))
-...     df.ta.strategy(ta.Strategy(&quot;MyStrategy&quot;, [
+...     df.ta.strategy(pandas_ta.Strategy(&quot;MyStrategy&quot;, [
 ...         dict(kind='ema', length=ema_len),
 ...         dict(kind='linreg', close='EMA_' + str(ema_len), length=linreg_len)
 ...     ]))
@@ -1709,11 +1709,11 @@ we can set `keep_pd` to True to pass all inputs as pandas objects instead of raw
 Let&#39;s demonstrate this by wrapping a basic composed [pandas_ta](https://github.com/twopirllc/pandas-ta) strategy:
 
 ```python-repl
-&gt;&gt;&gt; import pandas_ta as ta
+&gt;&gt;&gt; import pandas_ta
 
 &gt;&gt;&gt; def apply_func(open, high, low, close, volume, ema_len, linreg_len):
 ...     df = pd.DataFrame(dict(open=open, high=high, low=low, close=close, volume=volume))
-...     df.ta.strategy(ta.Strategy(&#34;MyStrategy&#34;, [
+...     df.ta.strategy(pandas_ta.Strategy(&#34;MyStrategy&#34;, [
 ...         dict(kind=&#39;ema&#39;, length=ema_len),
 ...         dict(kind=&#39;linreg&#39;, close=&#39;EMA_&#39; + str(ema_len), length=linreg_len)
 ...     ]))
@@ -2071,6 +2071,9 @@ import itertools
 import inspect
 from collections import OrderedDict
 import warnings
+from datetime import datetime, timedelta
+from types import ModuleType
+from collections import Counter
 
 from vectorbt.utils import checks
 from vectorbt.utils.decorators import classproperty, cached_property
@@ -2500,6 +2503,10 @@ def run_pipeline(
             return_meta=True,
             **broadcast_kwargs
         )
+        if input_index is None:
+            input_index = pd.RangeIndex(start=0, step=1, stop=input_shape[0])
+        if input_columns is None:
+            input_columns = pd.RangeIndex(start=0, step=1, stop=input_shape[1] if len(input_shape) &gt; 1 else 1)
         if len(input_list) == 1:
             bc_input_list = (bc_input_list,)
         input_list = list(map(np.asarray, bc_input_list))
@@ -4057,8 +4064,15 @@ Other keyword arguments are passed to `{0}.run`.&#34;&#34;&#34;.format(_0, _1)
         return self.from_custom_func(custom_func, as_lists=True, **kwargs)
 
     @classmethod
+    def get_talib_indicators(cls):
+        &#34;&#34;&#34;Get all TA-Lib indicators.&#34;&#34;&#34;
+        import talib
+
+        return set(talib.get_functions())
+
+    @classmethod
     def from_talib(cls, func_name, init_kwargs=None, **kwargs):
-        &#34;&#34;&#34;Build indicator class around a TA-Lib function.
+        &#34;&#34;&#34;Build an indicator class around a TA-Lib function.
 
         Requires [TA-Lib](https://github.com/mrjbq7/ta-lib) installed.
 
@@ -4088,7 +4102,7 @@ Other keyword arguments are passed to `{0}.run`.&#34;&#34;&#34;.format(_0, _1)
         2020-01-05      4.5  1.5  4.0  2.0
         ```
 
-        To get help on a function, use the `help` command:
+        To get help on running the indicator, use the `help` command:
 
         ```python-repl
         &gt;&gt;&gt; help(SMA.run)
@@ -4110,6 +4124,7 @@ Other keyword arguments are passed to `{0}.run`.&#34;&#34;&#34;.format(_0, _1)
         import talib
         from talib import abstract
 
+        func_name = func_name.upper()
         talib_func = getattr(talib, func_name)
         info = abstract.Function(func_name)._Function__info
         input_names = []
@@ -4120,20 +4135,21 @@ Other keyword arguments are passed to `{0}.run`.&#34;&#34;&#34;.format(_0, _1)
                 input_names.append(in_names)
         class_name = info[&#39;name&#39;]
         class_docstring = &#34;{}, {}&#34;.format(info[&#39;display_name&#39;], info[&#39;group&#39;])
-        short_name = info[&#39;name&#39;].lower()
         param_names = list(info[&#39;parameters&#39;].keys())
         output_names = info[&#39;output_names&#39;]
         output_flags = info[&#39;output_flags&#39;]
 
-        def apply_func(input_list, _, param_tuple):
+        def apply_func(input_list, _, param_tuple, **kwargs):
             # TA-Lib functions can only process 1-dim arrays
             n_input_cols = input_list[0].shape[1]
             outputs = []
             for col in range(n_input_cols):
-                outputs.append(talib_func(
+                output = talib_func(
                     *map(lambda x: x[:, col], input_list),
-                    *param_tuple
-                ))
+                    *param_tuple,
+                    **kwargs
+                )
+                outputs.append(output)
             if isinstance(outputs[0], tuple):  # multiple outputs
                 outputs = list(zip(*outputs))
                 return list(map(np.column_stack, outputs))
@@ -4144,7 +4160,6 @@ Other keyword arguments are passed to `{0}.run`.&#34;&#34;&#34;.format(_0, _1)
                 dict(
                     class_name=class_name,
                     class_docstring=class_docstring,
-                    short_name=short_name,
                     input_names=input_names,
                     param_names=param_names,
                     output_names=output_names,
@@ -4156,6 +4171,432 @@ Other keyword arguments are passed to `{0}.run`.&#34;&#34;&#34;.format(_0, _1)
             apply_func,
             pass_packed=True,
             **info[&#39;parameters&#39;],
+            **kwargs
+        )
+        return TALibIndicator
+
+    @classmethod
+    def _parse_pandas_ta_config(cls, func, test_input_names=None, test_index_len=50):
+        &#34;&#34;&#34;Get the config of a pandas-ta indicator.&#34;&#34;&#34;
+        if test_input_names is None:
+            test_input_names = {&#39;open_&#39;, &#39;open&#39;, &#39;high&#39;, &#39;low&#39;, &#39;close&#39;, &#39;adj_close&#39;, &#39;volume&#39;, &#39;dividends&#39;, &#39;split&#39;}
+
+        input_names = []
+        param_names = []
+        defaults = {}
+        output_names = []
+
+        # Parse the function signature of the indicator to get input names
+        sig = inspect.signature(func)
+        for k, v in sig.parameters.items():
+            if v.kind not in (v.VAR_POSITIONAL, v.VAR_KEYWORD):
+                if v.annotation != inspect._empty and v.annotation == pd.Series:
+                    input_names.append(k)
+                elif k in test_input_names:
+                    input_names.append(k)
+                elif v.default == inspect._empty:
+                    # Any positional argument is considered input
+                    input_names.append(k)
+                else:
+                    param_names.append(k)
+                    defaults[k] = v.default
+
+        # To get output names, we need to run the indicator
+        test_df = pd.DataFrame(
+            {c: np.random.uniform(1, 10, size=(test_index_len,)) for c in input_names},
+            index=[datetime(2020, 1, 1) + timedelta(days=i) for i in range(test_index_len)]
+        )
+        new_args = {c: test_df[c] for c in input_names}
+        try:
+            result = func(**new_args)
+        except:
+            raise ValueError(&#34;Couldn&#39;t parse the indicator&#34;)
+
+        # Concatenate Series/DataFrames if the result is a tuple
+        if isinstance(result, tuple):
+            results = []
+            for i, r in enumerate(result):
+                if not pd.Index.equals(r.index, test_df.index):
+                    warnings.warn(f&#34;Couldn&#39;t parse the output at index {i}: mismatching index&#34;, stacklevel=2)
+                else:
+                    results.append(r)
+            if len(results) &gt; 1:
+                result = pd.concat(results, axis=1)
+            elif len(results) == 1:
+                result = results[0]
+            else:
+                raise ValueError(&#34;Couldn&#39;t parse the output&#34;)
+
+        # Test if the produced array has the same index length
+        if not pd.Index.equals(result.index, test_df.index):
+            raise ValueError(&#34;Couldn&#39;t parse the output: mismatching index&#34;)
+
+        # Standardize output names: remove numbers, remove hyphens, and bring to lower case
+        output_cols = result.columns.tolist() if isinstance(result, pd.DataFrame) else [result.name]
+        new_output_cols = []
+        for i in range(len(output_cols)):
+            name_parts = []
+            for name_part in output_cols[i].split(&#39;_&#39;):
+                try:
+                    float(name_part)
+                    continue
+                except:
+                    name_parts.append(name_part.replace(&#39;-&#39;, &#39;_&#39;).lower())
+            output_col = &#39;_&#39;.join(name_parts)
+            new_output_cols.append(output_col)
+
+        # Add numbers to duplicates
+        for k, v in Counter(new_output_cols).items():
+            if v == 1:
+                output_names.append(k)
+            else:
+                for i in range(v):
+                    output_names.append(k + str(i))
+
+        return dict(
+            class_name=func.__name__.upper(),
+            class_docstring=func.__doc__,
+            input_names=input_names,
+            param_names=param_names,
+            output_names=output_names,
+            defaults=defaults
+        )
+
+    @classmethod
+    def get_pandas_ta_indicators(cls, silence_warnings=True):
+        &#34;&#34;&#34;Get all pandas-ta indicators.
+
+        !!! note
+            Returns only the indicators that have been successfully parsed.&#34;&#34;&#34;
+        import pandas_ta
+
+        indicators = set()
+        for func_name in [_k for k, v in pandas_ta.Category.items() for _k in v]:
+            try:
+                cls._parse_pandas_ta_config(getattr(pandas_ta, func_name))
+                indicators.add(func_name.upper())
+            except Exception as e:
+                if not silence_warnings:
+                    warnings.warn(str(e), stacklevel=2)
+        return indicators
+
+    @classmethod
+    def from_pandas_ta(cls, func_name, parse_kwargs=None, init_kwargs=None, **kwargs):
+        &#34;&#34;&#34;Build an indicator class around a pandas-ta function.
+
+        Requires [pandas-ta](https://github.com/twopirllc/pandas-ta) installed.
+
+        Args:
+            func_name (str): Function name.
+            parse_kwargs (dict): Keyword arguments passed to `IndicatorFactory._parse_pandas_ta_config`.
+            init_kwargs (dict): Keyword arguments passed to `IndicatorFactory`.
+            **kwargs: Keyword arguments passed to `IndicatorFactory.from_custom_func`.
+
+        Returns:
+            Indicator
+
+        ## Example
+
+        ```python-repl
+        &gt;&gt;&gt; SMA = vbt.IndicatorFactory.from_pandas_ta(&#39;SMA&#39;)
+
+        &gt;&gt;&gt; sma = SMA.run(price, length=[2, 3])
+        &gt;&gt;&gt; sma.sma
+        sma_length         2         3
+                      a    b    a    b
+        2020-01-01  NaN  NaN  NaN  NaN
+        2020-01-02  1.5  4.5  NaN  NaN
+        2020-01-03  2.5  3.5  2.0  4.0
+        2020-01-04  3.5  2.5  3.0  3.0
+        2020-01-05  4.5  1.5  4.0  2.0
+        ```
+
+        To get help on running the indicator, use the `help` command:
+
+        ```python-repl
+        &gt;&gt;&gt; help(SMA.run)
+        Help on method run:
+
+        run(close, length=None, offset=None, short_name=&#39;sma&#39;, hide_params=None, hide_default=True, **kwargs) method of builtins.type instance
+            Run `SMA` indicator.
+
+            * Inputs: `close`
+            * Parameters: `length`, `offset`
+            * Outputs: `sma`
+
+            Pass a list of parameter names as `hide_params` to hide their column levels.
+            Set `hide_default` to False to show the column levels of the parameters with a default value.
+
+            Other keyword arguments are passed to `vectorbt.indicators.factory.run_pipeline`.
+        ```
+
+        To get the indicator docstring, use the `help` command or print the `__doc__` attribute:
+
+        ```python-repl
+        &gt;&gt;&gt; print(SMA.__doc__)
+        Simple Moving Average (SMA)
+
+        The Simple Moving Average is the classic moving average that is the equally
+        weighted average over n periods.
+
+        Sources:
+            https://www.tradingtechnologies.com/help/x-study/technical-indicator-definitions/simple-moving-average-sma/
+
+        Calculation:
+            Default Inputs:
+                length=10
+            SMA = SUM(close, length) / length
+
+        Args:
+            close (pd.Series): Series of &#39;close&#39;s
+            length (int): It&#39;s period. Default: 10
+            offset (int): How many periods to offset the result. Default: 0
+
+        Kwargs:
+            adjust (bool): Default: True
+            presma (bool, optional): If True, uses SMA for initial value.
+            fillna (value, optional): pd.DataFrame.fillna(value)
+            fill_method (value, optional): Type of fill method
+
+        Returns:
+            pd.Series: New feature generated.
+        ```
+        &#34;&#34;&#34;
+        import pandas_ta
+
+        func_name = func_name.lower()
+        pandas_ta_func = getattr(pandas_ta, func_name)
+
+        if parse_kwargs is None:
+            parse_kwargs = {}
+        config = cls._parse_pandas_ta_config(pandas_ta_func, **parse_kwargs)
+
+        def apply_func(input_list, _, param_tuple, **kwargs):
+            is_series = isinstance(input_list[0], pd.Series)
+            n_input_cols = 1 if is_series else len(input_list[0].columns)
+            outputs = []
+            for col in range(n_input_cols):
+                output = pandas_ta_func(
+                    **{
+                        name: input_list[i] if is_series else input_list[i].iloc[:, col]
+                        for i, name in enumerate(config[&#39;input_names&#39;])
+                    },
+                    **{
+                        name: param_tuple[i]
+                        for i, name in enumerate(config[&#39;param_names&#39;])
+                    },
+                    **kwargs
+                )
+                if isinstance(output, tuple):
+                    _outputs = []
+                    for o in output:
+                        if pd.Index.equals(input_list[0].index, o.index):
+                            _outputs.append(o)
+                    if len(_outputs) &gt; 1:
+                        output = pd.concat(_outputs, axis=1)
+                    elif len(_outputs) == 1:
+                        output = _outputs[0]
+                    else:
+                        raise ValueError(&#34;No valid outputs were returned&#34;)
+                if isinstance(output, pd.DataFrame):
+                    output = tuple([output.iloc[:, i] for i in range(len(output.columns))])
+                outputs.append(output)
+            if isinstance(outputs[0], tuple):  # multiple outputs
+                outputs = list(zip(*outputs))
+                return list(map(np.column_stack, outputs))
+            return np.column_stack(outputs)
+
+        defaults = config.pop(&#39;defaults&#39;)
+        TALibIndicator = cls(
+            **merge_dicts(
+                config,
+                init_kwargs
+            )
+        ).from_apply_func(
+            apply_func,
+            pass_packed=True,
+            keep_pd=True,
+            to_2d=False,
+            **defaults,
+            **kwargs
+        )
+        return TALibIndicator
+
+    @classmethod
+    def get_ta_indicators(cls):
+        &#34;&#34;&#34;Get all ta indicators.&#34;&#34;&#34;
+        import ta
+
+        ta_module_names = [k for k in dir(ta) if isinstance(getattr(ta, k), ModuleType)]
+        indicators = set()
+        for module_name in ta_module_names:
+            module = getattr(ta, module_name)
+            for name in dir(module):
+                obj = getattr(module, name)
+                if isinstance(obj, type) \
+                        and obj != ta.utils.IndicatorMixin \
+                        and issubclass(obj, ta.utils.IndicatorMixin):
+                    indicators.add(obj.__name__)
+        return indicators
+
+    @classmethod
+    def find_ta_indicator(cls, cls_name):
+        &#34;&#34;&#34;Get ta indicator class by its name.&#34;&#34;&#34;
+        import ta
+
+        ta_module_names = [k for k in dir(ta) if isinstance(getattr(ta, k), ModuleType)]
+        indicators = set()
+        for module_name in ta_module_names:
+            module = getattr(ta, module_name)
+            if cls_name in dir(module):
+                return getattr(module, cls_name)
+        raise ValueError(f&#34;Indicator \&#34;{cls_name}\&#34; not found&#34;)
+
+    @classmethod
+    def _parse_ta_config(cls, ind_cls):
+        &#34;&#34;&#34;Get the config of a ta indicator.&#34;&#34;&#34;
+        input_names = []
+        param_names = []
+        defaults = {}
+        output_names = []
+
+        # Parse the __init__ signature of the indicator class to get input names
+        sig = inspect.signature(ind_cls)
+        for k, v in sig.parameters.items():
+            if v.kind not in (v.VAR_POSITIONAL, v.VAR_KEYWORD):
+                if v.annotation == inspect._empty:
+                    raise ValueError(f&#34;Argument \&#34;{k}\&#34; has no annotation&#34;)
+                if v.annotation == pd.Series:
+                    input_names.append(k)
+                else:
+                    param_names.append(k)
+                    if v.default != inspect._empty:
+                        defaults[k] = v.default
+
+        # Get output names by looking into instance methods
+        for attr in dir(ind_cls):
+            if not attr.startswith(&#39;_&#39;):
+                if inspect.signature(getattr(ind_cls, attr)).return_annotation == pd.Series:
+                    output_names.append(attr)
+                elif &#39;Returns:\n            pandas.Series&#39; in getattr(ind_cls, attr).__doc__:
+                    output_names.append(attr)
+
+        return dict(
+            class_name=ind_cls.__name__,
+            class_docstring=ind_cls.__doc__,
+            input_names=input_names,
+            param_names=param_names,
+            output_names=output_names,
+            defaults=defaults
+        )
+
+    @classmethod
+    def from_ta(cls, cls_name, init_kwargs=None, **kwargs):
+        &#34;&#34;&#34;Build an indicator class around a ta class.
+
+        Requires [ta](https://github.com/bukosabino/ta) installed.
+
+        Args:
+            cls_name (str): Class name.
+            init_kwargs (dict): Keyword arguments passed to `IndicatorFactory`.
+            **kwargs: Keyword arguments passed to `IndicatorFactory.from_custom_func`.
+
+        Returns:
+            Indicator
+
+        ## Example
+
+        ```python-repl
+        &gt;&gt;&gt; SMAIndicator = vbt.IndicatorFactory.from_ta(&#39;SMAIndicator&#39;)
+
+        &gt;&gt;&gt; sma = SMAIndicator.run(price, window=[2, 3])
+        &gt;&gt;&gt; sma.sma_indicator
+        smaindicator_window    2         3
+                               a    b    a    b
+        2020-01-01           NaN  NaN  NaN  NaN
+        2020-01-02           1.5  4.5  NaN  NaN
+        2020-01-03           2.5  3.5  2.0  4.0
+        2020-01-04           3.5  2.5  3.0  3.0
+        2020-01-05           4.5  1.5  4.0  2.0
+        ```
+
+        To get help on running the indicator, use the `help` command:
+
+        ```python-repl
+        &gt;&gt;&gt; help(SMAIndicator.run)
+        Help on method run:
+
+        run(close, window, fillna=False, short_name=&#39;smaindicator&#39;, hide_params=None, hide_default=True, **kwargs) method of builtins.type instance
+            Run `SMAIndicator` indicator.
+
+            * Inputs: `close`
+            * Parameters: `window`, `fillna`
+            * Outputs: `sma_indicator`
+
+            Pass a list of parameter names as `hide_params` to hide their column levels.
+            Set `hide_default` to False to show the column levels of the parameters with a default value.
+
+            Other keyword arguments are passed to `vectorbt.indicators.factory.run_pipeline`.
+        ```
+
+        To get the indicator docstring, use the `help` command or print the `__doc__` attribute:
+
+        ```python-repl
+        &gt;&gt;&gt; print(SMAIndicator.__doc__)
+        SMA - Simple Moving Average
+
+            Args:
+                close(pandas.Series): dataset &#39;Close&#39; column.
+                window(int): n period.
+                fillna(bool): if True, fill nan values.
+        ```
+        &#34;&#34;&#34;
+        import ta
+
+        ind_cls = cls.find_ta_indicator(cls_name)
+        config = cls._parse_ta_config(ind_cls)
+
+        def apply_func(input_list, _, param_tuple, **kwargs):
+            is_series = isinstance(input_list[0], pd.Series)
+            n_input_cols = 1 if is_series else len(input_list[0].columns)
+            outputs = []
+            for col in range(n_input_cols):
+                ind = ind_cls(
+                    **{
+                        name: input_list[i] if is_series else input_list[i].iloc[:, col]
+                        for i, name in enumerate(config[&#39;input_names&#39;])
+                    },
+                    **{
+                        name: param_tuple[i]
+                        for i, name in enumerate(config[&#39;param_names&#39;])
+                    },
+                    **kwargs
+                )
+                output = []
+                for output_name in config[&#39;output_names&#39;]:
+                    output.append(getattr(ind, output_name)())
+                if len(output) == 1:
+                    output = output[0]
+                else:
+                    output = tuple(output)
+                outputs.append(output)
+            if isinstance(outputs[0], tuple):  # multiple outputs
+                outputs = list(zip(*outputs))
+                return list(map(np.column_stack, outputs))
+            return np.column_stack(outputs)
+
+        defaults = config.pop(&#39;defaults&#39;)
+        TALibIndicator = cls(
+            **merge_dicts(
+                config,
+                init_kwargs
+            )
+        ).from_apply_func(
+            apply_func,
+            pass_packed=True,
+            keep_pd=True,
+            to_2d=False,
+            **defaults,
             **kwargs
         )
         return TALibIndicator</code></pre>
@@ -4910,6 +5351,10 @@ p3  False  False  False  False  False  False
             return_meta=True,
             **broadcast_kwargs
         )
+        if input_index is None:
+            input_index = pd.RangeIndex(start=0, step=1, stop=input_shape[0])
+        if input_columns is None:
+            input_columns = pd.RangeIndex(start=0, step=1, stop=input_shape[1] if len(input_shape) &gt; 1 else 1)
         if len(input_list) == 1:
             bc_input_list = (bc_input_list,)
         input_list = list(map(np.asarray, bc_input_list))
@@ -6504,8 +6949,15 @@ Other keyword arguments are passed to `{0}.run`.&#34;&#34;&#34;.format(_0, _1)
         return self.from_custom_func(custom_func, as_lists=True, **kwargs)
 
     @classmethod
+    def get_talib_indicators(cls):
+        &#34;&#34;&#34;Get all TA-Lib indicators.&#34;&#34;&#34;
+        import talib
+
+        return set(talib.get_functions())
+
+    @classmethod
     def from_talib(cls, func_name, init_kwargs=None, **kwargs):
-        &#34;&#34;&#34;Build indicator class around a TA-Lib function.
+        &#34;&#34;&#34;Build an indicator class around a TA-Lib function.
 
         Requires [TA-Lib](https://github.com/mrjbq7/ta-lib) installed.
 
@@ -6535,7 +6987,7 @@ Other keyword arguments are passed to `{0}.run`.&#34;&#34;&#34;.format(_0, _1)
         2020-01-05      4.5  1.5  4.0  2.0
         ```
 
-        To get help on a function, use the `help` command:
+        To get help on running the indicator, use the `help` command:
 
         ```python-repl
         &gt;&gt;&gt; help(SMA.run)
@@ -6557,6 +7009,7 @@ Other keyword arguments are passed to `{0}.run`.&#34;&#34;&#34;.format(_0, _1)
         import talib
         from talib import abstract
 
+        func_name = func_name.upper()
         talib_func = getattr(talib, func_name)
         info = abstract.Function(func_name)._Function__info
         input_names = []
@@ -6567,20 +7020,21 @@ Other keyword arguments are passed to `{0}.run`.&#34;&#34;&#34;.format(_0, _1)
                 input_names.append(in_names)
         class_name = info[&#39;name&#39;]
         class_docstring = &#34;{}, {}&#34;.format(info[&#39;display_name&#39;], info[&#39;group&#39;])
-        short_name = info[&#39;name&#39;].lower()
         param_names = list(info[&#39;parameters&#39;].keys())
         output_names = info[&#39;output_names&#39;]
         output_flags = info[&#39;output_flags&#39;]
 
-        def apply_func(input_list, _, param_tuple):
+        def apply_func(input_list, _, param_tuple, **kwargs):
             # TA-Lib functions can only process 1-dim arrays
             n_input_cols = input_list[0].shape[1]
             outputs = []
             for col in range(n_input_cols):
-                outputs.append(talib_func(
+                output = talib_func(
                     *map(lambda x: x[:, col], input_list),
-                    *param_tuple
-                ))
+                    *param_tuple,
+                    **kwargs
+                )
+                outputs.append(output)
             if isinstance(outputs[0], tuple):  # multiple outputs
                 outputs = list(zip(*outputs))
                 return list(map(np.column_stack, outputs))
@@ -6591,7 +7045,6 @@ Other keyword arguments are passed to `{0}.run`.&#34;&#34;&#34;.format(_0, _1)
                 dict(
                     class_name=class_name,
                     class_docstring=class_docstring,
-                    short_name=short_name,
                     input_names=input_names,
                     param_names=param_names,
                     output_names=output_names,
@@ -6605,6 +7058,432 @@ Other keyword arguments are passed to `{0}.run`.&#34;&#34;&#34;.format(_0, _1)
             **info[&#39;parameters&#39;],
             **kwargs
         )
+        return TALibIndicator
+
+    @classmethod
+    def _parse_pandas_ta_config(cls, func, test_input_names=None, test_index_len=50):
+        &#34;&#34;&#34;Get the config of a pandas-ta indicator.&#34;&#34;&#34;
+        if test_input_names is None:
+            test_input_names = {&#39;open_&#39;, &#39;open&#39;, &#39;high&#39;, &#39;low&#39;, &#39;close&#39;, &#39;adj_close&#39;, &#39;volume&#39;, &#39;dividends&#39;, &#39;split&#39;}
+
+        input_names = []
+        param_names = []
+        defaults = {}
+        output_names = []
+
+        # Parse the function signature of the indicator to get input names
+        sig = inspect.signature(func)
+        for k, v in sig.parameters.items():
+            if v.kind not in (v.VAR_POSITIONAL, v.VAR_KEYWORD):
+                if v.annotation != inspect._empty and v.annotation == pd.Series:
+                    input_names.append(k)
+                elif k in test_input_names:
+                    input_names.append(k)
+                elif v.default == inspect._empty:
+                    # Any positional argument is considered input
+                    input_names.append(k)
+                else:
+                    param_names.append(k)
+                    defaults[k] = v.default
+
+        # To get output names, we need to run the indicator
+        test_df = pd.DataFrame(
+            {c: np.random.uniform(1, 10, size=(test_index_len,)) for c in input_names},
+            index=[datetime(2020, 1, 1) + timedelta(days=i) for i in range(test_index_len)]
+        )
+        new_args = {c: test_df[c] for c in input_names}
+        try:
+            result = func(**new_args)
+        except:
+            raise ValueError(&#34;Couldn&#39;t parse the indicator&#34;)
+
+        # Concatenate Series/DataFrames if the result is a tuple
+        if isinstance(result, tuple):
+            results = []
+            for i, r in enumerate(result):
+                if not pd.Index.equals(r.index, test_df.index):
+                    warnings.warn(f&#34;Couldn&#39;t parse the output at index {i}: mismatching index&#34;, stacklevel=2)
+                else:
+                    results.append(r)
+            if len(results) &gt; 1:
+                result = pd.concat(results, axis=1)
+            elif len(results) == 1:
+                result = results[0]
+            else:
+                raise ValueError(&#34;Couldn&#39;t parse the output&#34;)
+
+        # Test if the produced array has the same index length
+        if not pd.Index.equals(result.index, test_df.index):
+            raise ValueError(&#34;Couldn&#39;t parse the output: mismatching index&#34;)
+
+        # Standardize output names: remove numbers, remove hyphens, and bring to lower case
+        output_cols = result.columns.tolist() if isinstance(result, pd.DataFrame) else [result.name]
+        new_output_cols = []
+        for i in range(len(output_cols)):
+            name_parts = []
+            for name_part in output_cols[i].split(&#39;_&#39;):
+                try:
+                    float(name_part)
+                    continue
+                except:
+                    name_parts.append(name_part.replace(&#39;-&#39;, &#39;_&#39;).lower())
+            output_col = &#39;_&#39;.join(name_parts)
+            new_output_cols.append(output_col)
+
+        # Add numbers to duplicates
+        for k, v in Counter(new_output_cols).items():
+            if v == 1:
+                output_names.append(k)
+            else:
+                for i in range(v):
+                    output_names.append(k + str(i))
+
+        return dict(
+            class_name=func.__name__.upper(),
+            class_docstring=func.__doc__,
+            input_names=input_names,
+            param_names=param_names,
+            output_names=output_names,
+            defaults=defaults
+        )
+
+    @classmethod
+    def get_pandas_ta_indicators(cls, silence_warnings=True):
+        &#34;&#34;&#34;Get all pandas-ta indicators.
+
+        !!! note
+            Returns only the indicators that have been successfully parsed.&#34;&#34;&#34;
+        import pandas_ta
+
+        indicators = set()
+        for func_name in [_k for k, v in pandas_ta.Category.items() for _k in v]:
+            try:
+                cls._parse_pandas_ta_config(getattr(pandas_ta, func_name))
+                indicators.add(func_name.upper())
+            except Exception as e:
+                if not silence_warnings:
+                    warnings.warn(str(e), stacklevel=2)
+        return indicators
+
+    @classmethod
+    def from_pandas_ta(cls, func_name, parse_kwargs=None, init_kwargs=None, **kwargs):
+        &#34;&#34;&#34;Build an indicator class around a pandas-ta function.
+
+        Requires [pandas-ta](https://github.com/twopirllc/pandas-ta) installed.
+
+        Args:
+            func_name (str): Function name.
+            parse_kwargs (dict): Keyword arguments passed to `IndicatorFactory._parse_pandas_ta_config`.
+            init_kwargs (dict): Keyword arguments passed to `IndicatorFactory`.
+            **kwargs: Keyword arguments passed to `IndicatorFactory.from_custom_func`.
+
+        Returns:
+            Indicator
+
+        ## Example
+
+        ```python-repl
+        &gt;&gt;&gt; SMA = vbt.IndicatorFactory.from_pandas_ta(&#39;SMA&#39;)
+
+        &gt;&gt;&gt; sma = SMA.run(price, length=[2, 3])
+        &gt;&gt;&gt; sma.sma
+        sma_length         2         3
+                      a    b    a    b
+        2020-01-01  NaN  NaN  NaN  NaN
+        2020-01-02  1.5  4.5  NaN  NaN
+        2020-01-03  2.5  3.5  2.0  4.0
+        2020-01-04  3.5  2.5  3.0  3.0
+        2020-01-05  4.5  1.5  4.0  2.0
+        ```
+
+        To get help on running the indicator, use the `help` command:
+
+        ```python-repl
+        &gt;&gt;&gt; help(SMA.run)
+        Help on method run:
+
+        run(close, length=None, offset=None, short_name=&#39;sma&#39;, hide_params=None, hide_default=True, **kwargs) method of builtins.type instance
+            Run `SMA` indicator.
+
+            * Inputs: `close`
+            * Parameters: `length`, `offset`
+            * Outputs: `sma`
+
+            Pass a list of parameter names as `hide_params` to hide their column levels.
+            Set `hide_default` to False to show the column levels of the parameters with a default value.
+
+            Other keyword arguments are passed to `vectorbt.indicators.factory.run_pipeline`.
+        ```
+
+        To get the indicator docstring, use the `help` command or print the `__doc__` attribute:
+
+        ```python-repl
+        &gt;&gt;&gt; print(SMA.__doc__)
+        Simple Moving Average (SMA)
+
+        The Simple Moving Average is the classic moving average that is the equally
+        weighted average over n periods.
+
+        Sources:
+            https://www.tradingtechnologies.com/help/x-study/technical-indicator-definitions/simple-moving-average-sma/
+
+        Calculation:
+            Default Inputs:
+                length=10
+            SMA = SUM(close, length) / length
+
+        Args:
+            close (pd.Series): Series of &#39;close&#39;s
+            length (int): It&#39;s period. Default: 10
+            offset (int): How many periods to offset the result. Default: 0
+
+        Kwargs:
+            adjust (bool): Default: True
+            presma (bool, optional): If True, uses SMA for initial value.
+            fillna (value, optional): pd.DataFrame.fillna(value)
+            fill_method (value, optional): Type of fill method
+
+        Returns:
+            pd.Series: New feature generated.
+        ```
+        &#34;&#34;&#34;
+        import pandas_ta
+
+        func_name = func_name.lower()
+        pandas_ta_func = getattr(pandas_ta, func_name)
+
+        if parse_kwargs is None:
+            parse_kwargs = {}
+        config = cls._parse_pandas_ta_config(pandas_ta_func, **parse_kwargs)
+
+        def apply_func(input_list, _, param_tuple, **kwargs):
+            is_series = isinstance(input_list[0], pd.Series)
+            n_input_cols = 1 if is_series else len(input_list[0].columns)
+            outputs = []
+            for col in range(n_input_cols):
+                output = pandas_ta_func(
+                    **{
+                        name: input_list[i] if is_series else input_list[i].iloc[:, col]
+                        for i, name in enumerate(config[&#39;input_names&#39;])
+                    },
+                    **{
+                        name: param_tuple[i]
+                        for i, name in enumerate(config[&#39;param_names&#39;])
+                    },
+                    **kwargs
+                )
+                if isinstance(output, tuple):
+                    _outputs = []
+                    for o in output:
+                        if pd.Index.equals(input_list[0].index, o.index):
+                            _outputs.append(o)
+                    if len(_outputs) &gt; 1:
+                        output = pd.concat(_outputs, axis=1)
+                    elif len(_outputs) == 1:
+                        output = _outputs[0]
+                    else:
+                        raise ValueError(&#34;No valid outputs were returned&#34;)
+                if isinstance(output, pd.DataFrame):
+                    output = tuple([output.iloc[:, i] for i in range(len(output.columns))])
+                outputs.append(output)
+            if isinstance(outputs[0], tuple):  # multiple outputs
+                outputs = list(zip(*outputs))
+                return list(map(np.column_stack, outputs))
+            return np.column_stack(outputs)
+
+        defaults = config.pop(&#39;defaults&#39;)
+        TALibIndicator = cls(
+            **merge_dicts(
+                config,
+                init_kwargs
+            )
+        ).from_apply_func(
+            apply_func,
+            pass_packed=True,
+            keep_pd=True,
+            to_2d=False,
+            **defaults,
+            **kwargs
+        )
+        return TALibIndicator
+
+    @classmethod
+    def get_ta_indicators(cls):
+        &#34;&#34;&#34;Get all ta indicators.&#34;&#34;&#34;
+        import ta
+
+        ta_module_names = [k for k in dir(ta) if isinstance(getattr(ta, k), ModuleType)]
+        indicators = set()
+        for module_name in ta_module_names:
+            module = getattr(ta, module_name)
+            for name in dir(module):
+                obj = getattr(module, name)
+                if isinstance(obj, type) \
+                        and obj != ta.utils.IndicatorMixin \
+                        and issubclass(obj, ta.utils.IndicatorMixin):
+                    indicators.add(obj.__name__)
+        return indicators
+
+    @classmethod
+    def find_ta_indicator(cls, cls_name):
+        &#34;&#34;&#34;Get ta indicator class by its name.&#34;&#34;&#34;
+        import ta
+
+        ta_module_names = [k for k in dir(ta) if isinstance(getattr(ta, k), ModuleType)]
+        indicators = set()
+        for module_name in ta_module_names:
+            module = getattr(ta, module_name)
+            if cls_name in dir(module):
+                return getattr(module, cls_name)
+        raise ValueError(f&#34;Indicator \&#34;{cls_name}\&#34; not found&#34;)
+
+    @classmethod
+    def _parse_ta_config(cls, ind_cls):
+        &#34;&#34;&#34;Get the config of a ta indicator.&#34;&#34;&#34;
+        input_names = []
+        param_names = []
+        defaults = {}
+        output_names = []
+
+        # Parse the __init__ signature of the indicator class to get input names
+        sig = inspect.signature(ind_cls)
+        for k, v in sig.parameters.items():
+            if v.kind not in (v.VAR_POSITIONAL, v.VAR_KEYWORD):
+                if v.annotation == inspect._empty:
+                    raise ValueError(f&#34;Argument \&#34;{k}\&#34; has no annotation&#34;)
+                if v.annotation == pd.Series:
+                    input_names.append(k)
+                else:
+                    param_names.append(k)
+                    if v.default != inspect._empty:
+                        defaults[k] = v.default
+
+        # Get output names by looking into instance methods
+        for attr in dir(ind_cls):
+            if not attr.startswith(&#39;_&#39;):
+                if inspect.signature(getattr(ind_cls, attr)).return_annotation == pd.Series:
+                    output_names.append(attr)
+                elif &#39;Returns:\n            pandas.Series&#39; in getattr(ind_cls, attr).__doc__:
+                    output_names.append(attr)
+
+        return dict(
+            class_name=ind_cls.__name__,
+            class_docstring=ind_cls.__doc__,
+            input_names=input_names,
+            param_names=param_names,
+            output_names=output_names,
+            defaults=defaults
+        )
+
+    @classmethod
+    def from_ta(cls, cls_name, init_kwargs=None, **kwargs):
+        &#34;&#34;&#34;Build an indicator class around a ta class.
+
+        Requires [ta](https://github.com/bukosabino/ta) installed.
+
+        Args:
+            cls_name (str): Class name.
+            init_kwargs (dict): Keyword arguments passed to `IndicatorFactory`.
+            **kwargs: Keyword arguments passed to `IndicatorFactory.from_custom_func`.
+
+        Returns:
+            Indicator
+
+        ## Example
+
+        ```python-repl
+        &gt;&gt;&gt; SMAIndicator = vbt.IndicatorFactory.from_ta(&#39;SMAIndicator&#39;)
+
+        &gt;&gt;&gt; sma = SMAIndicator.run(price, window=[2, 3])
+        &gt;&gt;&gt; sma.sma_indicator
+        smaindicator_window    2         3
+                               a    b    a    b
+        2020-01-01           NaN  NaN  NaN  NaN
+        2020-01-02           1.5  4.5  NaN  NaN
+        2020-01-03           2.5  3.5  2.0  4.0
+        2020-01-04           3.5  2.5  3.0  3.0
+        2020-01-05           4.5  1.5  4.0  2.0
+        ```
+
+        To get help on running the indicator, use the `help` command:
+
+        ```python-repl
+        &gt;&gt;&gt; help(SMAIndicator.run)
+        Help on method run:
+
+        run(close, window, fillna=False, short_name=&#39;smaindicator&#39;, hide_params=None, hide_default=True, **kwargs) method of builtins.type instance
+            Run `SMAIndicator` indicator.
+
+            * Inputs: `close`
+            * Parameters: `window`, `fillna`
+            * Outputs: `sma_indicator`
+
+            Pass a list of parameter names as `hide_params` to hide their column levels.
+            Set `hide_default` to False to show the column levels of the parameters with a default value.
+
+            Other keyword arguments are passed to `vectorbt.indicators.factory.run_pipeline`.
+        ```
+
+        To get the indicator docstring, use the `help` command or print the `__doc__` attribute:
+
+        ```python-repl
+        &gt;&gt;&gt; print(SMAIndicator.__doc__)
+        SMA - Simple Moving Average
+
+            Args:
+                close(pandas.Series): dataset &#39;Close&#39; column.
+                window(int): n period.
+                fillna(bool): if True, fill nan values.
+        ```
+        &#34;&#34;&#34;
+        import ta
+
+        ind_cls = cls.find_ta_indicator(cls_name)
+        config = cls._parse_ta_config(ind_cls)
+
+        def apply_func(input_list, _, param_tuple, **kwargs):
+            is_series = isinstance(input_list[0], pd.Series)
+            n_input_cols = 1 if is_series else len(input_list[0].columns)
+            outputs = []
+            for col in range(n_input_cols):
+                ind = ind_cls(
+                    **{
+                        name: input_list[i] if is_series else input_list[i].iloc[:, col]
+                        for i, name in enumerate(config[&#39;input_names&#39;])
+                    },
+                    **{
+                        name: param_tuple[i]
+                        for i, name in enumerate(config[&#39;param_names&#39;])
+                    },
+                    **kwargs
+                )
+                output = []
+                for output_name in config[&#39;output_names&#39;]:
+                    output.append(getattr(ind, output_name)())
+                if len(output) == 1:
+                    output = output[0]
+                else:
+                    output = tuple(output)
+                outputs.append(output)
+            if isinstance(outputs[0], tuple):  # multiple outputs
+                outputs = list(zip(*outputs))
+                return list(map(np.column_stack, outputs))
+            return np.column_stack(outputs)
+
+        defaults = config.pop(&#39;defaults&#39;)
+        TALibIndicator = cls(
+            **merge_dicts(
+                config,
+                init_kwargs
+            )
+        ).from_apply_func(
+            apply_func,
+            pass_packed=True,
+            keep_pd=True,
+            to_2d=False,
+            **defaults,
+            **kwargs
+        )
         return TALibIndicator</code></pre>
 </details>
 <h3 class="section-subtitle">Subclasses</h3>
@@ -6613,11 +7492,429 @@ Other keyword arguments are passed to `{0}.run`.&#34;&#34;&#34;.format(_0, _1)
 </ul>
 <h3 class="section-subtitle">Static methods</h3>
 <dl>
+<dt id="vectorbt.indicators.factory.IndicatorFactory.find_ta_indicator"><code class="name flex">
+<span>def <span class="ident fname">find_ta_indicator</span></span>(<span>cls_name)</span>
+</code></dt>
+<dd>
+<div class="desc"><p>Get ta indicator class by its name.</p></div>
+<details class="source">
+<summary>
+<span>Expand source code</span>
+</summary>
+<pre><code class="python">@classmethod
+def find_ta_indicator(cls, cls_name):
+    &#34;&#34;&#34;Get ta indicator class by its name.&#34;&#34;&#34;
+    import ta
+
+    ta_module_names = [k for k in dir(ta) if isinstance(getattr(ta, k), ModuleType)]
+    indicators = set()
+    for module_name in ta_module_names:
+        module = getattr(ta, module_name)
+        if cls_name in dir(module):
+            return getattr(module, cls_name)
+    raise ValueError(f&#34;Indicator \&#34;{cls_name}\&#34; not found&#34;)</code></pre>
+</details>
+</dd>
+<dt id="vectorbt.indicators.factory.IndicatorFactory.from_pandas_ta"><code class="name flex">
+<span>def <span class="ident fname">from_pandas_ta</span></span>(<span>func_name, parse_kwargs=None, init_kwargs=None, **kwargs)</span>
+</code></dt>
+<dd>
+<div class="desc"><p>Build an indicator class around a pandas-ta function.</p>
+<p>Requires <a href="https://github.com/twopirllc/pandas-ta">pandas-ta</a> installed.</p>
+<h2 id="args">Args</h2>
+<dl>
+<dt><strong><code>func_name</code></strong> :&ensp;<code>str</code></dt>
+<dd>Function name.</dd>
+<dt><strong><code>parse_kwargs</code></strong> :&ensp;<code>dict</code></dt>
+<dd>Keyword arguments passed to <code>IndicatorFactory._parse_pandas_ta_config</code>.</dd>
+<dt><strong><code>init_kwargs</code></strong> :&ensp;<code>dict</code></dt>
+<dd>Keyword arguments passed to <code><a title="vectorbt.indicators.factory.IndicatorFactory" href="#vectorbt.indicators.factory.IndicatorFactory">IndicatorFactory</a></code>.</dd>
+<dt><strong><code>**kwargs</code></strong></dt>
+<dd>Keyword arguments passed to <code><a title="vectorbt.indicators.factory.IndicatorFactory.from_custom_func" href="#vectorbt.indicators.factory.IndicatorFactory.from_custom_func">IndicatorFactory.from_custom_func()</a></code>.</dd>
+</dl>
+<h2 id="returns">Returns</h2>
+<p>Indicator</p>
+<h2 id="example">Example</h2>
+<pre><code class="language-python-repl">&gt;&gt;&gt; SMA = vbt.IndicatorFactory.from_pandas_ta('SMA')
+
+&gt;&gt;&gt; sma = SMA.run(price, length=[2, 3])
+&gt;&gt;&gt; sma.sma
+sma_length         2         3
+              a    b    a    b
+2020-01-01  NaN  NaN  NaN  NaN
+2020-01-02  1.5  4.5  NaN  NaN
+2020-01-03  2.5  3.5  2.0  4.0
+2020-01-04  3.5  2.5  3.0  3.0
+2020-01-05  4.5  1.5  4.0  2.0
+</code></pre>
+<p>To get help on running the indicator, use the <code>help</code> command:</p>
+<pre><code class="language-python-repl">&gt;&gt;&gt; help(SMA.run)
+Help on method run:
+
+run(close, length=None, offset=None, short_name='sma', hide_params=None, hide_default=True, **kwargs) method of builtins.type instance
+    Run `SMA` indicator.
+
+    * Inputs: `close`
+    * Parameters: `length`, `offset`
+    * Outputs: `sma`
+
+    Pass a list of parameter names as `hide_params` to hide their column levels.
+    Set `hide_default` to False to show the column levels of the parameters with a default value.
+
+    Other keyword arguments are passed to `vectorbt.indicators.factory.run_pipeline`.
+</code></pre>
+<p>To get the indicator docstring, use the <code>help</code> command or print the <code>__doc__</code> attribute:</p>
+<pre><code class="language-python-repl">&gt;&gt;&gt; print(SMA.__doc__)
+Simple Moving Average (SMA)
+
+The Simple Moving Average is the classic moving average that is the equally
+weighted average over n periods.
+
+Sources:
+    https://www.tradingtechnologies.com/help/x-study/technical-indicator-definitions/simple-moving-average-sma/
+
+Calculation:
+    Default Inputs:
+        length=10
+    SMA = SUM(close, length) / length
+
+Args:
+    close (pd.Series): Series of 'close's
+    length (int): It's period. Default: 10
+    offset (int): How many periods to offset the result. Default: 0
+
+Kwargs:
+    adjust (bool): Default: True
+    presma (bool, optional): If True, uses SMA for initial value.
+    fillna (value, optional): pd.DataFrame.fillna(value)
+    fill_method (value, optional): Type of fill method
+
+Returns:
+    pd.Series: New feature generated.
+</code></pre></div>
+<details class="source">
+<summary>
+<span>Expand source code</span>
+</summary>
+<pre><code class="python">@classmethod
+def from_pandas_ta(cls, func_name, parse_kwargs=None, init_kwargs=None, **kwargs):
+    &#34;&#34;&#34;Build an indicator class around a pandas-ta function.
+
+    Requires [pandas-ta](https://github.com/twopirllc/pandas-ta) installed.
+
+    Args:
+        func_name (str): Function name.
+        parse_kwargs (dict): Keyword arguments passed to `IndicatorFactory._parse_pandas_ta_config`.
+        init_kwargs (dict): Keyword arguments passed to `IndicatorFactory`.
+        **kwargs: Keyword arguments passed to `IndicatorFactory.from_custom_func`.
+
+    Returns:
+        Indicator
+
+    ## Example
+
+    ```python-repl
+    &gt;&gt;&gt; SMA = vbt.IndicatorFactory.from_pandas_ta(&#39;SMA&#39;)
+
+    &gt;&gt;&gt; sma = SMA.run(price, length=[2, 3])
+    &gt;&gt;&gt; sma.sma
+    sma_length         2         3
+                  a    b    a    b
+    2020-01-01  NaN  NaN  NaN  NaN
+    2020-01-02  1.5  4.5  NaN  NaN
+    2020-01-03  2.5  3.5  2.0  4.0
+    2020-01-04  3.5  2.5  3.0  3.0
+    2020-01-05  4.5  1.5  4.0  2.0
+    ```
+
+    To get help on running the indicator, use the `help` command:
+
+    ```python-repl
+    &gt;&gt;&gt; help(SMA.run)
+    Help on method run:
+
+    run(close, length=None, offset=None, short_name=&#39;sma&#39;, hide_params=None, hide_default=True, **kwargs) method of builtins.type instance
+        Run `SMA` indicator.
+
+        * Inputs: `close`
+        * Parameters: `length`, `offset`
+        * Outputs: `sma`
+
+        Pass a list of parameter names as `hide_params` to hide their column levels.
+        Set `hide_default` to False to show the column levels of the parameters with a default value.
+
+        Other keyword arguments are passed to `vectorbt.indicators.factory.run_pipeline`.
+    ```
+
+    To get the indicator docstring, use the `help` command or print the `__doc__` attribute:
+
+    ```python-repl
+    &gt;&gt;&gt; print(SMA.__doc__)
+    Simple Moving Average (SMA)
+
+    The Simple Moving Average is the classic moving average that is the equally
+    weighted average over n periods.
+
+    Sources:
+        https://www.tradingtechnologies.com/help/x-study/technical-indicator-definitions/simple-moving-average-sma/
+
+    Calculation:
+        Default Inputs:
+            length=10
+        SMA = SUM(close, length) / length
+
+    Args:
+        close (pd.Series): Series of &#39;close&#39;s
+        length (int): It&#39;s period. Default: 10
+        offset (int): How many periods to offset the result. Default: 0
+
+    Kwargs:
+        adjust (bool): Default: True
+        presma (bool, optional): If True, uses SMA for initial value.
+        fillna (value, optional): pd.DataFrame.fillna(value)
+        fill_method (value, optional): Type of fill method
+
+    Returns:
+        pd.Series: New feature generated.
+    ```
+    &#34;&#34;&#34;
+    import pandas_ta
+
+    func_name = func_name.lower()
+    pandas_ta_func = getattr(pandas_ta, func_name)
+
+    if parse_kwargs is None:
+        parse_kwargs = {}
+    config = cls._parse_pandas_ta_config(pandas_ta_func, **parse_kwargs)
+
+    def apply_func(input_list, _, param_tuple, **kwargs):
+        is_series = isinstance(input_list[0], pd.Series)
+        n_input_cols = 1 if is_series else len(input_list[0].columns)
+        outputs = []
+        for col in range(n_input_cols):
+            output = pandas_ta_func(
+                **{
+                    name: input_list[i] if is_series else input_list[i].iloc[:, col]
+                    for i, name in enumerate(config[&#39;input_names&#39;])
+                },
+                **{
+                    name: param_tuple[i]
+                    for i, name in enumerate(config[&#39;param_names&#39;])
+                },
+                **kwargs
+            )
+            if isinstance(output, tuple):
+                _outputs = []
+                for o in output:
+                    if pd.Index.equals(input_list[0].index, o.index):
+                        _outputs.append(o)
+                if len(_outputs) &gt; 1:
+                    output = pd.concat(_outputs, axis=1)
+                elif len(_outputs) == 1:
+                    output = _outputs[0]
+                else:
+                    raise ValueError(&#34;No valid outputs were returned&#34;)
+            if isinstance(output, pd.DataFrame):
+                output = tuple([output.iloc[:, i] for i in range(len(output.columns))])
+            outputs.append(output)
+        if isinstance(outputs[0], tuple):  # multiple outputs
+            outputs = list(zip(*outputs))
+            return list(map(np.column_stack, outputs))
+        return np.column_stack(outputs)
+
+    defaults = config.pop(&#39;defaults&#39;)
+    TALibIndicator = cls(
+        **merge_dicts(
+            config,
+            init_kwargs
+        )
+    ).from_apply_func(
+        apply_func,
+        pass_packed=True,
+        keep_pd=True,
+        to_2d=False,
+        **defaults,
+        **kwargs
+    )
+    return TALibIndicator</code></pre>
+</details>
+</dd>
+<dt id="vectorbt.indicators.factory.IndicatorFactory.from_ta"><code class="name flex">
+<span>def <span class="ident fname">from_ta</span></span>(<span>cls_name, init_kwargs=None, **kwargs)</span>
+</code></dt>
+<dd>
+<div class="desc"><p>Build an indicator class around a ta class.</p>
+<p>Requires <a href="https://github.com/bukosabino/ta">ta</a> installed.</p>
+<h2 id="args">Args</h2>
+<dl>
+<dt><strong><code>cls_name</code></strong> :&ensp;<code>str</code></dt>
+<dd>Class name.</dd>
+<dt><strong><code>init_kwargs</code></strong> :&ensp;<code>dict</code></dt>
+<dd>Keyword arguments passed to <code><a title="vectorbt.indicators.factory.IndicatorFactory" href="#vectorbt.indicators.factory.IndicatorFactory">IndicatorFactory</a></code>.</dd>
+<dt><strong><code>**kwargs</code></strong></dt>
+<dd>Keyword arguments passed to <code><a title="vectorbt.indicators.factory.IndicatorFactory.from_custom_func" href="#vectorbt.indicators.factory.IndicatorFactory.from_custom_func">IndicatorFactory.from_custom_func()</a></code>.</dd>
+</dl>
+<h2 id="returns">Returns</h2>
+<p>Indicator</p>
+<h2 id="example">Example</h2>
+<pre><code class="language-python-repl">&gt;&gt;&gt; SMAIndicator = vbt.IndicatorFactory.from_ta('SMAIndicator')
+
+&gt;&gt;&gt; sma = SMAIndicator.run(price, window=[2, 3])
+&gt;&gt;&gt; sma.sma_indicator
+smaindicator_window    2         3
+                       a    b    a    b
+2020-01-01           NaN  NaN  NaN  NaN
+2020-01-02           1.5  4.5  NaN  NaN
+2020-01-03           2.5  3.5  2.0  4.0
+2020-01-04           3.5  2.5  3.0  3.0
+2020-01-05           4.5  1.5  4.0  2.0
+</code></pre>
+<p>To get help on running the indicator, use the <code>help</code> command:</p>
+<pre><code class="language-python-repl">&gt;&gt;&gt; help(SMAIndicator.run)
+Help on method run:
+
+run(close, window, fillna=False, short_name='smaindicator', hide_params=None, hide_default=True, **kwargs) method of builtins.type instance
+    Run `SMAIndicator` indicator.
+
+    * Inputs: `close`
+    * Parameters: `window`, `fillna`
+    * Outputs: `sma_indicator`
+
+    Pass a list of parameter names as `hide_params` to hide their column levels.
+    Set `hide_default` to False to show the column levels of the parameters with a default value.
+
+    Other keyword arguments are passed to `vectorbt.indicators.factory.run_pipeline`.
+</code></pre>
+<p>To get the indicator docstring, use the <code>help</code> command or print the <code>__doc__</code> attribute:</p>
+<pre><code class="language-python-repl">&gt;&gt;&gt; print(SMAIndicator.__doc__)
+SMA - Simple Moving Average
+
+    Args:
+        close(pandas.Series): dataset 'Close' column.
+        window(int): n period.
+        fillna(bool): if True, fill nan values.
+</code></pre></div>
+<details class="source">
+<summary>
+<span>Expand source code</span>
+</summary>
+<pre><code class="python">@classmethod
+def from_ta(cls, cls_name, init_kwargs=None, **kwargs):
+    &#34;&#34;&#34;Build an indicator class around a ta class.
+
+    Requires [ta](https://github.com/bukosabino/ta) installed.
+
+    Args:
+        cls_name (str): Class name.
+        init_kwargs (dict): Keyword arguments passed to `IndicatorFactory`.
+        **kwargs: Keyword arguments passed to `IndicatorFactory.from_custom_func`.
+
+    Returns:
+        Indicator
+
+    ## Example
+
+    ```python-repl
+    &gt;&gt;&gt; SMAIndicator = vbt.IndicatorFactory.from_ta(&#39;SMAIndicator&#39;)
+
+    &gt;&gt;&gt; sma = SMAIndicator.run(price, window=[2, 3])
+    &gt;&gt;&gt; sma.sma_indicator
+    smaindicator_window    2         3
+                           a    b    a    b
+    2020-01-01           NaN  NaN  NaN  NaN
+    2020-01-02           1.5  4.5  NaN  NaN
+    2020-01-03           2.5  3.5  2.0  4.0
+    2020-01-04           3.5  2.5  3.0  3.0
+    2020-01-05           4.5  1.5  4.0  2.0
+    ```
+
+    To get help on running the indicator, use the `help` command:
+
+    ```python-repl
+    &gt;&gt;&gt; help(SMAIndicator.run)
+    Help on method run:
+
+    run(close, window, fillna=False, short_name=&#39;smaindicator&#39;, hide_params=None, hide_default=True, **kwargs) method of builtins.type instance
+        Run `SMAIndicator` indicator.
+
+        * Inputs: `close`
+        * Parameters: `window`, `fillna`
+        * Outputs: `sma_indicator`
+
+        Pass a list of parameter names as `hide_params` to hide their column levels.
+        Set `hide_default` to False to show the column levels of the parameters with a default value.
+
+        Other keyword arguments are passed to `vectorbt.indicators.factory.run_pipeline`.
+    ```
+
+    To get the indicator docstring, use the `help` command or print the `__doc__` attribute:
+
+    ```python-repl
+    &gt;&gt;&gt; print(SMAIndicator.__doc__)
+    SMA - Simple Moving Average
+
+        Args:
+            close(pandas.Series): dataset &#39;Close&#39; column.
+            window(int): n period.
+            fillna(bool): if True, fill nan values.
+    ```
+    &#34;&#34;&#34;
+    import ta
+
+    ind_cls = cls.find_ta_indicator(cls_name)
+    config = cls._parse_ta_config(ind_cls)
+
+    def apply_func(input_list, _, param_tuple, **kwargs):
+        is_series = isinstance(input_list[0], pd.Series)
+        n_input_cols = 1 if is_series else len(input_list[0].columns)
+        outputs = []
+        for col in range(n_input_cols):
+            ind = ind_cls(
+                **{
+                    name: input_list[i] if is_series else input_list[i].iloc[:, col]
+                    for i, name in enumerate(config[&#39;input_names&#39;])
+                },
+                **{
+                    name: param_tuple[i]
+                    for i, name in enumerate(config[&#39;param_names&#39;])
+                },
+                **kwargs
+            )
+            output = []
+            for output_name in config[&#39;output_names&#39;]:
+                output.append(getattr(ind, output_name)())
+            if len(output) == 1:
+                output = output[0]
+            else:
+                output = tuple(output)
+            outputs.append(output)
+        if isinstance(outputs[0], tuple):  # multiple outputs
+            outputs = list(zip(*outputs))
+            return list(map(np.column_stack, outputs))
+        return np.column_stack(outputs)
+
+    defaults = config.pop(&#39;defaults&#39;)
+    TALibIndicator = cls(
+        **merge_dicts(
+            config,
+            init_kwargs
+        )
+    ).from_apply_func(
+        apply_func,
+        pass_packed=True,
+        keep_pd=True,
+        to_2d=False,
+        **defaults,
+        **kwargs
+    )
+    return TALibIndicator</code></pre>
+</details>
+</dd>
 <dt id="vectorbt.indicators.factory.IndicatorFactory.from_talib"><code class="name flex">
 <span>def <span class="ident fname">from_talib</span></span>(<span>func_name, init_kwargs=None, **kwargs)</span>
 </code></dt>
 <dd>
-<div class="desc"><p>Build indicator class around a TA-Lib function.</p>
+<div class="desc"><p>Build an indicator class around a TA-Lib function.</p>
 <p>Requires <a href="https://github.com/mrjbq7/ta-lib">TA-Lib</a> installed.</p>
 <p>For input, parameter and output names, see <a href="https://github.com/mrjbq7/ta-lib/blob/master/docs/index.md">docs</a>.</p>
 <h2 id="args">Args</h2>
@@ -6644,7 +7941,7 @@ sma_timeperiod         2         3
 2020-01-04      3.5  2.5  3.0  3.0
 2020-01-05      4.5  1.5  4.0  2.0
 </code></pre>
-<p>To get help on a function, use the <code>help</code> command:</p>
+<p>To get help on running the indicator, use the <code>help</code> command:</p>
 <pre><code class="language-python-repl">&gt;&gt;&gt; help(SMA.run)
 Help on method run:
 
@@ -6666,7 +7963,7 @@ run(close, timeperiod=30, short_name='sma', hide_params=None, hide_default=True,
 </summary>
 <pre><code class="python">@classmethod
 def from_talib(cls, func_name, init_kwargs=None, **kwargs):
-    &#34;&#34;&#34;Build indicator class around a TA-Lib function.
+    &#34;&#34;&#34;Build an indicator class around a TA-Lib function.
 
     Requires [TA-Lib](https://github.com/mrjbq7/ta-lib) installed.
 
@@ -6696,7 +7993,7 @@ def from_talib(cls, func_name, init_kwargs=None, **kwargs):
     2020-01-05      4.5  1.5  4.0  2.0
     ```
 
-    To get help on a function, use the `help` command:
+    To get help on running the indicator, use the `help` command:
 
     ```python-repl
     &gt;&gt;&gt; help(SMA.run)
@@ -6718,6 +8015,7 @@ def from_talib(cls, func_name, init_kwargs=None, **kwargs):
     import talib
     from talib import abstract
 
+    func_name = func_name.upper()
     talib_func = getattr(talib, func_name)
     info = abstract.Function(func_name)._Function__info
     input_names = []
@@ -6728,20 +8026,21 @@ def from_talib(cls, func_name, init_kwargs=None, **kwargs):
             input_names.append(in_names)
     class_name = info[&#39;name&#39;]
     class_docstring = &#34;{}, {}&#34;.format(info[&#39;display_name&#39;], info[&#39;group&#39;])
-    short_name = info[&#39;name&#39;].lower()
     param_names = list(info[&#39;parameters&#39;].keys())
     output_names = info[&#39;output_names&#39;]
     output_flags = info[&#39;output_flags&#39;]
 
-    def apply_func(input_list, _, param_tuple):
+    def apply_func(input_list, _, param_tuple, **kwargs):
         # TA-Lib functions can only process 1-dim arrays
         n_input_cols = input_list[0].shape[1]
         outputs = []
         for col in range(n_input_cols):
-            outputs.append(talib_func(
+            output = talib_func(
                 *map(lambda x: x[:, col], input_list),
-                *param_tuple
-            ))
+                *param_tuple,
+                **kwargs
+            )
+            outputs.append(output)
         if isinstance(outputs[0], tuple):  # multiple outputs
             outputs = list(zip(*outputs))
             return list(map(np.column_stack, outputs))
@@ -6752,7 +8051,6 @@ def from_talib(cls, func_name, init_kwargs=None, **kwargs):
             dict(
                 class_name=class_name,
                 class_docstring=class_docstring,
-                short_name=short_name,
                 input_names=input_names,
                 param_names=param_names,
                 output_names=output_names,
@@ -6767,6 +8065,82 @@ def from_talib(cls, func_name, init_kwargs=None, **kwargs):
         **kwargs
     )
     return TALibIndicator</code></pre>
+</details>
+</dd>
+<dt id="vectorbt.indicators.factory.IndicatorFactory.get_pandas_ta_indicators"><code class="name flex">
+<span>def <span class="ident fname">get_pandas_ta_indicators</span></span>(<span>silence_warnings=True)</span>
+</code></dt>
+<dd>
+<div class="desc"><p>Get all pandas-ta indicators.</p>
+<div class="admonition note">
+<p class="admonition-title">Note</p>
+<p>Returns only the indicators that have been successfully parsed.</p>
+</div></div>
+<details class="source">
+<summary>
+<span>Expand source code</span>
+</summary>
+<pre><code class="python">@classmethod
+def get_pandas_ta_indicators(cls, silence_warnings=True):
+    &#34;&#34;&#34;Get all pandas-ta indicators.
+
+    !!! note
+        Returns only the indicators that have been successfully parsed.&#34;&#34;&#34;
+    import pandas_ta
+
+    indicators = set()
+    for func_name in [_k for k, v in pandas_ta.Category.items() for _k in v]:
+        try:
+            cls._parse_pandas_ta_config(getattr(pandas_ta, func_name))
+            indicators.add(func_name.upper())
+        except Exception as e:
+            if not silence_warnings:
+                warnings.warn(str(e), stacklevel=2)
+    return indicators</code></pre>
+</details>
+</dd>
+<dt id="vectorbt.indicators.factory.IndicatorFactory.get_ta_indicators"><code class="name flex">
+<span>def <span class="ident fname">get_ta_indicators</span></span>(<span>)</span>
+</code></dt>
+<dd>
+<div class="desc"><p>Get all ta indicators.</p></div>
+<details class="source">
+<summary>
+<span>Expand source code</span>
+</summary>
+<pre><code class="python">@classmethod
+def get_ta_indicators(cls):
+    &#34;&#34;&#34;Get all ta indicators.&#34;&#34;&#34;
+    import ta
+
+    ta_module_names = [k for k in dir(ta) if isinstance(getattr(ta, k), ModuleType)]
+    indicators = set()
+    for module_name in ta_module_names:
+        module = getattr(ta, module_name)
+        for name in dir(module):
+            obj = getattr(module, name)
+            if isinstance(obj, type) \
+                    and obj != ta.utils.IndicatorMixin \
+                    and issubclass(obj, ta.utils.IndicatorMixin):
+                indicators.add(obj.__name__)
+    return indicators</code></pre>
+</details>
+</dd>
+<dt id="vectorbt.indicators.factory.IndicatorFactory.get_talib_indicators"><code class="name flex">
+<span>def <span class="ident fname">get_talib_indicators</span></span>(<span>)</span>
+</code></dt>
+<dd>
+<div class="desc"><p>Get all TA-Lib indicators.</p></div>
+<details class="source">
+<summary>
+<span>Expand source code</span>
+</summary>
+<pre><code class="python">@classmethod
+def get_talib_indicators(cls):
+    &#34;&#34;&#34;Get all TA-Lib indicators.&#34;&#34;&#34;
+    import talib
+
+    return set(talib.get_functions())</code></pre>
 </details>
 </dd>
 </dl>
@@ -7831,9 +9205,15 @@ title="Search"
 <li>
 <h4><code><a title="vectorbt.indicators.factory.IndicatorFactory" href="#vectorbt.indicators.factory.IndicatorFactory">IndicatorFactory</a></code></h4>
 <ul class="">
+<li><code><a title="vectorbt.indicators.factory.IndicatorFactory.find_ta_indicator" href="#vectorbt.indicators.factory.IndicatorFactory.find_ta_indicator">find_ta_indicator</a></code></li>
 <li><code><a title="vectorbt.indicators.factory.IndicatorFactory.from_apply_func" href="#vectorbt.indicators.factory.IndicatorFactory.from_apply_func">from_apply_func</a></code></li>
 <li><code><a title="vectorbt.indicators.factory.IndicatorFactory.from_custom_func" href="#vectorbt.indicators.factory.IndicatorFactory.from_custom_func">from_custom_func</a></code></li>
+<li><code><a title="vectorbt.indicators.factory.IndicatorFactory.from_pandas_ta" href="#vectorbt.indicators.factory.IndicatorFactory.from_pandas_ta">from_pandas_ta</a></code></li>
+<li><code><a title="vectorbt.indicators.factory.IndicatorFactory.from_ta" href="#vectorbt.indicators.factory.IndicatorFactory.from_ta">from_ta</a></code></li>
 <li><code><a title="vectorbt.indicators.factory.IndicatorFactory.from_talib" href="#vectorbt.indicators.factory.IndicatorFactory.from_talib">from_talib</a></code></li>
+<li><code><a title="vectorbt.indicators.factory.IndicatorFactory.get_pandas_ta_indicators" href="#vectorbt.indicators.factory.IndicatorFactory.get_pandas_ta_indicators">get_pandas_ta_indicators</a></code></li>
+<li><code><a title="vectorbt.indicators.factory.IndicatorFactory.get_ta_indicators" href="#vectorbt.indicators.factory.IndicatorFactory.get_ta_indicators">get_ta_indicators</a></code></li>
+<li><code><a title="vectorbt.indicators.factory.IndicatorFactory.get_talib_indicators" href="#vectorbt.indicators.factory.IndicatorFactory.get_talib_indicators">get_talib_indicators</a></code></li>
 </ul>
 </li>
 </ul>
