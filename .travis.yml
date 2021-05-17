@@ -1,22 +1,27 @@
+test: &test
+  stage: test
+  language: python
+  install:
+    - ./scripts/install-talib.sh
+    - pip install .[full,cov]
+  script:
+    - export NUMBA_BOUNDSCHECK=1
+    - pytest tests/
+    - export NUMBA_DISABLE_JIT=1
+    - pytest --cov=vectorbt tests/
+  after_success:
+    - if [[ $TRAVIS_PYTHON_VERSION == 3.6 ]]; then codecov; fi
+
 jobs:
   include:
-    - stage: test
-      language: python
-      python:
-        - "3.6"
-        - "3.7"
-        - "3.8"
-        - "3.9"
-      install:
-        - ./scripts/install-talib.sh
-        - pip install .[full,cov]
-      script:
-        - export NUMBA_BOUNDSCHECK=1
-        - pytest tests/
-        - export NUMBA_DISABLE_JIT=1
-        - pytest --cov=vectorbt tests/
-      after_success:
-        - if [[ $TRAVIS_PYTHON_VERSION == 3.6 ]]; then codecov; fi
+    - <<: *test
+      python: 3.6
+    - <<: *test
+      python: 3.7
+    - <<: *test
+      python: 3.8
+    - <<: *test
+      python: 3.9
     - stage: deploy-pypi
       language: python
       python: "3.6"
@@ -48,13 +53,24 @@ jobs:
           keep_history: true
           on:
             branch: master
+    - stage: deploy-docker
+      language: ruby
+      script:
+        - echo "$DOCKER_PASSWORD" | docker login -u "$DOCKER_USERNAME" --password-stdin
+        - docker build -t polakowo/vectorbt . --build-arg FULL=
+        - ./scripts/docker-push.sh "polakowo/vectorbt" "$(cat vectorbt/_version.py | cut -d '"' -f 2)"
+        - docker build -t polakowo/vectorbt-full . --build-arg FULL=yes --build-arg TEST=yes
+        - ./scripts/docker-push.sh "polakowo/vectorbt-full" "$(cat vectorbt/_version.py | cut -d '"' -f 2)"
+
 stages:
   - name: test
-    if: commit_message !~ /(\[ci skip-test\]|\[travis skip-test\])/
+    if: (type = pull_request) OR (commit_message =~ /(\[ci test\]|\[ci deploy\])/)
   - name: deploy-pypi
-    if: commit_message !~ /(\[ci skip-deploy-pypi\]|\[travis skip-deploy-pypi\])/
+    if: (type != pull_request) AND (commit_message =~ /(\[ci deploy-pypi\]|\[ci deploy\])/)
   - name: deploy-pages
-    if: commit_message !~ /(\[ci skip-deploy-pages\]|\[travis skip-deploy-pages\])/
+    if: (type != pull_request) AND (commit_message =~ /(\[ci deploy-pages\]|\[ci deploy\])/)
+  - name: deploy-docker
+    if: (type != pull_request) AND (commit_message =~ /(\[ci deploy-docker\]|\[ci deploy\])/)
 branches:
   only:
   - master
