@@ -325,7 +325,7 @@ class ArrayWrapper(Configured, PandasIndexer):
 
         if column_only_select:
             if i_wrapper.ndim == 1:
-                raise IndexingError(&#34;Columns only: Attempting to select a column on a Series&#34;)
+                raise IndexingError(&#34;Columns only: This object already contains one column of data&#34;)
             try:
                 col_mapper = pd_indexing_func(i_wrapper.wrap_reduced(np.arange(n_cols), columns=columns))
             except pd.core.indexing.IndexingError as e:
@@ -551,7 +551,8 @@ class ArrayWrapper(Configured, PandasIndexer):
     def to_time_units(self, a: tp.MaybeArray[float]) -&gt; tp.Union[pd.Timedelta, tp.Array]:
         &#34;&#34;&#34;Convert array to time units.&#34;&#34;&#34;
         if self.freq is None:
-            raise ValueError(&#34;Couldn&#39;t parse the frequency of index. You must set `freq`.&#34;)
+            raise ValueError(&#34;Couldn&#39;t parse the frequency of index. &#34;
+                             &#34;Pass it as `freq` or define it globally under `settings.array_wrapper`.&#34;)
         return a * self.freq
 
     @property
@@ -744,10 +745,16 @@ class Wrapping(Configured, PandasIndexer):
             return self.copy(wrapper=self.wrapper.regroup(group_by, **kwargs))
         return self  # important for keeping cache
 
-    def select_series(self: WrappingT, column: tp.Any = None, group_by: tp.GroupByLike = None, **kwargs) -&gt; WrappingT:
+    def select_one(self: WrappingT, column: tp.Any = None, group_by: tp.GroupByLike = None, **kwargs) -&gt; WrappingT:
         &#34;&#34;&#34;Select one column/group.&#34;&#34;&#34;
         _self = self.regroup(group_by, **kwargs)
         if column is not None:
+            if _self.wrapper.grouper.is_grouped():
+                if column not in _self.wrapper.get_columns():
+                    raise KeyError(f&#34;Group &#39;{column}&#39; not found&#34;)
+            else:
+                if column not in _self.wrapper.columns:
+                    raise KeyError(f&#34;Column &#39;{column}&#39; not found&#34;)
             return _self[column]
         if not _self.wrapper.grouper.is_grouped():
             if _self.wrapper.ndim == 1:
@@ -755,6 +762,25 @@ class Wrapping(Configured, PandasIndexer):
             raise TypeError(&#34;Only one column is allowed. Use indexing or column argument.&#34;)
         if _self.wrapper.grouped_ndim == 1:
             return _self
+        raise TypeError(&#34;Only one group is allowed. Use indexing or column argument.&#34;)
+
+    @staticmethod
+    def select_one_from_obj(obj: tp.SeriesFrame, wrapper: ArrayWrapper, column: tp.Any = None) -&gt; tp.MaybeSeries:
+        &#34;&#34;&#34;Select one column/group from a pandas object.&#34;&#34;&#34;
+        if column is not None:
+            if wrapper.grouper.is_grouped():
+                if column not in wrapper.get_columns():
+                    raise KeyError(f&#34;Group &#39;{column}&#39; not found&#34;)
+            else:
+                if column not in wrapper.columns:
+                    raise KeyError(f&#34;Column &#39;{column}&#39; not found&#34;)
+            return obj[column]
+        if not wrapper.grouper.is_grouped():
+            if wrapper.ndim == 1:
+                return obj
+            raise TypeError(&#34;Only one column is allowed. Use indexing or column argument.&#34;)
+        if wrapper.grouped_ndim == 1:
+            return obj
         raise TypeError(&#34;Only one group is allowed. Use indexing or column argument.&#34;)</code></pre>
 </details>
 </section>
@@ -893,7 +919,7 @@ Tightly integrated with <code><a title="vectorbt.base.column_grouper.ColumnGroup
 
         if column_only_select:
             if i_wrapper.ndim == 1:
-                raise IndexingError(&#34;Columns only: Attempting to select a column on a Series&#34;)
+                raise IndexingError(&#34;Columns only: This object already contains one column of data&#34;)
             try:
                 col_mapper = pd_indexing_func(i_wrapper.wrap_reduced(np.arange(n_cols), columns=columns))
             except pd.core.indexing.IndexingError as e:
@@ -1119,7 +1145,8 @@ Tightly integrated with <code><a title="vectorbt.base.column_grouper.ColumnGroup
     def to_time_units(self, a: tp.MaybeArray[float]) -&gt; tp.Union[pd.Timedelta, tp.Array]:
         &#34;&#34;&#34;Convert array to time units.&#34;&#34;&#34;
         if self.freq is None:
-            raise ValueError(&#34;Couldn&#39;t parse the frequency of index. You must set `freq`.&#34;)
+            raise ValueError(&#34;Couldn&#39;t parse the frequency of index. &#34;
+                             &#34;Pass it as `freq` or define it globally under `settings.array_wrapper`.&#34;)
         return a * self.freq
 
     @property
@@ -1679,7 +1706,7 @@ def indexing_func_meta(self: ArrayWrapperT,
 
     if column_only_select:
         if i_wrapper.ndim == 1:
-            raise IndexingError(&#34;Columns only: Attempting to select a column on a Series&#34;)
+            raise IndexingError(&#34;Columns only: This object already contains one column of data&#34;)
         try:
             col_mapper = pd_indexing_func(i_wrapper.wrap_reduced(np.arange(n_cols), columns=columns))
         except pd.core.indexing.IndexingError as e:
@@ -1862,7 +1889,8 @@ def resolve(self: ArrayWrapperT, group_by: tp.GroupByLike = None, **kwargs) -&gt
 <pre><code class="python">def to_time_units(self, a: tp.MaybeArray[float]) -&gt; tp.Union[pd.Timedelta, tp.Array]:
     &#34;&#34;&#34;Convert array to time units.&#34;&#34;&#34;
     if self.freq is None:
-        raise ValueError(&#34;Couldn&#39;t parse the frequency of index. You must set `freq`.&#34;)
+        raise ValueError(&#34;Couldn&#39;t parse the frequency of index. &#34;
+                         &#34;Pass it as `freq` or define it globally under `settings.array_wrapper`.&#34;)
     return a * self.freq</code></pre>
 </details>
 </dd>
@@ -2002,6 +2030,7 @@ or the index of the resulting series/dataframe if reducing to an array per colum
 <li><code><a title="vectorbt.utils.config.Configured.loads" href="../utils/config.html#vectorbt.utils.config.Pickleable.loads">loads</a></code></li>
 <li><code><a title="vectorbt.utils.config.Configured.save" href="../utils/config.html#vectorbt.utils.config.Pickleable.save">save</a></code></li>
 <li><code><a title="vectorbt.utils.config.Configured.update_config" href="../utils/config.html#vectorbt.utils.config.Configured.update_config">update_config</a></code></li>
+<li><code><a title="vectorbt.utils.config.Configured.writeable_attrs" href="../utils/config.html#vectorbt.utils.config.Configured.writeable_attrs">writeable_attrs</a></code></li>
 </ul>
 </li>
 <li><code><b><a title="vectorbt.base.indexing.PandasIndexer" href="indexing.html#vectorbt.base.indexing.PandasIndexer">PandasIndexer</a></b></code>:
@@ -2054,10 +2083,16 @@ or the index of the resulting series/dataframe if reducing to an array per colum
             return self.copy(wrapper=self.wrapper.regroup(group_by, **kwargs))
         return self  # important for keeping cache
 
-    def select_series(self: WrappingT, column: tp.Any = None, group_by: tp.GroupByLike = None, **kwargs) -&gt; WrappingT:
+    def select_one(self: WrappingT, column: tp.Any = None, group_by: tp.GroupByLike = None, **kwargs) -&gt; WrappingT:
         &#34;&#34;&#34;Select one column/group.&#34;&#34;&#34;
         _self = self.regroup(group_by, **kwargs)
         if column is not None:
+            if _self.wrapper.grouper.is_grouped():
+                if column not in _self.wrapper.get_columns():
+                    raise KeyError(f&#34;Group &#39;{column}&#39; not found&#34;)
+            else:
+                if column not in _self.wrapper.columns:
+                    raise KeyError(f&#34;Column &#39;{column}&#39; not found&#34;)
             return _self[column]
         if not _self.wrapper.grouper.is_grouped():
             if _self.wrapper.ndim == 1:
@@ -2065,6 +2100,25 @@ or the index of the resulting series/dataframe if reducing to an array per colum
             raise TypeError(&#34;Only one column is allowed. Use indexing or column argument.&#34;)
         if _self.wrapper.grouped_ndim == 1:
             return _self
+        raise TypeError(&#34;Only one group is allowed. Use indexing or column argument.&#34;)
+
+    @staticmethod
+    def select_one_from_obj(obj: tp.SeriesFrame, wrapper: ArrayWrapper, column: tp.Any = None) -&gt; tp.MaybeSeries:
+        &#34;&#34;&#34;Select one column/group from a pandas object.&#34;&#34;&#34;
+        if column is not None:
+            if wrapper.grouper.is_grouped():
+                if column not in wrapper.get_columns():
+                    raise KeyError(f&#34;Group &#39;{column}&#39; not found&#34;)
+            else:
+                if column not in wrapper.columns:
+                    raise KeyError(f&#34;Column &#39;{column}&#39; not found&#34;)
+            return obj[column]
+        if not wrapper.grouper.is_grouped():
+            if wrapper.ndim == 1:
+                return obj
+            raise TypeError(&#34;Only one column is allowed. Use indexing or column argument.&#34;)
+        if wrapper.grouped_ndim == 1:
+            return obj
         raise TypeError(&#34;Only one group is allowed. Use indexing or column argument.&#34;)</code></pre>
 </details>
 <h3 class="section-subtitle">Ancestors</h3>
@@ -2082,6 +2136,38 @@ or the index of the resulting series/dataframe if reducing to an array per colum
 <li><a title="vectorbt.records.base.Records" href="../records/base.html#vectorbt.records.base.Records">Records</a></li>
 <li><a title="vectorbt.records.mapped_array.MappedArray" href="../records/mapped_array.html#vectorbt.records.mapped_array.MappedArray">MappedArray</a></li>
 </ul>
+<h3 class="section-subtitle">Static methods</h3>
+<dl>
+<dt id="vectorbt.base.array_wrapper.Wrapping.select_one_from_obj"><code class="name flex">
+<span>def <span class="ident">select_one_from_obj</span></span>(<span>obj, wrapper, column=None)</span>
+</code></dt>
+<dd>
+<div class="desc"><p>Select one column/group from a pandas object.</p></div>
+<details class="source">
+<summary>
+<span>Expand source code</span>
+</summary>
+<pre><code class="python">@staticmethod
+def select_one_from_obj(obj: tp.SeriesFrame, wrapper: ArrayWrapper, column: tp.Any = None) -&gt; tp.MaybeSeries:
+    &#34;&#34;&#34;Select one column/group from a pandas object.&#34;&#34;&#34;
+    if column is not None:
+        if wrapper.grouper.is_grouped():
+            if column not in wrapper.get_columns():
+                raise KeyError(f&#34;Group &#39;{column}&#39; not found&#34;)
+        else:
+            if column not in wrapper.columns:
+                raise KeyError(f&#34;Column &#39;{column}&#39; not found&#34;)
+        return obj[column]
+    if not wrapper.grouper.is_grouped():
+        if wrapper.ndim == 1:
+            return obj
+        raise TypeError(&#34;Only one column is allowed. Use indexing or column argument.&#34;)
+    if wrapper.grouped_ndim == 1:
+        return obj
+    raise TypeError(&#34;Only one group is allowed. Use indexing or column argument.&#34;)</code></pre>
+</details>
+</dd>
+</dl>
 <h3 class="section-subtitle">Instance variables</h3>
 <dl>
 <dt id="vectorbt.base.array_wrapper.Wrapping.wrapper"><code class="name">var <span class="ident">wrapper</span></code></dt>
@@ -2137,8 +2223,8 @@ def wrapper(self) -&gt; ArrayWrapper:
     return self  # important for keeping cache</code></pre>
 </details>
 </dd>
-<dt id="vectorbt.base.array_wrapper.Wrapping.select_series"><code class="name flex">
-<span>def <span class="ident">select_series</span></span>(<span>self, column=None, group_by=None, **kwargs)</span>
+<dt id="vectorbt.base.array_wrapper.Wrapping.select_one"><code class="name flex">
+<span>def <span class="ident">select_one</span></span>(<span>self, column=None, group_by=None, **kwargs)</span>
 </code></dt>
 <dd>
 <div class="desc"><p>Select one column/group.</p></div>
@@ -2146,10 +2232,16 @@ def wrapper(self) -&gt; ArrayWrapper:
 <summary>
 <span>Expand source code</span>
 </summary>
-<pre><code class="python">def select_series(self: WrappingT, column: tp.Any = None, group_by: tp.GroupByLike = None, **kwargs) -&gt; WrappingT:
+<pre><code class="python">def select_one(self: WrappingT, column: tp.Any = None, group_by: tp.GroupByLike = None, **kwargs) -&gt; WrappingT:
     &#34;&#34;&#34;Select one column/group.&#34;&#34;&#34;
     _self = self.regroup(group_by, **kwargs)
     if column is not None:
+        if _self.wrapper.grouper.is_grouped():
+            if column not in _self.wrapper.get_columns():
+                raise KeyError(f&#34;Group &#39;{column}&#39; not found&#34;)
+        else:
+            if column not in _self.wrapper.columns:
+                raise KeyError(f&#34;Column &#39;{column}&#39; not found&#34;)
         return _self[column]
     if not _self.wrapper.grouper.is_grouped():
         if _self.wrapper.ndim == 1:
@@ -2173,6 +2265,7 @@ def wrapper(self) -&gt; ArrayWrapper:
 <li><code><a title="vectorbt.utils.config.Configured.loads" href="../utils/config.html#vectorbt.utils.config.Pickleable.loads">loads</a></code></li>
 <li><code><a title="vectorbt.utils.config.Configured.save" href="../utils/config.html#vectorbt.utils.config.Pickleable.save">save</a></code></li>
 <li><code><a title="vectorbt.utils.config.Configured.update_config" href="../utils/config.html#vectorbt.utils.config.Configured.update_config">update_config</a></code></li>
+<li><code><a title="vectorbt.utils.config.Configured.writeable_attrs" href="../utils/config.html#vectorbt.utils.config.Configured.writeable_attrs">writeable_attrs</a></code></li>
 </ul>
 </li>
 <li><code><b><a title="vectorbt.base.indexing.PandasIndexer" href="indexing.html#vectorbt.base.indexing.PandasIndexer">PandasIndexer</a></b></code>:
@@ -2251,7 +2344,8 @@ title="Search"
 <ul class="">
 <li><code><a title="vectorbt.base.array_wrapper.Wrapping.indexing_func" href="#vectorbt.base.array_wrapper.Wrapping.indexing_func">indexing_func</a></code></li>
 <li><code><a title="vectorbt.base.array_wrapper.Wrapping.regroup" href="#vectorbt.base.array_wrapper.Wrapping.regroup">regroup</a></code></li>
-<li><code><a title="vectorbt.base.array_wrapper.Wrapping.select_series" href="#vectorbt.base.array_wrapper.Wrapping.select_series">select_series</a></code></li>
+<li><code><a title="vectorbt.base.array_wrapper.Wrapping.select_one" href="#vectorbt.base.array_wrapper.Wrapping.select_one">select_one</a></code></li>
+<li><code><a title="vectorbt.base.array_wrapper.Wrapping.select_one_from_obj" href="#vectorbt.base.array_wrapper.Wrapping.select_one_from_obj">select_one_from_obj</a></code></li>
 <li><code><a title="vectorbt.base.array_wrapper.Wrapping.wrapper" href="#vectorbt.base.array_wrapper.Wrapping.wrapper">wrapper</a></code></li>
 </ul>
 </li>

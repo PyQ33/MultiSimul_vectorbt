@@ -74,8 +74,8 @@ from vectorbt.utils.colors import adjust_lightness
 from vectorbt.utils.decorators import cached_property, cached_method
 from vectorbt.utils.config import merge_dicts
 from vectorbt.utils.datetime import DatetimeIndexes
-from vectorbt.utils.enum import to_value_map
-from vectorbt.utils.figure import make_figure
+from vectorbt.utils.enum import enum_to_value_map
+from vectorbt.utils.figure import make_figure, get_domain
 from vectorbt.utils.array import min_rel_rescale, max_rel_rescale
 from vectorbt.base.reshape_fns import to_1d, to_2d, broadcast_to
 from vectorbt.base.array_wrapper import ArrayWrapper
@@ -267,8 +267,8 @@ class Trades(Records):
         out[&#39;Exit Fees&#39;] = records_df[&#39;exit_fees&#39;]
         out[&#39;PnL&#39;] = records_df[&#39;pnl&#39;]
         out[&#39;Return&#39;] = records_df[&#39;return&#39;]
-        out[&#39;Direction&#39;] = records_df[&#39;direction&#39;].map(to_value_map(TradeDirection))
-        out[&#39;Status&#39;] = records_df[&#39;status&#39;].map(to_value_map(TradeStatus))
+        out[&#39;Direction&#39;] = records_df[&#39;direction&#39;].map(enum_to_value_map(TradeDirection))
+        out[&#39;Status&#39;] = records_df[&#39;status&#39;].map(enum_to_value_map(TradeStatus))
         if self.trade_type == TradeType.Trade:
             out[&#39;Position Id&#39;] = records_df[&#39;position_id&#39;]
         return out
@@ -465,7 +465,7 @@ class Trades(Records):
         from vectorbt._settings import settings
         plotting_cfg = settings[&#39;plotting&#39;]
 
-        self_col = self.select_series(column=column, group_by=False)
+        self_col = self.select_one(column=column, group_by=False)
 
         if closed_profit_trace_kwargs is None:
             closed_profit_trace_kwargs = {}
@@ -488,22 +488,16 @@ class Trades(Records):
             _layout_kwargs[yaxis] = dict(tickformat=&#39;.2%&#39;)
             fig.update_layout(**_layout_kwargs)
         fig.update_layout(**layout_kwargs)
-        x_domain = [0, 1]
-        if xaxis in fig.layout:
-            if &#39;domain&#39; in fig.layout[xaxis]:
-                if fig.layout[xaxis][&#39;domain&#39;] is not None:
-                    x_domain = fig.layout[xaxis][&#39;domain&#39;]
+        x_domain = get_domain(xref, fig)
 
         if len(self_col.values) &gt; 0:
             # Extract information
-            _id = self.values[&#39;id&#39;]
-            _id_str = &#39;Trade Id&#39; if self.trade_type == TradeType.Trade else &#39;Position Id&#39;
             _pnl_str = &#39;%{customdata[1]:.6f}&#39; if as_pct else &#39;%{y}&#39;
             _return_str = &#39;%{y}&#39; if as_pct else &#39;%{customdata[1]:.2%}&#39;
-            exit_idx = self.values[&#39;exit_idx&#39;]
-            pnl = self.values[&#39;pnl&#39;]
-            returns = self.values[&#39;return&#39;]
-            status = self.values[&#39;status&#39;]
+            exit_idx = self_col.values[&#39;exit_idx&#39;]
+            pnl = self_col.values[&#39;pnl&#39;]
+            returns = self_col.values[&#39;return&#39;]
+            status = self_col.values[&#39;status&#39;]
 
             neutral_mask = pnl == 0
             profit_mask = pnl &gt; 0
@@ -519,6 +513,26 @@ class Trades(Records):
 
             def _plot_scatter(mask: tp.Array1d, name: tp.TraceName, color: tp.Any, kwargs: tp.Kwargs) -&gt; None:
                 if np.any(mask):
+                    if self_col.trade_type == TradeType.Trade:
+                        customdata = np.stack((
+                            self_col.values[&#39;id&#39;][mask],
+                            self_col.values[&#39;position_id&#39;][mask],
+                            pnl[mask] if as_pct else returns[mask]
+                        ), axis=1)
+                        hovertemplate = &#34;Trade Id: %{customdata[0]}&#34; \
+                                        &#34;&lt;br&gt;Position Id: %{customdata[1]}&#34; \
+                                        &#34;&lt;br&gt;Date: %{x}&#34; \
+                                        f&#34;&lt;br&gt;PnL: {_pnl_str}&#34; \
+                                        f&#34;&lt;br&gt;Return: {_return_str}&#34;
+                    else:
+                        customdata = np.stack((
+                            self_col.values[&#39;id&#39;][mask],
+                            pnl[mask] if as_pct else returns[mask]
+                        ), axis=1)
+                        hovertemplate = &#34;Position Id: %{customdata[0]}&#34; \
+                                        &#34;&lt;br&gt;Date: %{x}&#34; \
+                                        f&#34;&lt;br&gt;PnL: {_pnl_str}&#34; \
+                                        f&#34;&lt;br&gt;Return: {_return_str}&#34;
                     scatter = go.Scatter(
                         x=self_col.wrapper.index[exit_idx[mask]],
                         y=returns[mask] if as_pct else pnl[mask],
@@ -534,14 +548,8 @@ class Trades(Records):
                             ),
                         ),
                         name=name,
-                        customdata=np.stack((
-                            _id[mask],
-                            pnl[mask] if as_pct else returns[mask]
-                        ), axis=1),
-                        hovertemplate=_id_str + &#34;: %{customdata[0]}&#34;
-                                                &#34;&lt;br&gt;Date: %{x}&#34;
-                                                f&#34;&lt;br&gt;PnL: {_pnl_str}&#34;
-                                                f&#34;&lt;br&gt;Return: {_return_str}&#34;
+                        customdata=customdata,
+                        hovertemplate=hovertemplate
                     )
                     scatter.update(**kwargs)
                     fig.add_trace(scatter, **add_trace_kwargs)
@@ -651,13 +659,15 @@ class Trades(Records):
         from vectorbt._settings import settings
         plotting_cfg = settings[&#39;plotting&#39;]
 
-        self_col = self.select_series(column=column, group_by=False)
+        self_col = self.select_one(column=column, group_by=False)
 
         if close_trace_kwargs is None:
             close_trace_kwargs = {}
         close_trace_kwargs = merge_dicts(dict(
-            line_color=plotting_cfg[&#39;color_schema&#39;][&#39;blue&#39;],
-            name=&#39;Close&#39; if self_col.wrapper.name is None else self_col.wrapper.name
+            line=dict(
+                color=plotting_cfg[&#39;color_schema&#39;][&#39;blue&#39;]
+            ),
+            name=&#39;Close&#39;
         ), close_trace_kwargs)
         if entry_trace_kwargs is None:
             entry_trace_kwargs = {}
@@ -697,7 +707,7 @@ class Trades(Records):
             exit_fees = self_col.values[&#39;exit_fees&#39;]
             pnl = self_col.values[&#39;pnl&#39;]
             ret = self_col.values[&#39;return&#39;]
-            direction_value_map = to_value_map(TradeDirection)
+            direction_value_map = enum_to_value_map(TradeDirection)
             direction = self_col.values[&#39;direction&#39;]
             direction = np.vectorize(lambda x: str(direction_value_map[x]))(direction)
             status = self_col.values[&#39;status&#39;]
@@ -1164,6 +1174,7 @@ def coverage(self, group_by: tp.GroupByLike = None, wrap_kwargs: tp.KwargsLike =
 <li><code><a title="vectorbt.portfolio.trades.Trades.expectancy" href="#vectorbt.portfolio.trades.Trades.expectancy">expectancy</a></code></li>
 <li><code><a title="vectorbt.portfolio.trades.Trades.filter_by_mask" href="../records/base.html#vectorbt.records.base.Records.filter_by_mask">filter_by_mask</a></code></li>
 <li><code><a title="vectorbt.portfolio.trades.Trades.from_orders" href="#vectorbt.portfolio.trades.Trades.from_orders">from_orders</a></code></li>
+<li><code><a title="vectorbt.portfolio.trades.Trades.get_by_col_idxs" href="../records/base.html#vectorbt.records.base.Records.get_by_col_idxs">get_by_col_idxs</a></code></li>
 <li><code><a title="vectorbt.portfolio.trades.Trades.getattr" href="../utils/config.html#vectorbt.utils.config.Configured.getattr">getattr</a></code></li>
 <li><code><a title="vectorbt.portfolio.trades.Trades.idx_field" href="../records/base.html#vectorbt.records.base.Records.idx_field">idx_field</a></code></li>
 <li><code><a title="vectorbt.portfolio.trades.Trades.iloc" href="../base/indexing.html#vectorbt.base.indexing.PandasIndexer.iloc">iloc</a></code></li>
@@ -1195,7 +1206,8 @@ def coverage(self, group_by: tp.GroupByLike = None, wrap_kwargs: tp.KwargsLike =
 <li><code><a title="vectorbt.portfolio.trades.Trades.regroup" href="../base/array_wrapper.html#vectorbt.base.array_wrapper.Wrapping.regroup">regroup</a></code></li>
 <li><code><a title="vectorbt.portfolio.trades.Trades.returns" href="#vectorbt.portfolio.trades.Trades.returns">returns</a></code></li>
 <li><code><a title="vectorbt.portfolio.trades.Trades.save" href="../utils/config.html#vectorbt.utils.config.Pickleable.save">save</a></code></li>
-<li><code><a title="vectorbt.portfolio.trades.Trades.select_series" href="../base/array_wrapper.html#vectorbt.base.array_wrapper.Wrapping.select_series">select_series</a></code></li>
+<li><code><a title="vectorbt.portfolio.trades.Trades.select_one" href="../base/array_wrapper.html#vectorbt.base.array_wrapper.Wrapping.select_one">select_one</a></code></li>
+<li><code><a title="vectorbt.portfolio.trades.Trades.select_one_from_obj" href="../base/array_wrapper.html#vectorbt.base.array_wrapper.Wrapping.select_one_from_obj">select_one_from_obj</a></code></li>
 <li><code><a title="vectorbt.portfolio.trades.Trades.short" href="#vectorbt.portfolio.trades.Trades.short">short</a></code></li>
 <li><code><a title="vectorbt.portfolio.trades.Trades.short_rate" href="#vectorbt.portfolio.trades.Trades.short_rate">short_rate</a></code></li>
 <li><code><a title="vectorbt.portfolio.trades.Trades.sort" href="../records/base.html#vectorbt.records.base.Records.sort">sort</a></code></li>
@@ -1208,6 +1220,11 @@ def coverage(self, group_by: tp.GroupByLike = None, wrap_kwargs: tp.KwargsLike =
 <li><code><a title="vectorbt.portfolio.trades.Trades.winning" href="#vectorbt.portfolio.trades.Trades.winning">winning</a></code></li>
 <li><code><a title="vectorbt.portfolio.trades.Trades.wrapper" href="../base/array_wrapper.html#vectorbt.base.array_wrapper.Wrapping.wrapper">wrapper</a></code></li>
 <li><code><a title="vectorbt.portfolio.trades.Trades.xs" href="../base/indexing.html#vectorbt.base.indexing.PandasIndexer.xs">xs</a></code></li>
+</ul>
+</li>
+<li><code><b><a title="vectorbt.utils.config.Configured" href="../utils/config.html#vectorbt.utils.config.Configured">Configured</a></b></code>:
+<ul class="hlist">
+<li><code><a title="vectorbt.utils.config.Configured.writeable_attrs" href="../utils/config.html#vectorbt.utils.config.Configured.writeable_attrs">writeable_attrs</a></code></li>
 </ul>
 </li>
 </ul>
@@ -1480,8 +1497,8 @@ the sum over all sizes and fees.</p>
         out[&#39;Exit Fees&#39;] = records_df[&#39;exit_fees&#39;]
         out[&#39;PnL&#39;] = records_df[&#39;pnl&#39;]
         out[&#39;Return&#39;] = records_df[&#39;return&#39;]
-        out[&#39;Direction&#39;] = records_df[&#39;direction&#39;].map(to_value_map(TradeDirection))
-        out[&#39;Status&#39;] = records_df[&#39;status&#39;].map(to_value_map(TradeStatus))
+        out[&#39;Direction&#39;] = records_df[&#39;direction&#39;].map(enum_to_value_map(TradeDirection))
+        out[&#39;Status&#39;] = records_df[&#39;status&#39;].map(enum_to_value_map(TradeStatus))
         if self.trade_type == TradeType.Trade:
             out[&#39;Position Id&#39;] = records_df[&#39;position_id&#39;]
         return out
@@ -1678,7 +1695,7 @@ the sum over all sizes and fees.</p>
         from vectorbt._settings import settings
         plotting_cfg = settings[&#39;plotting&#39;]
 
-        self_col = self.select_series(column=column, group_by=False)
+        self_col = self.select_one(column=column, group_by=False)
 
         if closed_profit_trace_kwargs is None:
             closed_profit_trace_kwargs = {}
@@ -1701,22 +1718,16 @@ the sum over all sizes and fees.</p>
             _layout_kwargs[yaxis] = dict(tickformat=&#39;.2%&#39;)
             fig.update_layout(**_layout_kwargs)
         fig.update_layout(**layout_kwargs)
-        x_domain = [0, 1]
-        if xaxis in fig.layout:
-            if &#39;domain&#39; in fig.layout[xaxis]:
-                if fig.layout[xaxis][&#39;domain&#39;] is not None:
-                    x_domain = fig.layout[xaxis][&#39;domain&#39;]
+        x_domain = get_domain(xref, fig)
 
         if len(self_col.values) &gt; 0:
             # Extract information
-            _id = self.values[&#39;id&#39;]
-            _id_str = &#39;Trade Id&#39; if self.trade_type == TradeType.Trade else &#39;Position Id&#39;
             _pnl_str = &#39;%{customdata[1]:.6f}&#39; if as_pct else &#39;%{y}&#39;
             _return_str = &#39;%{y}&#39; if as_pct else &#39;%{customdata[1]:.2%}&#39;
-            exit_idx = self.values[&#39;exit_idx&#39;]
-            pnl = self.values[&#39;pnl&#39;]
-            returns = self.values[&#39;return&#39;]
-            status = self.values[&#39;status&#39;]
+            exit_idx = self_col.values[&#39;exit_idx&#39;]
+            pnl = self_col.values[&#39;pnl&#39;]
+            returns = self_col.values[&#39;return&#39;]
+            status = self_col.values[&#39;status&#39;]
 
             neutral_mask = pnl == 0
             profit_mask = pnl &gt; 0
@@ -1732,6 +1743,26 @@ the sum over all sizes and fees.</p>
 
             def _plot_scatter(mask: tp.Array1d, name: tp.TraceName, color: tp.Any, kwargs: tp.Kwargs) -&gt; None:
                 if np.any(mask):
+                    if self_col.trade_type == TradeType.Trade:
+                        customdata = np.stack((
+                            self_col.values[&#39;id&#39;][mask],
+                            self_col.values[&#39;position_id&#39;][mask],
+                            pnl[mask] if as_pct else returns[mask]
+                        ), axis=1)
+                        hovertemplate = &#34;Trade Id: %{customdata[0]}&#34; \
+                                        &#34;&lt;br&gt;Position Id: %{customdata[1]}&#34; \
+                                        &#34;&lt;br&gt;Date: %{x}&#34; \
+                                        f&#34;&lt;br&gt;PnL: {_pnl_str}&#34; \
+                                        f&#34;&lt;br&gt;Return: {_return_str}&#34;
+                    else:
+                        customdata = np.stack((
+                            self_col.values[&#39;id&#39;][mask],
+                            pnl[mask] if as_pct else returns[mask]
+                        ), axis=1)
+                        hovertemplate = &#34;Position Id: %{customdata[0]}&#34; \
+                                        &#34;&lt;br&gt;Date: %{x}&#34; \
+                                        f&#34;&lt;br&gt;PnL: {_pnl_str}&#34; \
+                                        f&#34;&lt;br&gt;Return: {_return_str}&#34;
                     scatter = go.Scatter(
                         x=self_col.wrapper.index[exit_idx[mask]],
                         y=returns[mask] if as_pct else pnl[mask],
@@ -1747,14 +1778,8 @@ the sum over all sizes and fees.</p>
                             ),
                         ),
                         name=name,
-                        customdata=np.stack((
-                            _id[mask],
-                            pnl[mask] if as_pct else returns[mask]
-                        ), axis=1),
-                        hovertemplate=_id_str + &#34;: %{customdata[0]}&#34;
-                                                &#34;&lt;br&gt;Date: %{x}&#34;
-                                                f&#34;&lt;br&gt;PnL: {_pnl_str}&#34;
-                                                f&#34;&lt;br&gt;Return: {_return_str}&#34;
+                        customdata=customdata,
+                        hovertemplate=hovertemplate
                     )
                     scatter.update(**kwargs)
                     fig.add_trace(scatter, **add_trace_kwargs)
@@ -1864,13 +1889,15 @@ the sum over all sizes and fees.</p>
         from vectorbt._settings import settings
         plotting_cfg = settings[&#39;plotting&#39;]
 
-        self_col = self.select_series(column=column, group_by=False)
+        self_col = self.select_one(column=column, group_by=False)
 
         if close_trace_kwargs is None:
             close_trace_kwargs = {}
         close_trace_kwargs = merge_dicts(dict(
-            line_color=plotting_cfg[&#39;color_schema&#39;][&#39;blue&#39;],
-            name=&#39;Close&#39; if self_col.wrapper.name is None else self_col.wrapper.name
+            line=dict(
+                color=plotting_cfg[&#39;color_schema&#39;][&#39;blue&#39;]
+            ),
+            name=&#39;Close&#39;
         ), close_trace_kwargs)
         if entry_trace_kwargs is None:
             entry_trace_kwargs = {}
@@ -1910,7 +1937,7 @@ the sum over all sizes and fees.</p>
             exit_fees = self_col.values[&#39;exit_fees&#39;]
             pnl = self_col.values[&#39;pnl&#39;]
             ret = self_col.values[&#39;return&#39;]
-            direction_value_map = to_value_map(TradeDirection)
+            direction_value_map = enum_to_value_map(TradeDirection)
             direction = self_col.values[&#39;direction&#39;]
             direction = np.vectorize(lambda x: str(direction_value_map[x]))(direction)
             status = self_col.values[&#39;status&#39;]
@@ -2321,8 +2348,8 @@ def records_readable(self) -&gt; tp.Frame:
     out[&#39;Exit Fees&#39;] = records_df[&#39;exit_fees&#39;]
     out[&#39;PnL&#39;] = records_df[&#39;pnl&#39;]
     out[&#39;Return&#39;] = records_df[&#39;return&#39;]
-    out[&#39;Direction&#39;] = records_df[&#39;direction&#39;].map(to_value_map(TradeDirection))
-    out[&#39;Status&#39;] = records_df[&#39;status&#39;].map(to_value_map(TradeStatus))
+    out[&#39;Direction&#39;] = records_df[&#39;direction&#39;].map(enum_to_value_map(TradeDirection))
+    out[&#39;Status&#39;] = records_df[&#39;status&#39;].map(enum_to_value_map(TradeStatus))
     if self.trade_type == TradeType.Trade:
         out[&#39;Position Id&#39;] = records_df[&#39;position_id&#39;]
     return out</code></pre>
@@ -2674,13 +2701,15 @@ def open_rate(self, group_by: tp.GroupByLike = None, wrap_kwargs: tp.KwargsLike 
     from vectorbt._settings import settings
     plotting_cfg = settings[&#39;plotting&#39;]
 
-    self_col = self.select_series(column=column, group_by=False)
+    self_col = self.select_one(column=column, group_by=False)
 
     if close_trace_kwargs is None:
         close_trace_kwargs = {}
     close_trace_kwargs = merge_dicts(dict(
-        line_color=plotting_cfg[&#39;color_schema&#39;][&#39;blue&#39;],
-        name=&#39;Close&#39; if self_col.wrapper.name is None else self_col.wrapper.name
+        line=dict(
+            color=plotting_cfg[&#39;color_schema&#39;][&#39;blue&#39;]
+        ),
+        name=&#39;Close&#39;
     ), close_trace_kwargs)
     if entry_trace_kwargs is None:
         entry_trace_kwargs = {}
@@ -2720,7 +2749,7 @@ def open_rate(self, group_by: tp.GroupByLike = None, wrap_kwargs: tp.KwargsLike 
         exit_fees = self_col.values[&#39;exit_fees&#39;]
         pnl = self_col.values[&#39;pnl&#39;]
         ret = self_col.values[&#39;return&#39;]
-        direction_value_map = to_value_map(TradeDirection)
+        direction_value_map = enum_to_value_map(TradeDirection)
         direction = self_col.values[&#39;direction&#39;]
         direction = np.vectorize(lambda x: str(direction_value_map[x]))(direction)
         status = self_col.values[&#39;status&#39;]
@@ -2987,7 +3016,7 @@ def open_rate(self, group_by: tp.GroupByLike = None, wrap_kwargs: tp.KwargsLike 
     from vectorbt._settings import settings
     plotting_cfg = settings[&#39;plotting&#39;]
 
-    self_col = self.select_series(column=column, group_by=False)
+    self_col = self.select_one(column=column, group_by=False)
 
     if closed_profit_trace_kwargs is None:
         closed_profit_trace_kwargs = {}
@@ -3010,22 +3039,16 @@ def open_rate(self, group_by: tp.GroupByLike = None, wrap_kwargs: tp.KwargsLike 
         _layout_kwargs[yaxis] = dict(tickformat=&#39;.2%&#39;)
         fig.update_layout(**_layout_kwargs)
     fig.update_layout(**layout_kwargs)
-    x_domain = [0, 1]
-    if xaxis in fig.layout:
-        if &#39;domain&#39; in fig.layout[xaxis]:
-            if fig.layout[xaxis][&#39;domain&#39;] is not None:
-                x_domain = fig.layout[xaxis][&#39;domain&#39;]
+    x_domain = get_domain(xref, fig)
 
     if len(self_col.values) &gt; 0:
         # Extract information
-        _id = self.values[&#39;id&#39;]
-        _id_str = &#39;Trade Id&#39; if self.trade_type == TradeType.Trade else &#39;Position Id&#39;
         _pnl_str = &#39;%{customdata[1]:.6f}&#39; if as_pct else &#39;%{y}&#39;
         _return_str = &#39;%{y}&#39; if as_pct else &#39;%{customdata[1]:.2%}&#39;
-        exit_idx = self.values[&#39;exit_idx&#39;]
-        pnl = self.values[&#39;pnl&#39;]
-        returns = self.values[&#39;return&#39;]
-        status = self.values[&#39;status&#39;]
+        exit_idx = self_col.values[&#39;exit_idx&#39;]
+        pnl = self_col.values[&#39;pnl&#39;]
+        returns = self_col.values[&#39;return&#39;]
+        status = self_col.values[&#39;status&#39;]
 
         neutral_mask = pnl == 0
         profit_mask = pnl &gt; 0
@@ -3041,6 +3064,26 @@ def open_rate(self, group_by: tp.GroupByLike = None, wrap_kwargs: tp.KwargsLike 
 
         def _plot_scatter(mask: tp.Array1d, name: tp.TraceName, color: tp.Any, kwargs: tp.Kwargs) -&gt; None:
             if np.any(mask):
+                if self_col.trade_type == TradeType.Trade:
+                    customdata = np.stack((
+                        self_col.values[&#39;id&#39;][mask],
+                        self_col.values[&#39;position_id&#39;][mask],
+                        pnl[mask] if as_pct else returns[mask]
+                    ), axis=1)
+                    hovertemplate = &#34;Trade Id: %{customdata[0]}&#34; \
+                                    &#34;&lt;br&gt;Position Id: %{customdata[1]}&#34; \
+                                    &#34;&lt;br&gt;Date: %{x}&#34; \
+                                    f&#34;&lt;br&gt;PnL: {_pnl_str}&#34; \
+                                    f&#34;&lt;br&gt;Return: {_return_str}&#34;
+                else:
+                    customdata = np.stack((
+                        self_col.values[&#39;id&#39;][mask],
+                        pnl[mask] if as_pct else returns[mask]
+                    ), axis=1)
+                    hovertemplate = &#34;Position Id: %{customdata[0]}&#34; \
+                                    &#34;&lt;br&gt;Date: %{x}&#34; \
+                                    f&#34;&lt;br&gt;PnL: {_pnl_str}&#34; \
+                                    f&#34;&lt;br&gt;Return: {_return_str}&#34;
                 scatter = go.Scatter(
                     x=self_col.wrapper.index[exit_idx[mask]],
                     y=returns[mask] if as_pct else pnl[mask],
@@ -3056,14 +3099,8 @@ def open_rate(self, group_by: tp.GroupByLike = None, wrap_kwargs: tp.KwargsLike 
                         ),
                     ),
                     name=name,
-                    customdata=np.stack((
-                        _id[mask],
-                        pnl[mask] if as_pct else returns[mask]
-                    ), axis=1),
-                    hovertemplate=_id_str + &#34;: %{customdata[0]}&#34;
-                                            &#34;&lt;br&gt;Date: %{x}&#34;
-                                            f&#34;&lt;br&gt;PnL: {_pnl_str}&#34;
-                                            f&#34;&lt;br&gt;Return: {_return_str}&#34;
+                    customdata=customdata,
+                    hovertemplate=hovertemplate
                 )
                 scatter.update(**kwargs)
                 fig.add_trace(scatter, **add_trace_kwargs)
@@ -3215,6 +3252,7 @@ def win_rate(self, group_by: tp.GroupByLike = None, wrap_kwargs: tp.KwargsLike =
 <li><code><a title="vectorbt.records.base.Records.count" href="../records/base.html#vectorbt.records.base.Records.count">count</a></code></li>
 <li><code><a title="vectorbt.records.base.Records.dumps" href="../utils/config.html#vectorbt.utils.config.Pickleable.dumps">dumps</a></code></li>
 <li><code><a title="vectorbt.records.base.Records.filter_by_mask" href="../records/base.html#vectorbt.records.base.Records.filter_by_mask">filter_by_mask</a></code></li>
+<li><code><a title="vectorbt.records.base.Records.get_by_col_idxs" href="../records/base.html#vectorbt.records.base.Records.get_by_col_idxs">get_by_col_idxs</a></code></li>
 <li><code><a title="vectorbt.records.base.Records.getattr" href="../utils/config.html#vectorbt.utils.config.Configured.getattr">getattr</a></code></li>
 <li><code><a title="vectorbt.records.base.Records.idx_field" href="../records/base.html#vectorbt.records.base.Records.idx_field">idx_field</a></code></li>
 <li><code><a title="vectorbt.records.base.Records.iloc" href="../base/indexing.html#vectorbt.base.indexing.PandasIndexer.iloc">iloc</a></code></li>
@@ -3230,12 +3268,18 @@ def win_rate(self, group_by: tp.GroupByLike = None, wrap_kwargs: tp.KwargsLike =
 <li><code><a title="vectorbt.records.base.Records.records_arr" href="../records/base.html#vectorbt.records.base.Records.records_arr">records_arr</a></code></li>
 <li><code><a title="vectorbt.records.base.Records.regroup" href="../base/array_wrapper.html#vectorbt.base.array_wrapper.Wrapping.regroup">regroup</a></code></li>
 <li><code><a title="vectorbt.records.base.Records.save" href="../utils/config.html#vectorbt.utils.config.Pickleable.save">save</a></code></li>
-<li><code><a title="vectorbt.records.base.Records.select_series" href="../base/array_wrapper.html#vectorbt.base.array_wrapper.Wrapping.select_series">select_series</a></code></li>
+<li><code><a title="vectorbt.records.base.Records.select_one" href="../base/array_wrapper.html#vectorbt.base.array_wrapper.Wrapping.select_one">select_one</a></code></li>
+<li><code><a title="vectorbt.records.base.Records.select_one_from_obj" href="../base/array_wrapper.html#vectorbt.base.array_wrapper.Wrapping.select_one_from_obj">select_one_from_obj</a></code></li>
 <li><code><a title="vectorbt.records.base.Records.sort" href="../records/base.html#vectorbt.records.base.Records.sort">sort</a></code></li>
 <li><code><a title="vectorbt.records.base.Records.update_config" href="../utils/config.html#vectorbt.utils.config.Configured.update_config">update_config</a></code></li>
 <li><code><a title="vectorbt.records.base.Records.values" href="../records/base.html#vectorbt.records.base.Records.values">values</a></code></li>
 <li><code><a title="vectorbt.records.base.Records.wrapper" href="../base/array_wrapper.html#vectorbt.base.array_wrapper.Wrapping.wrapper">wrapper</a></code></li>
 <li><code><a title="vectorbt.records.base.Records.xs" href="../base/indexing.html#vectorbt.base.indexing.PandasIndexer.xs">xs</a></code></li>
+</ul>
+</li>
+<li><code><b><a title="vectorbt.utils.config.Configured" href="../utils/config.html#vectorbt.utils.config.Configured">Configured</a></b></code>:
+<ul class="hlist">
+<li><code><a title="vectorbt.utils.config.Configured.writeable_attrs" href="../utils/config.html#vectorbt.utils.config.Configured.writeable_attrs">writeable_attrs</a></code></li>
 </ul>
 </li>
 </ul>

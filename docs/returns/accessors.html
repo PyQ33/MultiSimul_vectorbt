@@ -103,7 +103,7 @@ from vectorbt import _typing as tp
 from vectorbt.root_accessors import register_dataframe_accessor, register_series_accessor
 from vectorbt.utils import checks
 from vectorbt.utils.config import merge_dicts
-from vectorbt.utils.figure import make_figure
+from vectorbt.utils.figure import make_figure, get_domain
 from vectorbt.utils.decorators import cached_property, cached_method
 from vectorbt.base.reshape_fns import to_1d, to_2d, broadcast_to
 from vectorbt.generic.drawdowns import Drawdowns
@@ -152,7 +152,8 @@ class ReturnsAccessor(GenericAccessor):
     def ann_factor(self) -&gt; float:
         &#34;&#34;&#34;Annualization factor.&#34;&#34;&#34;
         if self.wrapper.freq is None:
-            raise ValueError(&#34;Couldn&#39;t parse the frequency of index. You must set `freq`.&#34;)
+            raise ValueError(&#34;Couldn&#39;t parse the frequency of index. &#34;
+                             &#34;Pass it as `freq` or define it globally under `settings.array_wrapper`.&#34;)
         return self.year_freq / self.wrapper.freq
 
     def daily(self, **kwargs) -&gt; tp.SeriesFrame:
@@ -213,7 +214,8 @@ class ReturnsAccessor(GenericAccessor):
         &#34;&#34;&#34;Annualized volatility of a strategy.
 
         Args:
-            levy_alpha (float): Scaling relation (Levy stability exponent).&#34;&#34;&#34;
+            levy_alpha (float): Scaling relation (Levy stability exponent).
+            ddof (int): Means Delta Degrees of Freedom.&#34;&#34;&#34;
         result = nb.annualized_volatility_nb(self.to_2d_array(), self.ann_factor, levy_alpha, ddof)
         wrap_kwargs = merge_dicts(dict(name_or_index=&#39;annualized_volatility&#39;), wrap_kwargs)
         return self.wrapper.wrap_reduced(result, **wrap_kwargs)
@@ -263,7 +265,8 @@ class ReturnsAccessor(GenericAccessor):
         &#34;&#34;&#34;Sharpe ratio of a strategy.
 
         Args:
-            risk_free (float): Constant risk-free return throughout the period.&#34;&#34;&#34;
+            risk_free (float): Constant risk-free return throughout the period.
+            ddof (int): Means Delta Degrees of Freedom.&#34;&#34;&#34;
         result = nb.sharpe_ratio_nb(self.to_2d_array(), self.ann_factor, risk_free, ddof)
         wrap_kwargs = merge_dicts(dict(name_or_index=&#39;sharpe_ratio&#39;), wrap_kwargs)
         return self.wrapper.wrap_reduced(result, **wrap_kwargs)
@@ -343,7 +346,9 @@ class ReturnsAccessor(GenericAccessor):
         &#34;&#34;&#34;Information ratio of a strategy.
 
         Args:
-            benchmark_rets (array_like): Benchmark return to compare returns against. Will broadcast.&#34;&#34;&#34;
+            benchmark_rets (array_like): Benchmark return to compare returns against.
+                Will broadcast per element.
+            ddof (int): Means Delta Degrees of Freedom.&#34;&#34;&#34;
         benchmark_rets = broadcast_to(to_2d(benchmark_rets, raw=True), to_2d(self._obj, raw=True))
         result = nb.information_ratio_nb(self.to_2d_array(), benchmark_rets, ddof)
         wrap_kwargs = merge_dicts(dict(name_or_index=&#39;information_ratio&#39;), wrap_kwargs)
@@ -361,7 +366,8 @@ class ReturnsAccessor(GenericAccessor):
         &#34;&#34;&#34;Beta.
 
         Args:
-            benchmark_rets (array_like): Benchmark return to compare returns against. Will broadcast.&#34;&#34;&#34;
+            benchmark_rets (array_like): Benchmark return to compare returns against.
+                Will broadcast per element.&#34;&#34;&#34;
         benchmark_rets = broadcast_to(to_2d(benchmark_rets, raw=True), to_2d(self._obj, raw=True))
         result = nb.beta_nb(self.to_2d_array(), benchmark_rets)
         wrap_kwargs = merge_dicts(dict(name_or_index=&#39;beta&#39;), wrap_kwargs)
@@ -380,7 +386,8 @@ class ReturnsAccessor(GenericAccessor):
         &#34;&#34;&#34;Annualized alpha.
 
         Args:
-            benchmark_rets (array_like): Benchmark return to compare returns against. Will broadcast.
+            benchmark_rets (array_like): Benchmark return to compare returns against.
+                Will broadcast per element.
             risk_free (float): Constant risk-free return throughout the period.&#34;&#34;&#34;
         benchmark_rets = broadcast_to(to_2d(benchmark_rets, raw=True), to_2d(self._obj, raw=True))
         result = nb.alpha_nb(self.to_2d_array(), benchmark_rets, self.ann_factor, risk_free)
@@ -461,7 +468,8 @@ class ReturnsAccessor(GenericAccessor):
         &#34;&#34;&#34;Capture ratio.
 
         Args:
-            benchmark_rets (array_like): Benchmark return to compare returns against. Will broadcast.&#34;&#34;&#34;
+            benchmark_rets (array_like): Benchmark return to compare returns against.
+                Will broadcast per element.&#34;&#34;&#34;
         benchmark_rets = broadcast_to(to_2d(benchmark_rets, raw=True), to_2d(self._obj, raw=True))
         result = nb.capture_nb(self.to_2d_array(), benchmark_rets, self.ann_factor)
         wrap_kwargs = merge_dicts(dict(name_or_index=&#39;capture&#39;), wrap_kwargs)
@@ -479,7 +487,8 @@ class ReturnsAccessor(GenericAccessor):
         &#34;&#34;&#34;Capture ratio for periods when the benchmark return is positive.
 
         Args:
-            benchmark_rets (array_like): Benchmark return to compare returns against. Will broadcast.&#34;&#34;&#34;
+            benchmark_rets (array_like): Benchmark return to compare returns against.
+                Will broadcast per element.&#34;&#34;&#34;
         benchmark_rets = broadcast_to(to_2d(benchmark_rets, raw=True), to_2d(self._obj, raw=True))
         result = nb.up_capture_nb(self.to_2d_array(), benchmark_rets, self.ann_factor)
         wrap_kwargs = merge_dicts(dict(name_or_index=&#39;up_capture&#39;), wrap_kwargs)
@@ -497,7 +506,8 @@ class ReturnsAccessor(GenericAccessor):
         &#34;&#34;&#34;Capture ratio for periods when the benchmark return is negative.
 
         Args:
-            benchmark_rets (array_like): Benchmark return to compare returns against. Will broadcast.&#34;&#34;&#34;
+            benchmark_rets (array_like): Benchmark return to compare returns against. 
+                Will broadcast per element.&#34;&#34;&#34;
         benchmark_rets = broadcast_to(to_2d(benchmark_rets, raw=True), to_2d(self._obj, raw=True))
         result = nb.down_capture_nb(self.to_2d_array(), benchmark_rets, self.ann_factor)
         wrap_kwargs = merge_dicts(dict(name_or_index=&#39;down_capture&#39;), wrap_kwargs)
@@ -561,6 +571,7 @@ class ReturnsAccessor(GenericAccessor):
                 Will broadcast per column.
             required_return (float): Minimum acceptance return of the investor.
                 Will broadcast per column.
+            wrap_kwargs (dict): Keyword arguments passed to `vectorbt.base.array_wrapper.ArrayWrapper.wrap`.
 
         ## Example
 
@@ -582,7 +593,7 @@ class ReturnsAccessor(GenericAccessor):
         Annual Volatility [%]                88.4466
         Sharpe Ratio                         1.66841
         Calmar Ratio                         2.34193
-        Max. Drawdown [%]                   -83.0363
+        Max Drawdown [%]                    -83.0363
         Omega Ratio                          1.31107
         Sortino Ratio                        2.54018
         Skew                               0.0101324
@@ -607,7 +618,7 @@ class ReturnsAccessor(GenericAccessor):
             &#39;Annual Volatility [%]&#39;: self.annualized_volatility(levy_alpha=levy_alpha) * 100,
             &#39;Sharpe Ratio&#39;: self.sharpe_ratio(risk_free=risk_free),
             &#39;Calmar Ratio&#39;: self.calmar_ratio(),
-            &#39;Max. Drawdown [%]&#39;: self.max_drawdown() * 100,
+            &#39;Max Drawdown [%]&#39;: self.max_drawdown() * 100,
             &#39;Omega Ratio&#39;: self.omega_ratio(required_return=required_return),
             &#39;Sortino Ratio&#39;: self.sortino_ratio(required_return=required_return),
             &#39;Skew&#39;: self._obj.skew(axis=0),
@@ -687,12 +698,7 @@ class ReturnsSRAccessor(ReturnsAccessor, GenericSRAccessor):
         if fig is None:
             fig = make_figure()
         fig.update_layout(**layout_kwargs)
-        x_domain = [0, 1]
-        xaxis = &#39;xaxis&#39; + xref[1:]
-        if xaxis in fig.layout:
-            if &#39;domain&#39; in fig.layout[xaxis]:
-                if fig.layout[xaxis][&#39;domain&#39;] is not None:
-                    x_domain = fig.layout[xaxis][&#39;domain&#39;]
+        x_domain = get_domain(xref, fig)
         fill_to_benchmark = fill_to_benchmark and benchmark_rets is not None
 
         if benchmark_rets is not None:
@@ -702,7 +708,9 @@ class ReturnsSRAccessor(ReturnsAccessor, GenericSRAccessor):
                 benchmark_kwargs = {}
             benchmark_kwargs = merge_dicts(dict(
                 trace_kwargs=dict(
-                    line_color=plotting_cfg[&#39;color_schema&#39;][&#39;gray&#39;],
+                    line=dict(
+                        color=plotting_cfg[&#39;color_schema&#39;][&#39;gray&#39;]
+                    ),
                     name=&#39;Benchmark&#39;
                 )
             ), benchmark_kwargs)
@@ -716,7 +724,9 @@ class ReturnsSRAccessor(ReturnsAccessor, GenericSRAccessor):
             main_kwargs = {}
         main_kwargs = merge_dicts(dict(
             trace_kwargs=dict(
-                line_color=plotting_cfg[&#39;color_schema&#39;][&#39;purple&#39;],
+                line=dict(
+                    color=plotting_cfg[&#39;color_schema&#39;][&#39;purple&#39;]
+                )
             ),
             other_trace_kwargs=&#39;hidden&#39;
         ), main_kwargs)
@@ -814,7 +824,8 @@ class ReturnsDFAccessor(ReturnsAccessor, GenericDFAccessor):
     def ann_factor(self) -&gt; float:
         &#34;&#34;&#34;Annualization factor.&#34;&#34;&#34;
         if self.wrapper.freq is None:
-            raise ValueError(&#34;Couldn&#39;t parse the frequency of index. You must set `freq`.&#34;)
+            raise ValueError(&#34;Couldn&#39;t parse the frequency of index. &#34;
+                             &#34;Pass it as `freq` or define it globally under `settings.array_wrapper`.&#34;)
         return self.year_freq / self.wrapper.freq
 
     def daily(self, **kwargs) -&gt; tp.SeriesFrame:
@@ -875,7 +886,8 @@ class ReturnsDFAccessor(ReturnsAccessor, GenericDFAccessor):
         &#34;&#34;&#34;Annualized volatility of a strategy.
 
         Args:
-            levy_alpha (float): Scaling relation (Levy stability exponent).&#34;&#34;&#34;
+            levy_alpha (float): Scaling relation (Levy stability exponent).
+            ddof (int): Means Delta Degrees of Freedom.&#34;&#34;&#34;
         result = nb.annualized_volatility_nb(self.to_2d_array(), self.ann_factor, levy_alpha, ddof)
         wrap_kwargs = merge_dicts(dict(name_or_index=&#39;annualized_volatility&#39;), wrap_kwargs)
         return self.wrapper.wrap_reduced(result, **wrap_kwargs)
@@ -925,7 +937,8 @@ class ReturnsDFAccessor(ReturnsAccessor, GenericDFAccessor):
         &#34;&#34;&#34;Sharpe ratio of a strategy.
 
         Args:
-            risk_free (float): Constant risk-free return throughout the period.&#34;&#34;&#34;
+            risk_free (float): Constant risk-free return throughout the period.
+            ddof (int): Means Delta Degrees of Freedom.&#34;&#34;&#34;
         result = nb.sharpe_ratio_nb(self.to_2d_array(), self.ann_factor, risk_free, ddof)
         wrap_kwargs = merge_dicts(dict(name_or_index=&#39;sharpe_ratio&#39;), wrap_kwargs)
         return self.wrapper.wrap_reduced(result, **wrap_kwargs)
@@ -1005,7 +1018,9 @@ class ReturnsDFAccessor(ReturnsAccessor, GenericDFAccessor):
         &#34;&#34;&#34;Information ratio of a strategy.
 
         Args:
-            benchmark_rets (array_like): Benchmark return to compare returns against. Will broadcast.&#34;&#34;&#34;
+            benchmark_rets (array_like): Benchmark return to compare returns against.
+                Will broadcast per element.
+            ddof (int): Means Delta Degrees of Freedom.&#34;&#34;&#34;
         benchmark_rets = broadcast_to(to_2d(benchmark_rets, raw=True), to_2d(self._obj, raw=True))
         result = nb.information_ratio_nb(self.to_2d_array(), benchmark_rets, ddof)
         wrap_kwargs = merge_dicts(dict(name_or_index=&#39;information_ratio&#39;), wrap_kwargs)
@@ -1023,7 +1038,8 @@ class ReturnsDFAccessor(ReturnsAccessor, GenericDFAccessor):
         &#34;&#34;&#34;Beta.
 
         Args:
-            benchmark_rets (array_like): Benchmark return to compare returns against. Will broadcast.&#34;&#34;&#34;
+            benchmark_rets (array_like): Benchmark return to compare returns against.
+                Will broadcast per element.&#34;&#34;&#34;
         benchmark_rets = broadcast_to(to_2d(benchmark_rets, raw=True), to_2d(self._obj, raw=True))
         result = nb.beta_nb(self.to_2d_array(), benchmark_rets)
         wrap_kwargs = merge_dicts(dict(name_or_index=&#39;beta&#39;), wrap_kwargs)
@@ -1042,7 +1058,8 @@ class ReturnsDFAccessor(ReturnsAccessor, GenericDFAccessor):
         &#34;&#34;&#34;Annualized alpha.
 
         Args:
-            benchmark_rets (array_like): Benchmark return to compare returns against. Will broadcast.
+            benchmark_rets (array_like): Benchmark return to compare returns against.
+                Will broadcast per element.
             risk_free (float): Constant risk-free return throughout the period.&#34;&#34;&#34;
         benchmark_rets = broadcast_to(to_2d(benchmark_rets, raw=True), to_2d(self._obj, raw=True))
         result = nb.alpha_nb(self.to_2d_array(), benchmark_rets, self.ann_factor, risk_free)
@@ -1123,7 +1140,8 @@ class ReturnsDFAccessor(ReturnsAccessor, GenericDFAccessor):
         &#34;&#34;&#34;Capture ratio.
 
         Args:
-            benchmark_rets (array_like): Benchmark return to compare returns against. Will broadcast.&#34;&#34;&#34;
+            benchmark_rets (array_like): Benchmark return to compare returns against.
+                Will broadcast per element.&#34;&#34;&#34;
         benchmark_rets = broadcast_to(to_2d(benchmark_rets, raw=True), to_2d(self._obj, raw=True))
         result = nb.capture_nb(self.to_2d_array(), benchmark_rets, self.ann_factor)
         wrap_kwargs = merge_dicts(dict(name_or_index=&#39;capture&#39;), wrap_kwargs)
@@ -1141,7 +1159,8 @@ class ReturnsDFAccessor(ReturnsAccessor, GenericDFAccessor):
         &#34;&#34;&#34;Capture ratio for periods when the benchmark return is positive.
 
         Args:
-            benchmark_rets (array_like): Benchmark return to compare returns against. Will broadcast.&#34;&#34;&#34;
+            benchmark_rets (array_like): Benchmark return to compare returns against.
+                Will broadcast per element.&#34;&#34;&#34;
         benchmark_rets = broadcast_to(to_2d(benchmark_rets, raw=True), to_2d(self._obj, raw=True))
         result = nb.up_capture_nb(self.to_2d_array(), benchmark_rets, self.ann_factor)
         wrap_kwargs = merge_dicts(dict(name_or_index=&#39;up_capture&#39;), wrap_kwargs)
@@ -1159,7 +1178,8 @@ class ReturnsDFAccessor(ReturnsAccessor, GenericDFAccessor):
         &#34;&#34;&#34;Capture ratio for periods when the benchmark return is negative.
 
         Args:
-            benchmark_rets (array_like): Benchmark return to compare returns against. Will broadcast.&#34;&#34;&#34;
+            benchmark_rets (array_like): Benchmark return to compare returns against. 
+                Will broadcast per element.&#34;&#34;&#34;
         benchmark_rets = broadcast_to(to_2d(benchmark_rets, raw=True), to_2d(self._obj, raw=True))
         result = nb.down_capture_nb(self.to_2d_array(), benchmark_rets, self.ann_factor)
         wrap_kwargs = merge_dicts(dict(name_or_index=&#39;down_capture&#39;), wrap_kwargs)
@@ -1223,6 +1243,7 @@ class ReturnsDFAccessor(ReturnsAccessor, GenericDFAccessor):
                 Will broadcast per column.
             required_return (float): Minimum acceptance return of the investor.
                 Will broadcast per column.
+            wrap_kwargs (dict): Keyword arguments passed to `vectorbt.base.array_wrapper.ArrayWrapper.wrap`.
 
         ## Example
 
@@ -1244,7 +1265,7 @@ class ReturnsDFAccessor(ReturnsAccessor, GenericDFAccessor):
         Annual Volatility [%]                88.4466
         Sharpe Ratio                         1.66841
         Calmar Ratio                         2.34193
-        Max. Drawdown [%]                   -83.0363
+        Max Drawdown [%]                    -83.0363
         Omega Ratio                          1.31107
         Sortino Ratio                        2.54018
         Skew                               0.0101324
@@ -1269,7 +1290,7 @@ class ReturnsDFAccessor(ReturnsAccessor, GenericDFAccessor):
             &#39;Annual Volatility [%]&#39;: self.annualized_volatility(levy_alpha=levy_alpha) * 100,
             &#39;Sharpe Ratio&#39;: self.sharpe_ratio(risk_free=risk_free),
             &#39;Calmar Ratio&#39;: self.calmar_ratio(),
-            &#39;Max. Drawdown [%]&#39;: self.max_drawdown() * 100,
+            &#39;Max Drawdown [%]&#39;: self.max_drawdown() * 100,
             &#39;Omega Ratio&#39;: self.omega_ratio(required_return=required_return),
             &#39;Sortino Ratio&#39;: self.sortino_ratio(required_return=required_return),
             &#39;Skew&#39;: self._obj.skew(axis=0),
@@ -1328,7 +1349,8 @@ def from_price(cls: tp.Type[ReturnsAccessorT], price: tp.SeriesFrame, **kwargs) 
 def ann_factor(self) -&gt; float:
     &#34;&#34;&#34;Annualization factor.&#34;&#34;&#34;
     if self.wrapper.freq is None:
-        raise ValueError(&#34;Couldn&#39;t parse the frequency of index. You must set `freq`.&#34;)
+        raise ValueError(&#34;Couldn&#39;t parse the frequency of index. &#34;
+                         &#34;Pass it as `freq` or define it globally under `settings.array_wrapper`.&#34;)
     return self.year_freq / self.wrapper.freq</code></pre>
 </details>
 </dd>
@@ -1386,7 +1408,8 @@ def year_freq(self) -&gt; pd.Timedelta:
 <h2 id="args">Args</h2>
 <dl>
 <dt><strong><code>benchmark_rets</code></strong> :&ensp;<code>array_like</code></dt>
-<dd>Benchmark return to compare returns against. Will broadcast.</dd>
+<dd>Benchmark return to compare returns against.
+Will broadcast per element.</dd>
 <dt><strong><code>risk_free</code></strong> :&ensp;<code>float</code></dt>
 <dd>Constant risk-free return throughout the period.</dd>
 </dl></div>
@@ -1399,7 +1422,8 @@ def year_freq(self) -&gt; pd.Timedelta:
     &#34;&#34;&#34;Annualized alpha.
 
     Args:
-        benchmark_rets (array_like): Benchmark return to compare returns against. Will broadcast.
+        benchmark_rets (array_like): Benchmark return to compare returns against.
+            Will broadcast per element.
         risk_free (float): Constant risk-free return throughout the period.&#34;&#34;&#34;
     benchmark_rets = broadcast_to(to_2d(benchmark_rets, raw=True), to_2d(self._obj, raw=True))
     result = nb.alpha_nb(self.to_2d_array(), benchmark_rets, self.ann_factor, risk_free)
@@ -1453,6 +1477,8 @@ def year_freq(self) -&gt; pd.Timedelta:
 <dl>
 <dt><strong><code>levy_alpha</code></strong> :&ensp;<code>float</code></dt>
 <dd>Scaling relation (Levy stability exponent).</dd>
+<dt><strong><code>ddof</code></strong> :&ensp;<code>int</code></dt>
+<dd>Means Delta Degrees of Freedom.</dd>
 </dl></div>
 <details class="source">
 <summary>
@@ -1463,7 +1489,8 @@ def year_freq(self) -&gt; pd.Timedelta:
     &#34;&#34;&#34;Annualized volatility of a strategy.
 
     Args:
-        levy_alpha (float): Scaling relation (Levy stability exponent).&#34;&#34;&#34;
+        levy_alpha (float): Scaling relation (Levy stability exponent).
+        ddof (int): Means Delta Degrees of Freedom.&#34;&#34;&#34;
     result = nb.annualized_volatility_nb(self.to_2d_array(), self.ann_factor, levy_alpha, ddof)
     wrap_kwargs = merge_dicts(dict(name_or_index=&#39;annualized_volatility&#39;), wrap_kwargs)
     return self.wrapper.wrap_reduced(result, **wrap_kwargs)</code></pre>
@@ -1477,7 +1504,8 @@ def year_freq(self) -&gt; pd.Timedelta:
 <h2 id="args">Args</h2>
 <dl>
 <dt><strong><code>benchmark_rets</code></strong> :&ensp;<code>array_like</code></dt>
-<dd>Benchmark return to compare returns against. Will broadcast.</dd>
+<dd>Benchmark return to compare returns against.
+Will broadcast per element.</dd>
 </dl></div>
 <details class="source">
 <summary>
@@ -1487,7 +1515,8 @@ def year_freq(self) -&gt; pd.Timedelta:
     &#34;&#34;&#34;Beta.
 
     Args:
-        benchmark_rets (array_like): Benchmark return to compare returns against. Will broadcast.&#34;&#34;&#34;
+        benchmark_rets (array_like): Benchmark return to compare returns against.
+            Will broadcast per element.&#34;&#34;&#34;
     benchmark_rets = broadcast_to(to_2d(benchmark_rets, raw=True), to_2d(self._obj, raw=True))
     result = nb.beta_nb(self.to_2d_array(), benchmark_rets)
     wrap_kwargs = merge_dicts(dict(name_or_index=&#39;beta&#39;), wrap_kwargs)
@@ -1518,7 +1547,8 @@ def year_freq(self) -&gt; pd.Timedelta:
 <h2 id="args">Args</h2>
 <dl>
 <dt><strong><code>benchmark_rets</code></strong> :&ensp;<code>array_like</code></dt>
-<dd>Benchmark return to compare returns against. Will broadcast.</dd>
+<dd>Benchmark return to compare returns against.
+Will broadcast per element.</dd>
 </dl></div>
 <details class="source">
 <summary>
@@ -1528,7 +1558,8 @@ def year_freq(self) -&gt; pd.Timedelta:
     &#34;&#34;&#34;Capture ratio.
 
     Args:
-        benchmark_rets (array_like): Benchmark return to compare returns against. Will broadcast.&#34;&#34;&#34;
+        benchmark_rets (array_like): Benchmark return to compare returns against.
+            Will broadcast per element.&#34;&#34;&#34;
     benchmark_rets = broadcast_to(to_2d(benchmark_rets, raw=True), to_2d(self._obj, raw=True))
     result = nb.capture_nb(self.to_2d_array(), benchmark_rets, self.ann_factor)
     wrap_kwargs = merge_dicts(dict(name_or_index=&#39;capture&#39;), wrap_kwargs)
@@ -1670,7 +1701,8 @@ If <code>nb_trials</code> is None, is set to the number of columns.</p></div>
 <h2 id="args">Args</h2>
 <dl>
 <dt><strong><code>benchmark_rets</code></strong> :&ensp;<code>array_like</code></dt>
-<dd>Benchmark return to compare returns against. Will broadcast.</dd>
+<dd>Benchmark return to compare returns against.
+Will broadcast per element.</dd>
 </dl></div>
 <details class="source">
 <summary>
@@ -1680,7 +1712,8 @@ If <code>nb_trials</code> is None, is set to the number of columns.</p></div>
     &#34;&#34;&#34;Capture ratio for periods when the benchmark return is negative.
 
     Args:
-        benchmark_rets (array_like): Benchmark return to compare returns against. Will broadcast.&#34;&#34;&#34;
+        benchmark_rets (array_like): Benchmark return to compare returns against. 
+            Will broadcast per element.&#34;&#34;&#34;
     benchmark_rets = broadcast_to(to_2d(benchmark_rets, raw=True), to_2d(self._obj, raw=True))
     result = nb.down_capture_nb(self.to_2d_array(), benchmark_rets, self.ann_factor)
     wrap_kwargs = merge_dicts(dict(name_or_index=&#39;down_capture&#39;), wrap_kwargs)
@@ -1755,7 +1788,10 @@ def get_drawdowns(self, group_by: tp.GroupByLike = None, **kwargs) -&gt; Drawdow
 <h2 id="args">Args</h2>
 <dl>
 <dt><strong><code>benchmark_rets</code></strong> :&ensp;<code>array_like</code></dt>
-<dd>Benchmark return to compare returns against. Will broadcast.</dd>
+<dd>Benchmark return to compare returns against.
+Will broadcast per element.</dd>
+<dt><strong><code>ddof</code></strong> :&ensp;<code>int</code></dt>
+<dd>Means Delta Degrees of Freedom.</dd>
 </dl></div>
 <details class="source">
 <summary>
@@ -1766,7 +1802,9 @@ def get_drawdowns(self, group_by: tp.GroupByLike = None, **kwargs) -&gt; Drawdow
     &#34;&#34;&#34;Information ratio of a strategy.
 
     Args:
-        benchmark_rets (array_like): Benchmark return to compare returns against. Will broadcast.&#34;&#34;&#34;
+        benchmark_rets (array_like): Benchmark return to compare returns against.
+            Will broadcast per element.
+        ddof (int): Means Delta Degrees of Freedom.&#34;&#34;&#34;
     benchmark_rets = broadcast_to(to_2d(benchmark_rets, raw=True), to_2d(self._obj, raw=True))
     result = nb.information_ratio_nb(self.to_2d_array(), benchmark_rets, ddof)
     wrap_kwargs = merge_dicts(dict(name_or_index=&#39;information_ratio&#39;), wrap_kwargs)
@@ -2159,6 +2197,8 @@ def get_drawdowns(self, group_by: tp.GroupByLike = None, **kwargs) -&gt; Drawdow
 <dl>
 <dt><strong><code>risk_free</code></strong> :&ensp;<code>float</code></dt>
 <dd>Constant risk-free return throughout the period.</dd>
+<dt><strong><code>ddof</code></strong> :&ensp;<code>int</code></dt>
+<dd>Means Delta Degrees of Freedom.</dd>
 </dl></div>
 <details class="source">
 <summary>
@@ -2169,7 +2209,8 @@ def get_drawdowns(self, group_by: tp.GroupByLike = None, **kwargs) -&gt; Drawdow
     &#34;&#34;&#34;Sharpe ratio of a strategy.
 
     Args:
-        risk_free (float): Constant risk-free return throughout the period.&#34;&#34;&#34;
+        risk_free (float): Constant risk-free return throughout the period.
+        ddof (int): Means Delta Degrees of Freedom.&#34;&#34;&#34;
     result = nb.sharpe_ratio_nb(self.to_2d_array(), self.ann_factor, risk_free, ddof)
     wrap_kwargs = merge_dicts(dict(name_or_index=&#39;sharpe_ratio&#39;), wrap_kwargs)
     return self.wrapper.wrap_reduced(result, **wrap_kwargs)</code></pre>
@@ -2220,6 +2261,8 @@ Will broadcast per column.</dd>
 <dt><strong><code>required_return</code></strong> :&ensp;<code>float</code></dt>
 <dd>Minimum acceptance return of the investor.
 Will broadcast per column.</dd>
+<dt><strong><code>wrap_kwargs</code></strong> :&ensp;<code>dict</code></dt>
+<dd>Keyword arguments passed to <code><a title="vectorbt.base.array_wrapper.ArrayWrapper.wrap" href="../base/array_wrapper.html#vectorbt.base.array_wrapper.ArrayWrapper.wrap">ArrayWrapper.wrap()</a></code>.</dd>
 </dl>
 <h2 id="example">Example</h2>
 <pre><code class="language-python-repl">&gt;&gt;&gt; import pandas as pd
@@ -2239,7 +2282,7 @@ Annual Return [%]                    194.465
 Annual Volatility [%]                88.4466
 Sharpe Ratio                         1.66841
 Calmar Ratio                         2.34193
-Max. Drawdown [%]                   -83.0363
+Max Drawdown [%]                    -83.0363
 Omega Ratio                          1.31107
 Sortino Ratio                        2.54018
 Skew                               0.0101324
@@ -2272,6 +2315,7 @@ Name: BTC-USD, dtype: object
             Will broadcast per column.
         required_return (float): Minimum acceptance return of the investor.
             Will broadcast per column.
+        wrap_kwargs (dict): Keyword arguments passed to `vectorbt.base.array_wrapper.ArrayWrapper.wrap`.
 
     ## Example
 
@@ -2293,7 +2337,7 @@ Name: BTC-USD, dtype: object
     Annual Volatility [%]                88.4466
     Sharpe Ratio                         1.66841
     Calmar Ratio                         2.34193
-    Max. Drawdown [%]                   -83.0363
+    Max Drawdown [%]                    -83.0363
     Omega Ratio                          1.31107
     Sortino Ratio                        2.54018
     Skew                               0.0101324
@@ -2318,7 +2362,7 @@ Name: BTC-USD, dtype: object
         &#39;Annual Volatility [%]&#39;: self.annualized_volatility(levy_alpha=levy_alpha) * 100,
         &#39;Sharpe Ratio&#39;: self.sharpe_ratio(risk_free=risk_free),
         &#39;Calmar Ratio&#39;: self.calmar_ratio(),
-        &#39;Max. Drawdown [%]&#39;: self.max_drawdown() * 100,
+        &#39;Max Drawdown [%]&#39;: self.max_drawdown() * 100,
         &#39;Omega Ratio&#39;: self.omega_ratio(required_return=required_return),
         &#39;Sortino Ratio&#39;: self.sortino_ratio(required_return=required_return),
         &#39;Skew&#39;: self._obj.skew(axis=0),
@@ -2377,7 +2421,8 @@ Name: BTC-USD, dtype: object
 <h2 id="args">Args</h2>
 <dl>
 <dt><strong><code>benchmark_rets</code></strong> :&ensp;<code>array_like</code></dt>
-<dd>Benchmark return to compare returns against. Will broadcast.</dd>
+<dd>Benchmark return to compare returns against.
+Will broadcast per element.</dd>
 </dl></div>
 <details class="source">
 <summary>
@@ -2387,7 +2432,8 @@ Name: BTC-USD, dtype: object
     &#34;&#34;&#34;Capture ratio for periods when the benchmark return is positive.
 
     Args:
-        benchmark_rets (array_like): Benchmark return to compare returns against. Will broadcast.&#34;&#34;&#34;
+        benchmark_rets (array_like): Benchmark return to compare returns against.
+            Will broadcast per element.&#34;&#34;&#34;
     benchmark_rets = broadcast_to(to_2d(benchmark_rets, raw=True), to_2d(self._obj, raw=True))
     result = nb.up_capture_nb(self.to_2d_array(), benchmark_rets, self.ann_factor)
     wrap_kwargs = merge_dicts(dict(name_or_index=&#39;up_capture&#39;), wrap_kwargs)
@@ -2469,6 +2515,7 @@ bottom percentile of returns.</dd>
 <li><code><a title="vectorbt.generic.accessors.GenericAccessor.idxmin" href="../generic/accessors.html#vectorbt.generic.accessors.GenericAccessor.idxmin">idxmin</a></code></li>
 <li><code><a title="vectorbt.generic.accessors.GenericAccessor.lineplot" href="../generic/accessors.html#vectorbt.generic.accessors.GenericAccessor.lineplot">lineplot</a></code></li>
 <li><code><a title="vectorbt.generic.accessors.GenericAccessor.make_symmetric" href="../base/accessors.html#vectorbt.base.accessors.BaseAccessor.make_symmetric">make_symmetric</a></code></li>
+<li><code><a title="vectorbt.generic.accessors.GenericAccessor.map_enum" href="../generic/accessors.html#vectorbt.generic.accessors.GenericAccessor.map_enum">map_enum</a></code></li>
 <li><code><a title="vectorbt.generic.accessors.GenericAccessor.max" href="../generic/accessors.html#vectorbt.generic.accessors.GenericAccessor.max">max</a></code></li>
 <li><code><a title="vectorbt.generic.accessors.GenericAccessor.maxabs_scale" href="../generic/accessors.html#vectorbt.generic.accessors.GenericAccessor.maxabs_scale">maxabs_scale</a></code></li>
 <li><code><a title="vectorbt.generic.accessors.GenericAccessor.mean" href="../generic/accessors.html#vectorbt.generic.accessors.GenericAccessor.mean">mean</a></code></li>
@@ -2614,6 +2661,7 @@ bottom percentile of returns.</dd>
 <li><code><a title="vectorbt.returns.accessors.ReturnsAccessor.information_ratio" href="#vectorbt.returns.accessors.ReturnsAccessor.information_ratio">information_ratio</a></code></li>
 <li><code><a title="vectorbt.returns.accessors.ReturnsAccessor.lineplot" href="../generic/accessors.html#vectorbt.generic.accessors.GenericAccessor.lineplot">lineplot</a></code></li>
 <li><code><a title="vectorbt.returns.accessors.ReturnsAccessor.make_symmetric" href="../base/accessors.html#vectorbt.base.accessors.BaseAccessor.make_symmetric">make_symmetric</a></code></li>
+<li><code><a title="vectorbt.returns.accessors.ReturnsAccessor.map_enum" href="../generic/accessors.html#vectorbt.generic.accessors.GenericAccessor.map_enum">map_enum</a></code></li>
 <li><code><a title="vectorbt.returns.accessors.ReturnsAccessor.max" href="../generic/accessors.html#vectorbt.generic.accessors.GenericAccessor.max">max</a></code></li>
 <li><code><a title="vectorbt.returns.accessors.ReturnsAccessor.max_drawdown" href="#vectorbt.returns.accessors.ReturnsAccessor.max_drawdown">max_drawdown</a></code></li>
 <li><code><a title="vectorbt.returns.accessors.ReturnsAccessor.maxabs_scale" href="../generic/accessors.html#vectorbt.generic.accessors.GenericAccessor.maxabs_scale">maxabs_scale</a></code></li>
@@ -2766,12 +2814,7 @@ bottom percentile of returns.</dd>
         if fig is None:
             fig = make_figure()
         fig.update_layout(**layout_kwargs)
-        x_domain = [0, 1]
-        xaxis = &#39;xaxis&#39; + xref[1:]
-        if xaxis in fig.layout:
-            if &#39;domain&#39; in fig.layout[xaxis]:
-                if fig.layout[xaxis][&#39;domain&#39;] is not None:
-                    x_domain = fig.layout[xaxis][&#39;domain&#39;]
+        x_domain = get_domain(xref, fig)
         fill_to_benchmark = fill_to_benchmark and benchmark_rets is not None
 
         if benchmark_rets is not None:
@@ -2781,7 +2824,9 @@ bottom percentile of returns.</dd>
                 benchmark_kwargs = {}
             benchmark_kwargs = merge_dicts(dict(
                 trace_kwargs=dict(
-                    line_color=plotting_cfg[&#39;color_schema&#39;][&#39;gray&#39;],
+                    line=dict(
+                        color=plotting_cfg[&#39;color_schema&#39;][&#39;gray&#39;]
+                    ),
                     name=&#39;Benchmark&#39;
                 )
             ), benchmark_kwargs)
@@ -2795,7 +2840,9 @@ bottom percentile of returns.</dd>
             main_kwargs = {}
         main_kwargs = merge_dicts(dict(
             trace_kwargs=dict(
-                line_color=plotting_cfg[&#39;color_schema&#39;][&#39;purple&#39;],
+                line=dict(
+                    color=plotting_cfg[&#39;color_schema&#39;][&#39;purple&#39;]
+                )
             ),
             other_trace_kwargs=&#39;hidden&#39;
         ), main_kwargs)
@@ -2927,12 +2974,7 @@ Will broadcast per element.</dd>
     if fig is None:
         fig = make_figure()
     fig.update_layout(**layout_kwargs)
-    x_domain = [0, 1]
-    xaxis = &#39;xaxis&#39; + xref[1:]
-    if xaxis in fig.layout:
-        if &#39;domain&#39; in fig.layout[xaxis]:
-            if fig.layout[xaxis][&#39;domain&#39;] is not None:
-                x_domain = fig.layout[xaxis][&#39;domain&#39;]
+    x_domain = get_domain(xref, fig)
     fill_to_benchmark = fill_to_benchmark and benchmark_rets is not None
 
     if benchmark_rets is not None:
@@ -2942,7 +2984,9 @@ Will broadcast per element.</dd>
             benchmark_kwargs = {}
         benchmark_kwargs = merge_dicts(dict(
             trace_kwargs=dict(
-                line_color=plotting_cfg[&#39;color_schema&#39;][&#39;gray&#39;],
+                line=dict(
+                    color=plotting_cfg[&#39;color_schema&#39;][&#39;gray&#39;]
+                ),
                 name=&#39;Benchmark&#39;
             )
         ), benchmark_kwargs)
@@ -2956,7 +3000,9 @@ Will broadcast per element.</dd>
         main_kwargs = {}
     main_kwargs = merge_dicts(dict(
         trace_kwargs=dict(
-            line_color=plotting_cfg[&#39;color_schema&#39;][&#39;purple&#39;],
+            line=dict(
+                color=plotting_cfg[&#39;color_schema&#39;][&#39;purple&#39;]
+            )
         ),
         other_trace_kwargs=&#39;hidden&#39;
     ), main_kwargs)
@@ -3055,6 +3101,7 @@ Will broadcast per element.</dd>
 <li><code><a title="vectorbt.returns.accessors.ReturnsAccessor.information_ratio" href="#vectorbt.returns.accessors.ReturnsAccessor.information_ratio">information_ratio</a></code></li>
 <li><code><a title="vectorbt.returns.accessors.ReturnsAccessor.lineplot" href="../generic/accessors.html#vectorbt.generic.accessors.GenericAccessor.lineplot">lineplot</a></code></li>
 <li><code><a title="vectorbt.returns.accessors.ReturnsAccessor.make_symmetric" href="../base/accessors.html#vectorbt.base.accessors.BaseAccessor.make_symmetric">make_symmetric</a></code></li>
+<li><code><a title="vectorbt.returns.accessors.ReturnsAccessor.map_enum" href="../generic/accessors.html#vectorbt.generic.accessors.GenericAccessor.map_enum">map_enum</a></code></li>
 <li><code><a title="vectorbt.returns.accessors.ReturnsAccessor.max" href="../generic/accessors.html#vectorbt.generic.accessors.GenericAccessor.max">max</a></code></li>
 <li><code><a title="vectorbt.returns.accessors.ReturnsAccessor.max_drawdown" href="#vectorbt.returns.accessors.ReturnsAccessor.max_drawdown">max_drawdown</a></code></li>
 <li><code><a title="vectorbt.returns.accessors.ReturnsAccessor.maxabs_scale" href="../generic/accessors.html#vectorbt.generic.accessors.GenericAccessor.maxabs_scale">maxabs_scale</a></code></li>

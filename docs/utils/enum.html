@@ -44,51 +44,62 @@ ga('create', 'UA-142521178-3', 'auto'); ga('send', 'pageview');
 <pre><code class="python">&#34;&#34;&#34;Enum utilities.
 
 In vectorbt, enums are represented by instances of named tuples to be easily used in Numba.&#34;&#34;&#34;
+import numpy as np
+import pandas as pd
 
 from vectorbt import _typing as tp
 
 
-def get_caseins_enum_attr(enum: tp.NamedTuple, attr: str) -&gt; tp.Any:
-    &#34;&#34;&#34;Case-insensitive `getattr` for enums.&#34;&#34;&#34;
-    lower_attr_keys = list(map(lambda x: x.lower(), enum._fields))
-    attr_idx = lower_attr_keys.index(attr.lower())
-    orig_attr = enum._fields[attr_idx]
-    return getattr(enum, orig_attr)
+def enum_to_field_map(enum: tp.NamedTuple) -&gt; tp.Dict[tp.Optional[str], int]:
+    &#34;&#34;&#34;Convert an enum to a field map.&#34;&#34;&#34;
+    field_map = {k.lower(): v for k, v in enum._asdict().items()}
+    if -1 not in enum:
+        field_map[None] = -1
+    return field_map
 
 
-def prepare_enum_value(enum: tp.NamedTuple, value: tp.Any) -&gt; tp.Any:
-    &#34;&#34;&#34;Prepare value of an enum.
+def enum_to_value_map(enum: tp.NamedTuple) -&gt; tp.Dict[int, tp.Optional[str]]:
+    &#34;&#34;&#34;Convert an enum to a value map.&#34;&#34;&#34;
+    value_map = {v: k for k, v in enum._asdict().items()}
+    if -1 not in enum:
+        value_map[-1] = None
+    return value_map
+
+
+def cast_enum_value(value: tp.Any, enum: tp.NamedTuple) -&gt; tp.Any:
+    &#34;&#34;&#34;Cast string to an enum value.
 
     `enum` is expected to be an instance of `collections.namedtuple`.
-    `value` can a string of any case or a tuple/list of such, otherwise returns unmodified value.&#34;&#34;&#34;
+    `value` can a string of any case and with any number of underscores, or a tuple/list/array of such,
+    otherwise returns the unmodified value.
+
+    !!! note
+        Will only cast array/Series/DataFrame if the first element is a string.
+    &#34;&#34;&#34;
+    field_map = enum_to_field_map(enum)
 
     def _converter(x):
         if isinstance(x, str):
-            return get_caseins_enum_attr(enum, str(x))
+            return field_map[x.lower().replace(&#39;_&#39;, &#39;&#39;)]
         return x
 
     if isinstance(value, str):
-        # Convert str to int
         value = _converter(value)
-    elif isinstance(value, (tuple, list)):
-        # Convert each in the list
-        value_type = type(value)
-        value = list(value)
-        for i in range(len(value)):
-            if isinstance(value[i], (tuple, list)):
-                value[i] = prepare_enum_value(enum, value[i])
-            else:
-                value[i] = _converter(value[i])
-        return value_type(value)
-    return value
-
-
-def to_value_map(enum: tp.NamedTuple) -&gt; dict:
-    &#34;&#34;&#34;Create value map from enum.&#34;&#34;&#34;
-    value_map = dict(zip(tuple(enum), enum._fields))
-    if -1 not in value_map:
-        value_map[-1] = None
-    return value_map</code></pre>
+    if isinstance(value, (tuple, list)):
+        result = [cast_enum_value(v, enum) for v in value]
+        if isinstance(value, tuple):
+            result = tuple(result)
+        return result
+    if isinstance(value, np.ndarray):
+        if value.size &gt; 0 and isinstance(value.item(0), str):
+            return np.vectorize(_converter)(value)
+    if isinstance(value, pd.Series):
+        if value.size &gt; 0 and isinstance(value.iloc[0], str):
+            return value.map(_converter)
+    if isinstance(value, pd.DataFrame):
+        if value.size &gt; 0 and isinstance(value.iloc[0, 0], str):
+            return value.applymap(_converter)
+    return value</code></pre>
 </details>
 </section>
 <section>
@@ -98,74 +109,88 @@ def to_value_map(enum: tp.NamedTuple) -&gt; dict:
 <section>
 <h2 class="section-title" id="header-functions">Functions</h2>
 <dl>
-<dt id="vectorbt.utils.enum.get_caseins_enum_attr"><code class="name flex">
-<span>def <span class="ident">get_caseins_enum_attr</span></span>(<span>enum, attr)</span>
+<dt id="vectorbt.utils.enum.cast_enum_value"><code class="name flex">
+<span>def <span class="ident">cast_enum_value</span></span>(<span>value, enum)</span>
 </code></dt>
 <dd>
-<div class="desc"><p>Case-insensitive <code>getattr</code> for enums.</p></div>
-<details class="source">
-<summary>
-<span>Expand source code</span>
-</summary>
-<pre><code class="python">def get_caseins_enum_attr(enum: tp.NamedTuple, attr: str) -&gt; tp.Any:
-    &#34;&#34;&#34;Case-insensitive `getattr` for enums.&#34;&#34;&#34;
-    lower_attr_keys = list(map(lambda x: x.lower(), enum._fields))
-    attr_idx = lower_attr_keys.index(attr.lower())
-    orig_attr = enum._fields[attr_idx]
-    return getattr(enum, orig_attr)</code></pre>
-</details>
-</dd>
-<dt id="vectorbt.utils.enum.prepare_enum_value"><code class="name flex">
-<span>def <span class="ident">prepare_enum_value</span></span>(<span>enum, value)</span>
-</code></dt>
-<dd>
-<div class="desc"><p>Prepare value of an enum.</p>
+<div class="desc"><p>Cast string to an enum value.</p>
 <p><code>enum</code> is expected to be an instance of <code>collections.namedtuple</code>.
-<code>value</code> can a string of any case or a tuple/list of such, otherwise returns unmodified value.</p></div>
+<code>value</code> can a string of any case and with any number of underscores, or a tuple/list/array of such,
+otherwise returns the unmodified value.</p>
+<div class="admonition note">
+<p class="admonition-title">Note</p>
+<p>Will only cast array/Series/DataFrame if the first element is a string.</p>
+</div></div>
 <details class="source">
 <summary>
 <span>Expand source code</span>
 </summary>
-<pre><code class="python">def prepare_enum_value(enum: tp.NamedTuple, value: tp.Any) -&gt; tp.Any:
-    &#34;&#34;&#34;Prepare value of an enum.
+<pre><code class="python">def cast_enum_value(value: tp.Any, enum: tp.NamedTuple) -&gt; tp.Any:
+    &#34;&#34;&#34;Cast string to an enum value.
 
     `enum` is expected to be an instance of `collections.namedtuple`.
-    `value` can a string of any case or a tuple/list of such, otherwise returns unmodified value.&#34;&#34;&#34;
+    `value` can a string of any case and with any number of underscores, or a tuple/list/array of such,
+    otherwise returns the unmodified value.
+
+    !!! note
+        Will only cast array/Series/DataFrame if the first element is a string.
+    &#34;&#34;&#34;
+    field_map = enum_to_field_map(enum)
 
     def _converter(x):
         if isinstance(x, str):
-            return get_caseins_enum_attr(enum, str(x))
+            return field_map[x.lower().replace(&#39;_&#39;, &#39;&#39;)]
         return x
 
     if isinstance(value, str):
-        # Convert str to int
         value = _converter(value)
-    elif isinstance(value, (tuple, list)):
-        # Convert each in the list
-        value_type = type(value)
-        value = list(value)
-        for i in range(len(value)):
-            if isinstance(value[i], (tuple, list)):
-                value[i] = prepare_enum_value(enum, value[i])
-            else:
-                value[i] = _converter(value[i])
-        return value_type(value)
+    if isinstance(value, (tuple, list)):
+        result = [cast_enum_value(v, enum) for v in value]
+        if isinstance(value, tuple):
+            result = tuple(result)
+        return result
+    if isinstance(value, np.ndarray):
+        if value.size &gt; 0 and isinstance(value.item(0), str):
+            return np.vectorize(_converter)(value)
+    if isinstance(value, pd.Series):
+        if value.size &gt; 0 and isinstance(value.iloc[0], str):
+            return value.map(_converter)
+    if isinstance(value, pd.DataFrame):
+        if value.size &gt; 0 and isinstance(value.iloc[0, 0], str):
+            return value.applymap(_converter)
     return value</code></pre>
 </details>
 </dd>
-<dt id="vectorbt.utils.enum.to_value_map"><code class="name flex">
-<span>def <span class="ident">to_value_map</span></span>(<span>enum)</span>
+<dt id="vectorbt.utils.enum.enum_to_field_map"><code class="name flex">
+<span>def <span class="ident">enum_to_field_map</span></span>(<span>enum)</span>
 </code></dt>
 <dd>
-<div class="desc"><p>Create value map from enum.</p></div>
+<div class="desc"><p>Convert an enum to a field map.</p></div>
 <details class="source">
 <summary>
 <span>Expand source code</span>
 </summary>
-<pre><code class="python">def to_value_map(enum: tp.NamedTuple) -&gt; dict:
-    &#34;&#34;&#34;Create value map from enum.&#34;&#34;&#34;
-    value_map = dict(zip(tuple(enum), enum._fields))
-    if -1 not in value_map:
+<pre><code class="python">def enum_to_field_map(enum: tp.NamedTuple) -&gt; tp.Dict[tp.Optional[str], int]:
+    &#34;&#34;&#34;Convert an enum to a field map.&#34;&#34;&#34;
+    field_map = {k.lower(): v for k, v in enum._asdict().items()}
+    if -1 not in enum:
+        field_map[None] = -1
+    return field_map</code></pre>
+</details>
+</dd>
+<dt id="vectorbt.utils.enum.enum_to_value_map"><code class="name flex">
+<span>def <span class="ident">enum_to_value_map</span></span>(<span>enum)</span>
+</code></dt>
+<dd>
+<div class="desc"><p>Convert an enum to a value map.</p></div>
+<details class="source">
+<summary>
+<span>Expand source code</span>
+</summary>
+<pre><code class="python">def enum_to_value_map(enum: tp.NamedTuple) -&gt; tp.Dict[int, tp.Optional[str]]:
+    &#34;&#34;&#34;Convert an enum to a value map.&#34;&#34;&#34;
+    value_map = {v: k for k, v in enum._asdict().items()}
+    if -1 not in enum:
         value_map[-1] = None
     return value_map</code></pre>
 </details>
@@ -202,9 +227,9 @@ title="Search"
 </li>
 <li><h3><a href="#header-functions">Functions</a></h3>
 <ul class="">
-<li><code><a title="vectorbt.utils.enum.get_caseins_enum_attr" href="#vectorbt.utils.enum.get_caseins_enum_attr">get_caseins_enum_attr</a></code></li>
-<li><code><a title="vectorbt.utils.enum.prepare_enum_value" href="#vectorbt.utils.enum.prepare_enum_value">prepare_enum_value</a></code></li>
-<li><code><a title="vectorbt.utils.enum.to_value_map" href="#vectorbt.utils.enum.to_value_map">to_value_map</a></code></li>
+<li><code><a title="vectorbt.utils.enum.cast_enum_value" href="#vectorbt.utils.enum.cast_enum_value">cast_enum_value</a></code></li>
+<li><code><a title="vectorbt.utils.enum.enum_to_field_map" href="#vectorbt.utils.enum.enum_to_field_map">enum_to_field_map</a></code></li>
+<li><code><a title="vectorbt.utils.enum.enum_to_value_map" href="#vectorbt.utils.enum.enum_to_value_map">enum_to_value_map</a></code></li>
 </ul>
 </li>
 </nav>

@@ -287,12 +287,12 @@ def map_records_nb(records: tp.RecordArray, map_func_nb: tp.RecordMapFunc[float]
     return out
 
 
-# ############# Conversion to matrix ############# #
+# ############# Expansion ############# #
 
 
 @njit(cache=True)
-def mapped_matrix_compatible_nb(col_arr: tp.Array1d, idx_arr: tp.Array1d, target_shape: tp.Shape) -&gt; bool:
-    &#34;&#34;&#34;Check whether mapped array can be converted to a matrix without positional conflicts.&#34;&#34;&#34;
+def is_mapped_expandable_nb(col_arr: tp.Array1d, idx_arr: tp.Array1d, target_shape: tp.Shape) -&gt; bool:
+    &#34;&#34;&#34;Check whether mapped array can be expanded without positional conflicts.&#34;&#34;&#34;
     temp = np.zeros(target_shape)
 
     for i in range(len(col_arr)):
@@ -303,13 +303,30 @@ def mapped_matrix_compatible_nb(col_arr: tp.Array1d, idx_arr: tp.Array1d, target
 
 
 @njit(cache=True)
-def mapped_to_matrix_nb(mapped_arr: tp.Array1d, col_arr: tp.Array1d, idx_arr: tp.Array1d,
-                        target_shape: tp.Shape, default_val: float) -&gt; tp.Array2d:
-    &#34;&#34;&#34;Convert mapped array to the matrix form.&#34;&#34;&#34;
+def expand_mapped_nb(mapped_arr: tp.Array1d, col_arr: tp.Array1d, idx_arr: tp.Array1d,
+                     target_shape: tp.Shape, default_val: float) -&gt; tp.Array2d:
+    &#34;&#34;&#34;Expand mapped array to the 2-dim array form using index and column data.&#34;&#34;&#34;
     out = np.full(target_shape, default_val, dtype=np.float_)
 
     for r in range(mapped_arr.shape[0]):
         out[idx_arr[r], col_arr[r]] = mapped_arr[r]
+    return out
+
+
+@njit(cache=True)
+def stack_expand_mapped_nb(mapped_arr: tp.Array1d, col_map: tp.ColMap, default_val: float) -&gt; tp.Array2d:
+    &#34;&#34;&#34;Expand mapped array by stacking without using index data.&#34;&#34;&#34;
+    col_idxs, col_lens = col_map
+    col_start_idxs = np.cumsum(col_lens) - col_lens
+    out = np.full((np.max(col_lens), col_lens.shape[0]), default_val, dtype=np.float_)
+
+    for col in range(col_lens.shape[0]):
+        col_len = col_lens[col]
+        if col_len == 0:
+            continue
+        start_idx = col_start_idxs[col]
+        idxs = col_idxs[start_idx:start_idx + col_len]
+        out[:col_len, col] = mapped_arr[idxs]
     return out
 
 
@@ -320,7 +337,7 @@ def reduce_mapped_nb(mapped_arr: tp.Array1d, col_map: tp.ColMap, default_val: fl
                      reduce_func_nb: tp.ReduceFunc[float], *args) -&gt; tp.Array1d:
     &#34;&#34;&#34;Reduce mapped array by column to a single value.
 
-    Faster than `mapped_to_matrix_nb` and `vbt.*` used together, and also
+    Faster than `expand_mapped_nb` and `vbt.*` used together, and also
     requires less memory. But does not take advantage of caching.
 
     `reduce_func_nb` should accept index of the column, mapped array and `*args`,
@@ -440,23 +457,6 @@ def mapped_value_counts_nb(mapped_codes: tp.Array1d, col_map: tp.ColMap) -&gt; t
         start_idx = col_start_idxs[col]
         for i in range(col_len):
             out[mapped_codes[col_idxs[start_idx + i]], col] += 1
-    return out
-
-
-@njit(cache=True)
-def stack_mapped_nb(mapped_arr: tp.Array1d, col_map: tp.ColMap, default_val: float) -&gt; tp.Array2d:
-    &#34;&#34;&#34;Stack mapped array.&#34;&#34;&#34;
-    col_idxs, col_lens = col_map
-    col_start_idxs = np.cumsum(col_lens) - col_lens
-    out = np.full((np.max(col_lens), col_lens.shape[0]), default_val, dtype=np.float_)
-
-    for col in range(col_lens.shape[0]):
-        col_len = col_lens[col]
-        if col_len == 0:
-            continue
-        start_idx = col_start_idxs[col]
-        idxs = col_idxs[start_idx:start_idx + col_len]
-        out[:col_len, col] = mapped_arr[idxs]
     return out</code></pre>
 </details>
 </section>
@@ -622,6 +622,26 @@ def col_range_select_nb(col_range: tp.ColRange, new_cols: tp.Array1d) -&gt; tp.T
     return indices_out, col_arr_out</code></pre>
 </details>
 </dd>
+<dt id="vectorbt.records.nb.expand_mapped_nb"><code class="name flex">
+<span>def <span class="ident">expand_mapped_nb</span></span>(<span>mapped_arr, col_arr, idx_arr, target_shape, default_val)</span>
+</code></dt>
+<dd>
+<div class="desc"><p>Expand mapped array to the 2-dim array form using index and column data.</p></div>
+<details class="source">
+<summary>
+<span>Expand source code</span>
+</summary>
+<pre><code class="python">@njit(cache=True)
+def expand_mapped_nb(mapped_arr: tp.Array1d, col_arr: tp.Array1d, idx_arr: tp.Array1d,
+                     target_shape: tp.Shape, default_val: float) -&gt; tp.Array2d:
+    &#34;&#34;&#34;Expand mapped array to the 2-dim array form using index and column data.&#34;&#34;&#34;
+    out = np.full(target_shape, default_val, dtype=np.float_)
+
+    for r in range(mapped_arr.shape[0]):
+        out[idx_arr[r], col_arr[r]] = mapped_arr[r]
+    return out</code></pre>
+</details>
+</dd>
 <dt id="vectorbt.records.nb.is_col_idx_sorted_nb"><code class="name flex">
 <span>def <span class="ident">is_col_idx_sorted_nb</span></span>(<span>col_arr, id_arr)</span>
 </code></dt>
@@ -660,6 +680,27 @@ def is_col_sorted_nb(col_arr: tp.Array1d) -&gt; bool:
     return True</code></pre>
 </details>
 </dd>
+<dt id="vectorbt.records.nb.is_mapped_expandable_nb"><code class="name flex">
+<span>def <span class="ident">is_mapped_expandable_nb</span></span>(<span>col_arr, idx_arr, target_shape)</span>
+</code></dt>
+<dd>
+<div class="desc"><p>Check whether mapped array can be expanded without positional conflicts.</p></div>
+<details class="source">
+<summary>
+<span>Expand source code</span>
+</summary>
+<pre><code class="python">@njit(cache=True)
+def is_mapped_expandable_nb(col_arr: tp.Array1d, idx_arr: tp.Array1d, target_shape: tp.Shape) -&gt; bool:
+    &#34;&#34;&#34;Check whether mapped array can be expanded without positional conflicts.&#34;&#34;&#34;
+    temp = np.zeros(target_shape)
+
+    for i in range(len(col_arr)):
+        if temp[idx_arr[i], col_arr[i]] &gt; 0:
+            return False
+        temp[idx_arr[i], col_arr[i]] = 1
+    return True</code></pre>
+</details>
+</dd>
 <dt id="vectorbt.records.nb.map_records_nb"><code class="name flex">
 <span>def <span class="ident">map_records_nb</span></span>(<span>records, map_func_nb, *args)</span>
 </code></dt>
@@ -680,27 +721,6 @@ def map_records_nb(records: tp.RecordArray, map_func_nb: tp.RecordMapFunc[float]
     for r in range(records.shape[0]):
         out[r] = map_func_nb(records[r], *args)
     return out</code></pre>
-</details>
-</dd>
-<dt id="vectorbt.records.nb.mapped_matrix_compatible_nb"><code class="name flex">
-<span>def <span class="ident">mapped_matrix_compatible_nb</span></span>(<span>col_arr, idx_arr, target_shape)</span>
-</code></dt>
-<dd>
-<div class="desc"><p>Check whether mapped array can be converted to a matrix without positional conflicts.</p></div>
-<details class="source">
-<summary>
-<span>Expand source code</span>
-</summary>
-<pre><code class="python">@njit(cache=True)
-def mapped_matrix_compatible_nb(col_arr: tp.Array1d, idx_arr: tp.Array1d, target_shape: tp.Shape) -&gt; bool:
-    &#34;&#34;&#34;Check whether mapped array can be converted to a matrix without positional conflicts.&#34;&#34;&#34;
-    temp = np.zeros(target_shape)
-
-    for i in range(len(col_arr)):
-        if temp[idx_arr[i], col_arr[i]] &gt; 0:
-            return False
-        temp[idx_arr[i], col_arr[i]] = 1
-    return True</code></pre>
 </details>
 </dd>
 <dt id="vectorbt.records.nb.mapped_to_mask_nb"><code class="name flex">
@@ -736,26 +756,6 @@ def mapped_to_mask_nb(mapped_arr: tp.Array1d, col_map: tp.ColMap,
         idxs = col_idxs[start_idx:start_idx + col_len]
         inout_map_func_nb(inout, idxs, col, mapped_arr[idxs], *args)
     return inout</code></pre>
-</details>
-</dd>
-<dt id="vectorbt.records.nb.mapped_to_matrix_nb"><code class="name flex">
-<span>def <span class="ident">mapped_to_matrix_nb</span></span>(<span>mapped_arr, col_arr, idx_arr, target_shape, default_val)</span>
-</code></dt>
-<dd>
-<div class="desc"><p>Convert mapped array to the matrix form.</p></div>
-<details class="source">
-<summary>
-<span>Expand source code</span>
-</summary>
-<pre><code class="python">@njit(cache=True)
-def mapped_to_matrix_nb(mapped_arr: tp.Array1d, col_arr: tp.Array1d, idx_arr: tp.Array1d,
-                        target_shape: tp.Shape, default_val: float) -&gt; tp.Array2d:
-    &#34;&#34;&#34;Convert mapped array to the matrix form.&#34;&#34;&#34;
-    out = np.full(target_shape, default_val, dtype=np.float_)
-
-    for r in range(mapped_arr.shape[0]):
-        out[idx_arr[r], col_arr[r]] = mapped_arr[r]
-    return out</code></pre>
 </details>
 </dd>
 <dt id="vectorbt.records.nb.mapped_value_counts_nb"><code class="name flex">
@@ -854,7 +854,7 @@ def record_col_range_select_nb(records: tp.RecordArray, col_range: tp.ColRange,
 </code></dt>
 <dd>
 <div class="desc"><p>Reduce mapped array by column to a single value.</p>
-<p>Faster than <code><a title="vectorbt.records.nb.mapped_to_matrix_nb" href="#vectorbt.records.nb.mapped_to_matrix_nb">mapped_to_matrix_nb()</a></code> and <code>vbt.*</code> used together, and also
+<p>Faster than <code><a title="vectorbt.records.nb.expand_mapped_nb" href="#vectorbt.records.nb.expand_mapped_nb">expand_mapped_nb()</a></code> and <code>vbt.*</code> used together, and also
 requires less memory. But does not take advantage of caching.</p>
 <p><code>reduce_func_nb</code> should accept index of the column, mapped array and <code>*args</code>,
 and return a single value.</p></div>
@@ -867,7 +867,7 @@ def reduce_mapped_nb(mapped_arr: tp.Array1d, col_map: tp.ColMap, default_val: fl
                      reduce_func_nb: tp.ReduceFunc[float], *args) -&gt; tp.Array1d:
     &#34;&#34;&#34;Reduce mapped array by column to a single value.
 
-    Faster than `mapped_to_matrix_nb` and `vbt.*` used together, and also
+    Faster than `expand_mapped_nb` and `vbt.*` used together, and also
     requires less memory. But does not take advantage of caching.
 
     `reduce_func_nb` should accept index of the column, mapped array and `*args`,
@@ -1010,18 +1010,18 @@ def reduce_mapped_to_idx_nb(mapped_arr: tp.Array1d, col_map: tp.ColMap, idx_arr:
     return out</code></pre>
 </details>
 </dd>
-<dt id="vectorbt.records.nb.stack_mapped_nb"><code class="name flex">
-<span>def <span class="ident">stack_mapped_nb</span></span>(<span>mapped_arr, col_map, default_val)</span>
+<dt id="vectorbt.records.nb.stack_expand_mapped_nb"><code class="name flex">
+<span>def <span class="ident">stack_expand_mapped_nb</span></span>(<span>mapped_arr, col_map, default_val)</span>
 </code></dt>
 <dd>
-<div class="desc"><p>Stack mapped array.</p></div>
+<div class="desc"><p>Expand mapped array by stacking without using index data.</p></div>
 <details class="source">
 <summary>
 <span>Expand source code</span>
 </summary>
 <pre><code class="python">@njit(cache=True)
-def stack_mapped_nb(mapped_arr: tp.Array1d, col_map: tp.ColMap, default_val: float) -&gt; tp.Array2d:
-    &#34;&#34;&#34;Stack mapped array.&#34;&#34;&#34;
+def stack_expand_mapped_nb(mapped_arr: tp.Array1d, col_map: tp.ColMap, default_val: float) -&gt; tp.Array2d:
+    &#34;&#34;&#34;Expand mapped array by stacking without using index data.&#34;&#34;&#34;
     col_idxs, col_lens = col_map
     col_start_idxs = np.cumsum(col_lens) - col_lens
     out = np.full((np.max(col_lens), col_lens.shape[0]), default_val, dtype=np.float_)
@@ -1089,12 +1089,12 @@ title="Search"
 <li><code><a title="vectorbt.records.nb.col_map_select_nb" href="#vectorbt.records.nb.col_map_select_nb">col_map_select_nb</a></code></li>
 <li><code><a title="vectorbt.records.nb.col_range_nb" href="#vectorbt.records.nb.col_range_nb">col_range_nb</a></code></li>
 <li><code><a title="vectorbt.records.nb.col_range_select_nb" href="#vectorbt.records.nb.col_range_select_nb">col_range_select_nb</a></code></li>
+<li><code><a title="vectorbt.records.nb.expand_mapped_nb" href="#vectorbt.records.nb.expand_mapped_nb">expand_mapped_nb</a></code></li>
 <li><code><a title="vectorbt.records.nb.is_col_idx_sorted_nb" href="#vectorbt.records.nb.is_col_idx_sorted_nb">is_col_idx_sorted_nb</a></code></li>
 <li><code><a title="vectorbt.records.nb.is_col_sorted_nb" href="#vectorbt.records.nb.is_col_sorted_nb">is_col_sorted_nb</a></code></li>
+<li><code><a title="vectorbt.records.nb.is_mapped_expandable_nb" href="#vectorbt.records.nb.is_mapped_expandable_nb">is_mapped_expandable_nb</a></code></li>
 <li><code><a title="vectorbt.records.nb.map_records_nb" href="#vectorbt.records.nb.map_records_nb">map_records_nb</a></code></li>
-<li><code><a title="vectorbt.records.nb.mapped_matrix_compatible_nb" href="#vectorbt.records.nb.mapped_matrix_compatible_nb">mapped_matrix_compatible_nb</a></code></li>
 <li><code><a title="vectorbt.records.nb.mapped_to_mask_nb" href="#vectorbt.records.nb.mapped_to_mask_nb">mapped_to_mask_nb</a></code></li>
-<li><code><a title="vectorbt.records.nb.mapped_to_matrix_nb" href="#vectorbt.records.nb.mapped_to_matrix_nb">mapped_to_matrix_nb</a></code></li>
 <li><code><a title="vectorbt.records.nb.mapped_value_counts_nb" href="#vectorbt.records.nb.mapped_value_counts_nb">mapped_value_counts_nb</a></code></li>
 <li><code><a title="vectorbt.records.nb.record_col_map_select_nb" href="#vectorbt.records.nb.record_col_map_select_nb">record_col_map_select_nb</a></code></li>
 <li><code><a title="vectorbt.records.nb.record_col_range_select_nb" href="#vectorbt.records.nb.record_col_range_select_nb">record_col_range_select_nb</a></code></li>
@@ -1102,7 +1102,7 @@ title="Search"
 <li><code><a title="vectorbt.records.nb.reduce_mapped_to_array_nb" href="#vectorbt.records.nb.reduce_mapped_to_array_nb">reduce_mapped_to_array_nb</a></code></li>
 <li><code><a title="vectorbt.records.nb.reduce_mapped_to_idx_array_nb" href="#vectorbt.records.nb.reduce_mapped_to_idx_array_nb">reduce_mapped_to_idx_array_nb</a></code></li>
 <li><code><a title="vectorbt.records.nb.reduce_mapped_to_idx_nb" href="#vectorbt.records.nb.reduce_mapped_to_idx_nb">reduce_mapped_to_idx_nb</a></code></li>
-<li><code><a title="vectorbt.records.nb.stack_mapped_nb" href="#vectorbt.records.nb.stack_mapped_nb">stack_mapped_nb</a></code></li>
+<li><code><a title="vectorbt.records.nb.stack_expand_mapped_nb" href="#vectorbt.records.nb.stack_expand_mapped_nb">stack_expand_mapped_nb</a></code></li>
 <li><code><a title="vectorbt.records.nb.top_n_inout_map_nb" href="#vectorbt.records.nb.top_n_inout_map_nb">top_n_inout_map_nb</a></code></li>
 </ul>
 </li>
