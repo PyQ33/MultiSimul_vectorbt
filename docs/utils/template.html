@@ -47,21 +47,50 @@ from string import Template
 
 from vectorbt import _typing as tp
 from vectorbt.utils import checks
-from vectorbt.utils.config import set_dict_item
-
-
-class Rep(Template):
-    &#34;&#34;&#34;Template to replace the whole string with a mapped value.
-
-    Returns the mapped value (which is not necessarily a string).&#34;&#34;&#34;
-    pass
+from vectorbt.utils.config import set_dict_item, get_func_arg_names
 
 
 class Sub(Template):
-    &#34;&#34;&#34;Template to substitute parts of the string with the respective mapped values.
+    &#34;&#34;&#34;Template to substitute parts of the string with the respective values from `mapping`.
 
     Returns a string.&#34;&#34;&#34;
     pass
+
+
+class Rep:
+    &#34;&#34;&#34;Key to be replaced with the respective value from `mapping`.&#34;&#34;&#34;
+
+    def __init__(self, key: tp.Hashable) -&gt; None:
+        self._key = key
+
+    @property
+    def key(self) -&gt; tp.Hashable:
+        &#34;&#34;&#34;Key to be replaced.&#34;&#34;&#34;
+        return self._key
+
+
+class RepEval:
+    &#34;&#34;&#34;Expression to be evaluated with `mapping` used as locals.&#34;&#34;&#34;
+
+    def __init__(self, expression: str) -&gt; None:
+        self._expression = expression
+
+    @property
+    def expression(self) -&gt; str:
+        &#34;&#34;&#34;Expression to be evaluated.&#34;&#34;&#34;
+        return self._expression
+
+
+class RepFunc:
+    &#34;&#34;&#34;Function to be run with argument names from `mapping`.&#34;&#34;&#34;
+
+    def __init__(self, func: tp.Callable) -&gt; None:
+        self._func = func
+
+    @property
+    def func(self) -&gt; tp.Callable:
+        &#34;&#34;&#34;Replacement function to be run.&#34;&#34;&#34;
+        return self._func
 
 
 def deep_substitute(obj: tp.Any, mapping: tp.Optional[tp.Mapping] = None) -&gt; tp.Any:
@@ -72,19 +101,34 @@ def deep_substitute(obj: tp.Any, mapping: tp.Optional[tp.Mapping] = None) -&gt; 
     ## Example
 
     ```python-repl
-    &gt;&gt;&gt; from vectorbt.utils.template import Rep, Sub, deep_substitute
+    &gt;&gt;&gt; import vectorbt as vbt
 
-    &gt;&gt;&gt; deep_substitute(Rep(&#39;key&#39;), {&#39;key&#39;: 100})
-    100
-    &gt;&gt;&gt; deep_substitute(Sub(&#39;$key$key&#39;), {&#39;key&#39;: 100})
+    &gt;&gt;&gt; vbt.deep_substitute(vbt.Sub(&#39;$key&#39;), {&#39;key&#39;: 100})
+    &#39;100&#39;
+    &gt;&gt;&gt; vbt.deep_substitute(vbt.Sub(&#39;$key$key&#39;), {&#39;key&#39;: 100})
     &#39;100100&#39;
-    &gt;&gt;&gt; deep_substitute([Rep(&#39;key&#39;), Sub(&#39;$key$key&#39;)], {&#39;key&#39;: 100})
+    &gt;&gt;&gt; vbt.deep_substitute(vbt.Rep(&#39;key&#39;), {&#39;key&#39;: 100})
+    100
+    &gt;&gt;&gt; vbt.deep_substitute([vbt.Rep(&#39;key&#39;), vbt.Sub(&#39;$key$key&#39;)], {&#39;key&#39;: 100})
     [100, &#39;100100&#39;]
+    &gt;&gt;&gt; vbt.deep_substitute(vbt.RepFunc(lambda key: key == 100), {&#39;key&#39;: 100})
+    True
+    &gt;&gt;&gt; vbt.deep_substitute(vbt.RepEval(&#39;key == 100&#39;), {&#39;key&#39;: 100})
+    True
     ```&#34;&#34;&#34;
     if mapping is None:
         mapping = {}
+    if isinstance(obj, RepFunc):
+        func_arg_names = get_func_arg_names(obj.func)
+        func_kwargs = dict()
+        for k, v in mapping.items():
+            if k in func_arg_names:
+                func_kwargs[k] = v
+        return obj.func(**func_kwargs)
+    if isinstance(obj, RepEval):
+        return eval(obj.expression, {}, mapping)
     if isinstance(obj, Rep):
-        return mapping[obj.template]
+        return mapping[obj.key]
     if isinstance(obj, Template):
         return obj.substitute(mapping)
     if isinstance(obj, dict):
@@ -116,14 +160,20 @@ def deep_substitute(obj: tp.Any, mapping: tp.Optional[tp.Mapping] = None) -&gt; 
 <div class="desc"><p>Traverses an object recursively and substitutes all templates using a mapping.</p>
 <p>Traverses tuples, lists, dicts and (frozen-)sets. Does not look for templates in keys.</p>
 <h2 id="example">Example</h2>
-<pre><code class="language-python-repl">&gt;&gt;&gt; from vectorbt.utils.template import Rep, Sub, deep_substitute
+<pre><code class="language-python-repl">&gt;&gt;&gt; import vectorbt as vbt
 
-&gt;&gt;&gt; deep_substitute(Rep('key'), {'key': 100})
-100
-&gt;&gt;&gt; deep_substitute(Sub('$key$key'), {'key': 100})
+&gt;&gt;&gt; vbt.deep_substitute(vbt.Sub('$key'), {'key': 100})
+'100'
+&gt;&gt;&gt; vbt.deep_substitute(vbt.Sub('$key$key'), {'key': 100})
 '100100'
-&gt;&gt;&gt; deep_substitute([Rep('key'), Sub('$key$key')], {'key': 100})
+&gt;&gt;&gt; vbt.deep_substitute(vbt.Rep('key'), {'key': 100})
+100
+&gt;&gt;&gt; vbt.deep_substitute([vbt.Rep('key'), vbt.Sub('$key$key')], {'key': 100})
 [100, '100100']
+&gt;&gt;&gt; vbt.deep_substitute(vbt.RepFunc(lambda key: key == 100), {'key': 100})
+True
+&gt;&gt;&gt; vbt.deep_substitute(vbt.RepEval('key == 100'), {'key': 100})
+True
 </code></pre></div>
 <details class="source">
 <summary>
@@ -137,19 +187,34 @@ def deep_substitute(obj: tp.Any, mapping: tp.Optional[tp.Mapping] = None) -&gt; 
     ## Example
 
     ```python-repl
-    &gt;&gt;&gt; from vectorbt.utils.template import Rep, Sub, deep_substitute
+    &gt;&gt;&gt; import vectorbt as vbt
 
-    &gt;&gt;&gt; deep_substitute(Rep(&#39;key&#39;), {&#39;key&#39;: 100})
-    100
-    &gt;&gt;&gt; deep_substitute(Sub(&#39;$key$key&#39;), {&#39;key&#39;: 100})
+    &gt;&gt;&gt; vbt.deep_substitute(vbt.Sub(&#39;$key&#39;), {&#39;key&#39;: 100})
+    &#39;100&#39;
+    &gt;&gt;&gt; vbt.deep_substitute(vbt.Sub(&#39;$key$key&#39;), {&#39;key&#39;: 100})
     &#39;100100&#39;
-    &gt;&gt;&gt; deep_substitute([Rep(&#39;key&#39;), Sub(&#39;$key$key&#39;)], {&#39;key&#39;: 100})
+    &gt;&gt;&gt; vbt.deep_substitute(vbt.Rep(&#39;key&#39;), {&#39;key&#39;: 100})
+    100
+    &gt;&gt;&gt; vbt.deep_substitute([vbt.Rep(&#39;key&#39;), vbt.Sub(&#39;$key$key&#39;)], {&#39;key&#39;: 100})
     [100, &#39;100100&#39;]
+    &gt;&gt;&gt; vbt.deep_substitute(vbt.RepFunc(lambda key: key == 100), {&#39;key&#39;: 100})
+    True
+    &gt;&gt;&gt; vbt.deep_substitute(vbt.RepEval(&#39;key == 100&#39;), {&#39;key&#39;: 100})
+    True
     ```&#34;&#34;&#34;
     if mapping is None:
         mapping = {}
+    if isinstance(obj, RepFunc):
+        func_arg_names = get_func_arg_names(obj.func)
+        func_kwargs = dict()
+        for k, v in mapping.items():
+            if k in func_arg_names:
+                func_kwargs[k] = v
+        return obj.func(**func_kwargs)
+    if isinstance(obj, RepEval):
+        return eval(obj.expression, {}, mapping)
     if isinstance(obj, Rep):
-        return mapping[obj.template]
+        return mapping[obj.key]
     if isinstance(obj, Template):
         return obj.substitute(mapping)
     if isinstance(obj, dict):
@@ -174,30 +239,115 @@ def deep_substitute(obj: tp.Any, mapping: tp.Optional[tp.Mapping] = None) -&gt; 
 <dl>
 <dt id="vectorbt.utils.template.Rep"><code class="flex name class">
 <span>class <span class="ident">Rep</span></span>
-<span>(</span><span>template)</span>
+<span>(</span><span>key)</span>
 </code></dt>
 <dd>
-<div class="desc"><p>Template to replace the whole string with a mapped value.</p>
-<p>Returns the mapped value (which is not necessarily a string).</p></div>
+<div class="desc"><p>Key to be replaced with the respective value from <code>mapping</code>.</p></div>
 <details class="source">
 <summary>
 <span>Expand source code</span>
 </summary>
-<pre><code class="python">class Rep(Template):
-    &#34;&#34;&#34;Template to replace the whole string with a mapped value.
+<pre><code class="python">class Rep:
+    &#34;&#34;&#34;Key to be replaced with the respective value from `mapping`.&#34;&#34;&#34;
 
-    Returns the mapped value (which is not necessarily a string).&#34;&#34;&#34;
-    pass</code></pre>
+    def __init__(self, key: tp.Hashable) -&gt; None:
+        self._key = key
+
+    @property
+    def key(self) -&gt; tp.Hashable:
+        &#34;&#34;&#34;Key to be replaced.&#34;&#34;&#34;
+        return self._key</code></pre>
 </details>
-<h3 class="section-subtitle">Ancestors</h3>
-<ul class="hlist">
-<li>string.Template</li>
-</ul>
-<h3 class="section-subtitle">Class variables</h3>
+<h3 class="section-subtitle">Instance variables</h3>
 <dl>
-<dt id="vectorbt.utils.template.Rep.pattern"><code class="name">var <span class="ident">pattern</span></code></dt>
+<dt id="vectorbt.utils.template.Rep.key"><code class="name">var <span class="ident">key</span></code></dt>
 <dd>
-<div class="desc"></div>
+<div class="desc"><p>Key to be replaced.</p></div>
+<details class="source">
+<summary>
+<span>Expand source code</span>
+</summary>
+<pre><code class="python">@property
+def key(self) -&gt; tp.Hashable:
+    &#34;&#34;&#34;Key to be replaced.&#34;&#34;&#34;
+    return self._key</code></pre>
+</details>
+</dd>
+</dl>
+</dd>
+<dt id="vectorbt.utils.template.RepEval"><code class="flex name class">
+<span>class <span class="ident">RepEval</span></span>
+<span>(</span><span>expression)</span>
+</code></dt>
+<dd>
+<div class="desc"><p>Expression to be evaluated with <code>mapping</code> used as locals.</p></div>
+<details class="source">
+<summary>
+<span>Expand source code</span>
+</summary>
+<pre><code class="python">class RepEval:
+    &#34;&#34;&#34;Expression to be evaluated with `mapping` used as locals.&#34;&#34;&#34;
+
+    def __init__(self, expression: str) -&gt; None:
+        self._expression = expression
+
+    @property
+    def expression(self) -&gt; str:
+        &#34;&#34;&#34;Expression to be evaluated.&#34;&#34;&#34;
+        return self._expression</code></pre>
+</details>
+<h3 class="section-subtitle">Instance variables</h3>
+<dl>
+<dt id="vectorbt.utils.template.RepEval.expression"><code class="name">var <span class="ident">expression</span></code></dt>
+<dd>
+<div class="desc"><p>Expression to be evaluated.</p></div>
+<details class="source">
+<summary>
+<span>Expand source code</span>
+</summary>
+<pre><code class="python">@property
+def expression(self) -&gt; str:
+    &#34;&#34;&#34;Expression to be evaluated.&#34;&#34;&#34;
+    return self._expression</code></pre>
+</details>
+</dd>
+</dl>
+</dd>
+<dt id="vectorbt.utils.template.RepFunc"><code class="flex name class">
+<span>class <span class="ident">RepFunc</span></span>
+<span>(</span><span>func)</span>
+</code></dt>
+<dd>
+<div class="desc"><p>Function to be run with argument names from <code>mapping</code>.</p></div>
+<details class="source">
+<summary>
+<span>Expand source code</span>
+</summary>
+<pre><code class="python">class RepFunc:
+    &#34;&#34;&#34;Function to be run with argument names from `mapping`.&#34;&#34;&#34;
+
+    def __init__(self, func: tp.Callable) -&gt; None:
+        self._func = func
+
+    @property
+    def func(self) -&gt; tp.Callable:
+        &#34;&#34;&#34;Replacement function to be run.&#34;&#34;&#34;
+        return self._func</code></pre>
+</details>
+<h3 class="section-subtitle">Instance variables</h3>
+<dl>
+<dt id="vectorbt.utils.template.RepFunc.func"><code class="name">var <span class="ident">func</span></code></dt>
+<dd>
+<div class="desc"><p>Replacement function to be run.</p></div>
+<details class="source">
+<summary>
+<span>Expand source code</span>
+</summary>
+<pre><code class="python">@property
+def func(self) -&gt; tp.Callable:
+    &#34;&#34;&#34;Replacement function to be run.&#34;&#34;&#34;
+    return self._func</code></pre>
+</details>
 </dd>
 </dl>
 </dd>
@@ -206,14 +356,14 @@ def deep_substitute(obj: tp.Any, mapping: tp.Optional[tp.Mapping] = None) -&gt; 
 <span>(</span><span>template)</span>
 </code></dt>
 <dd>
-<div class="desc"><p>Template to substitute parts of the string with the respective mapped values.</p>
+<div class="desc"><p>Template to substitute parts of the string with the respective values from <code>mapping</code>.</p>
 <p>Returns a string.</p></div>
 <details class="source">
 <summary>
 <span>Expand source code</span>
 </summary>
 <pre><code class="python">class Sub(Template):
-    &#34;&#34;&#34;Template to substitute parts of the string with the respective mapped values.
+    &#34;&#34;&#34;Template to substitute parts of the string with the respective values from `mapping`.
 
     Returns a string.&#34;&#34;&#34;
     pass</code></pre>
@@ -237,7 +387,7 @@ def deep_substitute(obj: tp.Any, mapping: tp.Optional[tp.Mapping] = None) -&gt; 
 <header>
 <a class="homelink" rel="home" title="pdoc Home" href="https://github.com/polakowo/vectorbt">
 <img src="data:image/svg+xml;base64,PD94bWwgdmVyc2lvbj0iMS4wIiBlbmNvZGluZz0idXRmLTgiPz4KPCEtLSBHZW5lcmF0b3I6IEFkb2JlIElsbHVzdHJhdG9yIDI1LjAuMSwgU1ZHIEV4cG9ydCBQbHVnLUluIC4gU1ZHIFZlcnNpb246IDYuMDAgQnVpbGQgMCkgIC0tPgo8c3ZnIHZlcnNpb249IjEuMSIgaWQ9IkNhcGFfMSIgeG1sbnM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDAvc3ZnIiB4bWxuczp4bGluaz0iaHR0cDovL3d3dy53My5vcmcvMTk5OS94bGluayIgeD0iMHB4IiB5PSIwcHgiCgkgdmlld0JveD0iMCAwIDUxMiA1MTIiIHN0eWxlPSJlbmFibGUtYmFja2dyb3VuZDpuZXcgMCAwIDUxMiA1MTI7IiB4bWw6c3BhY2U9InByZXNlcnZlIj4KPHN0eWxlIHR5cGU9InRleHQvY3NzIj4KCS5zdDB7ZmlsbDojRUYwMDAwO30KCS5zdDF7ZmlsbDojRkY5MDAwO30KCS5zdDJ7ZmlsbDojRkZERjAwO30KCS5zdDN7ZmlsbDojMjgyQzM0O30KPC9zdHlsZT4KPGc+Cgk8Zz4KCQk8Zz4KCQkJPHBvbHlnb24gY2xhc3M9InN0MCIgcG9pbnRzPSIxNTUuMywzMDAuMSAyODMuMSwwIDIwOCwwIDExMC44LDAgMzUuOCwwIDEuMiw0NTAuMiA3Ni4zLDQ1MC4yIAkJCSIvPgoJCTwvZz4KCTwvZz4KCTxnPgoJCTxnPgoJCQk8cG9seWdvbiBjbGFzcz0ic3QxIiBwb2ludHM9IjIzMC40LDMwMC4xIDM1OC4xLDAgMjgzLjEsMCAxODUuOCwwIDExMC44LDAgNzYuMyw0NTAuMiAxNTEuMyw0NTAuMiAJCQkiLz4KCQk8L2c+Cgk8L2c+Cgk8Zz4KCQk8Zz4KCQkJPHBvbHlnb24gY2xhc3M9InN0MiIgcG9pbnRzPSIzMDUuNCwzMDAuMSA0MzMuMSwwIDM1OC4xLDAgMzMxLjYsNjIuMyAyNjAuOCwwIDE4NS44LDAgMTUxLjMsNDUwLjIgMjI2LjQsNDUwLjIgCQkJIi8+CgkJPC9nPgoJPC9nPgoJPGc+CgkJPGc+CgkJCTxwb2x5Z29uIGNsYXNzPSJzdDMiIHBvaW50cz0iNTEwLjgsMCA0MzMuMSwwIDMwNS40LDMwMC4xIDMzOC40LDAgMjYwLjgsMCAyMjYuNCw0NTAuMiAzMDQsNDUwLjIgCQkJIi8+CgkJPC9nPgoJPC9nPgo8L2c+Cjwvc3ZnPgo="/>
-vectorbt <span class="version">0.19.1</span></a>
+vectorbt <span class="version">0.19.2</span></a>
 </header>
 <div class="search-container">
 <input
@@ -268,7 +418,19 @@ title="Search"
 <li>
 <h4><code><a title="vectorbt.utils.template.Rep" href="#vectorbt.utils.template.Rep">Rep</a></code></h4>
 <ul class="">
-<li><code><a title="vectorbt.utils.template.Rep.pattern" href="#vectorbt.utils.template.Rep.pattern">pattern</a></code></li>
+<li><code><a title="vectorbt.utils.template.Rep.key" href="#vectorbt.utils.template.Rep.key">key</a></code></li>
+</ul>
+</li>
+<li>
+<h4><code><a title="vectorbt.utils.template.RepEval" href="#vectorbt.utils.template.RepEval">RepEval</a></code></h4>
+<ul class="">
+<li><code><a title="vectorbt.utils.template.RepEval.expression" href="#vectorbt.utils.template.RepEval.expression">expression</a></code></li>
+</ul>
+</li>
+<li>
+<h4><code><a title="vectorbt.utils.template.RepFunc" href="#vectorbt.utils.template.RepFunc">RepFunc</a></code></h4>
+<ul class="">
+<li><code><a title="vectorbt.utils.template.RepFunc.func" href="#vectorbt.utils.template.RepFunc.func">func</a></code></li>
 </ul>
 </li>
 <li>
