@@ -4,8 +4,8 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, minimum-scale=1" />
 <meta name="generator" content="pdoc 0.9.2" />
-<title>vectorbt.generic API documentation</title>
-<meta name="description" content="Modules for working with any time series …" />
+<title>vectorbt.generic.decorators API documentation</title>
+<meta name="description" content="Class and function decorators." />
 <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/5.12.0-2/css/all.min.css" integrity="sha256-46r060N2LrChLLb5zowXQ72/iKKNiw/lAmygmHExk/o=" crossorigin="anonymous" />
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/docsearch.js@2/dist/cdn/docsearch.min.css" />
 <link href='https://cdnjs.cloudflare.com/ajax/libs/normalize/8.0.0/normalize.min.css' rel='stylesheet'>
@@ -36,77 +36,306 @@ gtag('config', 'G-4QLCS0J048');
 <main>
 <article id="content">
 <header>
-<h1 class="title">Module <code>vectorbt.generic</code></h1>
+<h1 class="title">Module <code>vectorbt.generic.decorators</code></h1>
 </header>
 <section id="section-intro">
-<p>Modules for working with any time series.</p>
-<p>In contrast to the <code><a title="vectorbt.base" href="../base/index.html">vectorbt.base</a></code> sub-package, focuses on the data itself.</p>
+<p>Class and function decorators.</p>
 <details class="source">
 <summary>
 <span>Expand source code</span>
 </summary>
-<pre><code class="python">&#34;&#34;&#34;Modules for working with any time series.
+<pre><code class="python">&#34;&#34;&#34;Class and function decorators.&#34;&#34;&#34;
 
-In contrast to the `vectorbt.base` sub-package, focuses on the data itself.&#34;&#34;&#34;
+import inspect
 
-from vectorbt.generic.enums import *
-from vectorbt.generic.drawdowns import Drawdowns
-from vectorbt.generic.splitters import RangeSplitter, RollingSplitter, ExpandingSplitter
+from vectorbt import _typing as tp
+from vectorbt.utils import checks
+from vectorbt.utils.config import merge_dicts, Config, get_func_arg_names
 
-__all__ = [
-    &#39;Drawdowns&#39;,
-    &#39;RangeSplitter&#39;,
-    &#39;RollingSplitter&#39;,
-    &#39;ExpandingSplitter&#39;
-]
+WrapperFuncT = tp.Callable[[tp.Type[tp.T]], tp.Type[tp.T]]
 
-__pdoc__ = {k: False for k in __all__}</code></pre>
+
+def add_nb_methods(config: Config) -&gt; WrapperFuncT:
+    &#34;&#34;&#34;Class decorator to add Numba methods.
+
+    `config` should contain target method names (keys) and dictionaries (values) with the following keys:
+
+    * `func`: Function that should be wrapped. The first argument should expect a 2-dim array.
+    * `is_reducing`: Whether the function is reducing. Defaults to False.
+    * `path`: Path to the function for documentation. Defaults to `func.__name__`.
+    * `replace_signature`: Whether to replace the target signature with the source signature. Defaults to True.
+    * `wrap_kwargs`: Default keyword arguments for wrapping. Will be merged with the dict supplied by the user.
+        Defaults to `dict(name_or_index=target_name)` for reducing functions.
+
+    The class should be a subclass of `vectorbt.base.array_wrapper.Wrapping`.
+    &#34;&#34;&#34;
+
+    def wrapper(cls: tp.Type[tp.T]) -&gt; tp.Type[tp.T]:
+        from vectorbt.base.array_wrapper import Wrapping
+
+        checks.assert_subclass(cls, Wrapping)
+
+        for target_name, settings in config.items():
+            func = settings[&#39;func&#39;]
+            is_reducing = settings.get(&#39;is_reducing&#39;, False)
+            path = settings.get(&#39;path&#39;, func.__name__)
+            replace_signature = settings.get(&#39;replace_signature&#39;, True)
+            default_wrap_kwargs = settings.get(&#39;wrap_kwargs&#39;, dict(name_or_index=target_name) if is_reducing else None)
+
+            def new_method(self,
+                           *args,
+                           _target_name: str = target_name,
+                           _func: tp.Callable = func,
+                           _is_reducing: bool = is_reducing,
+                           _default_wrap_kwargs: tp.KwargsLike = default_wrap_kwargs,
+                           wrap_kwargs: tp.KwargsLike = None,
+                           **kwargs) -&gt; tp.SeriesFrame:
+                args = (self.to_2d_array(),) + args
+                inspect.signature(_func).bind(*args, **kwargs)
+
+                a = _func(*args, **kwargs)
+                wrap_kwargs = merge_dicts(_default_wrap_kwargs, wrap_kwargs)
+                if _is_reducing:
+                    return self.wrapper.wrap_reduced(a, **wrap_kwargs)
+                return self.wrapper.wrap(a, **wrap_kwargs)
+
+            if replace_signature:
+                # Replace the function&#39;s signature with the original one
+                source_sig = inspect.signature(func)
+                new_method_params = tuple(inspect.signature(new_method).parameters.values())
+                self_arg = new_method_params[0]
+                wrap_kwargs_arg = new_method_params[-2]
+                source_sig = source_sig.replace(
+                    parameters=(self_arg,) + tuple(source_sig.parameters.values())[1:] + (wrap_kwargs_arg,))
+                new_method.__signature__ = source_sig
+
+            new_method.__doc__ = f&#34;See `{path}`&#34;
+            new_method.__qualname__ = f&#34;{cls.__name__}.{target_name}&#34;
+            new_method.__name__ = target_name
+            setattr(cls, target_name, new_method)
+        return cls
+
+    return wrapper
+
+
+def add_transform_methods(config: Config) -&gt; WrapperFuncT:
+    &#34;&#34;&#34;Class decorator to add transformation methods.
+
+    `config` should contain target method names (keys) and dictionaries (values) with the following keys:
+
+    * `transformer`: Transformer class/object.
+    * `docstring`: Method docstring. Defaults to &#34;See `{transformer}.__name__`.&#34;.
+    * `replace_signature`: Whether to replace the target signature. Defaults to True.
+
+    The class should be a subclass of `vectorbt.generic.accessors.GenericAccessor`.
+    &#34;&#34;&#34;
+
+    def wrapper(cls: tp.Type[tp.T]) -&gt; tp.Type[tp.T]:
+        from vectorbt.generic.accessors import TransformerT
+
+        checks.assert_subclass(cls, &#34;GenericAccessor&#34;)
+
+        for target_name, settings in config.items():
+            transformer = settings[&#39;transformer&#39;]
+            docstring = settings.get(&#39;docstring&#39;, f&#34;See `{transformer.__name__}`.&#34;)
+            replace_signature = settings.get(&#39;replace_signature&#39;, True)
+
+            def new_method(self,
+                           _target_name: str = target_name,
+                           _transformer: tp.Union[tp.Type[TransformerT], TransformerT] = transformer,
+                           **kwargs) -&gt; tp.SeriesFrame:
+                if inspect.isclass(_transformer):
+                    arg_names = get_func_arg_names(_transformer.__init__)
+                    transformer_kwargs = dict()
+                    for arg_name in arg_names:
+                        if arg_name in kwargs:
+                            transformer_kwargs[arg_name] = kwargs.pop(arg_name)
+                    return self.transform(_transformer(**transformer_kwargs), **kwargs)
+                return self.transform(_transformer, **kwargs)
+
+            if replace_signature:
+                source_sig = inspect.signature(transformer.__init__)
+                new_method_params = tuple(inspect.signature(new_method).parameters.values())
+                if inspect.isclass(transformer):
+                    transformer_params = tuple(source_sig.parameters.values())
+                    source_sig = inspect.Signature(
+                        (new_method_params[0],) + transformer_params[1:] + (new_method_params[-1],))
+                    new_method.__signature__ = source_sig
+                else:
+                    source_sig = inspect.Signature((new_method_params[0],) + (new_method_params[-1],))
+                    new_method.__signature__ = source_sig
+
+            new_method.__doc__ = docstring
+            new_method.__qualname__ = f&#34;{cls.__name__}.{target_name}&#34;
+            new_method.__name__ = target_name
+            setattr(cls, target_name, new_method)
+        return cls
+
+    return wrapper</code></pre>
 </details>
 </section>
 <section>
-<h2 class="section-title" id="header-submodules">Sub-modules</h2>
+</section>
+<section>
+</section>
+<section>
+<h2 class="section-title" id="header-functions">Functions</h2>
 <dl>
-<dt><code class="name"><a title="vectorbt.generic.accessors" href="accessors.html">vectorbt.generic.accessors</a></code></dt>
+<dt id="vectorbt.generic.decorators.add_nb_methods"><code class="name flex">
+<span>def <span class="ident parent-name">add_nb_methods</span></span>(<span class="params">config)</span><span class="return_type"></span>
+</code></dt>
 <dd>
-<div class="desc"><p>Custom pandas accessors for generic data …</p></div>
+<div class="desc"><p>Class decorator to add Numba methods.</p>
+<p><code>config</code> should contain target method names (keys) and dictionaries (values) with the following keys:</p>
+<ul>
+<li><code>func</code>: Function that should be wrapped. The first argument should expect a 2-dim array.</li>
+<li><code>is_reducing</code>: Whether the function is reducing. Defaults to False.</li>
+<li><code>path</code>: Path to the function for documentation. Defaults to <code>func.__name__</code>.</li>
+<li><code>replace_signature</code>: Whether to replace the target signature with the source signature. Defaults to True.</li>
+<li><code>wrap_kwargs</code>: Default keyword arguments for wrapping. Will be merged with the dict supplied by the user.
+Defaults to <code>dict(name_or_index=target_name)</code> for reducing functions.</li>
+</ul>
+<p>The class should be a subclass of <code><a title="vectorbt.base.array_wrapper.Wrapping" href="../base/array_wrapper.html#vectorbt.base.array_wrapper.Wrapping">Wrapping</a></code>.</p></div>
+<details class="source">
+<summary>
+<span>Expand source code</span>
+</summary>
+<pre><code class="python">def add_nb_methods(config: Config) -&gt; WrapperFuncT:
+    &#34;&#34;&#34;Class decorator to add Numba methods.
+
+    `config` should contain target method names (keys) and dictionaries (values) with the following keys:
+
+    * `func`: Function that should be wrapped. The first argument should expect a 2-dim array.
+    * `is_reducing`: Whether the function is reducing. Defaults to False.
+    * `path`: Path to the function for documentation. Defaults to `func.__name__`.
+    * `replace_signature`: Whether to replace the target signature with the source signature. Defaults to True.
+    * `wrap_kwargs`: Default keyword arguments for wrapping. Will be merged with the dict supplied by the user.
+        Defaults to `dict(name_or_index=target_name)` for reducing functions.
+
+    The class should be a subclass of `vectorbt.base.array_wrapper.Wrapping`.
+    &#34;&#34;&#34;
+
+    def wrapper(cls: tp.Type[tp.T]) -&gt; tp.Type[tp.T]:
+        from vectorbt.base.array_wrapper import Wrapping
+
+        checks.assert_subclass(cls, Wrapping)
+
+        for target_name, settings in config.items():
+            func = settings[&#39;func&#39;]
+            is_reducing = settings.get(&#39;is_reducing&#39;, False)
+            path = settings.get(&#39;path&#39;, func.__name__)
+            replace_signature = settings.get(&#39;replace_signature&#39;, True)
+            default_wrap_kwargs = settings.get(&#39;wrap_kwargs&#39;, dict(name_or_index=target_name) if is_reducing else None)
+
+            def new_method(self,
+                           *args,
+                           _target_name: str = target_name,
+                           _func: tp.Callable = func,
+                           _is_reducing: bool = is_reducing,
+                           _default_wrap_kwargs: tp.KwargsLike = default_wrap_kwargs,
+                           wrap_kwargs: tp.KwargsLike = None,
+                           **kwargs) -&gt; tp.SeriesFrame:
+                args = (self.to_2d_array(),) + args
+                inspect.signature(_func).bind(*args, **kwargs)
+
+                a = _func(*args, **kwargs)
+                wrap_kwargs = merge_dicts(_default_wrap_kwargs, wrap_kwargs)
+                if _is_reducing:
+                    return self.wrapper.wrap_reduced(a, **wrap_kwargs)
+                return self.wrapper.wrap(a, **wrap_kwargs)
+
+            if replace_signature:
+                # Replace the function&#39;s signature with the original one
+                source_sig = inspect.signature(func)
+                new_method_params = tuple(inspect.signature(new_method).parameters.values())
+                self_arg = new_method_params[0]
+                wrap_kwargs_arg = new_method_params[-2]
+                source_sig = source_sig.replace(
+                    parameters=(self_arg,) + tuple(source_sig.parameters.values())[1:] + (wrap_kwargs_arg,))
+                new_method.__signature__ = source_sig
+
+            new_method.__doc__ = f&#34;See `{path}`&#34;
+            new_method.__qualname__ = f&#34;{cls.__name__}.{target_name}&#34;
+            new_method.__name__ = target_name
+            setattr(cls, target_name, new_method)
+        return cls
+
+    return wrapper</code></pre>
+</details>
 </dd>
-<dt><code class="name"><a title="vectorbt.generic.decorators" href="decorators.html">vectorbt.generic.decorators</a></code></dt>
+<dt id="vectorbt.generic.decorators.add_transform_methods"><code class="name flex">
+<span>def <span class="ident parent-name">add_transform_methods</span></span>(<span class="params">config)</span><span class="return_type"></span>
+</code></dt>
 <dd>
-<div class="desc"><p>Class and function decorators.</p></div>
-</dd>
-<dt><code class="name"><a title="vectorbt.generic.drawdowns" href="drawdowns.html">vectorbt.generic.drawdowns</a></code></dt>
-<dd>
-<div class="desc"><p>Base class for working with drawdown records …</p></div>
-</dd>
-<dt><code class="name"><a title="vectorbt.generic.enums" href="enums.html">vectorbt.generic.enums</a></code></dt>
-<dd>
-<div class="desc"><p>Named tuples and enumerated types …</p></div>
-</dd>
-<dt><code class="name"><a title="vectorbt.generic.nb" href="nb.html">vectorbt.generic.nb</a></code></dt>
-<dd>
-<div class="desc"><p>Numba-compiled functions …</p></div>
-</dd>
-<dt><code class="name"><a title="vectorbt.generic.plot_builder" href="plot_builder.html">vectorbt.generic.plot_builder</a></code></dt>
-<dd>
-<div class="desc"><p>Mixin for building plots out of subplots.</p></div>
-</dd>
-<dt><code class="name"><a title="vectorbt.generic.plotting" href="plotting.html">vectorbt.generic.plotting</a></code></dt>
-<dd>
-<div class="desc"><p>Base plotting functions …</p></div>
-</dd>
-<dt><code class="name"><a title="vectorbt.generic.splitters" href="splitters.html">vectorbt.generic.splitters</a></code></dt>
-<dd>
-<div class="desc"><p>Splitters for cross-validation …</p></div>
-</dd>
-<dt><code class="name"><a title="vectorbt.generic.stats_builder" href="stats_builder.html">vectorbt.generic.stats_builder</a></code></dt>
-<dd>
-<div class="desc"><p>Mixin for building statistics out of performance metrics.</p></div>
+<div class="desc"><p>Class decorator to add transformation methods.</p>
+<p><code>config</code> should contain target method names (keys) and dictionaries (values) with the following keys:</p>
+<ul>
+<li><code>transformer</code>: Transformer class/object.</li>
+<li><code>docstring</code>: Method docstring. Defaults to "See <code>{transformer}.__name__</code>.".</li>
+<li><code>replace_signature</code>: Whether to replace the target signature. Defaults to True.</li>
+</ul>
+<p>The class should be a subclass of <code><a title="vectorbt.generic.accessors.GenericAccessor" href="accessors.html#vectorbt.generic.accessors.GenericAccessor">GenericAccessor</a></code>.</p></div>
+<details class="source">
+<summary>
+<span>Expand source code</span>
+</summary>
+<pre><code class="python">def add_transform_methods(config: Config) -&gt; WrapperFuncT:
+    &#34;&#34;&#34;Class decorator to add transformation methods.
+
+    `config` should contain target method names (keys) and dictionaries (values) with the following keys:
+
+    * `transformer`: Transformer class/object.
+    * `docstring`: Method docstring. Defaults to &#34;See `{transformer}.__name__`.&#34;.
+    * `replace_signature`: Whether to replace the target signature. Defaults to True.
+
+    The class should be a subclass of `vectorbt.generic.accessors.GenericAccessor`.
+    &#34;&#34;&#34;
+
+    def wrapper(cls: tp.Type[tp.T]) -&gt; tp.Type[tp.T]:
+        from vectorbt.generic.accessors import TransformerT
+
+        checks.assert_subclass(cls, &#34;GenericAccessor&#34;)
+
+        for target_name, settings in config.items():
+            transformer = settings[&#39;transformer&#39;]
+            docstring = settings.get(&#39;docstring&#39;, f&#34;See `{transformer.__name__}`.&#34;)
+            replace_signature = settings.get(&#39;replace_signature&#39;, True)
+
+            def new_method(self,
+                           _target_name: str = target_name,
+                           _transformer: tp.Union[tp.Type[TransformerT], TransformerT] = transformer,
+                           **kwargs) -&gt; tp.SeriesFrame:
+                if inspect.isclass(_transformer):
+                    arg_names = get_func_arg_names(_transformer.__init__)
+                    transformer_kwargs = dict()
+                    for arg_name in arg_names:
+                        if arg_name in kwargs:
+                            transformer_kwargs[arg_name] = kwargs.pop(arg_name)
+                    return self.transform(_transformer(**transformer_kwargs), **kwargs)
+                return self.transform(_transformer, **kwargs)
+
+            if replace_signature:
+                source_sig = inspect.signature(transformer.__init__)
+                new_method_params = tuple(inspect.signature(new_method).parameters.values())
+                if inspect.isclass(transformer):
+                    transformer_params = tuple(source_sig.parameters.values())
+                    source_sig = inspect.Signature(
+                        (new_method_params[0],) + transformer_params[1:] + (new_method_params[-1],))
+                    new_method.__signature__ = source_sig
+                else:
+                    source_sig = inspect.Signature((new_method_params[0],) + (new_method_params[-1],))
+                    new_method.__signature__ = source_sig
+
+            new_method.__doc__ = docstring
+            new_method.__qualname__ = f&#34;{cls.__name__}.{target_name}&#34;
+            new_method.__name__ = target_name
+            setattr(cls, target_name, new_method)
+        return cls
+
+    return wrapper</code></pre>
+</details>
 </dd>
 </dl>
-</section>
-<section>
-</section>
-<section>
 </section>
 <section>
 </section>
@@ -133,20 +362,13 @@ title="Search"
 <ul id="index">
 <li><h3>Super-module</h3>
 <ul>
-<li><code><a title="vectorbt" href="../index.html">vectorbt</a></code></li>
+<li><code><a title="vectorbt.generic" href="index.html">vectorbt.generic</a></code></li>
 </ul>
 </li>
-<li><h3><a href="#header-submodules">Sub-modules</a></h3>
-<ul>
-<li><code><a title="vectorbt.generic.accessors" href="accessors.html">vectorbt.generic.accessors</a></code></li>
-<li><code><a title="vectorbt.generic.decorators" href="decorators.html">vectorbt.generic.decorators</a></code></li>
-<li><code><a title="vectorbt.generic.drawdowns" href="drawdowns.html">vectorbt.generic.drawdowns</a></code></li>
-<li><code><a title="vectorbt.generic.enums" href="enums.html">vectorbt.generic.enums</a></code></li>
-<li><code><a title="vectorbt.generic.nb" href="nb.html">vectorbt.generic.nb</a></code></li>
-<li><code><a title="vectorbt.generic.plot_builder" href="plot_builder.html">vectorbt.generic.plot_builder</a></code></li>
-<li><code><a title="vectorbt.generic.plotting" href="plotting.html">vectorbt.generic.plotting</a></code></li>
-<li><code><a title="vectorbt.generic.splitters" href="splitters.html">vectorbt.generic.splitters</a></code></li>
-<li><code><a title="vectorbt.generic.stats_builder" href="stats_builder.html">vectorbt.generic.stats_builder</a></code></li>
+<li><h3><a href="#header-functions">Functions</a></h3>
+<ul class="">
+<li><code><a title="vectorbt.generic.decorators.add_nb_methods" href="#vectorbt.generic.decorators.add_nb_methods">add_nb_methods</a></code></li>
+<li><code><a title="vectorbt.generic.decorators.add_transform_methods" href="#vectorbt.generic.decorators.add_transform_methods">add_transform_methods</a></code></li>
 </ul>
 </li>
 </nav>

@@ -4,8 +4,8 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, minimum-scale=1" />
 <meta name="generator" content="pdoc 0.9.2" />
-<title>vectorbt.generic API documentation</title>
-<meta name="description" content="Modules for working with any time series …" />
+<title>vectorbt.utils.mapping API documentation</title>
+<meta name="description" content="Mapping utilities." />
 <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/5.12.0-2/css/all.min.css" integrity="sha256-46r060N2LrChLLb5zowXQ72/iKKNiw/lAmygmHExk/o=" crossorigin="anonymous" />
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/docsearch.js@2/dist/cdn/docsearch.min.css" />
 <link href='https://cdnjs.cloudflare.com/ajax/libs/normalize/8.0.0/normalize.min.css' rel='stylesheet'>
@@ -36,77 +36,389 @@ gtag('config', 'G-4QLCS0J048');
 <main>
 <article id="content">
 <header>
-<h1 class="title">Module <code>vectorbt.generic</code></h1>
+<h1 class="title">Module <code>vectorbt.utils.mapping</code></h1>
 </header>
 <section id="section-intro">
-<p>Modules for working with any time series.</p>
-<p>In contrast to the <code><a title="vectorbt.base" href="../base/index.html">vectorbt.base</a></code> sub-package, focuses on the data itself.</p>
+<p>Mapping utilities.</p>
 <details class="source">
 <summary>
 <span>Expand source code</span>
 </summary>
-<pre><code class="python">&#34;&#34;&#34;Modules for working with any time series.
+<pre><code class="python">&#34;&#34;&#34;Mapping utilities.&#34;&#34;&#34;
 
-In contrast to the `vectorbt.base` sub-package, focuses on the data itself.&#34;&#34;&#34;
+import numpy as np
+import pandas as pd
 
-from vectorbt.generic.enums import *
-from vectorbt.generic.drawdowns import Drawdowns
-from vectorbt.generic.splitters import RangeSplitter, RollingSplitter, ExpandingSplitter
+from vectorbt import _typing as tp
+from vectorbt.utils import checks
 
-__all__ = [
-    &#39;Drawdowns&#39;,
-    &#39;RangeSplitter&#39;,
-    &#39;RollingSplitter&#39;,
-    &#39;ExpandingSplitter&#39;
-]
 
-__pdoc__ = {k: False for k in __all__}</code></pre>
+def reverse_mapping(mapping: tp.Mapping) -&gt; dict:
+    &#34;&#34;&#34;Reverse a mapping.
+
+    Returns a dict.&#34;&#34;&#34;
+    return {v: k for k, v in mapping.items()}
+
+
+def to_mapping(mapping_like: tp.MappingLike, reverse: bool = False) -&gt; dict:
+    &#34;&#34;&#34;Convert mapping-like object to a mapping.
+
+    Enable `reverse` to apply `reverse_mapping` on the result dict.&#34;&#34;&#34;
+    if checks.is_namedtuple(mapping_like):
+        mapping = {v: k for k, v in mapping_like._asdict().items()}
+        if -1 not in mapping_like:
+            mapping[-1] = None
+    elif not checks.is_mapping(mapping_like):
+        if checks.is_index(mapping_like):
+            mapping_like = pd.Series(mapping_like)
+        if checks.is_series(mapping_like):
+            mapping = mapping_like.to_dict()
+        else:
+            mapping = dict(enumerate(mapping_like))
+    else:
+        mapping = dict(mapping_like)
+    if reverse:
+        mapping = reverse_mapping(mapping)
+    return mapping
+
+
+def apply_mapping(obj: tp.Any,
+                  mapping_like: tp.Optional[tp.MappingLike] = None,
+                  reverse: bool = False,
+                  ignore_case: bool = True,
+                  ignore_underscores: bool = True,
+                  ignore_other_types: bool = True,
+                  na_sentinel: tp.Any = None) -&gt; tp.Any:
+    &#34;&#34;&#34;Apply mapping on object using a mapping-like object.
+
+    Args:
+        obj (any): Any object.
+
+            Can take a scalar, tuple, list, set, frozenset, NumPy array, Index, Series, and DataFrame.
+        mapping_like (mapping_like): Any mapping-like object.
+
+            See `to_mapping`.
+        reverse (bool): See `reverse` in `to_mapping`.
+        ignore_case (bool): Whether to ignore the case if the key is a string.
+        ignore_underscores (bool): Whether to ignore underscores if the key is a string.
+        ignore_other_types (bool): Whether to ignore other data types. Otherwise, throws an error.
+        na_sentinel (any): Value to mark “not found”.
+    &#34;&#34;&#34;
+    if mapping_like is None:
+        return na_sentinel
+
+    if ignore_case and ignore_underscores:
+        key_func = lambda x: x.lower().replace(&#39;_&#39;, &#39;&#39;)
+    elif ignore_case:
+        key_func = lambda x: x.lower()
+    elif ignore_underscores:
+        key_func = lambda x: x.replace(&#39;_&#39;, &#39;&#39;)
+    else:
+        key_func = lambda x: x
+
+    mapping = to_mapping(mapping_like, reverse=reverse)
+
+    key_types = set()
+    new_mapping = dict()
+    for k, v in mapping.items():
+        if pd.isnull(k):
+            na_sentinel = v
+        else:
+            if isinstance(k, str):
+                k = key_func(k)
+            new_mapping[k] = v
+            key_types.add(type(k))
+
+    def _type_in_key_types(x_type: type) -&gt; bool:
+        for key_type in key_types:
+            if x_type is key_type:
+                return True
+            x_dtype = np.dtype(x_type)
+            key_dtype = np.dtype(key_type)
+            if x_dtype is key_dtype:
+                return True
+            if np.issubdtype(x_dtype, np.number) and np.issubdtype(key_dtype, np.number):
+                return True
+            if np.issubdtype(x_dtype, np.bool_) and np.issubdtype(key_dtype, np.bool_):
+                return True
+            if np.issubdtype(x_dtype, np.flexible) and np.issubdtype(key_dtype, np.flexible):
+                return True
+        return False
+
+    def _converter(x: tp.Any) -&gt; tp.Any:
+        if pd.isnull(x):
+            return na_sentinel
+        if isinstance(x, str):
+            x = key_func(x)
+        return new_mapping[x]
+
+    if _type_in_key_types(type(obj)):
+        return _converter(obj)
+    if isinstance(obj, (tuple, list, set, frozenset)):
+        result = [apply_mapping(
+            v,
+            mapping_like=mapping_like,
+            reverse=reverse,
+            ignore_case=ignore_case,
+            ignore_underscores=ignore_underscores,
+            ignore_other_types=ignore_other_types,
+            na_sentinel=na_sentinel
+        ) for v in obj]
+        return type(obj)(result)
+    if isinstance(obj, np.ndarray):
+        if obj.size == 0:
+            return obj
+        if _type_in_key_types(type(obj.item(0))):
+            return np.vectorize(_converter)(obj)
+        if not ignore_other_types:
+            raise ValueError(f&#34;Type is {type(obj.item(0))}, must be one of types {key_types}&#34;)
+        return obj
+    if isinstance(obj, pd.Series):
+        if obj.size == 0:
+            return obj
+        if _type_in_key_types(type(obj.iloc[0])):
+            return obj.map(_converter)
+        if not ignore_other_types:
+            raise ValueError(f&#34;Type is {type(obj.iloc[0])}, must be one of types {key_types}&#34;)
+        return obj
+    if isinstance(obj, pd.Index):
+        if obj.size == 0:
+            return obj
+        if _type_in_key_types(type(obj[0])):
+            return obj.map(_converter)
+        if not ignore_other_types:
+            raise ValueError(f&#34;Type is {type(obj[0])}, must be one of types {key_types}&#34;)
+        return obj
+    if isinstance(obj, pd.DataFrame):
+        if obj.size == 0:
+            return obj
+        series = []
+        for sr_name, sr in obj.iteritems():
+            if _type_in_key_types(type(sr.iloc[0])):
+                series.append(sr.map(_converter))
+            else:
+                if not ignore_other_types:
+                    raise ValueError(f&#34;Type is {type(sr.iloc[0])}, must be one of types {key_types}&#34;)
+                series.append(sr)
+        return pd.concat(series, axis=1, keys=obj.columns)
+    if not ignore_other_types:
+        raise ValueError(f&#34;Type is {type(obj)}, must be one of types {key_types}&#34;)
+    return obj</code></pre>
 </details>
 </section>
 <section>
-<h2 class="section-title" id="header-submodules">Sub-modules</h2>
+</section>
+<section>
+</section>
+<section>
+<h2 class="section-title" id="header-functions">Functions</h2>
 <dl>
-<dt><code class="name"><a title="vectorbt.generic.accessors" href="accessors.html">vectorbt.generic.accessors</a></code></dt>
+<dt id="vectorbt.utils.mapping.apply_mapping"><code class="name flex">
+<span>def <span class="ident parent-name">apply_mapping</span></span>(<span class="params">obj, mapping_like=None, reverse=False, ignore_case=True, ignore_underscores=True, ignore_other_types=True, na_sentinel=None)</span><span class="return_type"></span>
+</code></dt>
 <dd>
-<div class="desc"><p>Custom pandas accessors for generic data …</p></div>
+<div class="desc"><p>Apply mapping on object using a mapping-like object.</p>
+<h2 id="args">Args</h2>
+<dl>
+<dt><strong><code>obj</code></strong> :&ensp;<code>any</code></dt>
+<dd>
+<p>Any object.</p>
+<p>Can take a scalar, tuple, list, set, frozenset, NumPy array, Index, Series, and DataFrame.</p>
 </dd>
-<dt><code class="name"><a title="vectorbt.generic.decorators" href="decorators.html">vectorbt.generic.decorators</a></code></dt>
+<dt><strong><code>mapping_like</code></strong> :&ensp;<code>mapping_like</code></dt>
 <dd>
-<div class="desc"><p>Class and function decorators.</p></div>
+<p>Any mapping-like object.</p>
+<p>See <code><a title="vectorbt.utils.mapping.to_mapping" href="#vectorbt.utils.mapping.to_mapping">to_mapping()</a></code>.</p>
 </dd>
-<dt><code class="name"><a title="vectorbt.generic.drawdowns" href="drawdowns.html">vectorbt.generic.drawdowns</a></code></dt>
-<dd>
-<div class="desc"><p>Base class for working with drawdown records …</p></div>
+<dt><strong><code>reverse</code></strong> :&ensp;<code>bool</code></dt>
+<dd>See <code>reverse</code> in <code><a title="vectorbt.utils.mapping.to_mapping" href="#vectorbt.utils.mapping.to_mapping">to_mapping()</a></code>.</dd>
+<dt><strong><code>ignore_case</code></strong> :&ensp;<code>bool</code></dt>
+<dd>Whether to ignore the case if the key is a string.</dd>
+<dt><strong><code>ignore_underscores</code></strong> :&ensp;<code>bool</code></dt>
+<dd>Whether to ignore underscores if the key is a string.</dd>
+<dt><strong><code>ignore_other_types</code></strong> :&ensp;<code>bool</code></dt>
+<dd>Whether to ignore other data types. Otherwise, throws an error.</dd>
+<dt><strong><code>na_sentinel</code></strong> :&ensp;<code>any</code></dt>
+<dd>Value to mark “not found”.</dd>
+</dl></div>
+<details class="source">
+<summary>
+<span>Expand source code</span>
+</summary>
+<pre><code class="python">def apply_mapping(obj: tp.Any,
+                  mapping_like: tp.Optional[tp.MappingLike] = None,
+                  reverse: bool = False,
+                  ignore_case: bool = True,
+                  ignore_underscores: bool = True,
+                  ignore_other_types: bool = True,
+                  na_sentinel: tp.Any = None) -&gt; tp.Any:
+    &#34;&#34;&#34;Apply mapping on object using a mapping-like object.
+
+    Args:
+        obj (any): Any object.
+
+            Can take a scalar, tuple, list, set, frozenset, NumPy array, Index, Series, and DataFrame.
+        mapping_like (mapping_like): Any mapping-like object.
+
+            See `to_mapping`.
+        reverse (bool): See `reverse` in `to_mapping`.
+        ignore_case (bool): Whether to ignore the case if the key is a string.
+        ignore_underscores (bool): Whether to ignore underscores if the key is a string.
+        ignore_other_types (bool): Whether to ignore other data types. Otherwise, throws an error.
+        na_sentinel (any): Value to mark “not found”.
+    &#34;&#34;&#34;
+    if mapping_like is None:
+        return na_sentinel
+
+    if ignore_case and ignore_underscores:
+        key_func = lambda x: x.lower().replace(&#39;_&#39;, &#39;&#39;)
+    elif ignore_case:
+        key_func = lambda x: x.lower()
+    elif ignore_underscores:
+        key_func = lambda x: x.replace(&#39;_&#39;, &#39;&#39;)
+    else:
+        key_func = lambda x: x
+
+    mapping = to_mapping(mapping_like, reverse=reverse)
+
+    key_types = set()
+    new_mapping = dict()
+    for k, v in mapping.items():
+        if pd.isnull(k):
+            na_sentinel = v
+        else:
+            if isinstance(k, str):
+                k = key_func(k)
+            new_mapping[k] = v
+            key_types.add(type(k))
+
+    def _type_in_key_types(x_type: type) -&gt; bool:
+        for key_type in key_types:
+            if x_type is key_type:
+                return True
+            x_dtype = np.dtype(x_type)
+            key_dtype = np.dtype(key_type)
+            if x_dtype is key_dtype:
+                return True
+            if np.issubdtype(x_dtype, np.number) and np.issubdtype(key_dtype, np.number):
+                return True
+            if np.issubdtype(x_dtype, np.bool_) and np.issubdtype(key_dtype, np.bool_):
+                return True
+            if np.issubdtype(x_dtype, np.flexible) and np.issubdtype(key_dtype, np.flexible):
+                return True
+        return False
+
+    def _converter(x: tp.Any) -&gt; tp.Any:
+        if pd.isnull(x):
+            return na_sentinel
+        if isinstance(x, str):
+            x = key_func(x)
+        return new_mapping[x]
+
+    if _type_in_key_types(type(obj)):
+        return _converter(obj)
+    if isinstance(obj, (tuple, list, set, frozenset)):
+        result = [apply_mapping(
+            v,
+            mapping_like=mapping_like,
+            reverse=reverse,
+            ignore_case=ignore_case,
+            ignore_underscores=ignore_underscores,
+            ignore_other_types=ignore_other_types,
+            na_sentinel=na_sentinel
+        ) for v in obj]
+        return type(obj)(result)
+    if isinstance(obj, np.ndarray):
+        if obj.size == 0:
+            return obj
+        if _type_in_key_types(type(obj.item(0))):
+            return np.vectorize(_converter)(obj)
+        if not ignore_other_types:
+            raise ValueError(f&#34;Type is {type(obj.item(0))}, must be one of types {key_types}&#34;)
+        return obj
+    if isinstance(obj, pd.Series):
+        if obj.size == 0:
+            return obj
+        if _type_in_key_types(type(obj.iloc[0])):
+            return obj.map(_converter)
+        if not ignore_other_types:
+            raise ValueError(f&#34;Type is {type(obj.iloc[0])}, must be one of types {key_types}&#34;)
+        return obj
+    if isinstance(obj, pd.Index):
+        if obj.size == 0:
+            return obj
+        if _type_in_key_types(type(obj[0])):
+            return obj.map(_converter)
+        if not ignore_other_types:
+            raise ValueError(f&#34;Type is {type(obj[0])}, must be one of types {key_types}&#34;)
+        return obj
+    if isinstance(obj, pd.DataFrame):
+        if obj.size == 0:
+            return obj
+        series = []
+        for sr_name, sr in obj.iteritems():
+            if _type_in_key_types(type(sr.iloc[0])):
+                series.append(sr.map(_converter))
+            else:
+                if not ignore_other_types:
+                    raise ValueError(f&#34;Type is {type(sr.iloc[0])}, must be one of types {key_types}&#34;)
+                series.append(sr)
+        return pd.concat(series, axis=1, keys=obj.columns)
+    if not ignore_other_types:
+        raise ValueError(f&#34;Type is {type(obj)}, must be one of types {key_types}&#34;)
+    return obj</code></pre>
+</details>
 </dd>
-<dt><code class="name"><a title="vectorbt.generic.enums" href="enums.html">vectorbt.generic.enums</a></code></dt>
+<dt id="vectorbt.utils.mapping.reverse_mapping"><code class="name flex">
+<span>def <span class="ident parent-name">reverse_mapping</span></span>(<span class="params">mapping)</span><span class="return_type"></span>
+</code></dt>
 <dd>
-<div class="desc"><p>Named tuples and enumerated types …</p></div>
+<div class="desc"><p>Reverse a mapping.</p>
+<p>Returns a dict.</p></div>
+<details class="source">
+<summary>
+<span>Expand source code</span>
+</summary>
+<pre><code class="python">def reverse_mapping(mapping: tp.Mapping) -&gt; dict:
+    &#34;&#34;&#34;Reverse a mapping.
+
+    Returns a dict.&#34;&#34;&#34;
+    return {v: k for k, v in mapping.items()}</code></pre>
+</details>
 </dd>
-<dt><code class="name"><a title="vectorbt.generic.nb" href="nb.html">vectorbt.generic.nb</a></code></dt>
+<dt id="vectorbt.utils.mapping.to_mapping"><code class="name flex">
+<span>def <span class="ident parent-name">to_mapping</span></span>(<span class="params">mapping_like, reverse=False)</span><span class="return_type"></span>
+</code></dt>
 <dd>
-<div class="desc"><p>Numba-compiled functions …</p></div>
-</dd>
-<dt><code class="name"><a title="vectorbt.generic.plot_builder" href="plot_builder.html">vectorbt.generic.plot_builder</a></code></dt>
-<dd>
-<div class="desc"><p>Mixin for building plots out of subplots.</p></div>
-</dd>
-<dt><code class="name"><a title="vectorbt.generic.plotting" href="plotting.html">vectorbt.generic.plotting</a></code></dt>
-<dd>
-<div class="desc"><p>Base plotting functions …</p></div>
-</dd>
-<dt><code class="name"><a title="vectorbt.generic.splitters" href="splitters.html">vectorbt.generic.splitters</a></code></dt>
-<dd>
-<div class="desc"><p>Splitters for cross-validation …</p></div>
-</dd>
-<dt><code class="name"><a title="vectorbt.generic.stats_builder" href="stats_builder.html">vectorbt.generic.stats_builder</a></code></dt>
-<dd>
-<div class="desc"><p>Mixin for building statistics out of performance metrics.</p></div>
+<div class="desc"><p>Convert mapping-like object to a mapping.</p>
+<p>Enable <code>reverse</code> to apply <code><a title="vectorbt.utils.mapping.reverse_mapping" href="#vectorbt.utils.mapping.reverse_mapping">reverse_mapping()</a></code> on the result dict.</p></div>
+<details class="source">
+<summary>
+<span>Expand source code</span>
+</summary>
+<pre><code class="python">def to_mapping(mapping_like: tp.MappingLike, reverse: bool = False) -&gt; dict:
+    &#34;&#34;&#34;Convert mapping-like object to a mapping.
+
+    Enable `reverse` to apply `reverse_mapping` on the result dict.&#34;&#34;&#34;
+    if checks.is_namedtuple(mapping_like):
+        mapping = {v: k for k, v in mapping_like._asdict().items()}
+        if -1 not in mapping_like:
+            mapping[-1] = None
+    elif not checks.is_mapping(mapping_like):
+        if checks.is_index(mapping_like):
+            mapping_like = pd.Series(mapping_like)
+        if checks.is_series(mapping_like):
+            mapping = mapping_like.to_dict()
+        else:
+            mapping = dict(enumerate(mapping_like))
+    else:
+        mapping = dict(mapping_like)
+    if reverse:
+        mapping = reverse_mapping(mapping)
+    return mapping</code></pre>
+</details>
 </dd>
 </dl>
-</section>
-<section>
-</section>
-<section>
 </section>
 <section>
 </section>
@@ -133,20 +445,14 @@ title="Search"
 <ul id="index">
 <li><h3>Super-module</h3>
 <ul>
-<li><code><a title="vectorbt" href="../index.html">vectorbt</a></code></li>
+<li><code><a title="vectorbt.utils" href="index.html">vectorbt.utils</a></code></li>
 </ul>
 </li>
-<li><h3><a href="#header-submodules">Sub-modules</a></h3>
-<ul>
-<li><code><a title="vectorbt.generic.accessors" href="accessors.html">vectorbt.generic.accessors</a></code></li>
-<li><code><a title="vectorbt.generic.decorators" href="decorators.html">vectorbt.generic.decorators</a></code></li>
-<li><code><a title="vectorbt.generic.drawdowns" href="drawdowns.html">vectorbt.generic.drawdowns</a></code></li>
-<li><code><a title="vectorbt.generic.enums" href="enums.html">vectorbt.generic.enums</a></code></li>
-<li><code><a title="vectorbt.generic.nb" href="nb.html">vectorbt.generic.nb</a></code></li>
-<li><code><a title="vectorbt.generic.plot_builder" href="plot_builder.html">vectorbt.generic.plot_builder</a></code></li>
-<li><code><a title="vectorbt.generic.plotting" href="plotting.html">vectorbt.generic.plotting</a></code></li>
-<li><code><a title="vectorbt.generic.splitters" href="splitters.html">vectorbt.generic.splitters</a></code></li>
-<li><code><a title="vectorbt.generic.stats_builder" href="stats_builder.html">vectorbt.generic.stats_builder</a></code></li>
+<li><h3><a href="#header-functions">Functions</a></h3>
+<ul class="">
+<li><code><a title="vectorbt.utils.mapping.apply_mapping" href="#vectorbt.utils.mapping.apply_mapping">apply_mapping</a></code></li>
+<li><code><a title="vectorbt.utils.mapping.reverse_mapping" href="#vectorbt.utils.mapping.reverse_mapping">reverse_mapping</a></code></li>
+<li><code><a title="vectorbt.utils.mapping.to_mapping" href="#vectorbt.utils.mapping.to_mapping">to_mapping</a></code></li>
 </ul>
 </li>
 </nav>

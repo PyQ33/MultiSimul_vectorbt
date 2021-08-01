@@ -4,8 +4,8 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, minimum-scale=1" />
 <meta name="generator" content="pdoc 0.9.2" />
-<title>vectorbt.generic API documentation</title>
-<meta name="description" content="Modules for working with any time series …" />
+<title>vectorbt.records.decorators API documentation</title>
+<meta name="description" content="Class and function decorators." />
 <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/5.12.0-2/css/all.min.css" integrity="sha256-46r060N2LrChLLb5zowXQ72/iKKNiw/lAmygmHExk/o=" crossorigin="anonymous" />
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/docsearch.js@2/dist/cdn/docsearch.min.css" />
 <link href='https://cdnjs.cloudflare.com/ajax/libs/normalize/8.0.0/normalize.min.css' rel='stylesheet'>
@@ -36,77 +36,164 @@ gtag('config', 'G-4QLCS0J048');
 <main>
 <article id="content">
 <header>
-<h1 class="title">Module <code>vectorbt.generic</code></h1>
+<h1 class="title">Module <code>vectorbt.records.decorators</code></h1>
 </header>
 <section id="section-intro">
-<p>Modules for working with any time series.</p>
-<p>In contrast to the <code><a title="vectorbt.base" href="../base/index.html">vectorbt.base</a></code> sub-package, focuses on the data itself.</p>
+<p>Class and function decorators.</p>
 <details class="source">
 <summary>
 <span>Expand source code</span>
 </summary>
-<pre><code class="python">&#34;&#34;&#34;Modules for working with any time series.
+<pre><code class="python">&#34;&#34;&#34;Class and function decorators.&#34;&#34;&#34;
 
-In contrast to the `vectorbt.base` sub-package, focuses on the data itself.&#34;&#34;&#34;
+import numpy as np
 
-from vectorbt.generic.enums import *
-from vectorbt.generic.drawdowns import Drawdowns
-from vectorbt.generic.splitters import RangeSplitter, RollingSplitter, ExpandingSplitter
+from vectorbt import _typing as tp
+from vectorbt.utils import checks
+from vectorbt.utils.config import merge_dicts, Config
+from vectorbt.utils.decorators import cached_property
+from vectorbt.records.mapped_array import MappedArray
 
-__all__ = [
-    &#39;Drawdowns&#39;,
-    &#39;RangeSplitter&#39;,
-    &#39;RollingSplitter&#39;,
-    &#39;ExpandingSplitter&#39;
-]
+WrapperFuncT = tp.Callable[[tp.Type[tp.T]], tp.Type[tp.T]]
 
-__pdoc__ = {k: False for k in __all__}</code></pre>
+
+def add_mapped_fields(dtype: np.dtype, config: tp.Optional[Config], on_conflict: str = &#39;raise&#39;) -&gt; WrapperFuncT:
+    &#34;&#34;&#34;Class decorator to override mapped field properties in a `vectorbt.records.base.Records` class.
+
+    `config` should contain fields (keys) and dictionaries (values) with the following keys:
+
+    * `target_name`: Name of the target property. Defaults to the field name. Set to None to disable.
+    * `defaults`: Dictionary with defaults for `vectorbt.records.base.Records.map_field`.
+
+    If a field name is not in the config, it will be added automatically.
+
+    If an attribute with the same name already exists in the class:
+
+    * it will be overridden if `on_conflict` is &#39;override&#39;
+    * it will be ignored if `on_conflict` is &#39;ignore&#39;
+    * an error will be raised if `on_conflict` is &#39;raise&#39;
+    &#34;&#34;&#34;
+
+    def wrapper(cls: tp.Type[tp.T]) -&gt; tp.Type[tp.T]:
+        from vectorbt.records.base import Records
+
+        checks.assert_subclass(cls, Records)
+        checks.assert_not_none(dtype.fields)
+
+        for field_name in dtype.names:
+            if field_name in config:
+                settings = config[field_name]
+                target_name = settings.get(&#39;target_name&#39;, field_name)
+                defaults = settings.get(&#39;defaults&#39;, None)
+            else:
+                target_name = field_name
+                defaults = None
+            if hasattr(cls, target_name):
+                if on_conflict.lower() == &#39;raise&#39;:
+                    raise ValueError(f&#34;An attribute with the name &#39;{target_name}&#39; already exists in {cls}&#34;)
+                elif on_conflict.lower() == &#39;ignore&#39;:
+                    continue
+                elif on_conflict.lower() == &#39;override&#39;:
+                    pass
+                else:
+                    raise ValueError(f&#34;Value &#39;{on_conflict}&#39; is invalid for on_conflict&#34;)
+            if not target_name.isidentifier():
+                raise ValueError(f&#34;Name &#39;{target_name}&#39; is not a valid attribute name&#34;)
+
+            def new_prop(self, _field_name: str = field_name, _defaults: tp.KwargsLike = defaults) -&gt; MappedArray:
+                return self.map_field(_field_name, **merge_dicts({}, _defaults))
+
+            new_prop.__doc__ = f&#34;Mapped array of the field `{field_name}`.&#34;
+            new_prop.__name__ = target_name
+            setattr(cls, target_name, cached_property(new_prop))
+        return cls
+
+    return wrapper</code></pre>
 </details>
 </section>
 <section>
-<h2 class="section-title" id="header-submodules">Sub-modules</h2>
+</section>
+<section>
+</section>
+<section>
+<h2 class="section-title" id="header-functions">Functions</h2>
 <dl>
-<dt><code class="name"><a title="vectorbt.generic.accessors" href="accessors.html">vectorbt.generic.accessors</a></code></dt>
+<dt id="vectorbt.records.decorators.add_mapped_fields"><code class="name flex">
+<span>def <span class="ident parent-name">add_mapped_fields</span></span>(<span class="params">dtype, config, on_conflict='raise')</span><span class="return_type"></span>
+</code></dt>
 <dd>
-<div class="desc"><p>Custom pandas accessors for generic data …</p></div>
-</dd>
-<dt><code class="name"><a title="vectorbt.generic.decorators" href="decorators.html">vectorbt.generic.decorators</a></code></dt>
-<dd>
-<div class="desc"><p>Class and function decorators.</p></div>
-</dd>
-<dt><code class="name"><a title="vectorbt.generic.drawdowns" href="drawdowns.html">vectorbt.generic.drawdowns</a></code></dt>
-<dd>
-<div class="desc"><p>Base class for working with drawdown records …</p></div>
-</dd>
-<dt><code class="name"><a title="vectorbt.generic.enums" href="enums.html">vectorbt.generic.enums</a></code></dt>
-<dd>
-<div class="desc"><p>Named tuples and enumerated types …</p></div>
-</dd>
-<dt><code class="name"><a title="vectorbt.generic.nb" href="nb.html">vectorbt.generic.nb</a></code></dt>
-<dd>
-<div class="desc"><p>Numba-compiled functions …</p></div>
-</dd>
-<dt><code class="name"><a title="vectorbt.generic.plot_builder" href="plot_builder.html">vectorbt.generic.plot_builder</a></code></dt>
-<dd>
-<div class="desc"><p>Mixin for building plots out of subplots.</p></div>
-</dd>
-<dt><code class="name"><a title="vectorbt.generic.plotting" href="plotting.html">vectorbt.generic.plotting</a></code></dt>
-<dd>
-<div class="desc"><p>Base plotting functions …</p></div>
-</dd>
-<dt><code class="name"><a title="vectorbt.generic.splitters" href="splitters.html">vectorbt.generic.splitters</a></code></dt>
-<dd>
-<div class="desc"><p>Splitters for cross-validation …</p></div>
-</dd>
-<dt><code class="name"><a title="vectorbt.generic.stats_builder" href="stats_builder.html">vectorbt.generic.stats_builder</a></code></dt>
-<dd>
-<div class="desc"><p>Mixin for building statistics out of performance metrics.</p></div>
+<div class="desc"><p>Class decorator to override mapped field properties in a <code><a title="vectorbt.records.base.Records" href="base.html#vectorbt.records.base.Records">Records</a></code> class.</p>
+<p><code>config</code> should contain fields (keys) and dictionaries (values) with the following keys:</p>
+<ul>
+<li><code>target_name</code>: Name of the target property. Defaults to the field name. Set to None to disable.</li>
+<li><code>defaults</code>: Dictionary with defaults for <code><a title="vectorbt.records.base.Records.map_field" href="base.html#vectorbt.records.base.Records.map_field">Records.map_field()</a></code>.</li>
+</ul>
+<p>If a field name is not in the config, it will be added automatically.</p>
+<p>If an attribute with the same name already exists in the class:</p>
+<ul>
+<li>it will be overridden if <code>on_conflict</code> is 'override'</li>
+<li>it will be ignored if <code>on_conflict</code> is 'ignore'</li>
+<li>an error will be raised if <code>on_conflict</code> is 'raise'</li>
+</ul></div>
+<details class="source">
+<summary>
+<span>Expand source code</span>
+</summary>
+<pre><code class="python">def add_mapped_fields(dtype: np.dtype, config: tp.Optional[Config], on_conflict: str = &#39;raise&#39;) -&gt; WrapperFuncT:
+    &#34;&#34;&#34;Class decorator to override mapped field properties in a `vectorbt.records.base.Records` class.
+
+    `config` should contain fields (keys) and dictionaries (values) with the following keys:
+
+    * `target_name`: Name of the target property. Defaults to the field name. Set to None to disable.
+    * `defaults`: Dictionary with defaults for `vectorbt.records.base.Records.map_field`.
+
+    If a field name is not in the config, it will be added automatically.
+
+    If an attribute with the same name already exists in the class:
+
+    * it will be overridden if `on_conflict` is &#39;override&#39;
+    * it will be ignored if `on_conflict` is &#39;ignore&#39;
+    * an error will be raised if `on_conflict` is &#39;raise&#39;
+    &#34;&#34;&#34;
+
+    def wrapper(cls: tp.Type[tp.T]) -&gt; tp.Type[tp.T]:
+        from vectorbt.records.base import Records
+
+        checks.assert_subclass(cls, Records)
+        checks.assert_not_none(dtype.fields)
+
+        for field_name in dtype.names:
+            if field_name in config:
+                settings = config[field_name]
+                target_name = settings.get(&#39;target_name&#39;, field_name)
+                defaults = settings.get(&#39;defaults&#39;, None)
+            else:
+                target_name = field_name
+                defaults = None
+            if hasattr(cls, target_name):
+                if on_conflict.lower() == &#39;raise&#39;:
+                    raise ValueError(f&#34;An attribute with the name &#39;{target_name}&#39; already exists in {cls}&#34;)
+                elif on_conflict.lower() == &#39;ignore&#39;:
+                    continue
+                elif on_conflict.lower() == &#39;override&#39;:
+                    pass
+                else:
+                    raise ValueError(f&#34;Value &#39;{on_conflict}&#39; is invalid for on_conflict&#34;)
+            if not target_name.isidentifier():
+                raise ValueError(f&#34;Name &#39;{target_name}&#39; is not a valid attribute name&#34;)
+
+            def new_prop(self, _field_name: str = field_name, _defaults: tp.KwargsLike = defaults) -&gt; MappedArray:
+                return self.map_field(_field_name, **merge_dicts({}, _defaults))
+
+            new_prop.__doc__ = f&#34;Mapped array of the field `{field_name}`.&#34;
+            new_prop.__name__ = target_name
+            setattr(cls, target_name, cached_property(new_prop))
+        return cls
+
+    return wrapper</code></pre>
+</details>
 </dd>
 </dl>
-</section>
-<section>
-</section>
-<section>
 </section>
 <section>
 </section>
@@ -133,20 +220,12 @@ title="Search"
 <ul id="index">
 <li><h3>Super-module</h3>
 <ul>
-<li><code><a title="vectorbt" href="../index.html">vectorbt</a></code></li>
+<li><code><a title="vectorbt.records" href="index.html">vectorbt.records</a></code></li>
 </ul>
 </li>
-<li><h3><a href="#header-submodules">Sub-modules</a></h3>
-<ul>
-<li><code><a title="vectorbt.generic.accessors" href="accessors.html">vectorbt.generic.accessors</a></code></li>
-<li><code><a title="vectorbt.generic.decorators" href="decorators.html">vectorbt.generic.decorators</a></code></li>
-<li><code><a title="vectorbt.generic.drawdowns" href="drawdowns.html">vectorbt.generic.drawdowns</a></code></li>
-<li><code><a title="vectorbt.generic.enums" href="enums.html">vectorbt.generic.enums</a></code></li>
-<li><code><a title="vectorbt.generic.nb" href="nb.html">vectorbt.generic.nb</a></code></li>
-<li><code><a title="vectorbt.generic.plot_builder" href="plot_builder.html">vectorbt.generic.plot_builder</a></code></li>
-<li><code><a title="vectorbt.generic.plotting" href="plotting.html">vectorbt.generic.plotting</a></code></li>
-<li><code><a title="vectorbt.generic.splitters" href="splitters.html">vectorbt.generic.splitters</a></code></li>
-<li><code><a title="vectorbt.generic.stats_builder" href="stats_builder.html">vectorbt.generic.stats_builder</a></code></li>
+<li><h3><a href="#header-functions">Functions</a></h3>
+<ul class="">
+<li><code><a title="vectorbt.records.decorators.add_mapped_fields" href="#vectorbt.records.decorators.add_mapped_fields">add_mapped_fields</a></code></li>
 </ul>
 </li>
 </nav>
