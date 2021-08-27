@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, minimum-scale=1" />
-<meta name="generator" content="pdoc 0.9.2" />
+<meta name="generator" content="pdoc 0.10.0" />
 <title>vectorbt.generic.accessors API documentation</title>
 <meta name="description" content="Custom pandas accessors for generic data …" />
 <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/5.12.0-2/css/all.min.css" integrity="sha256-46r060N2LrChLLb5zowXQ72/iKKNiw/lAmygmHExk/o=" crossorigin="anonymous" />
@@ -204,12 +204,27 @@ Min Index                  y
 Max Index                  z
 Name: 0, dtype: object
 </code></pre>
-<p>```</p>
+<pre><code>
+
+## Plots
+
+!!! hint
+    See &lt;code&gt;&lt;a title=&quot;vectorbt.generic.plots_builder.PlotsBuilderMixin.plots&quot; href=&quot;plots_builder.html#vectorbt.generic.plots_builder.PlotsBuilderMixin.plots&quot;&gt;PlotsBuilderMixin.plots()&lt;/a&gt;&lt;/code&gt; and &lt;code&gt;&lt;a title=&quot;vectorbt.generic.accessors.GenericAccessor.subplots&quot; href=&quot;#vectorbt.generic.accessors.GenericAccessor.subplots&quot;&gt;GenericAccessor.subplots&lt;/a&gt;&lt;/code&gt;.
+
+&lt;code&gt;&lt;a title=&quot;vectorbt.generic.accessors.GenericAccessor&quot; href=&quot;#vectorbt.generic.accessors.GenericAccessor&quot;&gt;GenericAccessor&lt;/a&gt;&lt;/code&gt; class has a single subplot based on &lt;code&gt;&lt;a title=&quot;vectorbt.generic.accessors.GenericAccessor.plot&quot; href=&quot;#vectorbt.generic.accessors.GenericAccessor.plot&quot;&gt;GenericAccessor.plot()&lt;/a&gt;&lt;/code&gt;:
+
+```python-repl
+&gt;&gt;&gt; df2.vbt.plots()
+</code></pre>
+<p><img alt="" src="/docs/img/generic_plots.svg"></p>
 <details class="source">
 <summary>
 <span>Expand source code</span>
 </summary>
-<pre><code class="python">&#34;&#34;&#34;Custom pandas accessors for generic data.
+<pre><code class="python"># Copyright (c) 2021 Oleg Polakow. All rights reserved.
+# This code is licensed under Apache 2.0 with Commons Clause license (see LICENSE.md for details)
+
+&#34;&#34;&#34;Custom pandas accessors for generic data.
 
 Methods can be accessed as follows:
 
@@ -394,6 +409,19 @@ Min Index                  y
 Max Index                  z
 Name: 0, dtype: object
 ```
+
+## Plots
+
+!!! hint
+    See `vectorbt.generic.plots_builder.PlotsBuilderMixin.plots` and `GenericAccessor.subplots`.
+
+`GenericAccessor` class has a single subplot based on `GenericAccessor.plot`:
+
+```python-repl
+&gt;&gt;&gt; df2.vbt.plots()
+```
+
+![](/docs/img/generic_plots.svg)
 &#34;&#34;&#34;
 
 import numpy as np
@@ -423,10 +451,12 @@ from vectorbt.base import index_fns, reshape_fns
 from vectorbt.base.accessors import BaseAccessor, BaseDFAccessor, BaseSRAccessor
 from vectorbt.base.array_wrapper import ArrayWrapper, Wrapping
 from vectorbt.generic import plotting, nb
+from vectorbt.generic.ranges import Ranges
 from vectorbt.generic.drawdowns import Drawdowns
 from vectorbt.generic.splitters import SplitterT, RangeSplitter, RollingSplitter, ExpandingSplitter
 from vectorbt.generic.stats_builder import StatsBuilderMixin
-from vectorbt.generic.decorators import add_nb_methods, add_transform_methods
+from vectorbt.generic.plots_builder import PlotsBuilderMixin
+from vectorbt.generic.decorators import attach_nb_methods, attach_transform_methods
 from vectorbt.records.mapped_array import MappedArray
 
 try:  # pragma: no cover
@@ -451,6 +481,13 @@ except ImportError:
     nanargmax = np.nanargmax
     nanargmin = np.nanargmin
 
+__pdoc__ = {}
+
+
+class MetaGenericAccessor(type(StatsBuilderMixin), type(PlotsBuilderMixin)):
+    pass
+
+
 GenericAccessorT = tp.TypeVar(&#34;GenericAccessorT&#34;, bound=&#34;GenericAccessor&#34;)
 SplitOutputT = tp.Union[tp.MaybeTuple[tp.Tuple[tp.Frame, tp.Index]], tp.BaseFigure]
 
@@ -466,8 +503,6 @@ class TransformerT(tp.Protocol):
         ...
 
 
-__pdoc__ = {}
-
 nb_config = Config(
     {
         &#39;shuffle&#39;: dict(func=nb.shuffle_nb, path=&#39;vectorbt.generic.nb.shuffle_nb&#39;),
@@ -476,6 +511,7 @@ nb_config = Config(
         &#39;fshift&#39;: dict(func=nb.fshift_nb, path=&#39;vectorbt.generic.nb.fshift_nb&#39;),
         &#39;diff&#39;: dict(func=nb.diff_nb, path=&#39;vectorbt.generic.nb.diff_nb&#39;),
         &#39;pct_change&#39;: dict(func=nb.pct_change_nb, path=&#39;vectorbt.generic.nb.pct_change_nb&#39;),
+        &#39;bfill&#39;: dict(func=nb.bfill_nb, path=&#39;vectorbt.generic.nb.bfill_nb&#39;),
         &#39;ffill&#39;: dict(func=nb.ffill_nb, path=&#39;vectorbt.generic.nb.ffill_nb&#39;),
         &#39;cumsum&#39;: dict(func=nb.nancumsum_nb, path=&#39;vectorbt.generic.nb.nancumsum_nb&#39;),
         &#39;cumprod&#39;: dict(func=nb.nancumprod_nb, path=&#39;vectorbt.generic.nb.nancumprod_nb&#39;),
@@ -487,9 +523,8 @@ nb_config = Config(
         &#39;expanding_mean&#39;: dict(func=nb.expanding_mean_nb, path=&#39;vectorbt.generic.nb.expanding_mean_nb&#39;),
         &#39;product&#39;: dict(func=nb.nanprod_nb, is_reducing=True, path=&#39;vectorbt.generic.nb.nanprod_nb&#39;)
     },
-    as_attrs=False,
     readonly=True,
-    copy_kwargs=dict(copy_mode=&#39;deep&#39;)
+    as_attrs=False
 )
 &#34;&#34;&#34;_&#34;&#34;&#34;
 
@@ -535,9 +570,8 @@ transform_config = Config(
             docstring=&#34;See `sklearn.preprocessing.PowerTransformer`.&#34;
         )
     },
-    as_attrs=False,
     readonly=True,
-    copy_kwargs=dict(copy_mode=&#39;deep&#39;)
+    as_attrs=False
 )
 &#34;&#34;&#34;_&#34;&#34;&#34;
 
@@ -549,28 +583,34 @@ __pdoc__[&#39;transform_config&#39;] = f&#34;&#34;&#34;Config of transform metho
 &#34;&#34;&#34;
 
 
-@add_nb_methods(nb_config)
-@add_transform_methods(transform_config)
-class GenericAccessor(BaseAccessor, StatsBuilderMixin):
+@attach_nb_methods(nb_config)
+@attach_transform_methods(transform_config)
+class GenericAccessor(BaseAccessor, StatsBuilderMixin, PlotsBuilderMixin, metaclass=MetaGenericAccessor):
     &#34;&#34;&#34;Accessor on top of data of any type. For both, Series and DataFrames.
 
     Accessible through `pd.Series.vbt` and `pd.DataFrame.vbt`.&#34;&#34;&#34;
 
     def __init__(self, obj: tp.SeriesFrame, mapping: tp.Optional[tp.MappingLike] = None, **kwargs) -&gt; None:
+        BaseAccessor.__init__(self, obj, mapping=mapping, **kwargs)
+        StatsBuilderMixin.__init__(self)
+        PlotsBuilderMixin.__init__(self)
+
         if mapping is not None:
+            if isinstance(mapping, str):
+                if mapping.lower() == &#39;index&#39;:
+                    mapping = self.wrapper.index
+                elif mapping.lower() == &#39;columns&#39;:
+                    mapping = self.wrapper.columns
             mapping = to_mapping(mapping)
         self._mapping = mapping
 
-        BaseAccessor.__init__(self, obj, mapping=mapping, **kwargs)
-        StatsBuilderMixin.__init__(self)
-
     @property
-    def sr_accessor_cls(self):
+    def sr_accessor_cls(self) -&gt; tp.Type[&#34;GenericSRAccessor&#34;]:
         &#34;&#34;&#34;Accessor class for `pd.Series`.&#34;&#34;&#34;
         return GenericSRAccessor
 
     @property
-    def df_accessor_cls(self):
+    def df_accessor_cls(self) -&gt; tp.Type[&#34;GenericDFAccessor&#34;]:
         &#34;&#34;&#34;Accessor class for `pd.DataFrame`.&#34;&#34;&#34;
         return GenericDFAccessor
 
@@ -1165,6 +1205,12 @@ class GenericAccessor(BaseAccessor, StatsBuilderMixin):
         Mapping will be applied using `vectorbt.utils.mapping.apply_mapping` with `**kwargs`.&#34;&#34;&#34;
         if mapping is None:
             mapping = self.mapping
+        if isinstance(mapping, str):
+            if mapping.lower() == &#39;index&#39;:
+                mapping = self.wrapper.index
+            elif mapping.lower() == &#39;columns&#39;:
+                mapping = self.wrapper.columns
+            mapping = to_mapping(mapping)
         codes, uniques = pd.factorize(self.obj.values.flatten(), sort=False, na_sentinel=None)
         codes = codes.reshape(self.wrapper.shape_2d)
         group_lens = self.wrapper.grouper.get_group_lens(group_by=group_by)
@@ -1231,7 +1277,7 @@ class GenericAccessor(BaseAccessor, StatsBuilderMixin):
             silence_warnings=silence_warnings
         )
         if &#39;mapping&#39; in cond_kwargs:
-            self_copy = reself.copy(mapping=cond_kwargs[&#39;mapping&#39;])
+            self_copy = reself.replace(mapping=cond_kwargs[&#39;mapping&#39;])
 
             if not checks.is_deep_equal(self_copy.mapping, reself.mapping):
                 if not silence_warnings:
@@ -1253,7 +1299,7 @@ class GenericAccessor(BaseAccessor, StatsBuilderMixin):
         &#34;&#34;&#34;Defaults for `GenericAccessor.stats`.
 
         Merges `vectorbt.generic.stats_builder.StatsBuilderMixin.stats_defaults` and
-        `generic.stats` in `vectorbt._settings.settings`.&#34;&#34;&#34;
+        `generic.stats` from `vectorbt._settings.settings`.&#34;&#34;&#34;
         from vectorbt._settings import settings
         generic_stats_cfg = settings[&#39;generic&#39;][&#39;stats&#39;]
 
@@ -1356,17 +1402,28 @@ class GenericAccessor(BaseAccessor, StatsBuilderMixin):
         return self.wrapper.wrap(out, group_by=False, **merge_dicts({}, wrap_kwargs))
 
     @property
+    def ranges(self) -&gt; Ranges:
+        &#34;&#34;&#34;`GenericAccessor.get_ranges` with default arguments.&#34;&#34;&#34;
+        return self.get_ranges()
+
+    def get_ranges(self, wrapper_kwargs: tp.KwargsLike = None, **kwargs) -&gt; Ranges:
+        &#34;&#34;&#34;Generate range records.
+
+        See `vectorbt.generic.ranges.Ranges`.&#34;&#34;&#34;
+        wrapper_kwargs = merge_dicts(self.wrapper.config, wrapper_kwargs)
+        return Ranges.from_ts(self.obj, wrapper_kwargs=wrapper_kwargs, **kwargs)
+
+    @property
     def drawdowns(self) -&gt; Drawdowns:
         &#34;&#34;&#34;`GenericAccessor.get_drawdowns` with default arguments.&#34;&#34;&#34;
         return self.get_drawdowns()
 
-    def get_drawdowns(self, group_by: tp.GroupByLike = None, **kwargs) -&gt; Drawdowns:
+    def get_drawdowns(self, wrapper_kwargs: tp.KwargsLike = None, **kwargs) -&gt; Drawdowns:
         &#34;&#34;&#34;Generate drawdown records.
 
         See `vectorbt.generic.drawdowns.Drawdowns`.&#34;&#34;&#34;
-        if group_by is None:
-            group_by = self.wrapper.grouper.group_by
-        return Drawdowns.from_ts(self.obj, freq=self.wrapper.freq, group_by=group_by, **kwargs)
+        wrapper_kwargs = merge_dicts(self.wrapper.config, wrapper_kwargs)
+        return Drawdowns.from_ts(self.obj, wrapper_kwargs=wrapper_kwargs, **kwargs)
 
     def to_mapped(self,
                   dropna: bool = True,
@@ -1442,6 +1499,15 @@ class GenericAccessor(BaseAccessor, StatsBuilderMixin):
     def zscore(self, **kwargs) -&gt; tp.SeriesFrame:
         &#34;&#34;&#34;Compute z-score using `sklearn.preprocessing.StandardScaler`.&#34;&#34;&#34;
         return self.scale(with_mean=True, with_std=True, **kwargs)
+
+    def rebase(self, base: float, wrap_kwargs: tp.KwargsLike = None) -&gt; tp.SeriesFrame:
+        &#34;&#34;&#34;Rebase all series to a given intial base.
+
+        This makes comparing/plotting different series together easier.
+        Will forward and backward fill NaN values.&#34;&#34;&#34;
+        result = nb.bfill_nb(nb.ffill_nb(self.to_2d_array()))
+        result = result / result[0] * base
+        return self.wrapper.wrap(result, group_by=False, **merge_dicts({}, wrap_kwargs))
 
     # ############# Splitting ############# #
 
@@ -1861,6 +1927,40 @@ class GenericAccessor(BaseAccessor, StatsBuilderMixin):
             return box.fig
         return box
 
+    @property
+    def plots_defaults(self) -&gt; tp.Kwargs:
+        &#34;&#34;&#34;Defaults for `GenericAccessor.plots`.
+
+        Merges `vectorbt.generic.plots_builder.PlotsBuilderMixin.plots_defaults` and
+        `generic.plots` from `vectorbt._settings.settings`.&#34;&#34;&#34;
+        from vectorbt._settings import settings
+        generic_plots_cfg = settings[&#39;generic&#39;][&#39;plots&#39;]
+
+        return merge_dicts(
+            PlotsBuilderMixin.plots_defaults.__get__(self),
+            generic_plots_cfg
+        )
+
+    _subplots: tp.ClassVar[Config] = Config(
+        dict(
+            plot=dict(
+                check_is_not_grouped=True,
+                plot_func=&#39;plot&#39;,
+                pass_trace_names=False,
+                tags=&#39;generic&#39;
+            )
+        ),
+        copy_kwargs=dict(copy_mode=&#39;deep&#39;)
+    )
+
+    @property
+    def subplots(self) -&gt; Config:
+        return self._subplots
+
+
+GenericAccessor.override_metrics_doc(__pdoc__)
+GenericAccessor.override_subplots_doc(__pdoc__)
+
 
 class GenericSRAccessor(GenericAccessor, BaseSRAccessor):
     &#34;&#34;&#34;Accessor on top of data of any type. For Series only.
@@ -1937,7 +2037,7 @@ class GenericSRAccessor(GenericAccessor, BaseSRAccessor):
         if hidden_trace_kwargs is None:
             hidden_trace_kwargs = {}
         obj, other = reshape_fns.broadcast(self.obj, other, columns_from=&#39;keep&#39;)
-        checks.assert_type(other, pd.Series)
+        checks.assert_instance_of(other, pd.Series)
         if fig is None:
             fig = make_figure()
         fig.update_layout(**layout_kwargs)
@@ -2068,7 +2168,7 @@ class GenericSRAccessor(GenericAccessor, BaseSRAccessor):
             add_trace_kwargs = {}
 
         obj, other = reshape_fns.broadcast(self.obj, other, columns_from=&#39;keep&#39;)
-        checks.assert_type(other, pd.Series)
+        checks.assert_instance_of(other, pd.Series)
         if fig is None:
             fig = make_subplots(specs=[[{&#34;secondary_y&#34;: True}]])
             if &#39;width&#39; in plotting_cfg[&#39;layout&#39;]:
@@ -2585,10 +2685,7 @@ class GenericDFAccessor(GenericAccessor, BaseDFAccessor):
     def ts_heatmap(self, is_y_category: bool = True,
                    **kwargs) -&gt; tp.Union[tp.BaseFigure, plotting.Heatmap]:  # pragma: no cover
         &#34;&#34;&#34;Heatmap of time-series data.&#34;&#34;&#34;
-        return self.obj.transpose().iloc[::-1].vbt.heatmap(is_y_category=is_y_category, **kwargs)
-
-
-GenericAccessor.override_metrics_doc(__pdoc__)</code></pre>
+        return self.obj.transpose().iloc[::-1].vbt.heatmap(is_y_category=is_y_category, **kwargs)</code></pre>
 </details>
 </section>
 <section>
@@ -2601,67 +2698,71 @@ GenericAccessor.override_metrics_doc(__pdoc__)</code></pre>
 <div class="desc"><p>Config of Numba methods to be added to <code><a title="vectorbt.generic.accessors.GenericAccessor" href="#vectorbt.generic.accessors.GenericAccessor">GenericAccessor</a></code>.</p>
 <pre><code class="language-json">Config({
     &quot;shuffle&quot;: {
-        &quot;func&quot;: &quot;CPUDispatcher(&lt;function shuffle_nb at 0x7fda41d24268&gt;)&quot;,
+        &quot;func&quot;: &quot;CPUDispatcher(&lt;function shuffle_nb at 0x7fcd578f5730&gt;)&quot;,
         &quot;path&quot;: &quot;vectorbt.generic.nb.shuffle_nb&quot;
     },
     &quot;fillna&quot;: {
-        &quot;func&quot;: &quot;CPUDispatcher(&lt;function fillna_nb at 0x7fda41d012f0&gt;)&quot;,
+        &quot;func&quot;: &quot;CPUDispatcher(&lt;function fillna_nb at 0x7fcd578f87b8&gt;)&quot;,
         &quot;path&quot;: &quot;vectorbt.generic.nb.fillna_nb&quot;
     },
     &quot;bshift&quot;: {
-        &quot;func&quot;: &quot;CPUDispatcher(&lt;function bshift_nb at 0x7fda41d01840&gt;)&quot;,
+        &quot;func&quot;: &quot;CPUDispatcher(&lt;function bshift_nb at 0x7fcd578f8d08&gt;)&quot;,
         &quot;path&quot;: &quot;vectorbt.generic.nb.bshift_nb&quot;
     },
     &quot;fshift&quot;: {
-        &quot;func&quot;: &quot;CPUDispatcher(&lt;function fshift_nb at 0x7fda41d01d90&gt;)&quot;,
+        &quot;func&quot;: &quot;CPUDispatcher(&lt;function fshift_nb at 0x7fcd578ea2f0&gt;)&quot;,
         &quot;path&quot;: &quot;vectorbt.generic.nb.fshift_nb&quot;
     },
     &quot;diff&quot;: {
-        &quot;func&quot;: &quot;CPUDispatcher(&lt;function diff_nb at 0x7fda41d17378&gt;)&quot;,
+        &quot;func&quot;: &quot;CPUDispatcher(&lt;function diff_nb at 0x7fcd578ea840&gt;)&quot;,
         &quot;path&quot;: &quot;vectorbt.generic.nb.diff_nb&quot;
     },
     &quot;pct_change&quot;: {
-        &quot;func&quot;: &quot;CPUDispatcher(&lt;function pct_change_nb at 0x7fda41d178c8&gt;)&quot;,
+        &quot;func&quot;: &quot;CPUDispatcher(&lt;function pct_change_nb at 0x7fcd578ead90&gt;)&quot;,
         &quot;path&quot;: &quot;vectorbt.generic.nb.pct_change_nb&quot;
     },
+    &quot;bfill&quot;: {
+        &quot;func&quot;: &quot;CPUDispatcher(&lt;function bfill_nb at 0x7fcd578f0378&gt;)&quot;,
+        &quot;path&quot;: &quot;vectorbt.generic.nb.bfill_nb&quot;
+    },
     &quot;ffill&quot;: {
-        &quot;func&quot;: &quot;CPUDispatcher(&lt;function ffill_nb at 0x7fda41d17e18&gt;)&quot;,
+        &quot;func&quot;: &quot;CPUDispatcher(&lt;function ffill_nb at 0x7fcd578f08c8&gt;)&quot;,
         &quot;path&quot;: &quot;vectorbt.generic.nb.ffill_nb&quot;
     },
     &quot;cumsum&quot;: {
-        &quot;func&quot;: &quot;CPUDispatcher(&lt;function nancumsum_nb at 0x7fda41d28400&gt;)&quot;,
+        &quot;func&quot;: &quot;CPUDispatcher(&lt;function nancumsum_nb at 0x7fcd578f0e18&gt;)&quot;,
         &quot;path&quot;: &quot;vectorbt.generic.nb.nancumsum_nb&quot;
     },
     &quot;cumprod&quot;: {
-        &quot;func&quot;: &quot;CPUDispatcher(&lt;function nancumprod_nb at 0x7fda41d286a8&gt;)&quot;,
+        &quot;func&quot;: &quot;CPUDispatcher(&lt;function nancumprod_nb at 0x7fcd57857158&gt;)&quot;,
         &quot;path&quot;: &quot;vectorbt.generic.nb.nancumprod_nb&quot;
     },
     &quot;rolling_min&quot;: {
-        &quot;func&quot;: &quot;CPUDispatcher(&lt;function rolling_min_nb at 0x7fda41d3a268&gt;)&quot;,
+        &quot;func&quot;: &quot;CPUDispatcher(&lt;function rolling_min_nb at 0x7fcd57859c80&gt;)&quot;,
         &quot;path&quot;: &quot;vectorbt.generic.nb.rolling_min_nb&quot;
     },
     &quot;rolling_max&quot;: {
-        &quot;func&quot;: &quot;CPUDispatcher(&lt;function rolling_max_nb at 0x7fda41d3a7b8&gt;)&quot;,
+        &quot;func&quot;: &quot;CPUDispatcher(&lt;function rolling_max_nb at 0x7fcd5785f268&gt;)&quot;,
         &quot;path&quot;: &quot;vectorbt.generic.nb.rolling_max_nb&quot;
     },
     &quot;rolling_mean&quot;: {
-        &quot;func&quot;: &quot;CPUDispatcher(&lt;function rolling_mean_nb at 0x7fda41d3ad08&gt;)&quot;,
+        &quot;func&quot;: &quot;CPUDispatcher(&lt;function rolling_mean_nb at 0x7fcd5785f7b8&gt;)&quot;,
         &quot;path&quot;: &quot;vectorbt.generic.nb.rolling_mean_nb&quot;
     },
     &quot;expanding_min&quot;: {
-        &quot;func&quot;: &quot;CPUDispatcher(&lt;function expanding_min_nb at 0x7fda41d4c378&gt;)&quot;,
+        &quot;func&quot;: &quot;CPUDispatcher(&lt;function expanding_min_nb at 0x7fcd57868d90&gt;)&quot;,
         &quot;path&quot;: &quot;vectorbt.generic.nb.expanding_min_nb&quot;
     },
     &quot;expanding_max&quot;: {
-        &quot;func&quot;: &quot;CPUDispatcher(&lt;function expanding_max_nb at 0x7fda41d4c8c8&gt;)&quot;,
+        &quot;func&quot;: &quot;CPUDispatcher(&lt;function expanding_max_nb at 0x7fcd5786c378&gt;)&quot;,
         &quot;path&quot;: &quot;vectorbt.generic.nb.expanding_max_nb&quot;
     },
     &quot;expanding_mean&quot;: {
-        &quot;func&quot;: &quot;CPUDispatcher(&lt;function expanding_mean_nb at 0x7fda41d4ce18&gt;)&quot;,
+        &quot;func&quot;: &quot;CPUDispatcher(&lt;function expanding_mean_nb at 0x7fcd5786c8c8&gt;)&quot;,
         &quot;path&quot;: &quot;vectorbt.generic.nb.expanding_mean_nb&quot;
     },
     &quot;product&quot;: {
-        &quot;func&quot;: &quot;CPUDispatcher(&lt;function nanprod_nb at 0x7fda41d28158&gt;)&quot;,
+        &quot;func&quot;: &quot;CPUDispatcher(&lt;function nanprod_nb at 0x7fcd578f0b70&gt;)&quot;,
         &quot;is_reducing&quot;: true,
         &quot;path&quot;: &quot;vectorbt.generic.nb.nanprod_nb&quot;
     }
@@ -2725,26 +2826,32 @@ GenericAccessor.override_metrics_doc(__pdoc__)</code></pre>
 <summary>
 <span>Expand source code</span>
 </summary>
-<pre><code class="python">class GenericAccessor(BaseAccessor, StatsBuilderMixin):
+<pre><code class="python">class GenericAccessor(BaseAccessor, StatsBuilderMixin, PlotsBuilderMixin, metaclass=MetaGenericAccessor):
     &#34;&#34;&#34;Accessor on top of data of any type. For both, Series and DataFrames.
 
     Accessible through `pd.Series.vbt` and `pd.DataFrame.vbt`.&#34;&#34;&#34;
 
     def __init__(self, obj: tp.SeriesFrame, mapping: tp.Optional[tp.MappingLike] = None, **kwargs) -&gt; None:
+        BaseAccessor.__init__(self, obj, mapping=mapping, **kwargs)
+        StatsBuilderMixin.__init__(self)
+        PlotsBuilderMixin.__init__(self)
+
         if mapping is not None:
+            if isinstance(mapping, str):
+                if mapping.lower() == &#39;index&#39;:
+                    mapping = self.wrapper.index
+                elif mapping.lower() == &#39;columns&#39;:
+                    mapping = self.wrapper.columns
             mapping = to_mapping(mapping)
         self._mapping = mapping
 
-        BaseAccessor.__init__(self, obj, mapping=mapping, **kwargs)
-        StatsBuilderMixin.__init__(self)
-
     @property
-    def sr_accessor_cls(self):
+    def sr_accessor_cls(self) -&gt; tp.Type[&#34;GenericSRAccessor&#34;]:
         &#34;&#34;&#34;Accessor class for `pd.Series`.&#34;&#34;&#34;
         return GenericSRAccessor
 
     @property
-    def df_accessor_cls(self):
+    def df_accessor_cls(self) -&gt; tp.Type[&#34;GenericDFAccessor&#34;]:
         &#34;&#34;&#34;Accessor class for `pd.DataFrame`.&#34;&#34;&#34;
         return GenericDFAccessor
 
@@ -3339,6 +3446,12 @@ GenericAccessor.override_metrics_doc(__pdoc__)</code></pre>
         Mapping will be applied using `vectorbt.utils.mapping.apply_mapping` with `**kwargs`.&#34;&#34;&#34;
         if mapping is None:
             mapping = self.mapping
+        if isinstance(mapping, str):
+            if mapping.lower() == &#39;index&#39;:
+                mapping = self.wrapper.index
+            elif mapping.lower() == &#39;columns&#39;:
+                mapping = self.wrapper.columns
+            mapping = to_mapping(mapping)
         codes, uniques = pd.factorize(self.obj.values.flatten(), sort=False, na_sentinel=None)
         codes = codes.reshape(self.wrapper.shape_2d)
         group_lens = self.wrapper.grouper.get_group_lens(group_by=group_by)
@@ -3405,7 +3518,7 @@ GenericAccessor.override_metrics_doc(__pdoc__)</code></pre>
             silence_warnings=silence_warnings
         )
         if &#39;mapping&#39; in cond_kwargs:
-            self_copy = reself.copy(mapping=cond_kwargs[&#39;mapping&#39;])
+            self_copy = reself.replace(mapping=cond_kwargs[&#39;mapping&#39;])
 
             if not checks.is_deep_equal(self_copy.mapping, reself.mapping):
                 if not silence_warnings:
@@ -3427,7 +3540,7 @@ GenericAccessor.override_metrics_doc(__pdoc__)</code></pre>
         &#34;&#34;&#34;Defaults for `GenericAccessor.stats`.
 
         Merges `vectorbt.generic.stats_builder.StatsBuilderMixin.stats_defaults` and
-        `generic.stats` in `vectorbt._settings.settings`.&#34;&#34;&#34;
+        `generic.stats` from `vectorbt._settings.settings`.&#34;&#34;&#34;
         from vectorbt._settings import settings
         generic_stats_cfg = settings[&#39;generic&#39;][&#39;stats&#39;]
 
@@ -3530,17 +3643,28 @@ GenericAccessor.override_metrics_doc(__pdoc__)</code></pre>
         return self.wrapper.wrap(out, group_by=False, **merge_dicts({}, wrap_kwargs))
 
     @property
+    def ranges(self) -&gt; Ranges:
+        &#34;&#34;&#34;`GenericAccessor.get_ranges` with default arguments.&#34;&#34;&#34;
+        return self.get_ranges()
+
+    def get_ranges(self, wrapper_kwargs: tp.KwargsLike = None, **kwargs) -&gt; Ranges:
+        &#34;&#34;&#34;Generate range records.
+
+        See `vectorbt.generic.ranges.Ranges`.&#34;&#34;&#34;
+        wrapper_kwargs = merge_dicts(self.wrapper.config, wrapper_kwargs)
+        return Ranges.from_ts(self.obj, wrapper_kwargs=wrapper_kwargs, **kwargs)
+
+    @property
     def drawdowns(self) -&gt; Drawdowns:
         &#34;&#34;&#34;`GenericAccessor.get_drawdowns` with default arguments.&#34;&#34;&#34;
         return self.get_drawdowns()
 
-    def get_drawdowns(self, group_by: tp.GroupByLike = None, **kwargs) -&gt; Drawdowns:
+    def get_drawdowns(self, wrapper_kwargs: tp.KwargsLike = None, **kwargs) -&gt; Drawdowns:
         &#34;&#34;&#34;Generate drawdown records.
 
         See `vectorbt.generic.drawdowns.Drawdowns`.&#34;&#34;&#34;
-        if group_by is None:
-            group_by = self.wrapper.grouper.group_by
-        return Drawdowns.from_ts(self.obj, freq=self.wrapper.freq, group_by=group_by, **kwargs)
+        wrapper_kwargs = merge_dicts(self.wrapper.config, wrapper_kwargs)
+        return Drawdowns.from_ts(self.obj, wrapper_kwargs=wrapper_kwargs, **kwargs)
 
     def to_mapped(self,
                   dropna: bool = True,
@@ -3616,6 +3740,15 @@ GenericAccessor.override_metrics_doc(__pdoc__)</code></pre>
     def zscore(self, **kwargs) -&gt; tp.SeriesFrame:
         &#34;&#34;&#34;Compute z-score using `sklearn.preprocessing.StandardScaler`.&#34;&#34;&#34;
         return self.scale(with_mean=True, with_std=True, **kwargs)
+
+    def rebase(self, base: float, wrap_kwargs: tp.KwargsLike = None) -&gt; tp.SeriesFrame:
+        &#34;&#34;&#34;Rebase all series to a given intial base.
+
+        This makes comparing/plotting different series together easier.
+        Will forward and backward fill NaN values.&#34;&#34;&#34;
+        result = nb.bfill_nb(nb.ffill_nb(self.to_2d_array()))
+        result = result / result[0] * base
+        return self.wrapper.wrap(result, group_by=False, **merge_dicts({}, wrap_kwargs))
 
     # ############# Splitting ############# #
 
@@ -4033,7 +4166,37 @@ GenericAccessor.override_metrics_doc(__pdoc__)</code></pre>
         )
         if return_fig:
             return box.fig
-        return box</code></pre>
+        return box
+
+    @property
+    def plots_defaults(self) -&gt; tp.Kwargs:
+        &#34;&#34;&#34;Defaults for `GenericAccessor.plots`.
+
+        Merges `vectorbt.generic.plots_builder.PlotsBuilderMixin.plots_defaults` and
+        `generic.plots` from `vectorbt._settings.settings`.&#34;&#34;&#34;
+        from vectorbt._settings import settings
+        generic_plots_cfg = settings[&#39;generic&#39;][&#39;plots&#39;]
+
+        return merge_dicts(
+            PlotsBuilderMixin.plots_defaults.__get__(self),
+            generic_plots_cfg
+        )
+
+    _subplots: tp.ClassVar[Config] = Config(
+        dict(
+            plot=dict(
+                check_is_not_grouped=True,
+                plot_func=&#39;plot&#39;,
+                pass_trace_names=False,
+                tags=&#39;generic&#39;
+            )
+        ),
+        copy_kwargs=dict(copy_mode=&#39;deep&#39;)
+    )
+
+    @property
+    def subplots(self) -&gt; Config:
+        return self._subplots</code></pre>
 </details>
 <h3 class="section-subtitle">Ancestors</h3>
 <ul class="hlist">
@@ -4046,6 +4209,7 @@ GenericAccessor.override_metrics_doc(__pdoc__)</code></pre>
 <li><a title="vectorbt.base.indexing.IndexingBase" href="../base/indexing.html#vectorbt.base.indexing.IndexingBase">IndexingBase</a></li>
 <li><a title="vectorbt.utils.attr.AttrResolver" href="../utils/attr.html#vectorbt.utils.attr.AttrResolver">AttrResolver</a></li>
 <li><a title="vectorbt.generic.stats_builder.StatsBuilderMixin" href="stats_builder.html#vectorbt.generic.stats_builder.StatsBuilderMixin">StatsBuilderMixin</a></li>
+<li><a title="vectorbt.generic.plots_builder.PlotsBuilderMixin" href="plots_builder.html#vectorbt.generic.plots_builder.PlotsBuilderMixin">PlotsBuilderMixin</a></li>
 </ul>
 <h3 class="section-subtitle">Subclasses</h3>
 <ul class="hlist">
@@ -4058,23 +4222,23 @@ GenericAccessor.override_metrics_doc(__pdoc__)</code></pre>
 <dl>
 <dt id="vectorbt.generic.accessors.GenericAccessor.metrics"><code class="name">var <span class="ident child-name">metrics</span></code></dt>
 <dd>
-<div class="desc"><p>Metrics supported by <code>StatsBuilderMixin.stats</code>.</p>
+<div class="desc"><p>Metrics supported by <code><a title="vectorbt.generic.accessors.GenericAccessor" href="#vectorbt.generic.accessors.GenericAccessor">GenericAccessor</a></code>.</p>
 <pre><code class="language-json">Config({
     &quot;start&quot;: {
         &quot;title&quot;: &quot;Start&quot;,
-        &quot;calc_func&quot;: &quot;&lt;function GenericAccessor.&lt;lambda&gt; at 0x7fda30d40510&gt;&quot;,
+        &quot;calc_func&quot;: &quot;&lt;function GenericAccessor.&lt;lambda&gt; at 0x7fcd468b1730&gt;&quot;,
         &quot;agg_func&quot;: null,
         &quot;tags&quot;: &quot;wrapper&quot;
     },
     &quot;end&quot;: {
         &quot;title&quot;: &quot;End&quot;,
-        &quot;calc_func&quot;: &quot;&lt;function GenericAccessor.&lt;lambda&gt; at 0x7fda30d40598&gt;&quot;,
+        &quot;calc_func&quot;: &quot;&lt;function GenericAccessor.&lt;lambda&gt; at 0x7fcd468b17b8&gt;&quot;,
         &quot;agg_func&quot;: null,
         &quot;tags&quot;: &quot;wrapper&quot;
     },
     &quot;period&quot;: {
         &quot;title&quot;: &quot;Period&quot;,
-        &quot;calc_func&quot;: &quot;&lt;function GenericAccessor.&lt;lambda&gt; at 0x7fda30d40620&gt;&quot;,
+        &quot;calc_func&quot;: &quot;&lt;function GenericAccessor.&lt;lambda&gt; at 0x7fcd468b1840&gt;&quot;,
         &quot;apply_to_timedelta&quot;: true,
         &quot;agg_func&quot;: null,
         &quot;tags&quot;: &quot;wrapper&quot;
@@ -4155,7 +4319,7 @@ GenericAccessor.override_metrics_doc(__pdoc__)</code></pre>
     },
     &quot;value_counts&quot;: {
         &quot;title&quot;: &quot;Value Counts&quot;,
-        &quot;calc_func&quot;: &quot;&lt;function GenericAccessor.&lt;lambda&gt; at 0x7fda30d406a8&gt;&quot;,
+        &quot;calc_func&quot;: &quot;&lt;function GenericAccessor.&lt;lambda&gt; at 0x7fcd468b18c8&gt;&quot;,
         &quot;resolve_value_counts&quot;: true,
         &quot;check_has_mapping&quot;: true,
         &quot;tags&quot;: [
@@ -4165,10 +4329,27 @@ GenericAccessor.override_metrics_doc(__pdoc__)</code></pre>
     }
 })
 </code></pre>
-<p>Returns <code>StatsBuilderMixin._metrics</code>, which gets (deep) copied upon creation of each instance.
+<p>Returns <code>GenericAccessor._metrics</code>, which gets (deep) copied upon creation of each instance.
 Thus, changing this config won't affect the class.</p>
-<p>To change metrics, you can either change the config in-place, override <code>StatsBuilderMixin.metrics</code>,
-or overwrite the instance variable <code>StatsBuilderMixin._metrics</code>.</p></div>
+<p>To change metrics, you can either change the config in-place, override this property,
+or overwrite the instance variable <code>GenericAccessor._metrics</code>.</p></div>
+</dd>
+<dt id="vectorbt.generic.accessors.GenericAccessor.subplots"><code class="name">var <span class="ident child-name">subplots</span></code></dt>
+<dd>
+<div class="desc"><p>Subplots supported by <code><a title="vectorbt.generic.accessors.GenericAccessor" href="#vectorbt.generic.accessors.GenericAccessor">GenericAccessor</a></code>.</p>
+<pre><code class="language-json">Config({
+    &quot;plot&quot;: {
+        &quot;check_is_not_grouped&quot;: true,
+        &quot;plot_func&quot;: &quot;plot&quot;,
+        &quot;pass_trace_names&quot;: false,
+        &quot;tags&quot;: &quot;generic&quot;
+    }
+})
+</code></pre>
+<p>Returns <code>GenericAccessor._subplots</code>, which gets (deep) copied upon creation of each instance.
+Thus, changing this config won't affect the class.</p>
+<p>To change subplots, you can either change the config in-place, override this property,
+or overwrite the instance variable <code>GenericAccessor._subplots</code>.</p></div>
 </dd>
 </dl>
 <h3 class="section-subtitle">Instance variables</h3>
@@ -4199,11 +4380,48 @@ def mapping(self) -&gt; tp.Optional[tp.Mapping]:
     return self._mapping</code></pre>
 </details>
 </dd>
+<dt id="vectorbt.generic.accessors.GenericAccessor.plots_defaults"><code class="name">var <span class="ident child-name">plots_defaults</span></code></dt>
+<dd>
+<div class="desc"><p>Defaults for <code><a title="vectorbt.generic.accessors.GenericAccessor.plots" href="plots_builder.html#vectorbt.generic.plots_builder.PlotsBuilderMixin.plots">PlotsBuilderMixin.plots()</a></code>.</p>
+<p>Merges <code><a title="vectorbt.generic.plots_builder.PlotsBuilderMixin.plots_defaults" href="plots_builder.html#vectorbt.generic.plots_builder.PlotsBuilderMixin.plots_defaults">PlotsBuilderMixin.plots_defaults</a></code> and
+<code>generic.plots</code> from <code><a title="vectorbt._settings.settings" href="../_settings.html#vectorbt._settings.settings">settings</a></code>.</p></div>
+<details class="source">
+<summary>
+<span>Expand source code</span>
+</summary>
+<pre><code class="python">@property
+def plots_defaults(self) -&gt; tp.Kwargs:
+    &#34;&#34;&#34;Defaults for `GenericAccessor.plots`.
+
+    Merges `vectorbt.generic.plots_builder.PlotsBuilderMixin.plots_defaults` and
+    `generic.plots` from `vectorbt._settings.settings`.&#34;&#34;&#34;
+    from vectorbt._settings import settings
+    generic_plots_cfg = settings[&#39;generic&#39;][&#39;plots&#39;]
+
+    return merge_dicts(
+        PlotsBuilderMixin.plots_defaults.__get__(self),
+        generic_plots_cfg
+    )</code></pre>
+</details>
+</dd>
+<dt id="vectorbt.generic.accessors.GenericAccessor.ranges"><code class="name">var <span class="ident child-name">ranges</span></code></dt>
+<dd>
+<div class="desc"><p><code><a title="vectorbt.generic.accessors.GenericAccessor.get_ranges" href="#vectorbt.generic.accessors.GenericAccessor.get_ranges">GenericAccessor.get_ranges()</a></code> with default arguments.</p></div>
+<details class="source">
+<summary>
+<span>Expand source code</span>
+</summary>
+<pre><code class="python">@property
+def ranges(self) -&gt; Ranges:
+    &#34;&#34;&#34;`GenericAccessor.get_ranges` with default arguments.&#34;&#34;&#34;
+    return self.get_ranges()</code></pre>
+</details>
+</dd>
 <dt id="vectorbt.generic.accessors.GenericAccessor.stats_defaults"><code class="name">var <span class="ident child-name">stats_defaults</span></code></dt>
 <dd>
 <div class="desc"><p>Defaults for <code><a title="vectorbt.generic.accessors.GenericAccessor.stats" href="stats_builder.html#vectorbt.generic.stats_builder.StatsBuilderMixin.stats">StatsBuilderMixin.stats()</a></code>.</p>
 <p>Merges <code><a title="vectorbt.generic.stats_builder.StatsBuilderMixin.stats_defaults" href="stats_builder.html#vectorbt.generic.stats_builder.StatsBuilderMixin.stats_defaults">StatsBuilderMixin.stats_defaults</a></code> and
-<code>generic.stats</code> in <code><a title="vectorbt._settings.settings" href="../_settings.html#vectorbt._settings.settings">settings</a></code>.</p></div>
+<code>generic.stats</code> from <code><a title="vectorbt._settings.settings" href="../_settings.html#vectorbt._settings.settings">settings</a></code>.</p></div>
 <details class="source">
 <summary>
 <span>Expand source code</span>
@@ -4213,7 +4431,7 @@ def stats_defaults(self) -&gt; tp.Kwargs:
     &#34;&#34;&#34;Defaults for `GenericAccessor.stats`.
 
     Merges `vectorbt.generic.stats_builder.StatsBuilderMixin.stats_defaults` and
-    `generic.stats` in `vectorbt._settings.settings`.&#34;&#34;&#34;
+    `generic.stats` from `vectorbt._settings.settings`.&#34;&#34;&#34;
     from vectorbt._settings import settings
     generic_stats_cfg = settings[&#39;generic&#39;][&#39;stats&#39;]
 
@@ -4396,6 +4614,33 @@ dtype: float64
     return bar</code></pre>
 </details>
 </dd>
+<dt id="vectorbt.generic.accessors.GenericAccessor.bfill"><code class="name flex">
+<span>def <span class="ident child-name">bfill</span></span>(<span class="params">self, *, wrap_kwargs=None)</span><span class="return_type"></span>
+</code></dt>
+<dd>
+<div class="desc"><p>See <code><a title="vectorbt.generic.nb.bfill_nb" href="nb.html#vectorbt.generic.nb.bfill_nb">bfill_nb()</a></code>.</p></div>
+<details class="source">
+<summary>
+<span>Expand source code</span>
+</summary>
+<pre><code class="python">def new_method(self,
+               *args,
+               _target_name: str = target_name,
+               _func: tp.Callable = func,
+               _is_reducing: bool = is_reducing,
+               _default_wrap_kwargs: tp.KwargsLike = default_wrap_kwargs,
+               wrap_kwargs: tp.KwargsLike = None,
+               **kwargs) -&gt; tp.SeriesFrame:
+    args = (self.to_2d_array(),) + args
+    inspect.signature(_func).bind(*args, **kwargs)
+
+    a = _func(*args, **kwargs)
+    wrap_kwargs = merge_dicts(_default_wrap_kwargs, wrap_kwargs)
+    if _is_reducing:
+        return self.wrapper.wrap_reduced(a, **wrap_kwargs)
+    return self.wrapper.wrap(a, **wrap_kwargs)</code></pre>
+</details>
+</dd>
 <dt id="vectorbt.generic.accessors.GenericAccessor.binarize"><code class="name flex">
 <span>def <span class="ident child-name">binarize</span></span>(<span class="params">self, *, threshold=0.0, copy=True, **kwargs)</span><span class="return_type"></span>
 </code></dt>
@@ -4467,7 +4712,7 @@ dtype: float64
 <span>def <span class="ident child-name">bshift</span></span>(<span class="params">self, n=1, fill_value=nan, *, wrap_kwargs=None)</span><span class="return_type"></span>
 </code></dt>
 <dd>
-<div class="desc"><p>See <code><a title="vectorbt.generic.nb.bshift_nb" href="nb.html#vectorbt.generic.nb.bshift_nb">bshift_nb()</a></code></p></div>
+<div class="desc"><p>See <code><a title="vectorbt.generic.nb.bshift_nb" href="nb.html#vectorbt.generic.nb.bshift_nb">bshift_nb()</a></code>.</p></div>
 <details class="source">
 <summary>
 <span>Expand source code</span>
@@ -4512,7 +4757,7 @@ dtype: float64
 <span>def <span class="ident child-name">cumprod</span></span>(<span class="params">self, *, wrap_kwargs=None)</span><span class="return_type"></span>
 </code></dt>
 <dd>
-<div class="desc"><p>See <code><a title="vectorbt.generic.nb.nancumprod_nb" href="nb.html#vectorbt.generic.nb.nancumprod_nb">nancumprod_nb()</a></code></p></div>
+<div class="desc"><p>See <code><a title="vectorbt.generic.nb.nancumprod_nb" href="nb.html#vectorbt.generic.nb.nancumprod_nb">nancumprod_nb()</a></code>.</p></div>
 <details class="source">
 <summary>
 <span>Expand source code</span>
@@ -4539,7 +4784,7 @@ dtype: float64
 <span>def <span class="ident child-name">cumsum</span></span>(<span class="params">self, *, wrap_kwargs=None)</span><span class="return_type"></span>
 </code></dt>
 <dd>
-<div class="desc"><p>See <code><a title="vectorbt.generic.nb.nancumsum_nb" href="nb.html#vectorbt.generic.nb.nancumsum_nb">nancumsum_nb()</a></code></p></div>
+<div class="desc"><p>See <code><a title="vectorbt.generic.nb.nancumsum_nb" href="nb.html#vectorbt.generic.nb.nancumsum_nb">nancumsum_nb()</a></code>.</p></div>
 <details class="source">
 <summary>
 <span>Expand source code</span>
@@ -4630,7 +4875,7 @@ max    5.000000  5.000000  3.00000
 <span>def <span class="ident child-name">diff</span></span>(<span class="params">self, n=1, *, wrap_kwargs=None)</span><span class="return_type"></span>
 </code></dt>
 <dd>
-<div class="desc"><p>See <code><a title="vectorbt.generic.nb.diff_nb" href="nb.html#vectorbt.generic.nb.diff_nb">diff_nb()</a></code></p></div>
+<div class="desc"><p>See <code><a title="vectorbt.generic.nb.diff_nb" href="nb.html#vectorbt.generic.nb.diff_nb">diff_nb()</a></code>.</p></div>
 <details class="source">
 <summary>
 <span>Expand source code</span>
@@ -4770,7 +5015,7 @@ max    5.000000  5.000000  3.00000
 <span>def <span class="ident child-name">expanding_max</span></span>(<span class="params">self, minp=1, *, wrap_kwargs=None)</span><span class="return_type"></span>
 </code></dt>
 <dd>
-<div class="desc"><p>See <code><a title="vectorbt.generic.nb.expanding_max_nb" href="nb.html#vectorbt.generic.nb.expanding_max_nb">expanding_max_nb()</a></code></p></div>
+<div class="desc"><p>See <code><a title="vectorbt.generic.nb.expanding_max_nb" href="nb.html#vectorbt.generic.nb.expanding_max_nb">expanding_max_nb()</a></code>.</p></div>
 <details class="source">
 <summary>
 <span>Expand source code</span>
@@ -4797,7 +5042,7 @@ max    5.000000  5.000000  3.00000
 <span>def <span class="ident child-name">expanding_mean</span></span>(<span class="params">self, minp=1, *, wrap_kwargs=None)</span><span class="return_type"></span>
 </code></dt>
 <dd>
-<div class="desc"><p>See <code><a title="vectorbt.generic.nb.expanding_mean_nb" href="nb.html#vectorbt.generic.nb.expanding_mean_nb">expanding_mean_nb()</a></code></p></div>
+<div class="desc"><p>See <code><a title="vectorbt.generic.nb.expanding_mean_nb" href="nb.html#vectorbt.generic.nb.expanding_mean_nb">expanding_mean_nb()</a></code>.</p></div>
 <details class="source">
 <summary>
 <span>Expand source code</span>
@@ -4824,7 +5069,7 @@ max    5.000000  5.000000  3.00000
 <span>def <span class="ident child-name">expanding_min</span></span>(<span class="params">self, minp=1, *, wrap_kwargs=None)</span><span class="return_type"></span>
 </code></dt>
 <dd>
-<div class="desc"><p>See <code><a title="vectorbt.generic.nb.expanding_min_nb" href="nb.html#vectorbt.generic.nb.expanding_min_nb">expanding_min_nb()</a></code></p></div>
+<div class="desc"><p>See <code><a title="vectorbt.generic.nb.expanding_min_nb" href="nb.html#vectorbt.generic.nb.expanding_min_nb">expanding_min_nb()</a></code>.</p></div>
 <details class="source">
 <summary>
 <span>Expand source code</span>
@@ -4936,7 +5181,7 @@ split_idx  0  1  2  3  4  5  6  7
 <span>def <span class="ident child-name">ffill</span></span>(<span class="params">self, *, wrap_kwargs=None)</span><span class="return_type"></span>
 </code></dt>
 <dd>
-<div class="desc"><p>See <code><a title="vectorbt.generic.nb.ffill_nb" href="nb.html#vectorbt.generic.nb.ffill_nb">ffill_nb()</a></code></p></div>
+<div class="desc"><p>See <code><a title="vectorbt.generic.nb.ffill_nb" href="nb.html#vectorbt.generic.nb.ffill_nb">ffill_nb()</a></code>.</p></div>
 <details class="source">
 <summary>
 <span>Expand source code</span>
@@ -4963,7 +5208,7 @@ split_idx  0  1  2  3  4  5  6  7
 <span>def <span class="ident child-name">fillna</span></span>(<span class="params">self, value, *, wrap_kwargs=None)</span><span class="return_type"></span>
 </code></dt>
 <dd>
-<div class="desc"><p>See <code><a title="vectorbt.generic.nb.fillna_nb" href="nb.html#vectorbt.generic.nb.fillna_nb">fillna_nb()</a></code></p></div>
+<div class="desc"><p>See <code><a title="vectorbt.generic.nb.fillna_nb" href="nb.html#vectorbt.generic.nb.fillna_nb">fillna_nb()</a></code>.</p></div>
 <details class="source">
 <summary>
 <span>Expand source code</span>
@@ -5032,7 +5277,7 @@ split_idx  0  1  2  3  4  5  6  7
 <span>def <span class="ident child-name">fshift</span></span>(<span class="params">self, n=1, fill_value=nan, *, wrap_kwargs=None)</span><span class="return_type"></span>
 </code></dt>
 <dd>
-<div class="desc"><p>See <code><a title="vectorbt.generic.nb.fshift_nb" href="nb.html#vectorbt.generic.nb.fshift_nb">fshift_nb()</a></code></p></div>
+<div class="desc"><p>See <code><a title="vectorbt.generic.nb.fshift_nb" href="nb.html#vectorbt.generic.nb.fshift_nb">fshift_nb()</a></code>.</p></div>
 <details class="source">
 <summary>
 <span>Expand source code</span>
@@ -5056,7 +5301,7 @@ split_idx  0  1  2  3  4  5  6  7
 </details>
 </dd>
 <dt id="vectorbt.generic.accessors.GenericAccessor.get_drawdowns"><code class="name flex">
-<span>def <span class="ident child-name">get_drawdowns</span></span>(<span class="params">self, group_by=None, **kwargs)</span><span class="return_type"></span>
+<span>def <span class="ident child-name">get_drawdowns</span></span>(<span class="params">self, wrapper_kwargs=None, **kwargs)</span><span class="return_type"></span>
 </code></dt>
 <dd>
 <div class="desc"><p>Generate drawdown records.</p>
@@ -5065,13 +5310,30 @@ split_idx  0  1  2  3  4  5  6  7
 <summary>
 <span>Expand source code</span>
 </summary>
-<pre><code class="python">def get_drawdowns(self, group_by: tp.GroupByLike = None, **kwargs) -&gt; Drawdowns:
+<pre><code class="python">def get_drawdowns(self, wrapper_kwargs: tp.KwargsLike = None, **kwargs) -&gt; Drawdowns:
     &#34;&#34;&#34;Generate drawdown records.
 
     See `vectorbt.generic.drawdowns.Drawdowns`.&#34;&#34;&#34;
-    if group_by is None:
-        group_by = self.wrapper.grouper.group_by
-    return Drawdowns.from_ts(self.obj, freq=self.wrapper.freq, group_by=group_by, **kwargs)</code></pre>
+    wrapper_kwargs = merge_dicts(self.wrapper.config, wrapper_kwargs)
+    return Drawdowns.from_ts(self.obj, wrapper_kwargs=wrapper_kwargs, **kwargs)</code></pre>
+</details>
+</dd>
+<dt id="vectorbt.generic.accessors.GenericAccessor.get_ranges"><code class="name flex">
+<span>def <span class="ident child-name">get_ranges</span></span>(<span class="params">self, wrapper_kwargs=None, **kwargs)</span><span class="return_type"></span>
+</code></dt>
+<dd>
+<div class="desc"><p>Generate range records.</p>
+<p>See <code><a title="vectorbt.generic.ranges.Ranges" href="ranges.html#vectorbt.generic.ranges.Ranges">Ranges</a></code>.</p></div>
+<details class="source">
+<summary>
+<span>Expand source code</span>
+</summary>
+<pre><code class="python">def get_ranges(self, wrapper_kwargs: tp.KwargsLike = None, **kwargs) -&gt; Ranges:
+    &#34;&#34;&#34;Generate range records.
+
+    See `vectorbt.generic.ranges.Ranges`.&#34;&#34;&#34;
+    wrapper_kwargs = merge_dicts(self.wrapper.config, wrapper_kwargs)
+    return Ranges.from_ts(self.obj, wrapper_kwargs=wrapper_kwargs, **kwargs)</code></pre>
 </details>
 </dd>
 <dt id="vectorbt.generic.accessors.GenericAccessor.groupby_apply"><code class="name flex">
@@ -5442,7 +5704,7 @@ split_idx  0  1  2  3  4  5  6  7
 <span>def <span class="ident child-name">pct_change</span></span>(<span class="params">self, n=1, *, wrap_kwargs=None)</span><span class="return_type"></span>
 </code></dt>
 <dd>
-<div class="desc"><p>See <code><a title="vectorbt.generic.nb.pct_change_nb" href="nb.html#vectorbt.generic.nb.pct_change_nb">pct_change_nb()</a></code></p></div>
+<div class="desc"><p>See <code><a title="vectorbt.generic.nb.pct_change_nb" href="nb.html#vectorbt.generic.nb.pct_change_nb">pct_change_nb()</a></code>.</p></div>
 <details class="source">
 <summary>
 <span>Expand source code</span>
@@ -5536,7 +5798,7 @@ split_idx  0  1  2  3  4  5  6  7
 <span>def <span class="ident child-name">product</span></span>(<span class="params">self, *, wrap_kwargs=None)</span><span class="return_type"></span>
 </code></dt>
 <dd>
-<div class="desc"><p>See <code><a title="vectorbt.generic.nb.nanprod_nb" href="nb.html#vectorbt.generic.nb.nanprod_nb">nanprod_nb()</a></code></p></div>
+<div class="desc"><p>See <code><a title="vectorbt.generic.nb.nanprod_nb" href="nb.html#vectorbt.generic.nb.nanprod_nb">nanprod_nb()</a></code>.</p></div>
 <details class="source">
 <summary>
 <span>Expand source code</span>
@@ -5751,6 +6013,27 @@ split_idx  0  1
     ![](/docs/img/range_split_plot.svg)
     &#34;&#34;&#34;
     return self.split(RangeSplitter(), **kwargs)</code></pre>
+</details>
+</dd>
+<dt id="vectorbt.generic.accessors.GenericAccessor.rebase"><code class="name flex">
+<span>def <span class="ident child-name">rebase</span></span>(<span class="params">self, base, wrap_kwargs=None)</span><span class="return_type"></span>
+</code></dt>
+<dd>
+<div class="desc"><p>Rebase all series to a given intial base.</p>
+<p>This makes comparing/plotting different series together easier.
+Will forward and backward fill NaN values.</p></div>
+<details class="source">
+<summary>
+<span>Expand source code</span>
+</summary>
+<pre><code class="python">def rebase(self, base: float, wrap_kwargs: tp.KwargsLike = None) -&gt; tp.SeriesFrame:
+    &#34;&#34;&#34;Rebase all series to a given intial base.
+
+    This makes comparing/plotting different series together easier.
+    Will forward and backward fill NaN values.&#34;&#34;&#34;
+    result = nb.bfill_nb(nb.ffill_nb(self.to_2d_array()))
+    result = result / result[0] * base
+    return self.wrapper.wrap(result, group_by=False, **merge_dicts({}, wrap_kwargs))</code></pre>
 </details>
 </dd>
 <dt id="vectorbt.generic.accessors.GenericAccessor.reduce"><code class="name flex">
@@ -6036,7 +6319,7 @@ max      5.0     3.0
         silence_warnings=silence_warnings
     )
     if &#39;mapping&#39; in cond_kwargs:
-        self_copy = reself.copy(mapping=cond_kwargs[&#39;mapping&#39;])
+        self_copy = reself.replace(mapping=cond_kwargs[&#39;mapping&#39;])
 
         if not checks.is_deep_equal(self_copy.mapping, reself.mapping):
             if not silence_warnings:
@@ -6145,7 +6428,7 @@ max      5.0     3.0
 <span>def <span class="ident child-name">rolling_max</span></span>(<span class="params">self, window, minp=None, *, wrap_kwargs=None)</span><span class="return_type"></span>
 </code></dt>
 <dd>
-<div class="desc"><p>See <code><a title="vectorbt.generic.nb.rolling_max_nb" href="nb.html#vectorbt.generic.nb.rolling_max_nb">rolling_max_nb()</a></code></p></div>
+<div class="desc"><p>See <code><a title="vectorbt.generic.nb.rolling_max_nb" href="nb.html#vectorbt.generic.nb.rolling_max_nb">rolling_max_nb()</a></code>.</p></div>
 <details class="source">
 <summary>
 <span>Expand source code</span>
@@ -6172,7 +6455,7 @@ max      5.0     3.0
 <span>def <span class="ident child-name">rolling_mean</span></span>(<span class="params">self, window, minp=None, *, wrap_kwargs=None)</span><span class="return_type"></span>
 </code></dt>
 <dd>
-<div class="desc"><p>See <code><a title="vectorbt.generic.nb.rolling_mean_nb" href="nb.html#vectorbt.generic.nb.rolling_mean_nb">rolling_mean_nb()</a></code></p></div>
+<div class="desc"><p>See <code><a title="vectorbt.generic.nb.rolling_mean_nb" href="nb.html#vectorbt.generic.nb.rolling_mean_nb">rolling_mean_nb()</a></code>.</p></div>
 <details class="source">
 <summary>
 <span>Expand source code</span>
@@ -6199,7 +6482,7 @@ max      5.0     3.0
 <span>def <span class="ident child-name">rolling_min</span></span>(<span class="params">self, window, minp=None, *, wrap_kwargs=None)</span><span class="return_type"></span>
 </code></dt>
 <dd>
-<div class="desc"><p>See <code><a title="vectorbt.generic.nb.rolling_min_nb" href="nb.html#vectorbt.generic.nb.rolling_min_nb">rolling_min_nb()</a></code></p></div>
+<div class="desc"><p>See <code><a title="vectorbt.generic.nb.rolling_min_nb" href="nb.html#vectorbt.generic.nb.rolling_min_nb">rolling_min_nb()</a></code>.</p></div>
 <details class="source">
 <summary>
 <span>Expand source code</span>
@@ -6351,7 +6634,7 @@ split_idx  0  1  2  3  4  5
 <span>def <span class="ident child-name">shuffle</span></span>(<span class="params">self, seed=None, *, wrap_kwargs=None)</span><span class="return_type"></span>
 </code></dt>
 <dd>
-<div class="desc"><p>See <code><a title="vectorbt.generic.nb.shuffle_nb" href="nb.html#vectorbt.generic.nb.shuffle_nb">shuffle_nb()</a></code></p></div>
+<div class="desc"><p>See <code><a title="vectorbt.generic.nb.shuffle_nb" href="nb.html#vectorbt.generic.nb.shuffle_nb">shuffle_nb()</a></code>.</p></div>
 <details class="source">
 <summary>
 <span>Expand source code</span>
@@ -6760,6 +7043,12 @@ ideally subclassing <code>sklearn.base.TransformerMixin</code> and <code>sklearn
     Mapping will be applied using `vectorbt.utils.mapping.apply_mapping` with `**kwargs`.&#34;&#34;&#34;
     if mapping is None:
         mapping = self.mapping
+    if isinstance(mapping, str):
+        if mapping.lower() == &#39;index&#39;:
+            mapping = self.wrapper.index
+        elif mapping.lower() == &#39;columns&#39;:
+            mapping = self.wrapper.columns
+        mapping = to_mapping(mapping)
     codes, uniques = pd.factorize(self.obj.values.flatten(), sort=False, na_sentinel=None)
     codes = codes.reshape(self.wrapper.shape_2d)
     group_lens = self.wrapper.grouper.get_group_lens(group_by=group_by)
@@ -6840,7 +7129,7 @@ ideally subclassing <code>sklearn.base.TransformerMixin</code> and <code>sklearn
 <li><code><a title="vectorbt.base.accessors.BaseAccessor.empty" href="../base/accessors.html#vectorbt.base.accessors.BaseAccessor.empty">empty</a></code></li>
 <li><code><a title="vectorbt.base.accessors.BaseAccessor.empty_like" href="../base/accessors.html#vectorbt.base.accessors.BaseAccessor.empty_like">empty_like</a></code></li>
 <li><code><a title="vectorbt.base.accessors.BaseAccessor.iloc" href="../base/indexing.html#vectorbt.base.indexing.PandasIndexer.iloc">iloc</a></code></li>
-<li><code><a title="vectorbt.base.accessors.BaseAccessor.indexing_func" href="../base/array_wrapper.html#vectorbt.base.array_wrapper.Wrapping.indexing_func">indexing_func</a></code></li>
+<li><code><a title="vectorbt.base.accessors.BaseAccessor.indexing_func" href="../base/accessors.html#vectorbt.base.accessors.BaseAccessor.indexing_func">indexing_func</a></code></li>
 <li><code><a title="vectorbt.base.accessors.BaseAccessor.indexing_kwargs" href="../base/indexing.html#vectorbt.base.indexing.PandasIndexer.indexing_kwargs">indexing_kwargs</a></code></li>
 <li><code><a title="vectorbt.base.accessors.BaseAccessor.load" href="../utils/config.html#vectorbt.utils.config.Pickleable.load">load</a></code></li>
 <li><code><a title="vectorbt.base.accessors.BaseAccessor.loads" href="../utils/config.html#vectorbt.utils.config.Pickleable.loads">loads</a></code></li>
@@ -6852,6 +7141,7 @@ ideally subclassing <code>sklearn.base.TransformerMixin</code> and <code>sklearn
 <li><code><a title="vectorbt.base.accessors.BaseAccessor.regroup" href="../base/array_wrapper.html#vectorbt.base.array_wrapper.Wrapping.regroup">regroup</a></code></li>
 <li><code><a title="vectorbt.base.accessors.BaseAccessor.rename_levels" href="../base/accessors.html#vectorbt.base.accessors.BaseAccessor.rename_levels">rename_levels</a></code></li>
 <li><code><a title="vectorbt.base.accessors.BaseAccessor.repeat" href="../base/accessors.html#vectorbt.base.accessors.BaseAccessor.repeat">repeat</a></code></li>
+<li><code><a title="vectorbt.base.accessors.BaseAccessor.replace" href="../utils/config.html#vectorbt.utils.config.Configured.replace">replace</a></code></li>
 <li><code><a title="vectorbt.base.accessors.BaseAccessor.resolve_attr" href="../utils/attr.html#vectorbt.utils.attr.AttrResolver.resolve_attr">resolve_attr</a></code></li>
 <li><code><a title="vectorbt.base.accessors.BaseAccessor.save" href="../utils/config.html#vectorbt.utils.config.Pickleable.save">save</a></code></li>
 <li><code><a title="vectorbt.base.accessors.BaseAccessor.select_levels" href="../base/accessors.html#vectorbt.base.accessors.BaseAccessor.select_levels">select_levels</a></code></li>
@@ -6878,6 +7168,13 @@ ideally subclassing <code>sklearn.base.TransformerMixin</code> and <code>sklearn
 <li><code><a title="vectorbt.generic.stats_builder.StatsBuilderMixin.build_metrics_doc" href="stats_builder.html#vectorbt.generic.stats_builder.StatsBuilderMixin.build_metrics_doc">build_metrics_doc</a></code></li>
 <li><code><a title="vectorbt.generic.stats_builder.StatsBuilderMixin.override_metrics_doc" href="stats_builder.html#vectorbt.generic.stats_builder.StatsBuilderMixin.override_metrics_doc">override_metrics_doc</a></code></li>
 <li><code><a title="vectorbt.generic.stats_builder.StatsBuilderMixin.stats" href="stats_builder.html#vectorbt.generic.stats_builder.StatsBuilderMixin.stats">stats</a></code></li>
+</ul>
+</li>
+<li><code><b><a title="vectorbt.generic.plots_builder.PlotsBuilderMixin" href="plots_builder.html#vectorbt.generic.plots_builder.PlotsBuilderMixin">PlotsBuilderMixin</a></b></code>:
+<ul class="hlist">
+<li><code><a title="vectorbt.generic.plots_builder.PlotsBuilderMixin.build_subplots_doc" href="plots_builder.html#vectorbt.generic.plots_builder.PlotsBuilderMixin.build_subplots_doc">build_subplots_doc</a></code></li>
+<li><code><a title="vectorbt.generic.plots_builder.PlotsBuilderMixin.override_subplots_doc" href="plots_builder.html#vectorbt.generic.plots_builder.PlotsBuilderMixin.override_subplots_doc">override_subplots_doc</a></code></li>
+<li><code><a title="vectorbt.generic.plots_builder.PlotsBuilderMixin.plots" href="plots_builder.html#vectorbt.generic.plots_builder.PlotsBuilderMixin.plots">plots</a></code></li>
 </ul>
 </li>
 </ul>
@@ -7046,6 +7343,7 @@ ideally subclassing <code>sklearn.base.TransformerMixin</code> and <code>sklearn
 <li><a title="vectorbt.base.indexing.IndexingBase" href="../base/indexing.html#vectorbt.base.indexing.IndexingBase">IndexingBase</a></li>
 <li><a title="vectorbt.utils.attr.AttrResolver" href="../utils/attr.html#vectorbt.utils.attr.AttrResolver">AttrResolver</a></li>
 <li><a title="vectorbt.generic.stats_builder.StatsBuilderMixin" href="stats_builder.html#vectorbt.generic.stats_builder.StatsBuilderMixin">StatsBuilderMixin</a></li>
+<li><a title="vectorbt.generic.plots_builder.PlotsBuilderMixin" href="plots_builder.html#vectorbt.generic.plots_builder.PlotsBuilderMixin">PlotsBuilderMixin</a></li>
 </ul>
 <h3 class="section-subtitle">Subclasses</h3>
 <ul class="hlist">
@@ -7297,12 +7595,14 @@ group       first  second
 <li><code><a title="vectorbt.generic.accessors.GenericAccessor.apply_on_index" href="../base/accessors.html#vectorbt.base.accessors.BaseAccessor.apply_on_index">apply_on_index</a></code></li>
 <li><code><a title="vectorbt.generic.accessors.GenericAccessor.applymap" href="#vectorbt.generic.accessors.GenericAccessor.applymap">applymap</a></code></li>
 <li><code><a title="vectorbt.generic.accessors.GenericAccessor.barplot" href="#vectorbt.generic.accessors.GenericAccessor.barplot">barplot</a></code></li>
+<li><code><a title="vectorbt.generic.accessors.GenericAccessor.bfill" href="#vectorbt.generic.accessors.GenericAccessor.bfill">bfill</a></code></li>
 <li><code><a title="vectorbt.generic.accessors.GenericAccessor.binarize" href="#vectorbt.generic.accessors.GenericAccessor.binarize">binarize</a></code></li>
 <li><code><a title="vectorbt.generic.accessors.GenericAccessor.boxplot" href="#vectorbt.generic.accessors.GenericAccessor.boxplot">boxplot</a></code></li>
 <li><code><a title="vectorbt.generic.accessors.GenericAccessor.broadcast" href="../base/accessors.html#vectorbt.base.accessors.BaseAccessor.broadcast">broadcast</a></code></li>
 <li><code><a title="vectorbt.generic.accessors.GenericAccessor.broadcast_to" href="../base/accessors.html#vectorbt.base.accessors.BaseAccessor.broadcast_to">broadcast_to</a></code></li>
 <li><code><a title="vectorbt.generic.accessors.GenericAccessor.bshift" href="#vectorbt.generic.accessors.GenericAccessor.bshift">bshift</a></code></li>
 <li><code><a title="vectorbt.generic.accessors.GenericAccessor.build_metrics_doc" href="stats_builder.html#vectorbt.generic.stats_builder.StatsBuilderMixin.build_metrics_doc">build_metrics_doc</a></code></li>
+<li><code><a title="vectorbt.generic.accessors.GenericAccessor.build_subplots_doc" href="plots_builder.html#vectorbt.generic.plots_builder.PlotsBuilderMixin.build_subplots_doc">build_subplots_doc</a></code></li>
 <li><code><a title="vectorbt.generic.accessors.GenericAccessor.combine" href="../base/accessors.html#vectorbt.base.accessors.BaseAccessor.combine">combine</a></code></li>
 <li><code><a title="vectorbt.generic.accessors.GenericAccessor.concat" href="../base/accessors.html#vectorbt.base.accessors.BaseAccessor.concat">concat</a></code></li>
 <li><code><a title="vectorbt.generic.accessors.GenericAccessor.config" href="../utils/config.html#vectorbt.utils.config.Configured.config">config</a></code></li>
@@ -7335,12 +7635,13 @@ group       first  second
 <li><code><a title="vectorbt.generic.accessors.GenericAccessor.filter" href="#vectorbt.generic.accessors.GenericAccessor.filter">filter</a></code></li>
 <li><code><a title="vectorbt.generic.accessors.GenericAccessor.fshift" href="#vectorbt.generic.accessors.GenericAccessor.fshift">fshift</a></code></li>
 <li><code><a title="vectorbt.generic.accessors.GenericAccessor.get_drawdowns" href="#vectorbt.generic.accessors.GenericAccessor.get_drawdowns">get_drawdowns</a></code></li>
+<li><code><a title="vectorbt.generic.accessors.GenericAccessor.get_ranges" href="#vectorbt.generic.accessors.GenericAccessor.get_ranges">get_ranges</a></code></li>
 <li><code><a title="vectorbt.generic.accessors.GenericAccessor.groupby_apply" href="#vectorbt.generic.accessors.GenericAccessor.groupby_apply">groupby_apply</a></code></li>
 <li><code><a title="vectorbt.generic.accessors.GenericAccessor.histplot" href="#vectorbt.generic.accessors.GenericAccessor.histplot">histplot</a></code></li>
 <li><code><a title="vectorbt.generic.accessors.GenericAccessor.idxmax" href="#vectorbt.generic.accessors.GenericAccessor.idxmax">idxmax</a></code></li>
 <li><code><a title="vectorbt.generic.accessors.GenericAccessor.idxmin" href="#vectorbt.generic.accessors.GenericAccessor.idxmin">idxmin</a></code></li>
 <li><code><a title="vectorbt.generic.accessors.GenericAccessor.iloc" href="../base/indexing.html#vectorbt.base.indexing.PandasIndexer.iloc">iloc</a></code></li>
-<li><code><a title="vectorbt.generic.accessors.GenericAccessor.indexing_func" href="../base/array_wrapper.html#vectorbt.base.array_wrapper.Wrapping.indexing_func">indexing_func</a></code></li>
+<li><code><a title="vectorbt.generic.accessors.GenericAccessor.indexing_func" href="../base/accessors.html#vectorbt.base.accessors.BaseAccessor.indexing_func">indexing_func</a></code></li>
 <li><code><a title="vectorbt.generic.accessors.GenericAccessor.indexing_kwargs" href="../base/indexing.html#vectorbt.base.indexing.PandasIndexer.indexing_kwargs">indexing_kwargs</a></code></li>
 <li><code><a title="vectorbt.generic.accessors.GenericAccessor.lineplot" href="#vectorbt.generic.accessors.GenericAccessor.lineplot">lineplot</a></code></li>
 <li><code><a title="vectorbt.generic.accessors.GenericAccessor.load" href="../utils/config.html#vectorbt.utils.config.Pickleable.load">load</a></code></li>
@@ -7357,18 +7658,24 @@ group       first  second
 <li><code><a title="vectorbt.generic.accessors.GenericAccessor.normalize" href="#vectorbt.generic.accessors.GenericAccessor.normalize">normalize</a></code></li>
 <li><code><a title="vectorbt.generic.accessors.GenericAccessor.obj" href="../base/accessors.html#vectorbt.base.accessors.BaseAccessor.obj">obj</a></code></li>
 <li><code><a title="vectorbt.generic.accessors.GenericAccessor.override_metrics_doc" href="stats_builder.html#vectorbt.generic.stats_builder.StatsBuilderMixin.override_metrics_doc">override_metrics_doc</a></code></li>
+<li><code><a title="vectorbt.generic.accessors.GenericAccessor.override_subplots_doc" href="plots_builder.html#vectorbt.generic.plots_builder.PlotsBuilderMixin.override_subplots_doc">override_subplots_doc</a></code></li>
 <li><code><a title="vectorbt.generic.accessors.GenericAccessor.pct_change" href="#vectorbt.generic.accessors.GenericAccessor.pct_change">pct_change</a></code></li>
 <li><code><a title="vectorbt.generic.accessors.GenericAccessor.plot" href="#vectorbt.generic.accessors.GenericAccessor.plot">plot</a></code></li>
+<li><code><a title="vectorbt.generic.accessors.GenericAccessor.plots" href="plots_builder.html#vectorbt.generic.plots_builder.PlotsBuilderMixin.plots">plots</a></code></li>
+<li><code><a title="vectorbt.generic.accessors.GenericAccessor.plots_defaults" href="#vectorbt.generic.accessors.GenericAccessor.plots_defaults">plots_defaults</a></code></li>
 <li><code><a title="vectorbt.generic.accessors.GenericAccessor.post_resolve_attr" href="../utils/attr.html#vectorbt.utils.attr.AttrResolver.post_resolve_attr">post_resolve_attr</a></code></li>
 <li><code><a title="vectorbt.generic.accessors.GenericAccessor.power_transform" href="#vectorbt.generic.accessors.GenericAccessor.power_transform">power_transform</a></code></li>
 <li><code><a title="vectorbt.generic.accessors.GenericAccessor.pre_resolve_attr" href="../utils/attr.html#vectorbt.utils.attr.AttrResolver.pre_resolve_attr">pre_resolve_attr</a></code></li>
 <li><code><a title="vectorbt.generic.accessors.GenericAccessor.product" href="#vectorbt.generic.accessors.GenericAccessor.product">product</a></code></li>
 <li><code><a title="vectorbt.generic.accessors.GenericAccessor.quantile_transform" href="#vectorbt.generic.accessors.GenericAccessor.quantile_transform">quantile_transform</a></code></li>
 <li><code><a title="vectorbt.generic.accessors.GenericAccessor.range_split" href="#vectorbt.generic.accessors.GenericAccessor.range_split">range_split</a></code></li>
+<li><code><a title="vectorbt.generic.accessors.GenericAccessor.ranges" href="#vectorbt.generic.accessors.GenericAccessor.ranges">ranges</a></code></li>
+<li><code><a title="vectorbt.generic.accessors.GenericAccessor.rebase" href="#vectorbt.generic.accessors.GenericAccessor.rebase">rebase</a></code></li>
 <li><code><a title="vectorbt.generic.accessors.GenericAccessor.reduce" href="#vectorbt.generic.accessors.GenericAccessor.reduce">reduce</a></code></li>
 <li><code><a title="vectorbt.generic.accessors.GenericAccessor.regroup" href="../base/array_wrapper.html#vectorbt.base.array_wrapper.Wrapping.regroup">regroup</a></code></li>
 <li><code><a title="vectorbt.generic.accessors.GenericAccessor.rename_levels" href="../base/accessors.html#vectorbt.base.accessors.BaseAccessor.rename_levels">rename_levels</a></code></li>
 <li><code><a title="vectorbt.generic.accessors.GenericAccessor.repeat" href="../base/accessors.html#vectorbt.base.accessors.BaseAccessor.repeat">repeat</a></code></li>
+<li><code><a title="vectorbt.generic.accessors.GenericAccessor.replace" href="../utils/config.html#vectorbt.utils.config.Configured.replace">replace</a></code></li>
 <li><code><a title="vectorbt.generic.accessors.GenericAccessor.resample_apply" href="#vectorbt.generic.accessors.GenericAccessor.resample_apply">resample_apply</a></code></li>
 <li><code><a title="vectorbt.generic.accessors.GenericAccessor.resolve_attr" href="../utils/attr.html#vectorbt.utils.attr.AttrResolver.resolve_attr">resolve_attr</a></code></li>
 <li><code><a title="vectorbt.generic.accessors.GenericAccessor.resolve_self" href="#vectorbt.generic.accessors.GenericAccessor.resolve_self">resolve_self</a></code></li>
@@ -7500,7 +7807,7 @@ group       first  second
         if hidden_trace_kwargs is None:
             hidden_trace_kwargs = {}
         obj, other = reshape_fns.broadcast(self.obj, other, columns_from=&#39;keep&#39;)
-        checks.assert_type(other, pd.Series)
+        checks.assert_instance_of(other, pd.Series)
         if fig is None:
             fig = make_figure()
         fig.update_layout(**layout_kwargs)
@@ -7631,7 +7938,7 @@ group       first  second
             add_trace_kwargs = {}
 
         obj, other = reshape_fns.broadcast(self.obj, other, columns_from=&#39;keep&#39;)
-        checks.assert_type(other, pd.Series)
+        checks.assert_instance_of(other, pd.Series)
         if fig is None:
             fig = make_subplots(specs=[[{&#34;secondary_y&#34;: True}]])
             if &#39;width&#39; in plotting_cfg[&#39;layout&#39;]:
@@ -8022,6 +8329,7 @@ group       first  second
 <li><a title="vectorbt.base.indexing.IndexingBase" href="../base/indexing.html#vectorbt.base.indexing.IndexingBase">IndexingBase</a></li>
 <li><a title="vectorbt.utils.attr.AttrResolver" href="../utils/attr.html#vectorbt.utils.attr.AttrResolver">AttrResolver</a></li>
 <li><a title="vectorbt.generic.stats_builder.StatsBuilderMixin" href="stats_builder.html#vectorbt.generic.stats_builder.StatsBuilderMixin">StatsBuilderMixin</a></li>
+<li><a title="vectorbt.generic.plots_builder.PlotsBuilderMixin" href="plots_builder.html#vectorbt.generic.plots_builder.PlotsBuilderMixin">PlotsBuilderMixin</a></li>
 </ul>
 <h3 class="section-subtitle">Subclasses</h3>
 <ul class="hlist">
@@ -8327,7 +8635,7 @@ dtype: int64
         add_trace_kwargs = {}
 
     obj, other = reshape_fns.broadcast(self.obj, other, columns_from=&#39;keep&#39;)
-    checks.assert_type(other, pd.Series)
+    checks.assert_instance_of(other, pd.Series)
     if fig is None:
         fig = make_subplots(specs=[[{&#34;secondary_y&#34;: True}]])
         if &#39;width&#39; in plotting_cfg[&#39;layout&#39;]:
@@ -8424,7 +8732,7 @@ dtype: int64
     if hidden_trace_kwargs is None:
         hidden_trace_kwargs = {}
     obj, other = reshape_fns.broadcast(self.obj, other, columns_from=&#39;keep&#39;)
-    checks.assert_type(other, pd.Series)
+    checks.assert_instance_of(other, pd.Series)
     if fig is None:
         fig = make_figure()
     fig.update_layout(**layout_kwargs)
@@ -8817,12 +9125,14 @@ dtype: int64
 <li><code><a title="vectorbt.generic.accessors.GenericAccessor.apply_on_index" href="../base/accessors.html#vectorbt.base.accessors.BaseAccessor.apply_on_index">apply_on_index</a></code></li>
 <li><code><a title="vectorbt.generic.accessors.GenericAccessor.applymap" href="#vectorbt.generic.accessors.GenericAccessor.applymap">applymap</a></code></li>
 <li><code><a title="vectorbt.generic.accessors.GenericAccessor.barplot" href="#vectorbt.generic.accessors.GenericAccessor.barplot">barplot</a></code></li>
+<li><code><a title="vectorbt.generic.accessors.GenericAccessor.bfill" href="#vectorbt.generic.accessors.GenericAccessor.bfill">bfill</a></code></li>
 <li><code><a title="vectorbt.generic.accessors.GenericAccessor.binarize" href="#vectorbt.generic.accessors.GenericAccessor.binarize">binarize</a></code></li>
 <li><code><a title="vectorbt.generic.accessors.GenericAccessor.boxplot" href="#vectorbt.generic.accessors.GenericAccessor.boxplot">boxplot</a></code></li>
 <li><code><a title="vectorbt.generic.accessors.GenericAccessor.broadcast" href="../base/accessors.html#vectorbt.base.accessors.BaseAccessor.broadcast">broadcast</a></code></li>
 <li><code><a title="vectorbt.generic.accessors.GenericAccessor.broadcast_to" href="../base/accessors.html#vectorbt.base.accessors.BaseAccessor.broadcast_to">broadcast_to</a></code></li>
 <li><code><a title="vectorbt.generic.accessors.GenericAccessor.bshift" href="#vectorbt.generic.accessors.GenericAccessor.bshift">bshift</a></code></li>
 <li><code><a title="vectorbt.generic.accessors.GenericAccessor.build_metrics_doc" href="stats_builder.html#vectorbt.generic.stats_builder.StatsBuilderMixin.build_metrics_doc">build_metrics_doc</a></code></li>
+<li><code><a title="vectorbt.generic.accessors.GenericAccessor.build_subplots_doc" href="plots_builder.html#vectorbt.generic.plots_builder.PlotsBuilderMixin.build_subplots_doc">build_subplots_doc</a></code></li>
 <li><code><a title="vectorbt.generic.accessors.GenericAccessor.combine" href="../base/accessors.html#vectorbt.base.accessors.BaseAccessor.combine">combine</a></code></li>
 <li><code><a title="vectorbt.generic.accessors.GenericAccessor.concat" href="../base/accessors.html#vectorbt.base.accessors.BaseAccessor.concat">concat</a></code></li>
 <li><code><a title="vectorbt.generic.accessors.GenericAccessor.config" href="../utils/config.html#vectorbt.utils.config.Configured.config">config</a></code></li>
@@ -8855,12 +9165,13 @@ dtype: int64
 <li><code><a title="vectorbt.generic.accessors.GenericAccessor.filter" href="#vectorbt.generic.accessors.GenericAccessor.filter">filter</a></code></li>
 <li><code><a title="vectorbt.generic.accessors.GenericAccessor.fshift" href="#vectorbt.generic.accessors.GenericAccessor.fshift">fshift</a></code></li>
 <li><code><a title="vectorbt.generic.accessors.GenericAccessor.get_drawdowns" href="#vectorbt.generic.accessors.GenericAccessor.get_drawdowns">get_drawdowns</a></code></li>
+<li><code><a title="vectorbt.generic.accessors.GenericAccessor.get_ranges" href="#vectorbt.generic.accessors.GenericAccessor.get_ranges">get_ranges</a></code></li>
 <li><code><a title="vectorbt.generic.accessors.GenericAccessor.groupby_apply" href="#vectorbt.generic.accessors.GenericAccessor.groupby_apply">groupby_apply</a></code></li>
 <li><code><a title="vectorbt.generic.accessors.GenericAccessor.histplot" href="#vectorbt.generic.accessors.GenericAccessor.histplot">histplot</a></code></li>
 <li><code><a title="vectorbt.generic.accessors.GenericAccessor.idxmax" href="#vectorbt.generic.accessors.GenericAccessor.idxmax">idxmax</a></code></li>
 <li><code><a title="vectorbt.generic.accessors.GenericAccessor.idxmin" href="#vectorbt.generic.accessors.GenericAccessor.idxmin">idxmin</a></code></li>
 <li><code><a title="vectorbt.generic.accessors.GenericAccessor.iloc" href="../base/indexing.html#vectorbt.base.indexing.PandasIndexer.iloc">iloc</a></code></li>
-<li><code><a title="vectorbt.generic.accessors.GenericAccessor.indexing_func" href="../base/array_wrapper.html#vectorbt.base.array_wrapper.Wrapping.indexing_func">indexing_func</a></code></li>
+<li><code><a title="vectorbt.generic.accessors.GenericAccessor.indexing_func" href="../base/accessors.html#vectorbt.base.accessors.BaseAccessor.indexing_func">indexing_func</a></code></li>
 <li><code><a title="vectorbt.generic.accessors.GenericAccessor.indexing_kwargs" href="../base/indexing.html#vectorbt.base.indexing.PandasIndexer.indexing_kwargs">indexing_kwargs</a></code></li>
 <li><code><a title="vectorbt.generic.accessors.GenericAccessor.lineplot" href="#vectorbt.generic.accessors.GenericAccessor.lineplot">lineplot</a></code></li>
 <li><code><a title="vectorbt.generic.accessors.GenericAccessor.load" href="../utils/config.html#vectorbt.utils.config.Pickleable.load">load</a></code></li>
@@ -8877,18 +9188,24 @@ dtype: int64
 <li><code><a title="vectorbt.generic.accessors.GenericAccessor.normalize" href="#vectorbt.generic.accessors.GenericAccessor.normalize">normalize</a></code></li>
 <li><code><a title="vectorbt.generic.accessors.GenericAccessor.obj" href="../base/accessors.html#vectorbt.base.accessors.BaseAccessor.obj">obj</a></code></li>
 <li><code><a title="vectorbt.generic.accessors.GenericAccessor.override_metrics_doc" href="stats_builder.html#vectorbt.generic.stats_builder.StatsBuilderMixin.override_metrics_doc">override_metrics_doc</a></code></li>
+<li><code><a title="vectorbt.generic.accessors.GenericAccessor.override_subplots_doc" href="plots_builder.html#vectorbt.generic.plots_builder.PlotsBuilderMixin.override_subplots_doc">override_subplots_doc</a></code></li>
 <li><code><a title="vectorbt.generic.accessors.GenericAccessor.pct_change" href="#vectorbt.generic.accessors.GenericAccessor.pct_change">pct_change</a></code></li>
 <li><code><a title="vectorbt.generic.accessors.GenericAccessor.plot" href="#vectorbt.generic.accessors.GenericAccessor.plot">plot</a></code></li>
+<li><code><a title="vectorbt.generic.accessors.GenericAccessor.plots" href="plots_builder.html#vectorbt.generic.plots_builder.PlotsBuilderMixin.plots">plots</a></code></li>
+<li><code><a title="vectorbt.generic.accessors.GenericAccessor.plots_defaults" href="#vectorbt.generic.accessors.GenericAccessor.plots_defaults">plots_defaults</a></code></li>
 <li><code><a title="vectorbt.generic.accessors.GenericAccessor.post_resolve_attr" href="../utils/attr.html#vectorbt.utils.attr.AttrResolver.post_resolve_attr">post_resolve_attr</a></code></li>
 <li><code><a title="vectorbt.generic.accessors.GenericAccessor.power_transform" href="#vectorbt.generic.accessors.GenericAccessor.power_transform">power_transform</a></code></li>
 <li><code><a title="vectorbt.generic.accessors.GenericAccessor.pre_resolve_attr" href="../utils/attr.html#vectorbt.utils.attr.AttrResolver.pre_resolve_attr">pre_resolve_attr</a></code></li>
 <li><code><a title="vectorbt.generic.accessors.GenericAccessor.product" href="#vectorbt.generic.accessors.GenericAccessor.product">product</a></code></li>
 <li><code><a title="vectorbt.generic.accessors.GenericAccessor.quantile_transform" href="#vectorbt.generic.accessors.GenericAccessor.quantile_transform">quantile_transform</a></code></li>
 <li><code><a title="vectorbt.generic.accessors.GenericAccessor.range_split" href="#vectorbt.generic.accessors.GenericAccessor.range_split">range_split</a></code></li>
+<li><code><a title="vectorbt.generic.accessors.GenericAccessor.ranges" href="#vectorbt.generic.accessors.GenericAccessor.ranges">ranges</a></code></li>
+<li><code><a title="vectorbt.generic.accessors.GenericAccessor.rebase" href="#vectorbt.generic.accessors.GenericAccessor.rebase">rebase</a></code></li>
 <li><code><a title="vectorbt.generic.accessors.GenericAccessor.reduce" href="#vectorbt.generic.accessors.GenericAccessor.reduce">reduce</a></code></li>
 <li><code><a title="vectorbt.generic.accessors.GenericAccessor.regroup" href="../base/array_wrapper.html#vectorbt.base.array_wrapper.Wrapping.regroup">regroup</a></code></li>
 <li><code><a title="vectorbt.generic.accessors.GenericAccessor.rename_levels" href="../base/accessors.html#vectorbt.base.accessors.BaseAccessor.rename_levels">rename_levels</a></code></li>
 <li><code><a title="vectorbt.generic.accessors.GenericAccessor.repeat" href="../base/accessors.html#vectorbt.base.accessors.BaseAccessor.repeat">repeat</a></code></li>
+<li><code><a title="vectorbt.generic.accessors.GenericAccessor.replace" href="../utils/config.html#vectorbt.utils.config.Configured.replace">replace</a></code></li>
 <li><code><a title="vectorbt.generic.accessors.GenericAccessor.resample_apply" href="#vectorbt.generic.accessors.GenericAccessor.resample_apply">resample_apply</a></code></li>
 <li><code><a title="vectorbt.generic.accessors.GenericAccessor.resolve_attr" href="../utils/attr.html#vectorbt.utils.attr.AttrResolver.resolve_attr">resolve_attr</a></code></li>
 <li><code><a title="vectorbt.generic.accessors.GenericAccessor.resolve_self" href="#vectorbt.generic.accessors.GenericAccessor.resolve_self">resolve_self</a></code></li>
@@ -8930,6 +9247,39 @@ dtype: int64
 <li><code><a title="vectorbt.generic.accessors.GenericAccessor.writeable_attrs" href="../utils/config.html#vectorbt.utils.config.Configured.writeable_attrs">writeable_attrs</a></code></li>
 <li><code><a title="vectorbt.generic.accessors.GenericAccessor.xs" href="../base/indexing.html#vectorbt.base.indexing.PandasIndexer.xs">xs</a></code></li>
 <li><code><a title="vectorbt.generic.accessors.GenericAccessor.zscore" href="#vectorbt.generic.accessors.GenericAccessor.zscore">zscore</a></code></li>
+</ul>
+</li>
+</ul>
+</dd>
+<dt id="vectorbt.generic.accessors.MetaGenericAccessor"><code class="flex name class">
+<span>class <span class="ident parent-name">MetaGenericAccessor</span></span>
+(<span class="params">*args, **kwargs</span>)
+</code></dt>
+<dd>
+<div class="desc"><p>Meta class that exposes a read-only class property <code>StatsBuilderMixin.metrics</code>.</p></div>
+<details class="source">
+<summary>
+<span>Expand source code</span>
+</summary>
+<pre><code class="python">class MetaGenericAccessor(type(StatsBuilderMixin), type(PlotsBuilderMixin)):
+    pass</code></pre>
+</details>
+<h3 class="section-subtitle">Ancestors</h3>
+<ul class="hlist">
+<li><a title="vectorbt.generic.stats_builder.MetaStatsBuilderMixin" href="stats_builder.html#vectorbt.generic.stats_builder.MetaStatsBuilderMixin">MetaStatsBuilderMixin</a></li>
+<li><a title="vectorbt.generic.plots_builder.MetaPlotsBuilderMixin" href="plots_builder.html#vectorbt.generic.plots_builder.MetaPlotsBuilderMixin">MetaPlotsBuilderMixin</a></li>
+<li>builtins.type</li>
+</ul>
+<h3 class="section-subtitle">Inherited members</h3>
+<ul class="hlist">
+<li><code><b><a title="vectorbt.generic.stats_builder.MetaStatsBuilderMixin" href="stats_builder.html#vectorbt.generic.stats_builder.MetaStatsBuilderMixin">MetaStatsBuilderMixin</a></b></code>:
+<ul class="hlist">
+<li><code><a title="vectorbt.generic.stats_builder.MetaStatsBuilderMixin.metrics" href="stats_builder.html#vectorbt.generic.stats_builder.MetaStatsBuilderMixin.metrics">metrics</a></code></li>
+</ul>
+</li>
+<li><code><b><a title="vectorbt.generic.plots_builder.MetaPlotsBuilderMixin" href="plots_builder.html#vectorbt.generic.plots_builder.MetaPlotsBuilderMixin">MetaPlotsBuilderMixin</a></b></code>:
+<ul class="hlist">
+<li><code><a title="vectorbt.generic.plots_builder.MetaPlotsBuilderMixin.subplots" href="plots_builder.html#vectorbt.generic.plots_builder.MetaPlotsBuilderMixin.subplots">subplots</a></code></li>
 </ul>
 </li>
 </ul>
@@ -9014,7 +9364,7 @@ def meth(self) -&gt; T:
 <header>
 <a class="homelink" rel="home" title="pdoc Home" href="https://github.com/polakowo/vectorbt">
 <img src="data:image/svg+xml;base64,PD94bWwgdmVyc2lvbj0iMS4wIiBlbmNvZGluZz0idXRmLTgiPz4KPCEtLSBHZW5lcmF0b3I6IEFkb2JlIElsbHVzdHJhdG9yIDI1LjAuMSwgU1ZHIEV4cG9ydCBQbHVnLUluIC4gU1ZHIFZlcnNpb246IDYuMDAgQnVpbGQgMCkgIC0tPgo8c3ZnIHZlcnNpb249IjEuMSIgaWQ9IkNhcGFfMSIgeG1sbnM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDAvc3ZnIiB4bWxuczp4bGluaz0iaHR0cDovL3d3dy53My5vcmcvMTk5OS94bGluayIgeD0iMHB4IiB5PSIwcHgiCgkgdmlld0JveD0iMCAwIDUxMiA1MTIiIHN0eWxlPSJlbmFibGUtYmFja2dyb3VuZDpuZXcgMCAwIDUxMiA1MTI7IiB4bWw6c3BhY2U9InByZXNlcnZlIj4KPHN0eWxlIHR5cGU9InRleHQvY3NzIj4KCS5zdDB7ZmlsbDojRUYwMDAwO30KCS5zdDF7ZmlsbDojRkY5MDAwO30KCS5zdDJ7ZmlsbDojRkZERjAwO30KCS5zdDN7ZmlsbDojMjgyQzM0O30KPC9zdHlsZT4KPGc+Cgk8Zz4KCQk8Zz4KCQkJPHBvbHlnb24gY2xhc3M9InN0MCIgcG9pbnRzPSIxNTUuMywzMDAuMSAyODMuMSwwIDIwOCwwIDExMC44LDAgMzUuOCwwIDEuMiw0NTAuMiA3Ni4zLDQ1MC4yIAkJCSIvPgoJCTwvZz4KCTwvZz4KCTxnPgoJCTxnPgoJCQk8cG9seWdvbiBjbGFzcz0ic3QxIiBwb2ludHM9IjIzMC40LDMwMC4xIDM1OC4xLDAgMjgzLjEsMCAxODUuOCwwIDExMC44LDAgNzYuMyw0NTAuMiAxNTEuMyw0NTAuMiAJCQkiLz4KCQk8L2c+Cgk8L2c+Cgk8Zz4KCQk8Zz4KCQkJPHBvbHlnb24gY2xhc3M9InN0MiIgcG9pbnRzPSIzMDUuNCwzMDAuMSA0MzMuMSwwIDM1OC4xLDAgMzMxLjYsNjIuMyAyNjAuOCwwIDE4NS44LDAgMTUxLjMsNDUwLjIgMjI2LjQsNDUwLjIgCQkJIi8+CgkJPC9nPgoJPC9nPgoJPGc+CgkJPGc+CgkJCTxwb2x5Z29uIGNsYXNzPSJzdDMiIHBvaW50cz0iNTEwLjgsMCA0MzMuMSwwIDMwNS40LDMwMC4xIDMzOC40LDAgMjYwLjgsMCAyMjYuNCw0NTAuMiAzMDQsNDUwLjIgCQkJIi8+CgkJPC9nPgoJPC9nPgo8L2c+Cjwvc3ZnPgo="/>
-vectorbt <span class="version">0.20.0</span></a>
+vectorbt <span class="version">0.21.0</span></a>
 </header>
 <div class="search-container">
 <input
@@ -9032,6 +9382,7 @@ title="Search"
 <li><a href="#mapping">Mapping</a></li>
 </ul>
 </li>
+<li><a href="#plots">Plots</a></li>
 </ul>
 </div>
 <ul id="index">
@@ -9056,6 +9407,7 @@ title="Search"
 <li><code><a title="vectorbt.generic.accessors.GenericAccessor.apply_mapping" href="#vectorbt.generic.accessors.GenericAccessor.apply_mapping">apply_mapping</a></code></li>
 <li><code><a title="vectorbt.generic.accessors.GenericAccessor.applymap" href="#vectorbt.generic.accessors.GenericAccessor.applymap">applymap</a></code></li>
 <li><code><a title="vectorbt.generic.accessors.GenericAccessor.barplot" href="#vectorbt.generic.accessors.GenericAccessor.barplot">barplot</a></code></li>
+<li><code><a title="vectorbt.generic.accessors.GenericAccessor.bfill" href="#vectorbt.generic.accessors.GenericAccessor.bfill">bfill</a></code></li>
 <li><code><a title="vectorbt.generic.accessors.GenericAccessor.binarize" href="#vectorbt.generic.accessors.GenericAccessor.binarize">binarize</a></code></li>
 <li><code><a title="vectorbt.generic.accessors.GenericAccessor.boxplot" href="#vectorbt.generic.accessors.GenericAccessor.boxplot">boxplot</a></code></li>
 <li><code><a title="vectorbt.generic.accessors.GenericAccessor.bshift" href="#vectorbt.generic.accessors.GenericAccessor.bshift">bshift</a></code></li>
@@ -9079,6 +9431,7 @@ title="Search"
 <li><code><a title="vectorbt.generic.accessors.GenericAccessor.filter" href="#vectorbt.generic.accessors.GenericAccessor.filter">filter</a></code></li>
 <li><code><a title="vectorbt.generic.accessors.GenericAccessor.fshift" href="#vectorbt.generic.accessors.GenericAccessor.fshift">fshift</a></code></li>
 <li><code><a title="vectorbt.generic.accessors.GenericAccessor.get_drawdowns" href="#vectorbt.generic.accessors.GenericAccessor.get_drawdowns">get_drawdowns</a></code></li>
+<li><code><a title="vectorbt.generic.accessors.GenericAccessor.get_ranges" href="#vectorbt.generic.accessors.GenericAccessor.get_ranges">get_ranges</a></code></li>
 <li><code><a title="vectorbt.generic.accessors.GenericAccessor.groupby_apply" href="#vectorbt.generic.accessors.GenericAccessor.groupby_apply">groupby_apply</a></code></li>
 <li><code><a title="vectorbt.generic.accessors.GenericAccessor.histplot" href="#vectorbt.generic.accessors.GenericAccessor.histplot">histplot</a></code></li>
 <li><code><a title="vectorbt.generic.accessors.GenericAccessor.idxmax" href="#vectorbt.generic.accessors.GenericAccessor.idxmax">idxmax</a></code></li>
@@ -9095,10 +9448,13 @@ title="Search"
 <li><code><a title="vectorbt.generic.accessors.GenericAccessor.normalize" href="#vectorbt.generic.accessors.GenericAccessor.normalize">normalize</a></code></li>
 <li><code><a title="vectorbt.generic.accessors.GenericAccessor.pct_change" href="#vectorbt.generic.accessors.GenericAccessor.pct_change">pct_change</a></code></li>
 <li><code><a title="vectorbt.generic.accessors.GenericAccessor.plot" href="#vectorbt.generic.accessors.GenericAccessor.plot">plot</a></code></li>
+<li><code><a title="vectorbt.generic.accessors.GenericAccessor.plots_defaults" href="#vectorbt.generic.accessors.GenericAccessor.plots_defaults">plots_defaults</a></code></li>
 <li><code><a title="vectorbt.generic.accessors.GenericAccessor.power_transform" href="#vectorbt.generic.accessors.GenericAccessor.power_transform">power_transform</a></code></li>
 <li><code><a title="vectorbt.generic.accessors.GenericAccessor.product" href="#vectorbt.generic.accessors.GenericAccessor.product">product</a></code></li>
 <li><code><a title="vectorbt.generic.accessors.GenericAccessor.quantile_transform" href="#vectorbt.generic.accessors.GenericAccessor.quantile_transform">quantile_transform</a></code></li>
 <li><code><a title="vectorbt.generic.accessors.GenericAccessor.range_split" href="#vectorbt.generic.accessors.GenericAccessor.range_split">range_split</a></code></li>
+<li><code><a title="vectorbt.generic.accessors.GenericAccessor.ranges" href="#vectorbt.generic.accessors.GenericAccessor.ranges">ranges</a></code></li>
+<li><code><a title="vectorbt.generic.accessors.GenericAccessor.rebase" href="#vectorbt.generic.accessors.GenericAccessor.rebase">rebase</a></code></li>
 <li><code><a title="vectorbt.generic.accessors.GenericAccessor.reduce" href="#vectorbt.generic.accessors.GenericAccessor.reduce">reduce</a></code></li>
 <li><code><a title="vectorbt.generic.accessors.GenericAccessor.resample_apply" href="#vectorbt.generic.accessors.GenericAccessor.resample_apply">resample_apply</a></code></li>
 <li><code><a title="vectorbt.generic.accessors.GenericAccessor.resolve_self" href="#vectorbt.generic.accessors.GenericAccessor.resolve_self">resolve_self</a></code></li>
@@ -9115,6 +9471,7 @@ title="Search"
 <li><code><a title="vectorbt.generic.accessors.GenericAccessor.split" href="#vectorbt.generic.accessors.GenericAccessor.split">split</a></code></li>
 <li><code><a title="vectorbt.generic.accessors.GenericAccessor.stats_defaults" href="#vectorbt.generic.accessors.GenericAccessor.stats_defaults">stats_defaults</a></code></li>
 <li><code><a title="vectorbt.generic.accessors.GenericAccessor.std" href="#vectorbt.generic.accessors.GenericAccessor.std">std</a></code></li>
+<li><code><a title="vectorbt.generic.accessors.GenericAccessor.subplots" href="#vectorbt.generic.accessors.GenericAccessor.subplots">subplots</a></code></li>
 <li><code><a title="vectorbt.generic.accessors.GenericAccessor.sum" href="#vectorbt.generic.accessors.GenericAccessor.sum">sum</a></code></li>
 <li><code><a title="vectorbt.generic.accessors.GenericAccessor.to_mapped" href="#vectorbt.generic.accessors.GenericAccessor.to_mapped">to_mapped</a></code></li>
 <li><code><a title="vectorbt.generic.accessors.GenericAccessor.to_returns" href="#vectorbt.generic.accessors.GenericAccessor.to_returns">to_returns</a></code></li>
@@ -9144,6 +9501,9 @@ title="Search"
 <li><code><a title="vectorbt.generic.accessors.GenericSRAccessor.ts_heatmap" href="#vectorbt.generic.accessors.GenericSRAccessor.ts_heatmap">ts_heatmap</a></code></li>
 <li><code><a title="vectorbt.generic.accessors.GenericSRAccessor.volume" href="#vectorbt.generic.accessors.GenericSRAccessor.volume">volume</a></code></li>
 </ul>
+</li>
+<li>
+<h4><code><a title="vectorbt.generic.accessors.MetaGenericAccessor" href="#vectorbt.generic.accessors.MetaGenericAccessor">MetaGenericAccessor</a></code></h4>
 </li>
 <li>
 <h4><code><a title="vectorbt.generic.accessors.TransformerT" href="#vectorbt.generic.accessors.TransformerT">TransformerT</a></code></h4>

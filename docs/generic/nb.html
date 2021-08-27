@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, minimum-scale=1" />
-<meta name="generator" content="pdoc 0.9.2" />
+<meta name="generator" content="pdoc 0.10.0" />
 <title>vectorbt.generic.nb API documentation</title>
 <meta name="description" content="Numba-compiled functions …" />
 <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/5.12.0-2/css/all.min.css" integrity="sha256-46r060N2LrChLLb5zowXQ72/iKKNiw/lAmygmHExk/o=" crossorigin="anonymous" />
@@ -63,7 +63,10 @@ Data is processed along index (axis 0).</p>
 <summary>
 <span>Expand source code</span>
 </summary>
-<pre><code class="python">&#34;&#34;&#34;Numba-compiled functions.
+<pre><code class="python"># Copyright (c) 2021 Oleg Polakow. All rights reserved.
+# This code is licensed under Apache 2.0 with Commons Clause license (see LICENSE.md for details)
+
+&#34;&#34;&#34;Numba-compiled functions.
 
 Provides an arsenal of Numba-compiled functions that are used by accessors
 and in many other parts of the backtesting pipeline, such as technical indicators.
@@ -96,7 +99,7 @@ from numba.typed import Dict
 from numba.core.types import Omitted
 
 from vectorbt import _typing as tp
-from vectorbt.generic.enums import DrawdownStatus, drawdown_dt
+from vectorbt.generic.enums import RangeStatus, DrawdownStatus, range_dt, drawdown_dt
 
 
 @njit(cache=True)
@@ -238,7 +241,7 @@ def bshift_1d_nb(a: tp.Array1d, n: int = 1, fill_value: tp.Scalar = np.nan) -&gt
     Numba equivalent to `pd.Series(a).shift(n)`.
 
     !!! warning
-        Shift backward means looking ahead.&#34;&#34;&#34;
+        This operation looks ahead.&#34;&#34;&#34;
     nb_enabled = not isinstance(a, np.ndarray)
     if nb_enabled:
         a_dtype = as_dtype(a.dtype)
@@ -387,6 +390,34 @@ def pct_change_nb(a: tp.Array2d, n: int = 1) -&gt; tp.Array2d:
 
 
 @njit(cache=True)
+def bfill_1d_nb(a: tp.Array1d) -&gt; tp.Array1d:
+    &#34;&#34;&#34;Fill NaNs by propagating first valid observation backward.
+
+    Numba equivalent to `pd.Series(a).fillna(method=&#39;bfill&#39;)`.
+
+    !!! warning
+        This operation looks ahead.&#34;&#34;&#34;
+    out = np.empty_like(a, dtype=a.dtype)
+    lastval = a[-1]
+    for i in range(a.shape[0] - 1, -1, -1):
+        if np.isnan(a[i]):
+            out[i] = lastval
+        else:
+            lastval = out[i] = a[i]
+    return out
+
+
+@njit(cache=True)
+def bfill_nb(a: tp.Array2d) -&gt; tp.Array2d:
+    &#34;&#34;&#34;2-dim version of `bfill_1d_nb`.&#34;&#34;&#34;
+    out = np.empty_like(a, dtype=a.dtype)
+    for col in range(a.shape[1]):
+        out[:, col] = bfill_1d_nb(a[:, col])
+    return out
+
+
+
+@njit(cache=True)
 def ffill_1d_nb(a: tp.Array1d) -&gt; tp.Array1d:
     &#34;&#34;&#34;Fill NaNs by propagating last valid observation forward.
 
@@ -411,7 +442,7 @@ def ffill_nb(a: tp.Array2d) -&gt; tp.Array2d:
 
 
 @generated_jit(nopython=True, cache=True)
-def nanprod_nb(a):
+def nanprod_nb(a: tp.Array2d) -&gt; tp.Array1d:
     &#34;&#34;&#34;Numba-equivalent of `np.nanprod` along axis 0.&#34;&#34;&#34;
     nb_enabled = not isinstance(a, np.ndarray)
     if nb_enabled:
@@ -433,7 +464,7 @@ def nanprod_nb(a):
 
 
 @generated_jit(nopython=True, cache=True)
-def nancumsum_nb(a):
+def nancumsum_nb(a: tp.Array2d) -&gt; tp.Array2d:
     &#34;&#34;&#34;Numba-equivalent of `np.nancumsum` along axis 0.&#34;&#34;&#34;
     nb_enabled = not isinstance(a, np.ndarray)
     if nb_enabled:
@@ -455,7 +486,7 @@ def nancumsum_nb(a):
 
 
 @generated_jit(nopython=True, cache=True)
-def nancumprod_nb(a):
+def nancumprod_nb(a: tp.Array2d) -&gt; tp.Array2d:
     &#34;&#34;&#34;Numba-equivalent of `np.nancumprod` along axis 0.&#34;&#34;&#34;
     nb_enabled = not isinstance(a, np.ndarray)
     if nb_enabled:
@@ -486,7 +517,7 @@ def nancnt_nb(a: tp.Array2d) -&gt; tp.Array1d:
 
 
 @generated_jit(nopython=True, cache=True)
-def nansum_nb(a):
+def nansum_nb(a: tp.Array2d) -&gt; tp.Array1d:
     &#34;&#34;&#34;Numba-equivalent of `np.nansum` along axis 0.&#34;&#34;&#34;
     nb_enabled = not isinstance(a, np.ndarray)
     if nb_enabled:
@@ -1471,19 +1502,183 @@ def any_squeeze_nb(col: int, group: int, a: tp.Array1d) -&gt; bool:
     return np.any(a)
 
 
-# ############# Drawdowns ############# #
+# ############# Ranges ############# #
 
 @njit(cache=True)
-def find_drawdowns_nb(ts: tp.Array2d) -&gt; tp.RecordArray:
-    &#34;&#34;&#34;Find drawdows and store their information as records to an array.
+def find_ranges_nb(ts: tp.Array2d, gap_value: tp.Scalar) -&gt; tp.RecordArray:
+    &#34;&#34;&#34;Find ranges and store their information as records to an array.
 
     ## Example
 
-    Find drawdowns in time series:
+    Find ranges in time series:
     ```python-repl
     &gt;&gt;&gt; import numpy as np
     &gt;&gt;&gt; import pandas as pd
-    &gt;&gt;&gt; from vectorbt.generic.nb import find_drawdowns_nb
+    &gt;&gt;&gt; from vectorbt.generic.nb import find_ranges_nb
+
+    &gt;&gt;&gt; ts = np.asarray([
+    ...     [np.nan, np.nan, np.nan, np.nan],
+    ...     [     2, np.nan, np.nan, np.nan],
+    ...     [     3,      3, np.nan, np.nan],
+    ...     [np.nan,      4,      4, np.nan],
+    ...     [     5, np.nan,      5,      5],
+    ...     [     6,      6, np.nan,      6]
+    ... ])
+    &gt;&gt;&gt; records = find_ranges_nb(ts, np.nan)
+
+    &gt;&gt;&gt; pd.DataFrame.from_records(records)
+       id  col  start_idx  end_idx
+    0   0    0          1        3
+    1   1    0          4        6
+    2   2    1          2        4
+    3   3    1          5        6
+    4   4    2          3        5
+    5   5    3          4        6
+    ```
+    &#34;&#34;&#34;
+    out = np.empty(ts.shape[0] * ts.shape[1], dtype=range_dt)
+    ridx = 0
+
+    for col in range(ts.shape[1]):
+        range_started = False
+        start_idx = -1
+        end_idx = -1
+        store_record = False
+        status = -1
+
+        for i in range(ts.shape[0]):
+            cur_val = ts[i, col]
+
+            if cur_val == gap_value or np.isnan(cur_val) and np.isnan(gap_value):
+                if range_started:
+                    # If stopped, save the current range
+                    end_idx = i
+                    range_started = False
+                    store_record = True
+                    status = RangeStatus.Closed
+            else:
+                if not range_started:
+                    # If started, register a new range
+                    start_idx = i
+                    range_started = True
+
+            if i == ts.shape[0] - 1 and range_started:
+                # If still running, mark for save
+                end_idx = ts.shape[0] - 1
+                range_started = False
+                store_record = True
+                status = RangeStatus.Open
+
+            if store_record:
+                # Save range to the records
+                out[ridx][&#39;id&#39;] = ridx
+                out[ridx][&#39;col&#39;] = col
+                out[ridx][&#39;start_idx&#39;] = start_idx
+                out[ridx][&#39;end_idx&#39;] = end_idx
+                out[ridx][&#39;status&#39;] = status
+                ridx += 1
+
+                # Reset running vars for a new range
+                store_record = False
+
+    return out[:ridx]
+
+
+@njit(cache=True)
+def range_duration_nb(start_idx_arr: tp.Array1d,
+                      end_idx_arr: tp.Array1d,
+                      status_arr: tp.Array2d) -&gt; tp.Array1d:
+    &#34;&#34;&#34;Get duration of each duration record.&#34;&#34;&#34;
+    out = np.empty(start_idx_arr.shape[0], dtype=np.int_)
+    for ridx in range(out.shape[0]):
+        if status_arr[ridx] == RangeStatus.Open:
+            out[ridx] = end_idx_arr[ridx] - start_idx_arr[ridx] + 1
+        else:
+            out[ridx] = end_idx_arr[ridx] - start_idx_arr[ridx]
+    return out
+
+
+@njit(cache=True)
+def range_coverage_nb(start_idx_arr: tp.Array1d,
+                      end_idx_arr: tp.Array1d,
+                      status_arr: tp.Array2d,
+                      col_map: tp.ColMap,
+                      index_lens: tp.Array1d,
+                      overlapping: bool = False,
+                      normalize: bool = False) -&gt; tp.Array1d:
+    &#34;&#34;&#34;Get coverage of range records.
+
+    Set `overlapping` to True to get the number of overlapping steps.
+    Set `normalize` to True to get the number of steps in relation either to the total number of steps
+    (when `overlapping=False`) or to the number of covered steps (when `overlapping=True`).
+    &#34;&#34;&#34;
+    col_idxs, col_lens = col_map
+    col_start_idxs = np.cumsum(col_lens) - col_lens
+    out = np.full(col_lens.shape[0], np.nan, dtype=np.float_)
+
+    for col in range(col_lens.shape[0]):
+        col_len = col_lens[col]
+        if col_len == 0:
+            continue
+        col_start_idx = col_start_idxs[col]
+        ridxs = col_idxs[col_start_idx:col_start_idx + col_len]
+        temp = np.full(index_lens[col], 0, dtype=np.int_)
+        for ridx in ridxs:
+            if status_arr[ridx] == RangeStatus.Open:
+                temp[start_idx_arr[ridx]:end_idx_arr[ridx] + 1] += 1
+            else:
+                temp[start_idx_arr[ridx]:end_idx_arr[ridx]] += 1
+        if overlapping:
+            if normalize:
+                out[col] = np.sum(temp &gt; 1) / np.sum(temp &gt; 0)
+            else:
+                out[col] = np.sum(temp &gt; 1)
+        else:
+            if normalize:
+                out[col] = np.sum(temp &gt; 0) / index_lens[col]
+            else:
+                out[col] = np.sum(temp &gt; 0)
+    return out
+
+
+@njit(cache=True)
+def ranges_to_mask_nb(start_idx_arr: tp.Array1d,
+                      end_idx_arr: tp.Array1d,
+                      status_arr: tp.Array2d,
+                      col_map: tp.ColMap,
+                      index_len: int) -&gt; tp.Array2d:
+    &#34;&#34;&#34;Convert ranges to 2-dim mask.&#34;&#34;&#34;
+    col_idxs, col_lens = col_map
+    col_start_idxs = np.cumsum(col_lens) - col_lens
+    out = np.full((index_len, col_lens.shape[0]), False, dtype=np.bool_)
+
+    for col in range(col_lens.shape[0]):
+        col_len = col_lens[col]
+        if col_len == 0:
+            continue
+        col_start_idx = col_start_idxs[col]
+        ridxs = col_idxs[col_start_idx:col_start_idx + col_len]
+        for ridx in ridxs:
+            if status_arr[ridx] == RangeStatus.Open:
+                out[start_idx_arr[ridx]:end_idx_arr[ridx] + 1, col] = True
+            else:
+                out[start_idx_arr[ridx]:end_idx_arr[ridx], col] = True
+
+    return out
+
+
+# ############# Drawdowns ############# #
+
+@njit(cache=True)
+def get_drawdowns_nb(ts: tp.Array2d) -&gt; tp.RecordArray:
+    &#34;&#34;&#34;Fill drawdown records by analyzing a time series.
+
+    ## Example
+
+    ```python-repl
+    &gt;&gt;&gt; import numpy as np
+    &gt;&gt;&gt; import pandas as pd
+    &gt;&gt;&gt; from vectorbt.generic.nb import get_drawdowns_nb
 
     &gt;&gt;&gt; ts = np.asarray([
     ...     [1, 5, 1, 3],
@@ -1492,13 +1687,18 @@ def find_drawdowns_nb(ts: tp.Array2d) -&gt; tp.RecordArray:
     ...     [4, 2, 2, 2],
     ...     [5, 1, 1, 3]
     ... ])
-    &gt;&gt;&gt; records = find_drawdowns_nb(ts)
+    &gt;&gt;&gt; records = get_drawdowns_nb(ts)
 
     &gt;&gt;&gt; pd.DataFrame.from_records(records)
-       id  col  start_idx  valley_idx  end_idx  status
-    0   0    1          0           4        4       0
-    1   1    2          2           4        4       0
-    2   2    3          0           2        4       1
+       id  col  peak_idx  start_idx  valley_idx  end_idx  peak_val  valley_val  \\
+    0   0    1         0          1           4        4       5.0         1.0
+    1   1    2         2          3           4        4       3.0         1.0
+    2   2    3         0          1           2        4       3.0         1.0
+
+       end_val  status
+    0      1.0       0
+    1      1.0       0
+    2      3.0       1
     ```
     &#34;&#34;&#34;
     out = np.empty(ts.shape[0] * ts.shape[1], dtype=drawdown_dt)
@@ -1506,11 +1706,11 @@ def find_drawdowns_nb(ts: tp.Array2d) -&gt; tp.RecordArray:
 
     for col in range(ts.shape[1]):
         drawdown_started = False
-        peak_idx = np.nan
-        valley_idx = np.nan
+        peak_idx = -1
+        valley_idx = -1
         peak_val = ts[0, col]
         valley_val = ts[0, col]
-        store_drawdown = False
+        store_record = False
         status = -1
 
         for i in range(ts.shape[0]):
@@ -1527,7 +1727,7 @@ def find_drawdowns_nb(ts: tp.Array2d) -&gt; tp.RecordArray:
                         # If running, potential recovery
                         if cur_val &gt;= peak_val:
                             drawdown_started = False
-                            store_drawdown = True
+                            store_record = True
                             status = DrawdownStatus.Recovered
                 else:
                     # Value decreased
@@ -1545,16 +1745,20 @@ def find_drawdowns_nb(ts: tp.Array2d) -&gt; tp.RecordArray:
                 if i == ts.shape[0] - 1 and drawdown_started:
                     # If still running, mark for save
                     drawdown_started = False
-                    store_drawdown = True
+                    store_record = True
                     status = DrawdownStatus.Active
 
-                if store_drawdown:
+                if store_record:
                     # Save drawdown to the records
                     out[ddidx][&#39;id&#39;] = ddidx
                     out[ddidx][&#39;col&#39;] = col
-                    out[ddidx][&#39;start_idx&#39;] = peak_idx
+                    out[ddidx][&#39;peak_idx&#39;] = peak_idx
+                    out[ddidx][&#39;start_idx&#39;] = peak_idx + 1
                     out[ddidx][&#39;valley_idx&#39;] = valley_idx
                     out[ddidx][&#39;end_idx&#39;] = i
+                    out[ddidx][&#39;peak_val&#39;] = peak_val
+                    out[ddidx][&#39;valley_val&#39;] = valley_val
+                    out[ddidx][&#39;end_val&#39;] = cur_val
                     out[ddidx][&#39;status&#39;] = status
                     ddidx += 1
 
@@ -1563,70 +1767,45 @@ def find_drawdowns_nb(ts: tp.Array2d) -&gt; tp.RecordArray:
                     valley_idx = i
                     peak_val = cur_val
                     valley_val = cur_val
-                    store_drawdown = False
+                    store_record = False
                     status = -1
 
     return out[:ddidx]
 
 
 @njit(cache=True)
-def dd_start_value_map_nb(record: tp.Record, ts: tp.Array2d) -&gt; float:
-    &#34;&#34;&#34;`map_func_nb` that returns start value of a drawdown.&#34;&#34;&#34;
-    return ts[record[&#39;start_idx&#39;], record[&#39;col&#39;]]
+def dd_drawdown_nb(peak_val_arr: tp.Array1d, valley_val_arr: tp.Array1d) -&gt; tp.Array1d:
+    &#34;&#34;&#34;Return the drawdown of each drawdown record.&#34;&#34;&#34;
+    return (valley_val_arr - peak_val_arr) / peak_val_arr
 
 
 @njit(cache=True)
-def dd_valley_value_map_nb(record: tp.Record, ts: tp.Array2d) -&gt; float:
-    &#34;&#34;&#34;`map_func_nb` that returns valley value of a drawdown.&#34;&#34;&#34;
-    return ts[record[&#39;valley_idx&#39;], record[&#39;col&#39;]]
+def dd_decline_duration_nb(start_idx_arr: tp.Array1d, valley_idx_arr: tp.Array1d) -&gt; tp.Array1d:
+    &#34;&#34;&#34;Return the duration of the peak-to-valley phase of each drawdown record.&#34;&#34;&#34;
+    return valley_idx_arr - start_idx_arr + 1
 
 
 @njit(cache=True)
-def dd_end_value_map_nb(record: tp.Record, ts: tp.Array2d) -&gt; float:
-    &#34;&#34;&#34;`map_func_nb` that returns end value of a drawdown.
-
-    This can be either recovery value or last value of an active drawdown.&#34;&#34;&#34;
-    return ts[record[&#39;end_idx&#39;], record[&#39;col&#39;]]
-
-
-@njit(cache=True)
-def dd_drawdown_map_nb(record: tp.Record, ts: tp.Array2d) -&gt; float:
-    &#34;&#34;&#34;`map_func_nb` that returns drawdown value of a drawdown.&#34;&#34;&#34;
-    valley_val = dd_valley_value_map_nb(record, ts)
-    start_val = dd_start_value_map_nb(record, ts)
-    return (valley_val - start_val) / start_val
+def dd_recovery_duration_nb(valley_idx_arr: tp.Array1d,
+                            end_idx_arr: tp.Array1d) -&gt; tp.Array1d:
+    &#34;&#34;&#34;Return the duration of the valley-to-recovery phase of each drawdown record.&#34;&#34;&#34;
+    return end_idx_arr - valley_idx_arr
 
 
 @njit(cache=True)
-def dd_duration_map_nb(record: tp.Record) -&gt; int:
-    &#34;&#34;&#34;`map_func_nb` that returns total duration of a drawdown.&#34;&#34;&#34;
-    return record[&#39;end_idx&#39;] - record[&#39;start_idx&#39;]
+def dd_recovery_duration_ratio_nb(start_idx_arr: tp.Array1d,
+                                  valley_idx_arr: tp.Array1d,
+                                  end_idx_arr: tp.Array1d) -&gt; tp.Array1d:
+    &#34;&#34;&#34;Return the ratio of the recovery duration to the decline duration of each drawdown record.&#34;&#34;&#34;
+    recovery_duration = dd_recovery_duration_nb(valley_idx_arr, end_idx_arr)
+    decline_duration = dd_decline_duration_nb(start_idx_arr, valley_idx_arr)
+    return recovery_duration / decline_duration
 
 
 @njit(cache=True)
-def dd_decline_duration_map_nb(record: tp.Record) -&gt; int:
-    &#34;&#34;&#34;`map_func_nb` that returns duration of the peak-to-valley phase.&#34;&#34;&#34;
-    return record[&#39;valley_idx&#39;] - record[&#39;start_idx&#39;]
-
-
-@njit(cache=True)
-def dd_recovery_duration_map_nb(record: tp.Record) -&gt; int:
-    &#34;&#34;&#34;`map_func_nb` that returns duration of the valley-to-recovery phase.&#34;&#34;&#34;
-    return record[&#39;end_idx&#39;] - record[&#39;valley_idx&#39;]
-
-
-@njit(cache=True)
-def dd_recovery_duration_ratio_map_nb(record: tp.Record) -&gt; float:
-    &#34;&#34;&#34;`map_func_nb` that returns ratio of recovery duration to total duration.&#34;&#34;&#34;
-    return dd_recovery_duration_map_nb(record) / dd_duration_map_nb(record)
-
-
-@njit(cache=True)
-def dd_recovery_return_map_nb(record: tp.Record, ts: tp.Array2d) -&gt; float:
-    &#34;&#34;&#34;`map_func_nb` that returns recovery return of a drawdown.&#34;&#34;&#34;
-    end_val = dd_end_value_map_nb(record, ts)
-    valley_val = dd_valley_value_map_nb(record, ts)
-    return (end_val - valley_val) / valley_val</code></pre>
+def dd_recovery_return_nb(valley_val_arr: tp.Array1d, end_val_arr: tp.Array1d) -&gt; tp.Array1d:
+    &#34;&#34;&#34;Return the recovery return of each drawdown record.&#34;&#34;&#34;
+    return (end_val_arr - valley_val_arr) / valley_val_arr</code></pre>
 </details>
 </section>
 <section>
@@ -1774,6 +1953,56 @@ def argmin_reduce_nb(col: int, a: tp.Array1d) -&gt; int:
     return np.argmin(a)</code></pre>
 </details>
 </dd>
+<dt id="vectorbt.generic.nb.bfill_1d_nb"><code class="name flex">
+<span>def <span class="ident parent-name">bfill_1d_nb</span></span>(<span class="params">a)</span><span class="return_type"></span>
+</code></dt>
+<dd>
+<div class="desc"><p>Fill NaNs by propagating first valid observation backward.</p>
+<p>Numba equivalent to <code>pd.Series(a).fillna(method='bfill')</code>.</p>
+<div class="admonition warning">
+<p class="admonition-title">Warning</p>
+<p>This operation looks ahead.</p>
+</div></div>
+<details class="source">
+<summary>
+<span>Expand source code</span>
+</summary>
+<pre><code class="python">@njit(cache=True)
+def bfill_1d_nb(a: tp.Array1d) -&gt; tp.Array1d:
+    &#34;&#34;&#34;Fill NaNs by propagating first valid observation backward.
+
+    Numba equivalent to `pd.Series(a).fillna(method=&#39;bfill&#39;)`.
+
+    !!! warning
+        This operation looks ahead.&#34;&#34;&#34;
+    out = np.empty_like(a, dtype=a.dtype)
+    lastval = a[-1]
+    for i in range(a.shape[0] - 1, -1, -1):
+        if np.isnan(a[i]):
+            out[i] = lastval
+        else:
+            lastval = out[i] = a[i]
+    return out</code></pre>
+</details>
+</dd>
+<dt id="vectorbt.generic.nb.bfill_nb"><code class="name flex">
+<span>def <span class="ident parent-name">bfill_nb</span></span>(<span class="params">a)</span><span class="return_type"></span>
+</code></dt>
+<dd>
+<div class="desc"><p>2-dim version of <code><a title="vectorbt.generic.nb.bfill_1d_nb" href="#vectorbt.generic.nb.bfill_1d_nb">bfill_1d_nb()</a></code>.</p></div>
+<details class="source">
+<summary>
+<span>Expand source code</span>
+</summary>
+<pre><code class="python">@njit(cache=True)
+def bfill_nb(a: tp.Array2d) -&gt; tp.Array2d:
+    &#34;&#34;&#34;2-dim version of `bfill_1d_nb`.&#34;&#34;&#34;
+    out = np.empty_like(a, dtype=a.dtype)
+    for col in range(a.shape[1]):
+        out[:, col] = bfill_1d_nb(a[:, col])
+    return out</code></pre>
+</details>
+</dd>
 <dt id="vectorbt.generic.nb.bshift_1d_nb"><code class="name flex">
 <span>def <span class="ident parent-name">bshift_1d_nb</span></span>(<span class="params">a, n=1, fill_value=nan)</span><span class="return_type"></span>
 </code></dt>
@@ -1782,7 +2011,7 @@ def argmin_reduce_nb(col: int, a: tp.Array1d) -&gt; int:
 <p>Numba equivalent to <code>pd.Series(a).shift(n)</code>.</p>
 <div class="admonition warning">
 <p class="admonition-title">Warning</p>
-<p>Shift backward means looking ahead.</p>
+<p>This operation looks ahead.</p>
 </div></div>
 <details class="source">
 <summary>
@@ -1795,7 +2024,7 @@ def bshift_1d_nb(a: tp.Array1d, n: int = 1, fill_value: tp.Scalar = np.nan) -&gt
     Numba equivalent to `pd.Series(a).shift(n)`.
 
     !!! warning
-        Shift backward means looking ahead.&#34;&#34;&#34;
+        This operation looks ahead.&#34;&#34;&#34;
     nb_enabled = not isinstance(a, np.ndarray)
     if nb_enabled:
         a_dtype = as_dtype(a.dtype)
@@ -1871,146 +2100,84 @@ def count_reduce_nb(col: int, a: tp.Array1d) -&gt; int:
     return np.sum(~np.isnan(a))</code></pre>
 </details>
 </dd>
-<dt id="vectorbt.generic.nb.dd_decline_duration_map_nb"><code class="name flex">
-<span>def <span class="ident parent-name">dd_decline_duration_map_nb</span></span>(<span class="params">record)</span><span class="return_type"></span>
+<dt id="vectorbt.generic.nb.dd_decline_duration_nb"><code class="name flex">
+<span>def <span class="ident parent-name">dd_decline_duration_nb</span></span>(<span class="params">start_idx_arr, valley_idx_arr)</span><span class="return_type"></span>
 </code></dt>
 <dd>
-<div class="desc"><p><code>map_func_nb</code> that returns duration of the peak-to-valley phase.</p></div>
+<div class="desc"><p>Return the duration of the peak-to-valley phase of each drawdown record.</p></div>
 <details class="source">
 <summary>
 <span>Expand source code</span>
 </summary>
 <pre><code class="python">@njit(cache=True)
-def dd_decline_duration_map_nb(record: tp.Record) -&gt; int:
-    &#34;&#34;&#34;`map_func_nb` that returns duration of the peak-to-valley phase.&#34;&#34;&#34;
-    return record[&#39;valley_idx&#39;] - record[&#39;start_idx&#39;]</code></pre>
+def dd_decline_duration_nb(start_idx_arr: tp.Array1d, valley_idx_arr: tp.Array1d) -&gt; tp.Array1d:
+    &#34;&#34;&#34;Return the duration of the peak-to-valley phase of each drawdown record.&#34;&#34;&#34;
+    return valley_idx_arr - start_idx_arr + 1</code></pre>
 </details>
 </dd>
-<dt id="vectorbt.generic.nb.dd_drawdown_map_nb"><code class="name flex">
-<span>def <span class="ident parent-name">dd_drawdown_map_nb</span></span>(<span class="params">record, ts)</span><span class="return_type"></span>
+<dt id="vectorbt.generic.nb.dd_drawdown_nb"><code class="name flex">
+<span>def <span class="ident parent-name">dd_drawdown_nb</span></span>(<span class="params">peak_val_arr, valley_val_arr)</span><span class="return_type"></span>
 </code></dt>
 <dd>
-<div class="desc"><p><code>map_func_nb</code> that returns drawdown value of a drawdown.</p></div>
+<div class="desc"><p>Return the drawdown of each drawdown record.</p></div>
 <details class="source">
 <summary>
 <span>Expand source code</span>
 </summary>
 <pre><code class="python">@njit(cache=True)
-def dd_drawdown_map_nb(record: tp.Record, ts: tp.Array2d) -&gt; float:
-    &#34;&#34;&#34;`map_func_nb` that returns drawdown value of a drawdown.&#34;&#34;&#34;
-    valley_val = dd_valley_value_map_nb(record, ts)
-    start_val = dd_start_value_map_nb(record, ts)
-    return (valley_val - start_val) / start_val</code></pre>
+def dd_drawdown_nb(peak_val_arr: tp.Array1d, valley_val_arr: tp.Array1d) -&gt; tp.Array1d:
+    &#34;&#34;&#34;Return the drawdown of each drawdown record.&#34;&#34;&#34;
+    return (valley_val_arr - peak_val_arr) / peak_val_arr</code></pre>
 </details>
 </dd>
-<dt id="vectorbt.generic.nb.dd_duration_map_nb"><code class="name flex">
-<span>def <span class="ident parent-name">dd_duration_map_nb</span></span>(<span class="params">record)</span><span class="return_type"></span>
+<dt id="vectorbt.generic.nb.dd_recovery_duration_nb"><code class="name flex">
+<span>def <span class="ident parent-name">dd_recovery_duration_nb</span></span>(<span class="params">valley_idx_arr, end_idx_arr)</span><span class="return_type"></span>
 </code></dt>
 <dd>
-<div class="desc"><p><code>map_func_nb</code> that returns total duration of a drawdown.</p></div>
+<div class="desc"><p>Return the duration of the valley-to-recovery phase of each drawdown record.</p></div>
 <details class="source">
 <summary>
 <span>Expand source code</span>
 </summary>
 <pre><code class="python">@njit(cache=True)
-def dd_duration_map_nb(record: tp.Record) -&gt; int:
-    &#34;&#34;&#34;`map_func_nb` that returns total duration of a drawdown.&#34;&#34;&#34;
-    return record[&#39;end_idx&#39;] - record[&#39;start_idx&#39;]</code></pre>
+def dd_recovery_duration_nb(valley_idx_arr: tp.Array1d,
+                            end_idx_arr: tp.Array1d) -&gt; tp.Array1d:
+    &#34;&#34;&#34;Return the duration of the valley-to-recovery phase of each drawdown record.&#34;&#34;&#34;
+    return end_idx_arr - valley_idx_arr</code></pre>
 </details>
 </dd>
-<dt id="vectorbt.generic.nb.dd_end_value_map_nb"><code class="name flex">
-<span>def <span class="ident parent-name">dd_end_value_map_nb</span></span>(<span class="params">record, ts)</span><span class="return_type"></span>
+<dt id="vectorbt.generic.nb.dd_recovery_duration_ratio_nb"><code class="name flex">
+<span>def <span class="ident parent-name">dd_recovery_duration_ratio_nb</span></span>(<span class="params">start_idx_arr, valley_idx_arr, end_idx_arr)</span><span class="return_type"></span>
 </code></dt>
 <dd>
-<div class="desc"><p><code>map_func_nb</code> that returns end value of a drawdown.</p>
-<p>This can be either recovery value or last value of an active drawdown.</p></div>
+<div class="desc"><p>Return the ratio of the recovery duration to the decline duration of each drawdown record.</p></div>
 <details class="source">
 <summary>
 <span>Expand source code</span>
 </summary>
 <pre><code class="python">@njit(cache=True)
-def dd_end_value_map_nb(record: tp.Record, ts: tp.Array2d) -&gt; float:
-    &#34;&#34;&#34;`map_func_nb` that returns end value of a drawdown.
-
-    This can be either recovery value or last value of an active drawdown.&#34;&#34;&#34;
-    return ts[record[&#39;end_idx&#39;], record[&#39;col&#39;]]</code></pre>
+def dd_recovery_duration_ratio_nb(start_idx_arr: tp.Array1d,
+                                  valley_idx_arr: tp.Array1d,
+                                  end_idx_arr: tp.Array1d) -&gt; tp.Array1d:
+    &#34;&#34;&#34;Return the ratio of the recovery duration to the decline duration of each drawdown record.&#34;&#34;&#34;
+    recovery_duration = dd_recovery_duration_nb(valley_idx_arr, end_idx_arr)
+    decline_duration = dd_decline_duration_nb(start_idx_arr, valley_idx_arr)
+    return recovery_duration / decline_duration</code></pre>
 </details>
 </dd>
-<dt id="vectorbt.generic.nb.dd_recovery_duration_map_nb"><code class="name flex">
-<span>def <span class="ident parent-name">dd_recovery_duration_map_nb</span></span>(<span class="params">record)</span><span class="return_type"></span>
+<dt id="vectorbt.generic.nb.dd_recovery_return_nb"><code class="name flex">
+<span>def <span class="ident parent-name">dd_recovery_return_nb</span></span>(<span class="params">valley_val_arr, end_val_arr)</span><span class="return_type"></span>
 </code></dt>
 <dd>
-<div class="desc"><p><code>map_func_nb</code> that returns duration of the valley-to-recovery phase.</p></div>
+<div class="desc"><p>Return the recovery return of each drawdown record.</p></div>
 <details class="source">
 <summary>
 <span>Expand source code</span>
 </summary>
 <pre><code class="python">@njit(cache=True)
-def dd_recovery_duration_map_nb(record: tp.Record) -&gt; int:
-    &#34;&#34;&#34;`map_func_nb` that returns duration of the valley-to-recovery phase.&#34;&#34;&#34;
-    return record[&#39;end_idx&#39;] - record[&#39;valley_idx&#39;]</code></pre>
-</details>
-</dd>
-<dt id="vectorbt.generic.nb.dd_recovery_duration_ratio_map_nb"><code class="name flex">
-<span>def <span class="ident parent-name">dd_recovery_duration_ratio_map_nb</span></span>(<span class="params">record)</span><span class="return_type"></span>
-</code></dt>
-<dd>
-<div class="desc"><p><code>map_func_nb</code> that returns ratio of recovery duration to total duration.</p></div>
-<details class="source">
-<summary>
-<span>Expand source code</span>
-</summary>
-<pre><code class="python">@njit(cache=True)
-def dd_recovery_duration_ratio_map_nb(record: tp.Record) -&gt; float:
-    &#34;&#34;&#34;`map_func_nb` that returns ratio of recovery duration to total duration.&#34;&#34;&#34;
-    return dd_recovery_duration_map_nb(record) / dd_duration_map_nb(record)</code></pre>
-</details>
-</dd>
-<dt id="vectorbt.generic.nb.dd_recovery_return_map_nb"><code class="name flex">
-<span>def <span class="ident parent-name">dd_recovery_return_map_nb</span></span>(<span class="params">record, ts)</span><span class="return_type"></span>
-</code></dt>
-<dd>
-<div class="desc"><p><code>map_func_nb</code> that returns recovery return of a drawdown.</p></div>
-<details class="source">
-<summary>
-<span>Expand source code</span>
-</summary>
-<pre><code class="python">@njit(cache=True)
-def dd_recovery_return_map_nb(record: tp.Record, ts: tp.Array2d) -&gt; float:
-    &#34;&#34;&#34;`map_func_nb` that returns recovery return of a drawdown.&#34;&#34;&#34;
-    end_val = dd_end_value_map_nb(record, ts)
-    valley_val = dd_valley_value_map_nb(record, ts)
-    return (end_val - valley_val) / valley_val</code></pre>
-</details>
-</dd>
-<dt id="vectorbt.generic.nb.dd_start_value_map_nb"><code class="name flex">
-<span>def <span class="ident parent-name">dd_start_value_map_nb</span></span>(<span class="params">record, ts)</span><span class="return_type"></span>
-</code></dt>
-<dd>
-<div class="desc"><p><code>map_func_nb</code> that returns start value of a drawdown.</p></div>
-<details class="source">
-<summary>
-<span>Expand source code</span>
-</summary>
-<pre><code class="python">@njit(cache=True)
-def dd_start_value_map_nb(record: tp.Record, ts: tp.Array2d) -&gt; float:
-    &#34;&#34;&#34;`map_func_nb` that returns start value of a drawdown.&#34;&#34;&#34;
-    return ts[record[&#39;start_idx&#39;], record[&#39;col&#39;]]</code></pre>
-</details>
-</dd>
-<dt id="vectorbt.generic.nb.dd_valley_value_map_nb"><code class="name flex">
-<span>def <span class="ident parent-name">dd_valley_value_map_nb</span></span>(<span class="params">record, ts)</span><span class="return_type"></span>
-</code></dt>
-<dd>
-<div class="desc"><p><code>map_func_nb</code> that returns valley value of a drawdown.</p></div>
-<details class="source">
-<summary>
-<span>Expand source code</span>
-</summary>
-<pre><code class="python">@njit(cache=True)
-def dd_valley_value_map_nb(record: tp.Record, ts: tp.Array2d) -&gt; float:
-    &#34;&#34;&#34;`map_func_nb` that returns valley value of a drawdown.&#34;&#34;&#34;
-    return ts[record[&#39;valley_idx&#39;], record[&#39;col&#39;]]</code></pre>
+def dd_recovery_return_nb(valley_val_arr: tp.Array1d, end_val_arr: tp.Array1d) -&gt; tp.Array1d:
+    &#34;&#34;&#34;Return the recovery return of each drawdown record.&#34;&#34;&#34;
+    return (end_val_arr - valley_val_arr) / valley_val_arr</code></pre>
 </details>
 </dd>
 <dt id="vectorbt.generic.nb.describe_reduce_nb"><code class="name flex">
@@ -2564,130 +2731,118 @@ def filter_nb(a: tp.Array2d, filter_func_nb: tp.FilterFunc, *args) -&gt; tp.Arra
     return out</code></pre>
 </details>
 </dd>
-<dt id="vectorbt.generic.nb.find_drawdowns_nb"><code class="name flex">
-<span>def <span class="ident parent-name">find_drawdowns_nb</span></span>(<span class="params">ts)</span><span class="return_type"></span>
+<dt id="vectorbt.generic.nb.find_ranges_nb"><code class="name flex">
+<span>def <span class="ident parent-name">find_ranges_nb</span></span>(<span class="params">ts, gap_value)</span><span class="return_type"></span>
 </code></dt>
 <dd>
-<div class="desc"><p>Find drawdows and store their information as records to an array.</p>
+<div class="desc"><p>Find ranges and store their information as records to an array.</p>
 <h2 id="example">Example</h2>
-<p>Find drawdowns in time series:</p>
+<p>Find ranges in time series:</p>
 <pre><code class="language-python-repl">&gt;&gt;&gt; import numpy as np
 &gt;&gt;&gt; import pandas as pd
-&gt;&gt;&gt; from vectorbt.generic.nb import find_drawdowns_nb
+&gt;&gt;&gt; from vectorbt.generic.nb import find_ranges_nb
 
 &gt;&gt;&gt; ts = np.asarray([
-...     [1, 5, 1, 3],
-...     [2, 4, 2, 2],
-...     [3, 3, 3, 1],
-...     [4, 2, 2, 2],
-...     [5, 1, 1, 3]
+...     [np.nan, np.nan, np.nan, np.nan],
+...     [     2, np.nan, np.nan, np.nan],
+...     [     3,      3, np.nan, np.nan],
+...     [np.nan,      4,      4, np.nan],
+...     [     5, np.nan,      5,      5],
+...     [     6,      6, np.nan,      6]
 ... ])
-&gt;&gt;&gt; records = find_drawdowns_nb(ts)
+&gt;&gt;&gt; records = find_ranges_nb(ts, np.nan)
 
 &gt;&gt;&gt; pd.DataFrame.from_records(records)
-   id  col  start_idx  valley_idx  end_idx  status
-0   0    1          0           4        4       0
-1   1    2          2           4        4       0
-2   2    3          0           2        4       1
+   id  col  start_idx  end_idx
+0   0    0          1        3
+1   1    0          4        6
+2   2    1          2        4
+3   3    1          5        6
+4   4    2          3        5
+5   5    3          4        6
 </code></pre></div>
 <details class="source">
 <summary>
 <span>Expand source code</span>
 </summary>
 <pre><code class="python">@njit(cache=True)
-def find_drawdowns_nb(ts: tp.Array2d) -&gt; tp.RecordArray:
-    &#34;&#34;&#34;Find drawdows and store their information as records to an array.
+def find_ranges_nb(ts: tp.Array2d, gap_value: tp.Scalar) -&gt; tp.RecordArray:
+    &#34;&#34;&#34;Find ranges and store their information as records to an array.
 
     ## Example
 
-    Find drawdowns in time series:
+    Find ranges in time series:
     ```python-repl
     &gt;&gt;&gt; import numpy as np
     &gt;&gt;&gt; import pandas as pd
-    &gt;&gt;&gt; from vectorbt.generic.nb import find_drawdowns_nb
+    &gt;&gt;&gt; from vectorbt.generic.nb import find_ranges_nb
 
     &gt;&gt;&gt; ts = np.asarray([
-    ...     [1, 5, 1, 3],
-    ...     [2, 4, 2, 2],
-    ...     [3, 3, 3, 1],
-    ...     [4, 2, 2, 2],
-    ...     [5, 1, 1, 3]
+    ...     [np.nan, np.nan, np.nan, np.nan],
+    ...     [     2, np.nan, np.nan, np.nan],
+    ...     [     3,      3, np.nan, np.nan],
+    ...     [np.nan,      4,      4, np.nan],
+    ...     [     5, np.nan,      5,      5],
+    ...     [     6,      6, np.nan,      6]
     ... ])
-    &gt;&gt;&gt; records = find_drawdowns_nb(ts)
+    &gt;&gt;&gt; records = find_ranges_nb(ts, np.nan)
 
     &gt;&gt;&gt; pd.DataFrame.from_records(records)
-       id  col  start_idx  valley_idx  end_idx  status
-    0   0    1          0           4        4       0
-    1   1    2          2           4        4       0
-    2   2    3          0           2        4       1
+       id  col  start_idx  end_idx
+    0   0    0          1        3
+    1   1    0          4        6
+    2   2    1          2        4
+    3   3    1          5        6
+    4   4    2          3        5
+    5   5    3          4        6
     ```
     &#34;&#34;&#34;
-    out = np.empty(ts.shape[0] * ts.shape[1], dtype=drawdown_dt)
-    ddidx = 0
+    out = np.empty(ts.shape[0] * ts.shape[1], dtype=range_dt)
+    ridx = 0
 
     for col in range(ts.shape[1]):
-        drawdown_started = False
-        peak_idx = np.nan
-        valley_idx = np.nan
-        peak_val = ts[0, col]
-        valley_val = ts[0, col]
-        store_drawdown = False
+        range_started = False
+        start_idx = -1
+        end_idx = -1
+        store_record = False
         status = -1
 
         for i in range(ts.shape[0]):
             cur_val = ts[i, col]
 
-            if not np.isnan(cur_val):
-                if np.isnan(peak_val) or cur_val &gt;= peak_val:
-                    # Value increased
-                    if not drawdown_started:
-                        # If not running, register new peak
-                        peak_val = cur_val
-                        peak_idx = i
-                    else:
-                        # If running, potential recovery
-                        if cur_val &gt;= peak_val:
-                            drawdown_started = False
-                            store_drawdown = True
-                            status = DrawdownStatus.Recovered
-                else:
-                    # Value decreased
-                    if not drawdown_started:
-                        # If not running, start new drawdown
-                        drawdown_started = True
-                        valley_val = cur_val
-                        valley_idx = i
-                    else:
-                        # If running, potential valley
-                        if cur_val &lt; valley_val:
-                            valley_val = cur_val
-                            valley_idx = i
+            if cur_val == gap_value or np.isnan(cur_val) and np.isnan(gap_value):
+                if range_started:
+                    # If stopped, save the current range
+                    end_idx = i
+                    range_started = False
+                    store_record = True
+                    status = RangeStatus.Closed
+            else:
+                if not range_started:
+                    # If started, register a new range
+                    start_idx = i
+                    range_started = True
 
-                if i == ts.shape[0] - 1 and drawdown_started:
-                    # If still running, mark for save
-                    drawdown_started = False
-                    store_drawdown = True
-                    status = DrawdownStatus.Active
+            if i == ts.shape[0] - 1 and range_started:
+                # If still running, mark for save
+                end_idx = ts.shape[0] - 1
+                range_started = False
+                store_record = True
+                status = RangeStatus.Open
 
-                if store_drawdown:
-                    # Save drawdown to the records
-                    out[ddidx][&#39;id&#39;] = ddidx
-                    out[ddidx][&#39;col&#39;] = col
-                    out[ddidx][&#39;start_idx&#39;] = peak_idx
-                    out[ddidx][&#39;valley_idx&#39;] = valley_idx
-                    out[ddidx][&#39;end_idx&#39;] = i
-                    out[ddidx][&#39;status&#39;] = status
-                    ddidx += 1
+            if store_record:
+                # Save range to the records
+                out[ridx][&#39;id&#39;] = ridx
+                out[ridx][&#39;col&#39;] = col
+                out[ridx][&#39;start_idx&#39;] = start_idx
+                out[ridx][&#39;end_idx&#39;] = end_idx
+                out[ridx][&#39;status&#39;] = status
+                ridx += 1
 
-                    # Reset running vars for a new drawdown
-                    peak_idx = i
-                    valley_idx = i
-                    peak_val = cur_val
-                    valley_val = cur_val
-                    store_drawdown = False
-                    status = -1
+                # Reset running vars for a new range
+                store_record = False
 
-    return out[:ddidx]</code></pre>
+    return out[:ridx]</code></pre>
 </details>
 </dd>
 <dt id="vectorbt.generic.nb.flat_reduce_grouped_nb"><code class="name flex">
@@ -2889,6 +3044,144 @@ def fshift_nb(a: tp.Array2d, n: int = 1, fill_value: tp.Scalar = np.nan) -&gt; t
     return _fshift_nb</code></pre>
 </details>
 </dd>
+<dt id="vectorbt.generic.nb.get_drawdowns_nb"><code class="name flex">
+<span>def <span class="ident parent-name">get_drawdowns_nb</span></span>(<span class="params">ts)</span><span class="return_type"></span>
+</code></dt>
+<dd>
+<div class="desc"><p>Fill drawdown records by analyzing a time series.</p>
+<h2 id="example">Example</h2>
+<pre><code class="language-python-repl">&gt;&gt;&gt; import numpy as np
+&gt;&gt;&gt; import pandas as pd
+&gt;&gt;&gt; from vectorbt.generic.nb import get_drawdowns_nb
+
+&gt;&gt;&gt; ts = np.asarray([
+...     [1, 5, 1, 3],
+...     [2, 4, 2, 2],
+...     [3, 3, 3, 1],
+...     [4, 2, 2, 2],
+...     [5, 1, 1, 3]
+... ])
+&gt;&gt;&gt; records = get_drawdowns_nb(ts)
+
+&gt;&gt;&gt; pd.DataFrame.from_records(records)
+   id  col  peak_idx  start_idx  valley_idx  end_idx  peak_val  valley_val  \
+0   0    1         0          1           4        4       5.0         1.0
+1   1    2         2          3           4        4       3.0         1.0
+2   2    3         0          1           2        4       3.0         1.0
+
+   end_val  status
+0      1.0       0
+1      1.0       0
+2      3.0       1
+</code></pre></div>
+<details class="source">
+<summary>
+<span>Expand source code</span>
+</summary>
+<pre><code class="python">@njit(cache=True)
+def get_drawdowns_nb(ts: tp.Array2d) -&gt; tp.RecordArray:
+    &#34;&#34;&#34;Fill drawdown records by analyzing a time series.
+
+    ## Example
+
+    ```python-repl
+    &gt;&gt;&gt; import numpy as np
+    &gt;&gt;&gt; import pandas as pd
+    &gt;&gt;&gt; from vectorbt.generic.nb import get_drawdowns_nb
+
+    &gt;&gt;&gt; ts = np.asarray([
+    ...     [1, 5, 1, 3],
+    ...     [2, 4, 2, 2],
+    ...     [3, 3, 3, 1],
+    ...     [4, 2, 2, 2],
+    ...     [5, 1, 1, 3]
+    ... ])
+    &gt;&gt;&gt; records = get_drawdowns_nb(ts)
+
+    &gt;&gt;&gt; pd.DataFrame.from_records(records)
+       id  col  peak_idx  start_idx  valley_idx  end_idx  peak_val  valley_val  \\
+    0   0    1         0          1           4        4       5.0         1.0
+    1   1    2         2          3           4        4       3.0         1.0
+    2   2    3         0          1           2        4       3.0         1.0
+
+       end_val  status
+    0      1.0       0
+    1      1.0       0
+    2      3.0       1
+    ```
+    &#34;&#34;&#34;
+    out = np.empty(ts.shape[0] * ts.shape[1], dtype=drawdown_dt)
+    ddidx = 0
+
+    for col in range(ts.shape[1]):
+        drawdown_started = False
+        peak_idx = -1
+        valley_idx = -1
+        peak_val = ts[0, col]
+        valley_val = ts[0, col]
+        store_record = False
+        status = -1
+
+        for i in range(ts.shape[0]):
+            cur_val = ts[i, col]
+
+            if not np.isnan(cur_val):
+                if np.isnan(peak_val) or cur_val &gt;= peak_val:
+                    # Value increased
+                    if not drawdown_started:
+                        # If not running, register new peak
+                        peak_val = cur_val
+                        peak_idx = i
+                    else:
+                        # If running, potential recovery
+                        if cur_val &gt;= peak_val:
+                            drawdown_started = False
+                            store_record = True
+                            status = DrawdownStatus.Recovered
+                else:
+                    # Value decreased
+                    if not drawdown_started:
+                        # If not running, start new drawdown
+                        drawdown_started = True
+                        valley_val = cur_val
+                        valley_idx = i
+                    else:
+                        # If running, potential valley
+                        if cur_val &lt; valley_val:
+                            valley_val = cur_val
+                            valley_idx = i
+
+                if i == ts.shape[0] - 1 and drawdown_started:
+                    # If still running, mark for save
+                    drawdown_started = False
+                    store_record = True
+                    status = DrawdownStatus.Active
+
+                if store_record:
+                    # Save drawdown to the records
+                    out[ddidx][&#39;id&#39;] = ddidx
+                    out[ddidx][&#39;col&#39;] = col
+                    out[ddidx][&#39;peak_idx&#39;] = peak_idx
+                    out[ddidx][&#39;start_idx&#39;] = peak_idx + 1
+                    out[ddidx][&#39;valley_idx&#39;] = valley_idx
+                    out[ddidx][&#39;end_idx&#39;] = i
+                    out[ddidx][&#39;peak_val&#39;] = peak_val
+                    out[ddidx][&#39;valley_val&#39;] = valley_val
+                    out[ddidx][&#39;end_val&#39;] = cur_val
+                    out[ddidx][&#39;status&#39;] = status
+                    ddidx += 1
+
+                    # Reset running vars for a new drawdown
+                    peak_idx = i
+                    valley_idx = i
+                    peak_val = cur_val
+                    valley_val = cur_val
+                    store_record = False
+                    status = -1
+
+    return out[:ddidx]</code></pre>
+</details>
+</dd>
 <dt id="vectorbt.generic.nb.groupby_apply_nb"><code class="name flex">
 <span>def <span class="ident parent-name">groupby_apply_nb</span></span>(<span class="params">a, groups, apply_func_nb, *args)</span><span class="return_type"></span>
 </code></dt>
@@ -3067,7 +3360,7 @@ def nancnt_nb(a: tp.Array2d) -&gt; tp.Array1d:
 <span>Expand source code</span>
 </summary>
 <pre><code class="python">@generated_jit(nopython=True, cache=True)
-def nancumprod_nb(a):
+def nancumprod_nb(a: tp.Array2d) -&gt; tp.Array2d:
     &#34;&#34;&#34;Numba-equivalent of `np.nancumprod` along axis 0.&#34;&#34;&#34;
     nb_enabled = not isinstance(a, np.ndarray)
     if nb_enabled:
@@ -3098,7 +3391,7 @@ def nancumprod_nb(a):
 <span>Expand source code</span>
 </summary>
 <pre><code class="python">@generated_jit(nopython=True, cache=True)
-def nancumsum_nb(a):
+def nancumsum_nb(a: tp.Array2d) -&gt; tp.Array2d:
     &#34;&#34;&#34;Numba-equivalent of `np.nancumsum` along axis 0.&#34;&#34;&#34;
     nb_enabled = not isinstance(a, np.ndarray)
     if nb_enabled:
@@ -3201,7 +3494,7 @@ def nanmin_nb(a: tp.Array2d) -&gt; tp.Array1d:
 <span>Expand source code</span>
 </summary>
 <pre><code class="python">@generated_jit(nopython=True, cache=True)
-def nanprod_nb(a):
+def nanprod_nb(a: tp.Array2d) -&gt; tp.Array1d:
     &#34;&#34;&#34;Numba-equivalent of `np.nanprod` along axis 0.&#34;&#34;&#34;
     nb_enabled = not isinstance(a, np.ndarray)
     if nb_enabled:
@@ -3269,7 +3562,7 @@ def nanstd_nb(a: tp.Array2d, ddof: int = 0) -&gt; tp.Array1d:
 <span>Expand source code</span>
 </summary>
 <pre><code class="python">@generated_jit(nopython=True, cache=True)
-def nansum_nb(a):
+def nansum_nb(a: tp.Array2d) -&gt; tp.Array1d:
     &#34;&#34;&#34;Numba-equivalent of `np.nansum` along axis 0.&#34;&#34;&#34;
     nb_enabled = not isinstance(a, np.ndarray)
     if nb_enabled:
@@ -3362,6 +3655,119 @@ def pct_change_nb(a: tp.Array2d, n: int = 1) -&gt; tp.Array2d:
     out = np.empty_like(a, dtype=np.float_)
     for col in range(a.shape[1]):
         out[:, col] = pct_change_1d_nb(a[:, col], n=n)
+    return out</code></pre>
+</details>
+</dd>
+<dt id="vectorbt.generic.nb.range_coverage_nb"><code class="name flex">
+<span>def <span class="ident parent-name">range_coverage_nb</span></span>(<span class="params">start_idx_arr, end_idx_arr, status_arr, col_map, index_lens, overlapping=False, normalize=False)</span><span class="return_type"></span>
+</code></dt>
+<dd>
+<div class="desc"><p>Get coverage of range records.</p>
+<p>Set <code>overlapping</code> to True to get the number of overlapping steps.
+Set <code>normalize</code> to True to get the number of steps in relation either to the total number of steps
+(when <code>overlapping=False</code>) or to the number of covered steps (when <code>overlapping=True</code>).</p></div>
+<details class="source">
+<summary>
+<span>Expand source code</span>
+</summary>
+<pre><code class="python">@njit(cache=True)
+def range_coverage_nb(start_idx_arr: tp.Array1d,
+                      end_idx_arr: tp.Array1d,
+                      status_arr: tp.Array2d,
+                      col_map: tp.ColMap,
+                      index_lens: tp.Array1d,
+                      overlapping: bool = False,
+                      normalize: bool = False) -&gt; tp.Array1d:
+    &#34;&#34;&#34;Get coverage of range records.
+
+    Set `overlapping` to True to get the number of overlapping steps.
+    Set `normalize` to True to get the number of steps in relation either to the total number of steps
+    (when `overlapping=False`) or to the number of covered steps (when `overlapping=True`).
+    &#34;&#34;&#34;
+    col_idxs, col_lens = col_map
+    col_start_idxs = np.cumsum(col_lens) - col_lens
+    out = np.full(col_lens.shape[0], np.nan, dtype=np.float_)
+
+    for col in range(col_lens.shape[0]):
+        col_len = col_lens[col]
+        if col_len == 0:
+            continue
+        col_start_idx = col_start_idxs[col]
+        ridxs = col_idxs[col_start_idx:col_start_idx + col_len]
+        temp = np.full(index_lens[col], 0, dtype=np.int_)
+        for ridx in ridxs:
+            if status_arr[ridx] == RangeStatus.Open:
+                temp[start_idx_arr[ridx]:end_idx_arr[ridx] + 1] += 1
+            else:
+                temp[start_idx_arr[ridx]:end_idx_arr[ridx]] += 1
+        if overlapping:
+            if normalize:
+                out[col] = np.sum(temp &gt; 1) / np.sum(temp &gt; 0)
+            else:
+                out[col] = np.sum(temp &gt; 1)
+        else:
+            if normalize:
+                out[col] = np.sum(temp &gt; 0) / index_lens[col]
+            else:
+                out[col] = np.sum(temp &gt; 0)
+    return out</code></pre>
+</details>
+</dd>
+<dt id="vectorbt.generic.nb.range_duration_nb"><code class="name flex">
+<span>def <span class="ident parent-name">range_duration_nb</span></span>(<span class="params">start_idx_arr, end_idx_arr, status_arr)</span><span class="return_type"></span>
+</code></dt>
+<dd>
+<div class="desc"><p>Get duration of each duration record.</p></div>
+<details class="source">
+<summary>
+<span>Expand source code</span>
+</summary>
+<pre><code class="python">@njit(cache=True)
+def range_duration_nb(start_idx_arr: tp.Array1d,
+                      end_idx_arr: tp.Array1d,
+                      status_arr: tp.Array2d) -&gt; tp.Array1d:
+    &#34;&#34;&#34;Get duration of each duration record.&#34;&#34;&#34;
+    out = np.empty(start_idx_arr.shape[0], dtype=np.int_)
+    for ridx in range(out.shape[0]):
+        if status_arr[ridx] == RangeStatus.Open:
+            out[ridx] = end_idx_arr[ridx] - start_idx_arr[ridx] + 1
+        else:
+            out[ridx] = end_idx_arr[ridx] - start_idx_arr[ridx]
+    return out</code></pre>
+</details>
+</dd>
+<dt id="vectorbt.generic.nb.ranges_to_mask_nb"><code class="name flex">
+<span>def <span class="ident parent-name">ranges_to_mask_nb</span></span>(<span class="params">start_idx_arr, end_idx_arr, status_arr, col_map, index_len)</span><span class="return_type"></span>
+</code></dt>
+<dd>
+<div class="desc"><p>Convert ranges to 2-dim mask.</p></div>
+<details class="source">
+<summary>
+<span>Expand source code</span>
+</summary>
+<pre><code class="python">@njit(cache=True)
+def ranges_to_mask_nb(start_idx_arr: tp.Array1d,
+                      end_idx_arr: tp.Array1d,
+                      status_arr: tp.Array2d,
+                      col_map: tp.ColMap,
+                      index_len: int) -&gt; tp.Array2d:
+    &#34;&#34;&#34;Convert ranges to 2-dim mask.&#34;&#34;&#34;
+    col_idxs, col_lens = col_map
+    col_start_idxs = np.cumsum(col_lens) - col_lens
+    out = np.full((index_len, col_lens.shape[0]), False, dtype=np.bool_)
+
+    for col in range(col_lens.shape[0]):
+        col_len = col_lens[col]
+        if col_len == 0:
+            continue
+        col_start_idx = col_start_idxs[col]
+        ridxs = col_idxs[col_start_idx:col_start_idx + col_len]
+        for ridx in ridxs:
+            if status_arr[ridx] == RangeStatus.Open:
+                out[start_idx_arr[ridx]:end_idx_arr[ridx] + 1, col] = True
+            else:
+                out[start_idx_arr[ridx]:end_idx_arr[ridx], col] = True
+
     return out</code></pre>
 </details>
 </dd>
@@ -4110,7 +4516,7 @@ def value_counts_nb(codes: tp.Array2d, n_uniques: int, group_lens: tp.Array1d) -
 <header>
 <a class="homelink" rel="home" title="pdoc Home" href="https://github.com/polakowo/vectorbt">
 <img src="data:image/svg+xml;base64,PD94bWwgdmVyc2lvbj0iMS4wIiBlbmNvZGluZz0idXRmLTgiPz4KPCEtLSBHZW5lcmF0b3I6IEFkb2JlIElsbHVzdHJhdG9yIDI1LjAuMSwgU1ZHIEV4cG9ydCBQbHVnLUluIC4gU1ZHIFZlcnNpb246IDYuMDAgQnVpbGQgMCkgIC0tPgo8c3ZnIHZlcnNpb249IjEuMSIgaWQ9IkNhcGFfMSIgeG1sbnM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDAvc3ZnIiB4bWxuczp4bGluaz0iaHR0cDovL3d3dy53My5vcmcvMTk5OS94bGluayIgeD0iMHB4IiB5PSIwcHgiCgkgdmlld0JveD0iMCAwIDUxMiA1MTIiIHN0eWxlPSJlbmFibGUtYmFja2dyb3VuZDpuZXcgMCAwIDUxMiA1MTI7IiB4bWw6c3BhY2U9InByZXNlcnZlIj4KPHN0eWxlIHR5cGU9InRleHQvY3NzIj4KCS5zdDB7ZmlsbDojRUYwMDAwO30KCS5zdDF7ZmlsbDojRkY5MDAwO30KCS5zdDJ7ZmlsbDojRkZERjAwO30KCS5zdDN7ZmlsbDojMjgyQzM0O30KPC9zdHlsZT4KPGc+Cgk8Zz4KCQk8Zz4KCQkJPHBvbHlnb24gY2xhc3M9InN0MCIgcG9pbnRzPSIxNTUuMywzMDAuMSAyODMuMSwwIDIwOCwwIDExMC44LDAgMzUuOCwwIDEuMiw0NTAuMiA3Ni4zLDQ1MC4yIAkJCSIvPgoJCTwvZz4KCTwvZz4KCTxnPgoJCTxnPgoJCQk8cG9seWdvbiBjbGFzcz0ic3QxIiBwb2ludHM9IjIzMC40LDMwMC4xIDM1OC4xLDAgMjgzLjEsMCAxODUuOCwwIDExMC44LDAgNzYuMyw0NTAuMiAxNTEuMyw0NTAuMiAJCQkiLz4KCQk8L2c+Cgk8L2c+Cgk8Zz4KCQk8Zz4KCQkJPHBvbHlnb24gY2xhc3M9InN0MiIgcG9pbnRzPSIzMDUuNCwzMDAuMSA0MzMuMSwwIDM1OC4xLDAgMzMxLjYsNjIuMyAyNjAuOCwwIDE4NS44LDAgMTUxLjMsNDUwLjIgMjI2LjQsNDUwLjIgCQkJIi8+CgkJPC9nPgoJPC9nPgoJPGc+CgkJPGc+CgkJCTxwb2x5Z29uIGNsYXNzPSJzdDMiIHBvaW50cz0iNTEwLjgsMCA0MzMuMSwwIDMwNS40LDMwMC4xIDMzOC40LDAgMjYwLjgsMCAyMjYuNCw0NTAuMiAzMDQsNDUwLjIgCQkJIi8+CgkJPC9nPgoJPC9nPgo8L2c+Cjwvc3ZnPgo="/>
-vectorbt <span class="version">0.20.0</span></a>
+vectorbt <span class="version">0.21.0</span></a>
 </header>
 <div class="search-container">
 <input
@@ -4139,18 +4545,16 @@ title="Search"
 <li><code><a title="vectorbt.generic.nb.applymap_nb" href="#vectorbt.generic.nb.applymap_nb">applymap_nb</a></code></li>
 <li><code><a title="vectorbt.generic.nb.argmax_reduce_nb" href="#vectorbt.generic.nb.argmax_reduce_nb">argmax_reduce_nb</a></code></li>
 <li><code><a title="vectorbt.generic.nb.argmin_reduce_nb" href="#vectorbt.generic.nb.argmin_reduce_nb">argmin_reduce_nb</a></code></li>
+<li><code><a title="vectorbt.generic.nb.bfill_1d_nb" href="#vectorbt.generic.nb.bfill_1d_nb">bfill_1d_nb</a></code></li>
+<li><code><a title="vectorbt.generic.nb.bfill_nb" href="#vectorbt.generic.nb.bfill_nb">bfill_nb</a></code></li>
 <li><code><a title="vectorbt.generic.nb.bshift_1d_nb" href="#vectorbt.generic.nb.bshift_1d_nb">bshift_1d_nb</a></code></li>
 <li><code><a title="vectorbt.generic.nb.bshift_nb" href="#vectorbt.generic.nb.bshift_nb">bshift_nb</a></code></li>
 <li><code><a title="vectorbt.generic.nb.count_reduce_nb" href="#vectorbt.generic.nb.count_reduce_nb">count_reduce_nb</a></code></li>
-<li><code><a title="vectorbt.generic.nb.dd_decline_duration_map_nb" href="#vectorbt.generic.nb.dd_decline_duration_map_nb">dd_decline_duration_map_nb</a></code></li>
-<li><code><a title="vectorbt.generic.nb.dd_drawdown_map_nb" href="#vectorbt.generic.nb.dd_drawdown_map_nb">dd_drawdown_map_nb</a></code></li>
-<li><code><a title="vectorbt.generic.nb.dd_duration_map_nb" href="#vectorbt.generic.nb.dd_duration_map_nb">dd_duration_map_nb</a></code></li>
-<li><code><a title="vectorbt.generic.nb.dd_end_value_map_nb" href="#vectorbt.generic.nb.dd_end_value_map_nb">dd_end_value_map_nb</a></code></li>
-<li><code><a title="vectorbt.generic.nb.dd_recovery_duration_map_nb" href="#vectorbt.generic.nb.dd_recovery_duration_map_nb">dd_recovery_duration_map_nb</a></code></li>
-<li><code><a title="vectorbt.generic.nb.dd_recovery_duration_ratio_map_nb" href="#vectorbt.generic.nb.dd_recovery_duration_ratio_map_nb">dd_recovery_duration_ratio_map_nb</a></code></li>
-<li><code><a title="vectorbt.generic.nb.dd_recovery_return_map_nb" href="#vectorbt.generic.nb.dd_recovery_return_map_nb">dd_recovery_return_map_nb</a></code></li>
-<li><code><a title="vectorbt.generic.nb.dd_start_value_map_nb" href="#vectorbt.generic.nb.dd_start_value_map_nb">dd_start_value_map_nb</a></code></li>
-<li><code><a title="vectorbt.generic.nb.dd_valley_value_map_nb" href="#vectorbt.generic.nb.dd_valley_value_map_nb">dd_valley_value_map_nb</a></code></li>
+<li><code><a title="vectorbt.generic.nb.dd_decline_duration_nb" href="#vectorbt.generic.nb.dd_decline_duration_nb">dd_decline_duration_nb</a></code></li>
+<li><code><a title="vectorbt.generic.nb.dd_drawdown_nb" href="#vectorbt.generic.nb.dd_drawdown_nb">dd_drawdown_nb</a></code></li>
+<li><code><a title="vectorbt.generic.nb.dd_recovery_duration_nb" href="#vectorbt.generic.nb.dd_recovery_duration_nb">dd_recovery_duration_nb</a></code></li>
+<li><code><a title="vectorbt.generic.nb.dd_recovery_duration_ratio_nb" href="#vectorbt.generic.nb.dd_recovery_duration_ratio_nb">dd_recovery_duration_ratio_nb</a></code></li>
+<li><code><a title="vectorbt.generic.nb.dd_recovery_return_nb" href="#vectorbt.generic.nb.dd_recovery_return_nb">dd_recovery_return_nb</a></code></li>
 <li><code><a title="vectorbt.generic.nb.describe_reduce_nb" href="#vectorbt.generic.nb.describe_reduce_nb">describe_reduce_nb</a></code></li>
 <li><code><a title="vectorbt.generic.nb.diff_1d_nb" href="#vectorbt.generic.nb.diff_1d_nb">diff_1d_nb</a></code></li>
 <li><code><a title="vectorbt.generic.nb.diff_nb" href="#vectorbt.generic.nb.diff_nb">diff_nb</a></code></li>
@@ -4173,7 +4577,7 @@ title="Search"
 <li><code><a title="vectorbt.generic.nb.fillna_1d_nb" href="#vectorbt.generic.nb.fillna_1d_nb">fillna_1d_nb</a></code></li>
 <li><code><a title="vectorbt.generic.nb.fillna_nb" href="#vectorbt.generic.nb.fillna_nb">fillna_nb</a></code></li>
 <li><code><a title="vectorbt.generic.nb.filter_nb" href="#vectorbt.generic.nb.filter_nb">filter_nb</a></code></li>
-<li><code><a title="vectorbt.generic.nb.find_drawdowns_nb" href="#vectorbt.generic.nb.find_drawdowns_nb">find_drawdowns_nb</a></code></li>
+<li><code><a title="vectorbt.generic.nb.find_ranges_nb" href="#vectorbt.generic.nb.find_ranges_nb">find_ranges_nb</a></code></li>
 <li><code><a title="vectorbt.generic.nb.flat_reduce_grouped_nb" href="#vectorbt.generic.nb.flat_reduce_grouped_nb">flat_reduce_grouped_nb</a></code></li>
 <li><code><a title="vectorbt.generic.nb.flat_reduce_grouped_to_array_nb" href="#vectorbt.generic.nb.flat_reduce_grouped_to_array_nb">flat_reduce_grouped_to_array_nb</a></code></li>
 <li><code><a title="vectorbt.generic.nb.flatten_forder_nb" href="#vectorbt.generic.nb.flatten_forder_nb">flatten_forder_nb</a></code></li>
@@ -4181,6 +4585,7 @@ title="Search"
 <li><code><a title="vectorbt.generic.nb.flatten_uniform_grouped_nb" href="#vectorbt.generic.nb.flatten_uniform_grouped_nb">flatten_uniform_grouped_nb</a></code></li>
 <li><code><a title="vectorbt.generic.nb.fshift_1d_nb" href="#vectorbt.generic.nb.fshift_1d_nb">fshift_1d_nb</a></code></li>
 <li><code><a title="vectorbt.generic.nb.fshift_nb" href="#vectorbt.generic.nb.fshift_nb">fshift_nb</a></code></li>
+<li><code><a title="vectorbt.generic.nb.get_drawdowns_nb" href="#vectorbt.generic.nb.get_drawdowns_nb">get_drawdowns_nb</a></code></li>
 <li><code><a title="vectorbt.generic.nb.groupby_apply_nb" href="#vectorbt.generic.nb.groupby_apply_nb">groupby_apply_nb</a></code></li>
 <li><code><a title="vectorbt.generic.nb.groupby_matrix_apply_nb" href="#vectorbt.generic.nb.groupby_matrix_apply_nb">groupby_matrix_apply_nb</a></code></li>
 <li><code><a title="vectorbt.generic.nb.max_reduce_nb" href="#vectorbt.generic.nb.max_reduce_nb">max_reduce_nb</a></code></li>
@@ -4204,6 +4609,9 @@ title="Search"
 <li><code><a title="vectorbt.generic.nb.nth_reduce_nb" href="#vectorbt.generic.nb.nth_reduce_nb">nth_reduce_nb</a></code></li>
 <li><code><a title="vectorbt.generic.nb.pct_change_1d_nb" href="#vectorbt.generic.nb.pct_change_1d_nb">pct_change_1d_nb</a></code></li>
 <li><code><a title="vectorbt.generic.nb.pct_change_nb" href="#vectorbt.generic.nb.pct_change_nb">pct_change_nb</a></code></li>
+<li><code><a title="vectorbt.generic.nb.range_coverage_nb" href="#vectorbt.generic.nb.range_coverage_nb">range_coverage_nb</a></code></li>
+<li><code><a title="vectorbt.generic.nb.range_duration_nb" href="#vectorbt.generic.nb.range_duration_nb">range_duration_nb</a></code></li>
+<li><code><a title="vectorbt.generic.nb.ranges_to_mask_nb" href="#vectorbt.generic.nb.ranges_to_mask_nb">ranges_to_mask_nb</a></code></li>
 <li><code><a title="vectorbt.generic.nb.reduce_grouped_nb" href="#vectorbt.generic.nb.reduce_grouped_nb">reduce_grouped_nb</a></code></li>
 <li><code><a title="vectorbt.generic.nb.reduce_grouped_to_array_nb" href="#vectorbt.generic.nb.reduce_grouped_to_array_nb">reduce_grouped_to_array_nb</a></code></li>
 <li><code><a title="vectorbt.generic.nb.reduce_nb" href="#vectorbt.generic.nb.reduce_nb">reduce_nb</a></code></li>

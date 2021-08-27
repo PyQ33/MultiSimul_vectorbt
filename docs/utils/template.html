@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, minimum-scale=1" />
-<meta name="generator" content="pdoc 0.9.2" />
+<meta name="generator" content="pdoc 0.10.0" />
 <title>vectorbt.utils.template API documentation</title>
 <meta name="description" content="Utilities for working with templates." />
 <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/5.12.0-2/css/all.min.css" integrity="sha256-46r060N2LrChLLb5zowXQ72/iKKNiw/lAmygmHExk/o=" crossorigin="anonymous" />
@@ -44,7 +44,10 @@ gtag('config', 'G-4QLCS0J048');
 <summary>
 <span>Expand source code</span>
 </summary>
-<pre><code class="python">&#34;&#34;&#34;Utilities for working with templates.&#34;&#34;&#34;
+<pre><code class="python"># Copyright (c) 2021 Oleg Polakow. All rights reserved.
+# This code is licensed under Apache 2.0 with Commons Clause license (see LICENSE.md for details)
+
+&#34;&#34;&#34;Utilities for working with templates.&#34;&#34;&#34;
 
 from copy import copy
 from string import Template
@@ -86,7 +89,7 @@ class Sub(SafeToStr):
         mapping = merge_dicts(self.mapping, mapping)
         return self.template.substitute(mapping)
 
-    def __str__(self):
+    def __str__(self) -&gt; str:
         return f&#34;{self.__class__.__name__}(&#34; \
                f&#34;template=\&#34;{self.template.template}\&#34;, &#34; \
                f&#34;mapping={prepare_for_doc(self.mapping)})&#34;
@@ -118,7 +121,7 @@ class Rep(SafeToStr):
         mapping = merge_dicts(self.mapping, mapping)
         return mapping[self.key]
 
-    def __str__(self):
+    def __str__(self) -&gt; str:
         return f&#34;{self.__class__.__name__}(&#34; \
                f&#34;key=&#39;{self.key}&#39;, &#34; \
                f&#34;mapping={prepare_for_doc(self.mapping)})&#34;
@@ -150,7 +153,7 @@ class RepEval(SafeToStr):
         mapping = merge_dicts(self.mapping, mapping)
         return eval(self.expression, {}, mapping)
 
-    def __str__(self):
+    def __str__(self) -&gt; str:
         return f&#34;{self.__class__.__name__}(&#34; \
                f&#34;expression=\&#34;{self.expression}\&#34;, &#34; \
                f&#34;mapping={prepare_for_doc(self.mapping)})&#34;
@@ -187,18 +190,49 @@ class RepFunc(SafeToStr):
                 func_kwargs[k] = v
         return self.func(**func_kwargs)
 
-    def __str__(self):
+    def __str__(self) -&gt; str:
         return f&#34;{self.__class__.__name__}(&#34; \
                f&#34;func={self.func}, &#34; \
                f&#34;mapping={prepare_for_doc(self.mapping)})&#34;
 
 
-def deep_substitute(obj: tp.Any, mapping: tp.Optional[tp.Mapping] = None, safe: bool = False) -&gt; tp.Any:
-    &#34;&#34;&#34;Traverses an object recursively and substitutes all templates using a mapping.
+def has_templates(obj: tp.Any) -&gt; tp.Any:
+    &#34;&#34;&#34;Check if the object has any templates.&#34;&#34;&#34;
+    if isinstance(obj, RepFunc):
+        return True
+    if isinstance(obj, RepEval):
+        return True
+    if isinstance(obj, Rep):
+        return True
+    if isinstance(obj, Sub):
+        return True
+    if isinstance(obj, Template):
+        return True
+    if isinstance(obj, dict):
+        for k, v in obj.items():
+            if has_templates(v):
+                return True
+    if isinstance(obj, (tuple, list, set, frozenset)):
+        for v in obj:
+            if has_templates(v):
+                return True
+    return False
+
+
+def deep_substitute(obj: tp.Any,
+                    mapping: tp.Optional[tp.Mapping] = None,
+                    safe: bool = False,
+                    make_copy: bool = True) -&gt; tp.Any:
+    &#34;&#34;&#34;Traverses the object recursively and, if any template found, substitutes it using a mapping.
 
     Traverses tuples, lists, dicts and (frozen-)sets. Does not look for templates in keys.
 
-    If `safe` is True, won&#39;t raise an error, but simply return the original template.
+    If `safe` is True, won&#39;t raise an error but return the original template.
+
+    !!! note
+        If the object is deep (such as a dict or a list), creates a copy of it if any template found inside,
+        thus loosing the reference to the original. Make sure to do a deep or hybrid copy of the object
+        before proceeding for consistent behavior, or disable `make_copy` to override the original in place.
 
     ## Example
 
@@ -226,6 +260,8 @@ def deep_substitute(obj: tp.Any, mapping: tp.Optional[tp.Mapping] = None, safe: 
     ```&#34;&#34;&#34;
     if mapping is None:
         mapping = {}
+    if not has_templates(obj):
+        return obj
     try:
         if isinstance(obj, RepFunc):
             return obj.call(mapping)
@@ -238,11 +274,18 @@ def deep_substitute(obj: tp.Any, mapping: tp.Optional[tp.Mapping] = None, safe: 
         if isinstance(obj, Template):
             return obj.substitute(mapping)
         if isinstance(obj, dict):
-            obj = copy(obj)
+            if make_copy:
+                obj = copy(obj)
             for k, v in obj.items():
                 set_dict_item(obj, k, deep_substitute(v, mapping=mapping, safe=safe), force=True)
             return obj
-        if isinstance(obj, (tuple, list, set, frozenset)):
+        if isinstance(obj, list):
+            if make_copy:
+                obj = copy(obj)
+            for i in range(len(obj)):
+                obj[i] = deep_substitute(obj[i], mapping=mapping, safe=safe)
+            return obj
+        if isinstance(obj, (tuple, set, frozenset)):
             result = []
             for o in obj:
                 result.append(deep_substitute(o, mapping=mapping, safe=safe))
@@ -263,12 +306,18 @@ def deep_substitute(obj: tp.Any, mapping: tp.Optional[tp.Mapping] = None, safe: 
 <h2 class="section-title" id="header-functions">Functions</h2>
 <dl>
 <dt id="vectorbt.utils.template.deep_substitute"><code class="name flex">
-<span>def <span class="ident parent-name">deep_substitute</span></span>(<span class="params">obj, mapping=None, safe=False)</span><span class="return_type"></span>
+<span>def <span class="ident parent-name">deep_substitute</span></span>(<span class="params">obj, mapping=None, safe=False, make_copy=True)</span><span class="return_type"></span>
 </code></dt>
 <dd>
-<div class="desc"><p>Traverses an object recursively and substitutes all templates using a mapping.</p>
+<div class="desc"><p>Traverses the object recursively and, if any template found, substitutes it using a mapping.</p>
 <p>Traverses tuples, lists, dicts and (frozen-)sets. Does not look for templates in keys.</p>
-<p>If <code>safe</code> is True, won't raise an error, but simply return the original template.</p>
+<p>If <code>safe</code> is True, won't raise an error but return the original template.</p>
+<div class="admonition note">
+<p class="admonition-title">Note</p>
+<p>If the object is deep (such as a dict or a list), creates a copy of it if any template found inside,
+thus loosing the reference to the original. Make sure to do a deep or hybrid copy of the object
+before proceeding for consistent behavior, or disable <code>make_copy</code> to override the original in place.</p>
+</div>
 <h2 id="example">Example</h2>
 <pre><code class="language-python-repl">&gt;&gt;&gt; import vectorbt as vbt
 
@@ -295,12 +344,20 @@ NameError: name 'key' is not defined
 <summary>
 <span>Expand source code</span>
 </summary>
-<pre><code class="python">def deep_substitute(obj: tp.Any, mapping: tp.Optional[tp.Mapping] = None, safe: bool = False) -&gt; tp.Any:
-    &#34;&#34;&#34;Traverses an object recursively and substitutes all templates using a mapping.
+<pre><code class="python">def deep_substitute(obj: tp.Any,
+                    mapping: tp.Optional[tp.Mapping] = None,
+                    safe: bool = False,
+                    make_copy: bool = True) -&gt; tp.Any:
+    &#34;&#34;&#34;Traverses the object recursively and, if any template found, substitutes it using a mapping.
 
     Traverses tuples, lists, dicts and (frozen-)sets. Does not look for templates in keys.
 
-    If `safe` is True, won&#39;t raise an error, but simply return the original template.
+    If `safe` is True, won&#39;t raise an error but return the original template.
+
+    !!! note
+        If the object is deep (such as a dict or a list), creates a copy of it if any template found inside,
+        thus loosing the reference to the original. Make sure to do a deep or hybrid copy of the object
+        before proceeding for consistent behavior, or disable `make_copy` to override the original in place.
 
     ## Example
 
@@ -328,6 +385,8 @@ NameError: name 'key' is not defined
     ```&#34;&#34;&#34;
     if mapping is None:
         mapping = {}
+    if not has_templates(obj):
+        return obj
     try:
         if isinstance(obj, RepFunc):
             return obj.call(mapping)
@@ -340,11 +399,18 @@ NameError: name 'key' is not defined
         if isinstance(obj, Template):
             return obj.substitute(mapping)
         if isinstance(obj, dict):
-            obj = copy(obj)
+            if make_copy:
+                obj = copy(obj)
             for k, v in obj.items():
                 set_dict_item(obj, k, deep_substitute(v, mapping=mapping, safe=safe), force=True)
             return obj
-        if isinstance(obj, (tuple, list, set, frozenset)):
+        if isinstance(obj, list):
+            if make_copy:
+                obj = copy(obj)
+            for i in range(len(obj)):
+                obj[i] = deep_substitute(obj[i], mapping=mapping, safe=safe)
+            return obj
+        if isinstance(obj, (tuple, set, frozenset)):
             result = []
             for o in obj:
                 result.append(deep_substitute(o, mapping=mapping, safe=safe))
@@ -355,6 +421,38 @@ NameError: name 'key' is not defined
         if not safe:
             raise e
     return obj</code></pre>
+</details>
+</dd>
+<dt id="vectorbt.utils.template.has_templates"><code class="name flex">
+<span>def <span class="ident parent-name">has_templates</span></span>(<span class="params">obj)</span><span class="return_type"></span>
+</code></dt>
+<dd>
+<div class="desc"><p>Check if the object has any templates.</p></div>
+<details class="source">
+<summary>
+<span>Expand source code</span>
+</summary>
+<pre><code class="python">def has_templates(obj: tp.Any) -&gt; tp.Any:
+    &#34;&#34;&#34;Check if the object has any templates.&#34;&#34;&#34;
+    if isinstance(obj, RepFunc):
+        return True
+    if isinstance(obj, RepEval):
+        return True
+    if isinstance(obj, Rep):
+        return True
+    if isinstance(obj, Sub):
+        return True
+    if isinstance(obj, Template):
+        return True
+    if isinstance(obj, dict):
+        for k, v in obj.items():
+            if has_templates(v):
+                return True
+    if isinstance(obj, (tuple, list, set, frozenset)):
+        for v in obj:
+            if has_templates(v):
+                return True
+    return False</code></pre>
 </details>
 </dd>
 </dl>
@@ -398,7 +496,7 @@ NameError: name 'key' is not defined
         mapping = merge_dicts(self.mapping, mapping)
         return mapping[self.key]
 
-    def __str__(self):
+    def __str__(self) -&gt; str:
         return f&#34;{self.__class__.__name__}(&#34; \
                f&#34;key=&#39;{self.key}&#39;, &#34; \
                f&#34;mapping={prepare_for_doc(self.mapping)})&#34;</code></pre>
@@ -496,7 +594,7 @@ def mapping(self) -&gt; tp.Mapping:
         mapping = merge_dicts(self.mapping, mapping)
         return eval(self.expression, {}, mapping)
 
-    def __str__(self):
+    def __str__(self) -&gt; str:
         return f&#34;{self.__class__.__name__}(&#34; \
                f&#34;expression=\&#34;{self.expression}\&#34;, &#34; \
                f&#34;mapping={prepare_for_doc(self.mapping)})&#34;</code></pre>
@@ -599,7 +697,7 @@ def mapping(self) -&gt; tp.Mapping:
                 func_kwargs[k] = v
         return self.func(**func_kwargs)
 
-    def __str__(self):
+    def __str__(self) -&gt; str:
         return f&#34;{self.__class__.__name__}(&#34; \
                f&#34;func={self.func}, &#34; \
                f&#34;mapping={prepare_for_doc(self.mapping)})&#34;</code></pre>
@@ -708,7 +806,7 @@ def mapping(self) -&gt; tp.Mapping:
         mapping = merge_dicts(self.mapping, mapping)
         return self.template.substitute(mapping)
 
-    def __str__(self):
+    def __str__(self) -&gt; str:
         return f&#34;{self.__class__.__name__}(&#34; \
                f&#34;template=\&#34;{self.template.template}\&#34;, &#34; \
                f&#34;mapping={prepare_for_doc(self.mapping)})&#34;</code></pre>
@@ -780,7 +878,7 @@ def template(self) -&gt; Template:
 <header>
 <a class="homelink" rel="home" title="pdoc Home" href="https://github.com/polakowo/vectorbt">
 <img src="data:image/svg+xml;base64,PD94bWwgdmVyc2lvbj0iMS4wIiBlbmNvZGluZz0idXRmLTgiPz4KPCEtLSBHZW5lcmF0b3I6IEFkb2JlIElsbHVzdHJhdG9yIDI1LjAuMSwgU1ZHIEV4cG9ydCBQbHVnLUluIC4gU1ZHIFZlcnNpb246IDYuMDAgQnVpbGQgMCkgIC0tPgo8c3ZnIHZlcnNpb249IjEuMSIgaWQ9IkNhcGFfMSIgeG1sbnM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDAvc3ZnIiB4bWxuczp4bGluaz0iaHR0cDovL3d3dy53My5vcmcvMTk5OS94bGluayIgeD0iMHB4IiB5PSIwcHgiCgkgdmlld0JveD0iMCAwIDUxMiA1MTIiIHN0eWxlPSJlbmFibGUtYmFja2dyb3VuZDpuZXcgMCAwIDUxMiA1MTI7IiB4bWw6c3BhY2U9InByZXNlcnZlIj4KPHN0eWxlIHR5cGU9InRleHQvY3NzIj4KCS5zdDB7ZmlsbDojRUYwMDAwO30KCS5zdDF7ZmlsbDojRkY5MDAwO30KCS5zdDJ7ZmlsbDojRkZERjAwO30KCS5zdDN7ZmlsbDojMjgyQzM0O30KPC9zdHlsZT4KPGc+Cgk8Zz4KCQk8Zz4KCQkJPHBvbHlnb24gY2xhc3M9InN0MCIgcG9pbnRzPSIxNTUuMywzMDAuMSAyODMuMSwwIDIwOCwwIDExMC44LDAgMzUuOCwwIDEuMiw0NTAuMiA3Ni4zLDQ1MC4yIAkJCSIvPgoJCTwvZz4KCTwvZz4KCTxnPgoJCTxnPgoJCQk8cG9seWdvbiBjbGFzcz0ic3QxIiBwb2ludHM9IjIzMC40LDMwMC4xIDM1OC4xLDAgMjgzLjEsMCAxODUuOCwwIDExMC44LDAgNzYuMyw0NTAuMiAxNTEuMyw0NTAuMiAJCQkiLz4KCQk8L2c+Cgk8L2c+Cgk8Zz4KCQk8Zz4KCQkJPHBvbHlnb24gY2xhc3M9InN0MiIgcG9pbnRzPSIzMDUuNCwzMDAuMSA0MzMuMSwwIDM1OC4xLDAgMzMxLjYsNjIuMyAyNjAuOCwwIDE4NS44LDAgMTUxLjMsNDUwLjIgMjI2LjQsNDUwLjIgCQkJIi8+CgkJPC9nPgoJPC9nPgoJPGc+CgkJPGc+CgkJCTxwb2x5Z29uIGNsYXNzPSJzdDMiIHBvaW50cz0iNTEwLjgsMCA0MzMuMSwwIDMwNS40LDMwMC4xIDMzOC40LDAgMjYwLjgsMCAyMjYuNCw0NTAuMiAzMDQsNDUwLjIgCQkJIi8+CgkJPC9nPgoJPC9nPgo8L2c+Cjwvc3ZnPgo="/>
-vectorbt <span class="version">0.20.0</span></a>
+vectorbt <span class="version">0.21.0</span></a>
 </header>
 <div class="search-container">
 <input
@@ -804,6 +902,7 @@ title="Search"
 <li><h3><a href="#header-functions">Functions</a></h3>
 <ul class="">
 <li><code><a title="vectorbt.utils.template.deep_substitute" href="#vectorbt.utils.template.deep_substitute">deep_substitute</a></code></li>
+<li><code><a title="vectorbt.utils.template.has_templates" href="#vectorbt.utils.template.has_templates">has_templates</a></code></li>
 </ul>
 </li>
 <li><h3><a href="#header-classes">Classes</a></h3>

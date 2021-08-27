@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, minimum-scale=1" />
-<meta name="generator" content="pdoc 0.9.2" />
+<meta name="generator" content="pdoc 0.10.0" />
 <title>vectorbt.base.array_wrapper API documentation</title>
 <meta name="description" content="Class for wrapping NumPy arrays into Series/DataFrames …" />
 <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/5.12.0-2/css/all.min.css" integrity="sha256-46r060N2LrChLLb5zowXQ72/iKKNiw/lAmygmHExk/o=" crossorigin="anonymous" />
@@ -118,7 +118,10 @@ dtype: float64
 <summary>
 <span>Expand source code</span>
 </summary>
-<pre><code class="python">&#34;&#34;&#34;Class for wrapping NumPy arrays into Series/DataFrames.
+<pre><code class="python"># Copyright (c) 2021 Oleg Polakow. All rights reserved.
+# This code is licensed under Apache 2.0 with Commons Clause license (see LICENSE.md for details)
+
+&#34;&#34;&#34;Class for wrapping NumPy arrays into Series/DataFrames.
 
 vectorbt&#39;s functionality is based upon the ability to perform the most essential pandas operations
 using NumPy+Numba stack. One has to convert the Series/DataFrame into the NumPy format, perform
@@ -231,7 +234,7 @@ class ArrayWrapper(Configured, PandasIndexer):
     `**kwargs` are passed to `vectorbt.base.column_grouper.ColumnGrouper`.
 
     !!! note
-        This class is meant to be immutable. To change any attribute, use `ArrayWrapper.copy`.
+        This class is meant to be immutable. To change any attribute, use `ArrayWrapper.replace`.
 
         Use methods that begin with `get_` to get group-aware results.&#34;&#34;&#34;
 
@@ -423,7 +426,7 @@ class ArrayWrapper(Configured, PandasIndexer):
                 ungrouped_group_idxs[group_lens[:-1]] = 1
                 ungrouped_group_idxs = np.cumsum(ungrouped_group_idxs)
 
-                return _self.copy(
+                return _self.replace(
                     index=new_index,
                     columns=ungrouped_columns,
                     ndim=ungrouped_ndim,
@@ -433,7 +436,7 @@ class ArrayWrapper(Configured, PandasIndexer):
 
             # Selection based on columns
             col_idxs_arr = reshape_fns.to_1d_array(col_idxs)
-            return _self.copy(
+            return _self.replace(
                 index=new_index,
                 columns=new_columns,
                 ndim=new_ndim,
@@ -442,7 +445,7 @@ class ArrayWrapper(Configured, PandasIndexer):
             ), idx_idxs, col_idxs, col_idxs
 
         # Grouping disabled
-        return _self.copy(
+        return _self.replace(
             index=new_index,
             columns=new_columns,
             ndim=new_ndim,
@@ -461,6 +464,9 @@ class ArrayWrapper(Configured, PandasIndexer):
         index = index_fns.get_index(pd_obj, 0)
         columns = index_fns.get_index(pd_obj, 1)
         ndim = pd_obj.ndim
+        kwargs.pop(&#39;index&#39;, None)
+        kwargs.pop(&#39;columns&#39;, None)
+        kwargs.pop(&#39;ndim&#39;, None)
         return cls(index, columns, ndim, *args, **kwargs)
 
     @classmethod
@@ -547,8 +553,8 @@ class ArrayWrapper(Configured, PandasIndexer):
                 return freq_to_timedelta(self.index.inferred_freq)
         return freq
 
-    def to_timedelta(self, a: tp.MaybeArray[float],
-                    silence_warnings: tp.Optional[bool] = None) -&gt; tp.Union[pd.Timedelta, tp.Array]:
+    def to_timedelta(self, a: tp.MaybeArray[float], to_pd: bool = False,
+                     silence_warnings: tp.Optional[bool] = None) -&gt; tp.Union[pd.Timedelta, np.timedelta64, tp.Array]:
         &#34;&#34;&#34;Convert array to duration using `ArrayWrapper.freq`.&#34;&#34;&#34;
         from vectorbt._settings import settings
         array_wrapper_cfg = settings[&#39;array_wrapper&#39;]
@@ -561,6 +567,8 @@ class ArrayWrapper(Configured, PandasIndexer):
                 warnings.warn(&#34;Couldn&#39;t parse the frequency of index. Pass it as `freq` or &#34;
                               &#34;define it globally under `settings.array_wrapper`.&#34;, stacklevel=2)
             return a
+        if to_pd:
+            return pd.to_timedelta(a * self.freq)
         return a * self.freq
 
     @property
@@ -597,7 +605,7 @@ class ArrayWrapper(Configured, PandasIndexer):
             if self.grouper.is_grouped(group_by=group_by):
                 if not self.grouper.is_group_count_changed(group_by=group_by):
                     grouped_ndim = self.grouped_ndim
-            return self.copy(grouped_ndim=grouped_ndim, group_by=group_by, **kwargs)
+            return self.replace(grouped_ndim=grouped_ndim, group_by=group_by, **kwargs)
         return self  # important for keeping cache
 
     @cached_method
@@ -607,7 +615,7 @@ class ArrayWrapper(Configured, PandasIndexer):
         Replaces columns and other metadata with groups.&#34;&#34;&#34;
         _self = self.regroup(group_by=group_by, **kwargs)
         if _self.grouper.is_grouped():
-            return _self.copy(
+            return _self.replace(
                 columns=_self.grouper.get_columns(),
                 ndim=_self.grouped_ndim,
                 grouped_ndim=None,
@@ -624,11 +632,16 @@ class ArrayWrapper(Configured, PandasIndexer):
              group_by: tp.GroupByLike = None,
              to_timedelta: bool = False,
              to_index: bool = False,
-             silence_warnings: tp.Optional[bool] = False) -&gt; tp.SeriesFrame:
+             silence_warnings: tp.Optional[bool] = None) -&gt; tp.SeriesFrame:
         &#34;&#34;&#34;Wrap a NumPy array using the stored metadata.
 
-        !!! note
-            Array will be converted to a NumPy array before wrapping.&#34;&#34;&#34;
+        Runs the following pipeline:
+
+        1) Converts to NumPy array
+        2) Fills NaN (optional)
+        3) Wraps using index, columns, and dtype (optional)
+        4) Converts to index (optional)
+        5) Converts to timedelta using `ArrayWrapper.to_timedelta` (optional)&#34;&#34;&#34;
         from vectorbt._settings import settings
         array_wrapper_cfg = settings[&#39;array_wrapper&#39;]
 
@@ -690,14 +703,14 @@ class ArrayWrapper(Configured, PandasIndexer):
                      group_by: tp.GroupByLike = None,
                      to_timedelta: bool = False,
                      to_index: bool = False,
-                     silence_warnings: tp.Optional[bool] = False) -&gt; tp.MaybeSeriesFrame:
+                     silence_warnings: tp.Optional[bool] = None) -&gt; tp.MaybeSeriesFrame:
         &#34;&#34;&#34;Wrap result of reduction.
 
         `name_or_index` can be the name of the resulting series if reducing to a scalar per column,
         or the index of the resulting series/dataframe if reducing to an array per column.
         `columns` can be set to override object&#39;s default columns.
 
-        If `to_timedelta` is set, calls `ArrayWrapper.to_timedelta`.&#34;&#34;&#34;
+        See `ArrayWrapper.wrap` for the pipeline.&#34;&#34;&#34;
         from vectorbt._settings import settings
         array_wrapper_cfg = settings[&#39;array_wrapper&#39;]
 
@@ -776,6 +789,16 @@ class ArrayWrapper(Configured, PandasIndexer):
         _self = self.resolve(group_by=group_by)
         return _self.wrap(np.empty(_self.shape), **kwargs)
 
+    def fill(self, fill_value: tp.Scalar, group_by: tp.GroupByLike = None, **kwargs) -&gt; tp.SeriesFrame:
+        &#34;&#34;&#34;Fill a Series/DataFrame.&#34;&#34;&#34;
+        _self = self.resolve(group_by=group_by)
+        return _self.wrap(np.full(_self.shape_2d, fill_value), **kwargs)
+
+    def fill_reduced(self, fill_value: tp.Scalar, group_by: tp.GroupByLike = None, **kwargs) -&gt; tp.SeriesFrame:
+        &#34;&#34;&#34;Fill a reduced Series/DataFrame.&#34;&#34;&#34;
+        _self = self.resolve(group_by=group_by)
+        return _self.wrap(np.full(_self.shape_2d[1], fill_value), **kwargs)
+
 
 WrappingT = tp.TypeVar(&#34;WrappingT&#34;, bound=&#34;Wrapping&#34;)
 
@@ -784,7 +807,7 @@ class Wrapping(Configured, PandasIndexer, AttrResolver):
     &#34;&#34;&#34;Class that uses `ArrayWrapper` globally.&#34;&#34;&#34;
 
     def __init__(self, wrapper: ArrayWrapper, **kwargs) -&gt; None:
-        checks.assert_type(wrapper, ArrayWrapper)
+        checks.assert_instance_of(wrapper, ArrayWrapper)
         self._wrapper = wrapper
 
         Configured.__init__(self, wrapper=wrapper, **kwargs)
@@ -793,7 +816,7 @@ class Wrapping(Configured, PandasIndexer, AttrResolver):
 
     def indexing_func(self: WrappingT, pd_indexing_func: tp.PandasIndexingFunc, **kwargs) -&gt; WrappingT:
         &#34;&#34;&#34;Perform indexing on `Wrapping`.&#34;&#34;&#34;
-        return self.copy(wrapper=self.wrapper.indexing_func(pd_indexing_func, **kwargs))
+        return self.replace(wrapper=self.wrapper.indexing_func(pd_indexing_func, **kwargs))
 
     @property
     def wrapper(self) -&gt; ArrayWrapper:
@@ -808,7 +831,7 @@ class Wrapping(Configured, PandasIndexer, AttrResolver):
         `**kwargs` will be passed to `ArrayWrapper.regroup`.&#34;&#34;&#34;
         if self.wrapper.grouper.is_grouping_changed(group_by=group_by):
             self.wrapper.grouper.check_group_by(group_by=group_by)
-            return self.copy(wrapper=self.wrapper.regroup(group_by, **kwargs))
+            return self.replace(wrapper=self.wrapper.regroup(group_by, **kwargs))
         return self  # important for keeping cache
 
     def resolve_self(self: AttrResolverT,
@@ -830,13 +853,13 @@ class Wrapping(Configured, PandasIndexer, AttrResolver):
             silence_warnings = array_wrapper_cfg[&#39;silence_warnings&#39;]
 
         if &#39;freq&#39; in cond_kwargs:
-            wrapper_copy = self.wrapper.copy(freq=cond_kwargs[&#39;freq&#39;])
+            wrapper_copy = self.wrapper.replace(freq=cond_kwargs[&#39;freq&#39;])
 
             if wrapper_copy.freq != self.wrapper.freq:
                 if not silence_warnings:
                     warnings.warn(f&#34;Changing the frequency will create a copy of this object. &#34;
                                   f&#34;Consider setting it upon object creation to re-use existing cache.&#34;, stacklevel=2)
-                self_copy = self.copy(wrapper=wrapper_copy)
+                self_copy = self.replace(wrapper=wrapper_copy)
                 for alias in self.self_aliases:
                     if alias not in custom_arg_names:
                         cond_kwargs[alias] = self_copy
@@ -847,16 +870,40 @@ class Wrapping(Configured, PandasIndexer, AttrResolver):
         return self
 
     def select_one(self: WrappingT, column: tp.Any = None, group_by: tp.GroupByLike = None, **kwargs) -&gt; WrappingT:
-        &#34;&#34;&#34;Select one column/group.&#34;&#34;&#34;
+        &#34;&#34;&#34;Select one column/group.
+
+        `column` can be a label-based position as well as an integer position (if label fails).&#34;&#34;&#34;
         _self = self.regroup(group_by, **kwargs)
+
+        def _check_out_dim(out: WrappingT) -&gt; WrappingT:
+            if _self.wrapper.grouper.is_grouped():
+                if out.wrapper.grouped_ndim != 1:
+                    raise TypeError(&#34;Could not select one group: multiple groups returned&#34;)
+            else:
+                if out.wrapper.ndim != 1:
+                    raise TypeError(&#34;Could not select one column: multiple columns returned&#34;)
+            return out
+
         if column is not None:
             if _self.wrapper.grouper.is_grouped():
+                if _self.wrapper.grouped_ndim == 1:
+                    raise TypeError(&#34;This object already contains one group of data&#34;)
                 if column not in _self.wrapper.get_columns():
+                    if isinstance(column, int):
+                        if _self.wrapper.column_only_select:
+                            return _check_out_dim(_self.iloc[column])
+                        return _check_out_dim(_self.iloc[:, column])
                     raise KeyError(f&#34;Group &#39;{column}&#39; not found&#34;)
             else:
+                if _self.wrapper.ndim == 1:
+                    raise TypeError(&#34;This object already contains one column of data&#34;)
                 if column not in _self.wrapper.columns:
+                    if isinstance(column, int):
+                        if _self.wrapper.column_only_select:
+                            return _check_out_dim(_self.iloc[column])
+                        return _check_out_dim(_self.iloc[:, column])
                     raise KeyError(f&#34;Column &#39;{column}&#39; not found&#34;)
-            return _self[column]
+            return _check_out_dim(_self[column])
         if not _self.wrapper.grouper.is_grouped():
             if _self.wrapper.ndim == 1:
                 return _self
@@ -867,13 +914,25 @@ class Wrapping(Configured, PandasIndexer, AttrResolver):
 
     @staticmethod
     def select_one_from_obj(obj: tp.SeriesFrame, wrapper: ArrayWrapper, column: tp.Any = None) -&gt; tp.MaybeSeries:
-        &#34;&#34;&#34;Select one column/group from a pandas object.&#34;&#34;&#34;
+        &#34;&#34;&#34;Select one column/group from a pandas object.
+
+        `column` can be a label-based position as well as an integer position (if label fails).&#34;&#34;&#34;
         if column is not None:
+            if wrapper.ndim == 1:
+                raise TypeError(&#34;This object already contains one column of data&#34;)
             if wrapper.grouper.is_grouped():
                 if column not in wrapper.get_columns():
+                    if isinstance(column, int):
+                        if isinstance(obj, pd.DataFrame):
+                            return obj.iloc[:, column]
+                        return obj.iloc[column]
                     raise KeyError(f&#34;Group &#39;{column}&#39; not found&#34;)
             else:
                 if column not in wrapper.columns:
+                    if isinstance(column, int):
+                        if isinstance(obj, pd.DataFrame):
+                            return obj.iloc[:, column]
+                        return obj.iloc[column]
                     raise KeyError(f&#34;Column &#39;{column}&#39; not found&#34;)
             return obj[column]
         if not wrapper.grouper.is_grouped():
@@ -905,7 +964,7 @@ Tightly integrated with <code><a title="vectorbt.base.column_grouper.ColumnGroup
 <p><code>**kwargs</code> are passed to <code><a title="vectorbt.base.column_grouper.ColumnGrouper" href="column_grouper.html#vectorbt.base.column_grouper.ColumnGrouper">ColumnGrouper</a></code>.</p>
 <div class="admonition note">
 <p class="admonition-title">Note</p>
-<p>This class is meant to be immutable. To change any attribute, use <code><a title="vectorbt.base.array_wrapper.ArrayWrapper.copy" href="../utils/config.html#vectorbt.utils.config.Configured.copy">Configured.copy()</a></code>.</p>
+<p>This class is meant to be immutable. To change any attribute, use <code><a title="vectorbt.base.array_wrapper.ArrayWrapper.replace" href="../utils/config.html#vectorbt.utils.config.Configured.replace">Configured.replace()</a></code>.</p>
 <p>Use methods that begin with <code>get_</code> to get group-aware results.</p>
 </div></div>
 <details class="source">
@@ -921,7 +980,7 @@ Tightly integrated with <code><a title="vectorbt.base.column_grouper.ColumnGroup
     `**kwargs` are passed to `vectorbt.base.column_grouper.ColumnGrouper`.
 
     !!! note
-        This class is meant to be immutable. To change any attribute, use `ArrayWrapper.copy`.
+        This class is meant to be immutable. To change any attribute, use `ArrayWrapper.replace`.
 
         Use methods that begin with `get_` to get group-aware results.&#34;&#34;&#34;
 
@@ -1113,7 +1172,7 @@ Tightly integrated with <code><a title="vectorbt.base.column_grouper.ColumnGroup
                 ungrouped_group_idxs[group_lens[:-1]] = 1
                 ungrouped_group_idxs = np.cumsum(ungrouped_group_idxs)
 
-                return _self.copy(
+                return _self.replace(
                     index=new_index,
                     columns=ungrouped_columns,
                     ndim=ungrouped_ndim,
@@ -1123,7 +1182,7 @@ Tightly integrated with <code><a title="vectorbt.base.column_grouper.ColumnGroup
 
             # Selection based on columns
             col_idxs_arr = reshape_fns.to_1d_array(col_idxs)
-            return _self.copy(
+            return _self.replace(
                 index=new_index,
                 columns=new_columns,
                 ndim=new_ndim,
@@ -1132,7 +1191,7 @@ Tightly integrated with <code><a title="vectorbt.base.column_grouper.ColumnGroup
             ), idx_idxs, col_idxs, col_idxs
 
         # Grouping disabled
-        return _self.copy(
+        return _self.replace(
             index=new_index,
             columns=new_columns,
             ndim=new_ndim,
@@ -1151,6 +1210,9 @@ Tightly integrated with <code><a title="vectorbt.base.column_grouper.ColumnGroup
         index = index_fns.get_index(pd_obj, 0)
         columns = index_fns.get_index(pd_obj, 1)
         ndim = pd_obj.ndim
+        kwargs.pop(&#39;index&#39;, None)
+        kwargs.pop(&#39;columns&#39;, None)
+        kwargs.pop(&#39;ndim&#39;, None)
         return cls(index, columns, ndim, *args, **kwargs)
 
     @classmethod
@@ -1237,8 +1299,8 @@ Tightly integrated with <code><a title="vectorbt.base.column_grouper.ColumnGroup
                 return freq_to_timedelta(self.index.inferred_freq)
         return freq
 
-    def to_timedelta(self, a: tp.MaybeArray[float],
-                    silence_warnings: tp.Optional[bool] = None) -&gt; tp.Union[pd.Timedelta, tp.Array]:
+    def to_timedelta(self, a: tp.MaybeArray[float], to_pd: bool = False,
+                     silence_warnings: tp.Optional[bool] = None) -&gt; tp.Union[pd.Timedelta, np.timedelta64, tp.Array]:
         &#34;&#34;&#34;Convert array to duration using `ArrayWrapper.freq`.&#34;&#34;&#34;
         from vectorbt._settings import settings
         array_wrapper_cfg = settings[&#39;array_wrapper&#39;]
@@ -1251,6 +1313,8 @@ Tightly integrated with <code><a title="vectorbt.base.column_grouper.ColumnGroup
                 warnings.warn(&#34;Couldn&#39;t parse the frequency of index. Pass it as `freq` or &#34;
                               &#34;define it globally under `settings.array_wrapper`.&#34;, stacklevel=2)
             return a
+        if to_pd:
+            return pd.to_timedelta(a * self.freq)
         return a * self.freq
 
     @property
@@ -1287,7 +1351,7 @@ Tightly integrated with <code><a title="vectorbt.base.column_grouper.ColumnGroup
             if self.grouper.is_grouped(group_by=group_by):
                 if not self.grouper.is_group_count_changed(group_by=group_by):
                     grouped_ndim = self.grouped_ndim
-            return self.copy(grouped_ndim=grouped_ndim, group_by=group_by, **kwargs)
+            return self.replace(grouped_ndim=grouped_ndim, group_by=group_by, **kwargs)
         return self  # important for keeping cache
 
     @cached_method
@@ -1297,7 +1361,7 @@ Tightly integrated with <code><a title="vectorbt.base.column_grouper.ColumnGroup
         Replaces columns and other metadata with groups.&#34;&#34;&#34;
         _self = self.regroup(group_by=group_by, **kwargs)
         if _self.grouper.is_grouped():
-            return _self.copy(
+            return _self.replace(
                 columns=_self.grouper.get_columns(),
                 ndim=_self.grouped_ndim,
                 grouped_ndim=None,
@@ -1314,11 +1378,16 @@ Tightly integrated with <code><a title="vectorbt.base.column_grouper.ColumnGroup
              group_by: tp.GroupByLike = None,
              to_timedelta: bool = False,
              to_index: bool = False,
-             silence_warnings: tp.Optional[bool] = False) -&gt; tp.SeriesFrame:
+             silence_warnings: tp.Optional[bool] = None) -&gt; tp.SeriesFrame:
         &#34;&#34;&#34;Wrap a NumPy array using the stored metadata.
 
-        !!! note
-            Array will be converted to a NumPy array before wrapping.&#34;&#34;&#34;
+        Runs the following pipeline:
+
+        1) Converts to NumPy array
+        2) Fills NaN (optional)
+        3) Wraps using index, columns, and dtype (optional)
+        4) Converts to index (optional)
+        5) Converts to timedelta using `ArrayWrapper.to_timedelta` (optional)&#34;&#34;&#34;
         from vectorbt._settings import settings
         array_wrapper_cfg = settings[&#39;array_wrapper&#39;]
 
@@ -1380,14 +1449,14 @@ Tightly integrated with <code><a title="vectorbt.base.column_grouper.ColumnGroup
                      group_by: tp.GroupByLike = None,
                      to_timedelta: bool = False,
                      to_index: bool = False,
-                     silence_warnings: tp.Optional[bool] = False) -&gt; tp.MaybeSeriesFrame:
+                     silence_warnings: tp.Optional[bool] = None) -&gt; tp.MaybeSeriesFrame:
         &#34;&#34;&#34;Wrap result of reduction.
 
         `name_or_index` can be the name of the resulting series if reducing to a scalar per column,
         or the index of the resulting series/dataframe if reducing to an array per column.
         `columns` can be set to override object&#39;s default columns.
 
-        If `to_timedelta` is set, calls `ArrayWrapper.to_timedelta`.&#34;&#34;&#34;
+        See `ArrayWrapper.wrap` for the pipeline.&#34;&#34;&#34;
         from vectorbt._settings import settings
         array_wrapper_cfg = settings[&#39;array_wrapper&#39;]
 
@@ -1464,7 +1533,17 @@ Tightly integrated with <code><a title="vectorbt.base.column_grouper.ColumnGroup
     def dummy(self, group_by: tp.GroupByLike = None, **kwargs) -&gt; tp.SeriesFrame:
         &#34;&#34;&#34;Create a dummy Series/DataFrame.&#34;&#34;&#34;
         _self = self.resolve(group_by=group_by)
-        return _self.wrap(np.empty(_self.shape), **kwargs)</code></pre>
+        return _self.wrap(np.empty(_self.shape), **kwargs)
+
+    def fill(self, fill_value: tp.Scalar, group_by: tp.GroupByLike = None, **kwargs) -&gt; tp.SeriesFrame:
+        &#34;&#34;&#34;Fill a Series/DataFrame.&#34;&#34;&#34;
+        _self = self.resolve(group_by=group_by)
+        return _self.wrap(np.full(_self.shape_2d, fill_value), **kwargs)
+
+    def fill_reduced(self, fill_value: tp.Scalar, group_by: tp.GroupByLike = None, **kwargs) -&gt; tp.SeriesFrame:
+        &#34;&#34;&#34;Fill a reduced Series/DataFrame.&#34;&#34;&#34;
+        _self = self.resolve(group_by=group_by)
+        return _self.wrap(np.full(_self.shape_2d[1], fill_value), **kwargs)</code></pre>
 </details>
 <h3 class="section-subtitle">Ancestors</h3>
 <ul class="hlist">
@@ -1492,6 +1571,9 @@ def from_obj(cls: tp.Type[ArrayWrapperT], obj: tp.ArrayLike, *args, **kwargs) -&
     index = index_fns.get_index(pd_obj, 0)
     columns = index_fns.get_index(pd_obj, 1)
     ndim = pd_obj.ndim
+    kwargs.pop(&#39;index&#39;, None)
+    kwargs.pop(&#39;columns&#39;, None)
+    kwargs.pop(&#39;ndim&#39;, None)
     return cls(index, columns, ndim, *args, **kwargs)</code></pre>
 </details>
 </dd>
@@ -1700,6 +1782,36 @@ def shape_2d(self) -&gt; tp.Shape:
     &#34;&#34;&#34;Create a dummy Series/DataFrame.&#34;&#34;&#34;
     _self = self.resolve(group_by=group_by)
     return _self.wrap(np.empty(_self.shape), **kwargs)</code></pre>
+</details>
+</dd>
+<dt id="vectorbt.base.array_wrapper.ArrayWrapper.fill"><code class="name flex">
+<span>def <span class="ident child-name">fill</span></span>(<span class="params">self, fill_value, group_by=None, **kwargs)</span><span class="return_type"></span>
+</code></dt>
+<dd>
+<div class="desc"><p>Fill a Series/DataFrame.</p></div>
+<details class="source">
+<summary>
+<span>Expand source code</span>
+</summary>
+<pre><code class="python">def fill(self, fill_value: tp.Scalar, group_by: tp.GroupByLike = None, **kwargs) -&gt; tp.SeriesFrame:
+    &#34;&#34;&#34;Fill a Series/DataFrame.&#34;&#34;&#34;
+    _self = self.resolve(group_by=group_by)
+    return _self.wrap(np.full(_self.shape_2d, fill_value), **kwargs)</code></pre>
+</details>
+</dd>
+<dt id="vectorbt.base.array_wrapper.ArrayWrapper.fill_reduced"><code class="name flex">
+<span>def <span class="ident child-name">fill_reduced</span></span>(<span class="params">self, fill_value, group_by=None, **kwargs)</span><span class="return_type"></span>
+</code></dt>
+<dd>
+<div class="desc"><p>Fill a reduced Series/DataFrame.</p></div>
+<details class="source">
+<summary>
+<span>Expand source code</span>
+</summary>
+<pre><code class="python">def fill_reduced(self, fill_value: tp.Scalar, group_by: tp.GroupByLike = None, **kwargs) -&gt; tp.SeriesFrame:
+    &#34;&#34;&#34;Fill a reduced Series/DataFrame.&#34;&#34;&#34;
+    _self = self.resolve(group_by=group_by)
+    return _self.wrap(np.full(_self.shape_2d[1], fill_value), **kwargs)</code></pre>
 </details>
 </dd>
 <dt id="vectorbt.base.array_wrapper.ArrayWrapper.get_columns"><code class="name flex">
@@ -1955,7 +2067,7 @@ def indexing_func_meta(self: ArrayWrapperT,
             ungrouped_group_idxs[group_lens[:-1]] = 1
             ungrouped_group_idxs = np.cumsum(ungrouped_group_idxs)
 
-            return _self.copy(
+            return _self.replace(
                 index=new_index,
                 columns=ungrouped_columns,
                 ndim=ungrouped_ndim,
@@ -1965,7 +2077,7 @@ def indexing_func_meta(self: ArrayWrapperT,
 
         # Selection based on columns
         col_idxs_arr = reshape_fns.to_1d_array(col_idxs)
-        return _self.copy(
+        return _self.replace(
             index=new_index,
             columns=new_columns,
             ndim=new_ndim,
@@ -1974,7 +2086,7 @@ def indexing_func_meta(self: ArrayWrapperT,
         ), idx_idxs, col_idxs, col_idxs
 
     # Grouping disabled
-    return _self.copy(
+    return _self.replace(
         index=new_index,
         columns=new_columns,
         ndim=new_ndim,
@@ -2003,7 +2115,7 @@ def indexing_func_meta(self: ArrayWrapperT,
         if self.grouper.is_grouped(group_by=group_by):
             if not self.grouper.is_group_count_changed(group_by=group_by):
                 grouped_ndim = self.grouped_ndim
-        return self.copy(grouped_ndim=grouped_ndim, group_by=group_by, **kwargs)
+        return self.replace(grouped_ndim=grouped_ndim, group_by=group_by, **kwargs)
     return self  # important for keeping cache</code></pre>
 </details>
 </dd>
@@ -2024,7 +2136,7 @@ def resolve(self: ArrayWrapperT, group_by: tp.GroupByLike = None, **kwargs) -&gt
     Replaces columns and other metadata with groups.&#34;&#34;&#34;
     _self = self.regroup(group_by=group_by, **kwargs)
     if _self.grouper.is_grouped():
-        return _self.copy(
+        return _self.replace(
             columns=_self.grouper.get_columns(),
             ndim=_self.grouped_ndim,
             grouped_ndim=None,
@@ -2034,7 +2146,7 @@ def resolve(self: ArrayWrapperT, group_by: tp.GroupByLike = None, **kwargs) -&gt
 </details>
 </dd>
 <dt id="vectorbt.base.array_wrapper.ArrayWrapper.to_timedelta"><code class="name flex">
-<span>def <span class="ident child-name">to_timedelta</span></span>(<span class="params">self, a, silence_warnings=None)</span><span class="return_type"></span>
+<span>def <span class="ident child-name">to_timedelta</span></span>(<span class="params">self, a, to_pd=False, silence_warnings=None)</span><span class="return_type"></span>
 </code></dt>
 <dd>
 <div class="desc"><p>Convert array to duration using <code><a title="vectorbt.base.array_wrapper.ArrayWrapper.freq" href="#vectorbt.base.array_wrapper.ArrayWrapper.freq">ArrayWrapper.freq</a></code>.</p></div>
@@ -2042,8 +2154,8 @@ def resolve(self: ArrayWrapperT, group_by: tp.GroupByLike = None, **kwargs) -&gt
 <summary>
 <span>Expand source code</span>
 </summary>
-<pre><code class="python">def to_timedelta(self, a: tp.MaybeArray[float],
-                silence_warnings: tp.Optional[bool] = None) -&gt; tp.Union[pd.Timedelta, tp.Array]:
+<pre><code class="python">def to_timedelta(self, a: tp.MaybeArray[float], to_pd: bool = False,
+                 silence_warnings: tp.Optional[bool] = None) -&gt; tp.Union[pd.Timedelta, np.timedelta64, tp.Array]:
     &#34;&#34;&#34;Convert array to duration using `ArrayWrapper.freq`.&#34;&#34;&#34;
     from vectorbt._settings import settings
     array_wrapper_cfg = settings[&#39;array_wrapper&#39;]
@@ -2056,18 +2168,22 @@ def resolve(self: ArrayWrapperT, group_by: tp.GroupByLike = None, **kwargs) -&gt
             warnings.warn(&#34;Couldn&#39;t parse the frequency of index. Pass it as `freq` or &#34;
                           &#34;define it globally under `settings.array_wrapper`.&#34;, stacklevel=2)
         return a
+    if to_pd:
+        return pd.to_timedelta(a * self.freq)
     return a * self.freq</code></pre>
 </details>
 </dd>
 <dt id="vectorbt.base.array_wrapper.ArrayWrapper.wrap"><code class="name flex">
-<span>def <span class="ident child-name">wrap</span></span>(<span class="params">self, arr, index=None, columns=None, fillna=None, dtype=None, group_by=None, to_timedelta=False, to_index=False, silence_warnings=False)</span><span class="return_type"></span>
+<span>def <span class="ident child-name">wrap</span></span>(<span class="params">self, arr, index=None, columns=None, fillna=None, dtype=None, group_by=None, to_timedelta=False, to_index=False, silence_warnings=None)</span><span class="return_type"></span>
 </code></dt>
 <dd>
 <div class="desc"><p>Wrap a NumPy array using the stored metadata.</p>
-<div class="admonition note">
-<p class="admonition-title">Note</p>
-<p>Array will be converted to a NumPy array before wrapping.</p>
-</div></div>
+<p>Runs the following pipeline:</p>
+<p>1) Converts to NumPy array
+2) Fills NaN (optional)
+3) Wraps using index, columns, and dtype (optional)
+4) Converts to index (optional)
+5) Converts to timedelta using <code><a title="vectorbt.base.array_wrapper.ArrayWrapper.to_timedelta" href="#vectorbt.base.array_wrapper.ArrayWrapper.to_timedelta">ArrayWrapper.to_timedelta()</a></code> (optional)</p></div>
 <details class="source">
 <summary>
 <span>Expand source code</span>
@@ -2081,11 +2197,16 @@ def resolve(self: ArrayWrapperT, group_by: tp.GroupByLike = None, **kwargs) -&gt
          group_by: tp.GroupByLike = None,
          to_timedelta: bool = False,
          to_index: bool = False,
-         silence_warnings: tp.Optional[bool] = False) -&gt; tp.SeriesFrame:
+         silence_warnings: tp.Optional[bool] = None) -&gt; tp.SeriesFrame:
     &#34;&#34;&#34;Wrap a NumPy array using the stored metadata.
 
-    !!! note
-        Array will be converted to a NumPy array before wrapping.&#34;&#34;&#34;
+    Runs the following pipeline:
+
+    1) Converts to NumPy array
+    2) Fills NaN (optional)
+    3) Wraps using index, columns, and dtype (optional)
+    4) Converts to index (optional)
+    5) Converts to timedelta using `ArrayWrapper.to_timedelta` (optional)&#34;&#34;&#34;
     from vectorbt._settings import settings
     array_wrapper_cfg = settings[&#39;array_wrapper&#39;]
 
@@ -2140,14 +2261,14 @@ def resolve(self: ArrayWrapperT, group_by: tp.GroupByLike = None, **kwargs) -&gt
 </details>
 </dd>
 <dt id="vectorbt.base.array_wrapper.ArrayWrapper.wrap_reduced"><code class="name flex">
-<span>def <span class="ident child-name">wrap_reduced</span></span>(<span class="params">self, arr, name_or_index=None, columns=None, fillna=None, dtype=None, group_by=None, to_timedelta=False, to_index=False, silence_warnings=False)</span><span class="return_type"></span>
+<span>def <span class="ident child-name">wrap_reduced</span></span>(<span class="params">self, arr, name_or_index=None, columns=None, fillna=None, dtype=None, group_by=None, to_timedelta=False, to_index=False, silence_warnings=None)</span><span class="return_type"></span>
 </code></dt>
 <dd>
 <div class="desc"><p>Wrap result of reduction.</p>
 <p><code>name_or_index</code> can be the name of the resulting series if reducing to a scalar per column,
 or the index of the resulting series/dataframe if reducing to an array per column.
 <code>columns</code> can be set to override object's default columns.</p>
-<p>If <code>to_timedelta</code> is set, calls <code><a title="vectorbt.base.array_wrapper.ArrayWrapper.to_timedelta" href="#vectorbt.base.array_wrapper.ArrayWrapper.to_timedelta">ArrayWrapper.to_timedelta()</a></code>.</p></div>
+<p>See <code><a title="vectorbt.base.array_wrapper.ArrayWrapper.wrap" href="#vectorbt.base.array_wrapper.ArrayWrapper.wrap">ArrayWrapper.wrap()</a></code> for the pipeline.</p></div>
 <details class="source">
 <summary>
 <span>Expand source code</span>
@@ -2161,14 +2282,14 @@ or the index of the resulting series/dataframe if reducing to an array per colum
                  group_by: tp.GroupByLike = None,
                  to_timedelta: bool = False,
                  to_index: bool = False,
-                 silence_warnings: tp.Optional[bool] = False) -&gt; tp.MaybeSeriesFrame:
+                 silence_warnings: tp.Optional[bool] = None) -&gt; tp.MaybeSeriesFrame:
     &#34;&#34;&#34;Wrap result of reduction.
 
     `name_or_index` can be the name of the resulting series if reducing to a scalar per column,
     or the index of the resulting series/dataframe if reducing to an array per column.
     `columns` can be set to override object&#39;s default columns.
 
-    If `to_timedelta` is set, calls `ArrayWrapper.to_timedelta`.&#34;&#34;&#34;
+    See `ArrayWrapper.wrap` for the pipeline.&#34;&#34;&#34;
     from vectorbt._settings import settings
     array_wrapper_cfg = settings[&#39;array_wrapper&#39;]
 
@@ -2253,6 +2374,7 @@ or the index of the resulting series/dataframe if reducing to an array per colum
 <li><code><a title="vectorbt.utils.config.Configured.dumps" href="../utils/config.html#vectorbt.utils.config.Pickleable.dumps">dumps</a></code></li>
 <li><code><a title="vectorbt.utils.config.Configured.load" href="../utils/config.html#vectorbt.utils.config.Pickleable.load">load</a></code></li>
 <li><code><a title="vectorbt.utils.config.Configured.loads" href="../utils/config.html#vectorbt.utils.config.Pickleable.loads">loads</a></code></li>
+<li><code><a title="vectorbt.utils.config.Configured.replace" href="../utils/config.html#vectorbt.utils.config.Configured.replace">replace</a></code></li>
 <li><code><a title="vectorbt.utils.config.Configured.save" href="../utils/config.html#vectorbt.utils.config.Pickleable.save">save</a></code></li>
 <li><code><a title="vectorbt.utils.config.Configured.to_doc" href="../utils/docs.html#vectorbt.utils.docs.Documented.to_doc">to_doc</a></code></li>
 <li><code><a title="vectorbt.utils.config.Configured.update_config" href="../utils/config.html#vectorbt.utils.config.Configured.update_config">update_config</a></code></li>
@@ -2283,7 +2405,7 @@ or the index of the resulting series/dataframe if reducing to an array per colum
     &#34;&#34;&#34;Class that uses `ArrayWrapper` globally.&#34;&#34;&#34;
 
     def __init__(self, wrapper: ArrayWrapper, **kwargs) -&gt; None:
-        checks.assert_type(wrapper, ArrayWrapper)
+        checks.assert_instance_of(wrapper, ArrayWrapper)
         self._wrapper = wrapper
 
         Configured.__init__(self, wrapper=wrapper, **kwargs)
@@ -2292,7 +2414,7 @@ or the index of the resulting series/dataframe if reducing to an array per colum
 
     def indexing_func(self: WrappingT, pd_indexing_func: tp.PandasIndexingFunc, **kwargs) -&gt; WrappingT:
         &#34;&#34;&#34;Perform indexing on `Wrapping`.&#34;&#34;&#34;
-        return self.copy(wrapper=self.wrapper.indexing_func(pd_indexing_func, **kwargs))
+        return self.replace(wrapper=self.wrapper.indexing_func(pd_indexing_func, **kwargs))
 
     @property
     def wrapper(self) -&gt; ArrayWrapper:
@@ -2307,7 +2429,7 @@ or the index of the resulting series/dataframe if reducing to an array per colum
         `**kwargs` will be passed to `ArrayWrapper.regroup`.&#34;&#34;&#34;
         if self.wrapper.grouper.is_grouping_changed(group_by=group_by):
             self.wrapper.grouper.check_group_by(group_by=group_by)
-            return self.copy(wrapper=self.wrapper.regroup(group_by, **kwargs))
+            return self.replace(wrapper=self.wrapper.regroup(group_by, **kwargs))
         return self  # important for keeping cache
 
     def resolve_self(self: AttrResolverT,
@@ -2329,13 +2451,13 @@ or the index of the resulting series/dataframe if reducing to an array per colum
             silence_warnings = array_wrapper_cfg[&#39;silence_warnings&#39;]
 
         if &#39;freq&#39; in cond_kwargs:
-            wrapper_copy = self.wrapper.copy(freq=cond_kwargs[&#39;freq&#39;])
+            wrapper_copy = self.wrapper.replace(freq=cond_kwargs[&#39;freq&#39;])
 
             if wrapper_copy.freq != self.wrapper.freq:
                 if not silence_warnings:
                     warnings.warn(f&#34;Changing the frequency will create a copy of this object. &#34;
                                   f&#34;Consider setting it upon object creation to re-use existing cache.&#34;, stacklevel=2)
-                self_copy = self.copy(wrapper=wrapper_copy)
+                self_copy = self.replace(wrapper=wrapper_copy)
                 for alias in self.self_aliases:
                     if alias not in custom_arg_names:
                         cond_kwargs[alias] = self_copy
@@ -2346,16 +2468,40 @@ or the index of the resulting series/dataframe if reducing to an array per colum
         return self
 
     def select_one(self: WrappingT, column: tp.Any = None, group_by: tp.GroupByLike = None, **kwargs) -&gt; WrappingT:
-        &#34;&#34;&#34;Select one column/group.&#34;&#34;&#34;
+        &#34;&#34;&#34;Select one column/group.
+
+        `column` can be a label-based position as well as an integer position (if label fails).&#34;&#34;&#34;
         _self = self.regroup(group_by, **kwargs)
+
+        def _check_out_dim(out: WrappingT) -&gt; WrappingT:
+            if _self.wrapper.grouper.is_grouped():
+                if out.wrapper.grouped_ndim != 1:
+                    raise TypeError(&#34;Could not select one group: multiple groups returned&#34;)
+            else:
+                if out.wrapper.ndim != 1:
+                    raise TypeError(&#34;Could not select one column: multiple columns returned&#34;)
+            return out
+
         if column is not None:
             if _self.wrapper.grouper.is_grouped():
+                if _self.wrapper.grouped_ndim == 1:
+                    raise TypeError(&#34;This object already contains one group of data&#34;)
                 if column not in _self.wrapper.get_columns():
+                    if isinstance(column, int):
+                        if _self.wrapper.column_only_select:
+                            return _check_out_dim(_self.iloc[column])
+                        return _check_out_dim(_self.iloc[:, column])
                     raise KeyError(f&#34;Group &#39;{column}&#39; not found&#34;)
             else:
+                if _self.wrapper.ndim == 1:
+                    raise TypeError(&#34;This object already contains one column of data&#34;)
                 if column not in _self.wrapper.columns:
+                    if isinstance(column, int):
+                        if _self.wrapper.column_only_select:
+                            return _check_out_dim(_self.iloc[column])
+                        return _check_out_dim(_self.iloc[:, column])
                     raise KeyError(f&#34;Column &#39;{column}&#39; not found&#34;)
-            return _self[column]
+            return _check_out_dim(_self[column])
         if not _self.wrapper.grouper.is_grouped():
             if _self.wrapper.ndim == 1:
                 return _self
@@ -2366,13 +2512,25 @@ or the index of the resulting series/dataframe if reducing to an array per colum
 
     @staticmethod
     def select_one_from_obj(obj: tp.SeriesFrame, wrapper: ArrayWrapper, column: tp.Any = None) -&gt; tp.MaybeSeries:
-        &#34;&#34;&#34;Select one column/group from a pandas object.&#34;&#34;&#34;
+        &#34;&#34;&#34;Select one column/group from a pandas object.
+
+        `column` can be a label-based position as well as an integer position (if label fails).&#34;&#34;&#34;
         if column is not None:
+            if wrapper.ndim == 1:
+                raise TypeError(&#34;This object already contains one column of data&#34;)
             if wrapper.grouper.is_grouped():
                 if column not in wrapper.get_columns():
+                    if isinstance(column, int):
+                        if isinstance(obj, pd.DataFrame):
+                            return obj.iloc[:, column]
+                        return obj.iloc[column]
                     raise KeyError(f&#34;Group &#39;{column}&#39; not found&#34;)
             else:
                 if column not in wrapper.columns:
+                    if isinstance(column, int):
+                        if isinstance(obj, pd.DataFrame):
+                            return obj.iloc[:, column]
+                        return obj.iloc[column]
                     raise KeyError(f&#34;Column &#39;{column}&#39; not found&#34;)
             return obj[column]
         if not wrapper.grouper.is_grouped():
@@ -2408,20 +2566,33 @@ or the index of the resulting series/dataframe if reducing to an array per colum
 <span>def <span class="ident child-name">select_one_from_obj</span></span>(<span class="params">obj, wrapper, column=None)</span><span class="return_type"></span>
 </code></dt>
 <dd>
-<div class="desc"><p>Select one column/group from a pandas object.</p></div>
+<div class="desc"><p>Select one column/group from a pandas object.</p>
+<p><code>column</code> can be a label-based position as well as an integer position (if label fails).</p></div>
 <details class="source">
 <summary>
 <span>Expand source code</span>
 </summary>
 <pre><code class="python">@staticmethod
 def select_one_from_obj(obj: tp.SeriesFrame, wrapper: ArrayWrapper, column: tp.Any = None) -&gt; tp.MaybeSeries:
-    &#34;&#34;&#34;Select one column/group from a pandas object.&#34;&#34;&#34;
+    &#34;&#34;&#34;Select one column/group from a pandas object.
+
+    `column` can be a label-based position as well as an integer position (if label fails).&#34;&#34;&#34;
     if column is not None:
+        if wrapper.ndim == 1:
+            raise TypeError(&#34;This object already contains one column of data&#34;)
         if wrapper.grouper.is_grouped():
             if column not in wrapper.get_columns():
+                if isinstance(column, int):
+                    if isinstance(obj, pd.DataFrame):
+                        return obj.iloc[:, column]
+                    return obj.iloc[column]
                 raise KeyError(f&#34;Group &#39;{column}&#39; not found&#34;)
         else:
             if column not in wrapper.columns:
+                if isinstance(column, int):
+                    if isinstance(obj, pd.DataFrame):
+                        return obj.iloc[:, column]
+                    return obj.iloc[column]
                 raise KeyError(f&#34;Column &#39;{column}&#39; not found&#34;)
         return obj[column]
     if not wrapper.grouper.is_grouped():
@@ -2463,7 +2634,7 @@ def wrapper(self) -&gt; ArrayWrapper:
 </summary>
 <pre><code class="python">def indexing_func(self: WrappingT, pd_indexing_func: tp.PandasIndexingFunc, **kwargs) -&gt; WrappingT:
     &#34;&#34;&#34;Perform indexing on `Wrapping`.&#34;&#34;&#34;
-    return self.copy(wrapper=self.wrapper.indexing_func(pd_indexing_func, **kwargs))</code></pre>
+    return self.replace(wrapper=self.wrapper.indexing_func(pd_indexing_func, **kwargs))</code></pre>
 </details>
 </dd>
 <dt id="vectorbt.base.array_wrapper.Wrapping.regroup"><code class="name flex">
@@ -2485,7 +2656,7 @@ def wrapper(self) -&gt; ArrayWrapper:
     `**kwargs` will be passed to `ArrayWrapper.regroup`.&#34;&#34;&#34;
     if self.wrapper.grouper.is_grouping_changed(group_by=group_by):
         self.wrapper.grouper.check_group_by(group_by=group_by)
-        return self.copy(wrapper=self.wrapper.regroup(group_by, **kwargs))
+        return self.replace(wrapper=self.wrapper.regroup(group_by, **kwargs))
     return self  # important for keeping cache</code></pre>
 </details>
 </dd>
@@ -2518,13 +2689,13 @@ def wrapper(self) -&gt; ArrayWrapper:
         silence_warnings = array_wrapper_cfg[&#39;silence_warnings&#39;]
 
     if &#39;freq&#39; in cond_kwargs:
-        wrapper_copy = self.wrapper.copy(freq=cond_kwargs[&#39;freq&#39;])
+        wrapper_copy = self.wrapper.replace(freq=cond_kwargs[&#39;freq&#39;])
 
         if wrapper_copy.freq != self.wrapper.freq:
             if not silence_warnings:
                 warnings.warn(f&#34;Changing the frequency will create a copy of this object. &#34;
                               f&#34;Consider setting it upon object creation to re-use existing cache.&#34;, stacklevel=2)
-            self_copy = self.copy(wrapper=wrapper_copy)
+            self_copy = self.replace(wrapper=wrapper_copy)
             for alias in self.self_aliases:
                 if alias not in custom_arg_names:
                     cond_kwargs[alias] = self_copy
@@ -2539,22 +2710,47 @@ def wrapper(self) -&gt; ArrayWrapper:
 <span>def <span class="ident child-name">select_one</span></span>(<span class="params">self, column=None, group_by=None, **kwargs)</span><span class="return_type"></span>
 </code></dt>
 <dd>
-<div class="desc"><p>Select one column/group.</p></div>
+<div class="desc"><p>Select one column/group.</p>
+<p><code>column</code> can be a label-based position as well as an integer position (if label fails).</p></div>
 <details class="source">
 <summary>
 <span>Expand source code</span>
 </summary>
 <pre><code class="python">def select_one(self: WrappingT, column: tp.Any = None, group_by: tp.GroupByLike = None, **kwargs) -&gt; WrappingT:
-    &#34;&#34;&#34;Select one column/group.&#34;&#34;&#34;
+    &#34;&#34;&#34;Select one column/group.
+
+    `column` can be a label-based position as well as an integer position (if label fails).&#34;&#34;&#34;
     _self = self.regroup(group_by, **kwargs)
+
+    def _check_out_dim(out: WrappingT) -&gt; WrappingT:
+        if _self.wrapper.grouper.is_grouped():
+            if out.wrapper.grouped_ndim != 1:
+                raise TypeError(&#34;Could not select one group: multiple groups returned&#34;)
+        else:
+            if out.wrapper.ndim != 1:
+                raise TypeError(&#34;Could not select one column: multiple columns returned&#34;)
+        return out
+
     if column is not None:
         if _self.wrapper.grouper.is_grouped():
+            if _self.wrapper.grouped_ndim == 1:
+                raise TypeError(&#34;This object already contains one group of data&#34;)
             if column not in _self.wrapper.get_columns():
+                if isinstance(column, int):
+                    if _self.wrapper.column_only_select:
+                        return _check_out_dim(_self.iloc[column])
+                    return _check_out_dim(_self.iloc[:, column])
                 raise KeyError(f&#34;Group &#39;{column}&#39; not found&#34;)
         else:
+            if _self.wrapper.ndim == 1:
+                raise TypeError(&#34;This object already contains one column of data&#34;)
             if column not in _self.wrapper.columns:
+                if isinstance(column, int):
+                    if _self.wrapper.column_only_select:
+                        return _check_out_dim(_self.iloc[column])
+                    return _check_out_dim(_self.iloc[:, column])
                 raise KeyError(f&#34;Column &#39;{column}&#39; not found&#34;)
-        return _self[column]
+        return _check_out_dim(_self[column])
     if not _self.wrapper.grouper.is_grouped():
         if _self.wrapper.ndim == 1:
             return _self
@@ -2574,6 +2770,7 @@ def wrapper(self) -&gt; ArrayWrapper:
 <li><code><a title="vectorbt.utils.config.Configured.dumps" href="../utils/config.html#vectorbt.utils.config.Pickleable.dumps">dumps</a></code></li>
 <li><code><a title="vectorbt.utils.config.Configured.load" href="../utils/config.html#vectorbt.utils.config.Pickleable.load">load</a></code></li>
 <li><code><a title="vectorbt.utils.config.Configured.loads" href="../utils/config.html#vectorbt.utils.config.Pickleable.loads">loads</a></code></li>
+<li><code><a title="vectorbt.utils.config.Configured.replace" href="../utils/config.html#vectorbt.utils.config.Configured.replace">replace</a></code></li>
 <li><code><a title="vectorbt.utils.config.Configured.save" href="../utils/config.html#vectorbt.utils.config.Pickleable.save">save</a></code></li>
 <li><code><a title="vectorbt.utils.config.Configured.to_doc" href="../utils/docs.html#vectorbt.utils.docs.Documented.to_doc">to_doc</a></code></li>
 <li><code><a title="vectorbt.utils.config.Configured.update_config" href="../utils/config.html#vectorbt.utils.config.Configured.update_config">update_config</a></code></li>
@@ -2606,7 +2803,7 @@ def wrapper(self) -&gt; ArrayWrapper:
 <header>
 <a class="homelink" rel="home" title="pdoc Home" href="https://github.com/polakowo/vectorbt">
 <img src="data:image/svg+xml;base64,PD94bWwgdmVyc2lvbj0iMS4wIiBlbmNvZGluZz0idXRmLTgiPz4KPCEtLSBHZW5lcmF0b3I6IEFkb2JlIElsbHVzdHJhdG9yIDI1LjAuMSwgU1ZHIEV4cG9ydCBQbHVnLUluIC4gU1ZHIFZlcnNpb246IDYuMDAgQnVpbGQgMCkgIC0tPgo8c3ZnIHZlcnNpb249IjEuMSIgaWQ9IkNhcGFfMSIgeG1sbnM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDAvc3ZnIiB4bWxuczp4bGluaz0iaHR0cDovL3d3dy53My5vcmcvMTk5OS94bGluayIgeD0iMHB4IiB5PSIwcHgiCgkgdmlld0JveD0iMCAwIDUxMiA1MTIiIHN0eWxlPSJlbmFibGUtYmFja2dyb3VuZDpuZXcgMCAwIDUxMiA1MTI7IiB4bWw6c3BhY2U9InByZXNlcnZlIj4KPHN0eWxlIHR5cGU9InRleHQvY3NzIj4KCS5zdDB7ZmlsbDojRUYwMDAwO30KCS5zdDF7ZmlsbDojRkY5MDAwO30KCS5zdDJ7ZmlsbDojRkZERjAwO30KCS5zdDN7ZmlsbDojMjgyQzM0O30KPC9zdHlsZT4KPGc+Cgk8Zz4KCQk8Zz4KCQkJPHBvbHlnb24gY2xhc3M9InN0MCIgcG9pbnRzPSIxNTUuMywzMDAuMSAyODMuMSwwIDIwOCwwIDExMC44LDAgMzUuOCwwIDEuMiw0NTAuMiA3Ni4zLDQ1MC4yIAkJCSIvPgoJCTwvZz4KCTwvZz4KCTxnPgoJCTxnPgoJCQk8cG9seWdvbiBjbGFzcz0ic3QxIiBwb2ludHM9IjIzMC40LDMwMC4xIDM1OC4xLDAgMjgzLjEsMCAxODUuOCwwIDExMC44LDAgNzYuMyw0NTAuMiAxNTEuMyw0NTAuMiAJCQkiLz4KCQk8L2c+Cgk8L2c+Cgk8Zz4KCQk8Zz4KCQkJPHBvbHlnb24gY2xhc3M9InN0MiIgcG9pbnRzPSIzMDUuNCwzMDAuMSA0MzMuMSwwIDM1OC4xLDAgMzMxLjYsNjIuMyAyNjAuOCwwIDE4NS44LDAgMTUxLjMsNDUwLjIgMjI2LjQsNDUwLjIgCQkJIi8+CgkJPC9nPgoJPC9nPgoJPGc+CgkJPGc+CgkJCTxwb2x5Z29uIGNsYXNzPSJzdDMiIHBvaW50cz0iNTEwLjgsMCA0MzMuMSwwIDMwNS40LDMwMC4xIDMzOC40LDAgMjYwLjgsMCAyMjYuNCw0NTAuMiAzMDQsNDUwLjIgCQkJIi8+CgkJPC9nPgoJPC9nPgo8L2c+Cjwvc3ZnPgo="/>
-vectorbt <span class="version">0.20.0</span></a>
+vectorbt <span class="version">0.21.0</span></a>
 </header>
 <div class="search-container">
 <input
@@ -2635,6 +2832,8 @@ title="Search"
 <li><code><a title="vectorbt.base.array_wrapper.ArrayWrapper.column_only_select" href="#vectorbt.base.array_wrapper.ArrayWrapper.column_only_select">column_only_select</a></code></li>
 <li><code><a title="vectorbt.base.array_wrapper.ArrayWrapper.columns" href="#vectorbt.base.array_wrapper.ArrayWrapper.columns">columns</a></code></li>
 <li><code><a title="vectorbt.base.array_wrapper.ArrayWrapper.dummy" href="#vectorbt.base.array_wrapper.ArrayWrapper.dummy">dummy</a></code></li>
+<li><code><a title="vectorbt.base.array_wrapper.ArrayWrapper.fill" href="#vectorbt.base.array_wrapper.ArrayWrapper.fill">fill</a></code></li>
+<li><code><a title="vectorbt.base.array_wrapper.ArrayWrapper.fill_reduced" href="#vectorbt.base.array_wrapper.ArrayWrapper.fill_reduced">fill_reduced</a></code></li>
 <li><code><a title="vectorbt.base.array_wrapper.ArrayWrapper.freq" href="#vectorbt.base.array_wrapper.ArrayWrapper.freq">freq</a></code></li>
 <li><code><a title="vectorbt.base.array_wrapper.ArrayWrapper.from_obj" href="#vectorbt.base.array_wrapper.ArrayWrapper.from_obj">from_obj</a></code></li>
 <li><code><a title="vectorbt.base.array_wrapper.ArrayWrapper.from_shape" href="#vectorbt.base.array_wrapper.ArrayWrapper.from_shape">from_shape</a></code></li>

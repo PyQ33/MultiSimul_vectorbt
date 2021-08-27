@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, minimum-scale=1" />
-<meta name="generator" content="pdoc 0.9.2" />
+<meta name="generator" content="pdoc 0.10.0" />
 <title>vectorbt.generic.stats_builder API documentation</title>
 <meta name="description" content="Mixin for building statistics out of performance metrics." />
 <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/5.12.0-2/css/all.min.css" integrity="sha256-46r060N2LrChLLb5zowXQ72/iKKNiw/lAmygmHExk/o=" crossorigin="anonymous" />
@@ -44,7 +44,10 @@ gtag('config', 'G-4QLCS0J048');
 <summary>
 <span>Expand source code</span>
 </summary>
-<pre><code class="python">&#34;&#34;&#34;Mixin for building statistics out of performance metrics.&#34;&#34;&#34;
+<pre><code class="python"># Copyright (c) 2021 Oleg Polakow. All rights reserved.
+# This code is licensed under Apache 2.0 with Commons Clause license (see LICENSE.md for details)
+
+&#34;&#34;&#34;Mixin for building statistics out of performance metrics.&#34;&#34;&#34;
 
 import pandas as pd
 import numpy as np
@@ -76,8 +79,8 @@ class StatsBuilderMixin(metaclass=MetaStatsBuilderMixin):
 
     Required to be a subclass of `vectorbt.base.array_wrapper.Wrapping`.&#34;&#34;&#34;
 
-    def __init__(self):
-        checks.assert_type(self, Wrapping)
+    def __init__(self) -&gt; None:
+        checks.assert_instance_of(self, Wrapping)
 
         # Copy writeable attrs
         self._metrics = self.__class__._metrics.copy()
@@ -127,17 +130,17 @@ class StatsBuilderMixin(metaclass=MetaStatsBuilderMixin):
 
     @property
     def metrics(self) -&gt; Config:
-        &#34;&#34;&#34;Metrics supported by `StatsBuilderMixin.stats`.
+        &#34;&#34;&#34;Metrics supported by `${cls_name}`.
 
         ```json
         ${metrics}
         ```
 
-        Returns `StatsBuilderMixin._metrics`, which gets (deep) copied upon creation of each instance.
+        Returns `${cls_name}._metrics`, which gets (deep) copied upon creation of each instance.
         Thus, changing this config won&#39;t affect the class.
 
-        To change metrics, you can either change the config in-place, override `StatsBuilderMixin.metrics`,
-        or overwrite the instance variable `StatsBuilderMixin._metrics`.&#34;&#34;&#34;
+        To change metrics, you can either change the config in-place, override this property,
+        or overwrite the instance variable `${cls_name}._metrics`.&#34;&#34;&#34;
         return self._metrics
 
     def stats(self,
@@ -190,8 +193,8 @@ class StatsBuilderMixin(metaclass=MetaStatsBuilderMixin):
                     this argument was found in the function&#39;s signature. Set to False to not pass.
                     If argument to be passed was not found, `pass_{arg}` is removed.
                 * `resolve_path_{arg}`: Whether to resolve an argument that is meant to be an attribute of
-                    this object and is part of the path of `calc_func`. Defaults to True.
-                    See `vectorbt.utils.attr.AttrResolver.resolve_attr`.
+                    this object and is the first part of the path of `calc_func`. Passes only optional arguments.
+                    Defaults to True. See `vectorbt.utils.attr.AttrResolver.resolve_attr`.
                 * `resolve_{arg}`: Whether to resolve an argument that is meant to be an attribute of
                     this object and is present in the function&#39;s signature. Defaults to False.
                     See `vectorbt.utils.attr.AttrResolver.resolve_attr`.
@@ -289,11 +292,11 @@ class StatsBuilderMixin(metaclass=MetaStatsBuilderMixin):
         &#34;&#34;&#34;
         # Resolve defaults
         if silence_warnings is None:
-            silence_warnings = self.stats_defaults[&#39;silence_warnings&#39;]
-        template_mapping = merge_dicts(self.stats_defaults[&#39;template_mapping&#39;], template_mapping)
-        filters = merge_dicts(self.stats_defaults[&#39;filters&#39;], filters)
-        settings = merge_dicts(self.stats_defaults[&#39;settings&#39;], settings)
-        metric_settings = merge_dicts(self.stats_defaults[&#39;metric_settings&#39;], metric_settings)
+            silence_warnings = self.stats_defaults.get(&#39;silence_warnings&#39;, False)
+        template_mapping = merge_dicts(self.stats_defaults.get(&#39;template_mapping&#39;, {}), template_mapping)
+        filters = merge_dicts(self.stats_defaults.get(&#39;filters&#39;, {}), filters)
+        settings = merge_dicts(self.stats_defaults.get(&#39;settings&#39;, {}), settings)
+        metric_settings = merge_dicts(self.stats_defaults.get(&#39;metric_settings&#39;, {}), metric_settings)
 
         # Replace templates globally (not used at metric level)
         if len(template_mapping) &gt; 0:
@@ -310,7 +313,7 @@ class StatsBuilderMixin(metaclass=MetaStatsBuilderMixin):
 
         # Prepare metrics
         if metrics is None:
-            metrics = reself.stats_defaults[&#39;metrics&#39;]
+            metrics = reself.stats_defaults.get(&#39;metrics&#39;, &#39;all&#39;)
         if metrics == &#39;all&#39;:
             metrics = reself.metrics
         if isinstance(metrics, dict):
@@ -320,7 +323,7 @@ class StatsBuilderMixin(metaclass=MetaStatsBuilderMixin):
 
         # Prepare tags
         if tags is None:
-            tags = reself.stats_defaults[&#39;tags&#39;]
+            tags = reself.stats_defaults.get(&#39;tags&#39;, &#39;all&#39;)
         if isinstance(tags, str) and tags == &#39;all&#39;:
             tags = None
         if isinstance(tags, (str, tuple)):
@@ -450,7 +453,7 @@ class StatsBuilderMixin(metaclass=MetaStatsBuilderMixin):
         # Any metrics left?
         if len(metrics_dct) == 0:
             if not silence_warnings:
-                warnings.warn(&#34;No metrics left to calculate&#34;, stacklevel=2)
+                warnings.warn(&#34;No metrics to calculate&#34;, stacklevel=2)
             return None
 
         # Compute stats
@@ -500,9 +503,12 @@ class StatsBuilderMixin(metaclass=MetaStatsBuilderMixin):
                                           args: tp.ArgsLike = None,
                                           kwargs: tp.KwargsLike = None,
                                           call_attr: bool = True,
+                                          _final_kwargs: tp.Kwargs = final_kwargs,
+                                          _opt_arg_names: tp.Set[str] = opt_arg_names,
                                           _custom_arg_names: tp.Set[str] = custom_arg_names,
-                                          _arg_cache_dct: tp.Kwargs = arg_cache_dct,
-                                          _final_kwargs: tp.Kwargs = final_kwargs) -&gt; tp.Any:
+                                          _arg_cache_dct: tp.Kwargs = arg_cache_dct) -&gt; tp.Any:
+                            if attr in final_kwargs:
+                                return final_kwargs[attr]
                             if args is None:
                                 args = ()
                             if kwargs is None:
@@ -512,7 +518,7 @@ class StatsBuilderMixin(metaclass=MetaStatsBuilderMixin):
                                     return custom_reself.resolve_attr(
                                         attr,
                                         args=args,
-                                        cond_kwargs=_final_kwargs,
+                                        cond_kwargs={k: v for k, v in _final_kwargs.items() if k in _opt_arg_names},
                                         kwargs=kwargs,
                                         custom_arg_names=_custom_arg_names,
                                         cache_dct=_arg_cache_dct,
@@ -534,38 +540,40 @@ class StatsBuilderMixin(metaclass=MetaStatsBuilderMixin):
                         if &#39;group_by&#39; in passed_kwargs_out:
                             if &#39;pass_group_by&#39; not in final_kwargs:
                                 final_kwargs.pop(&#39;group_by&#39;, None)
-                    if not callable(calc_func):
-                        raise TypeError(&#34;calc_func must be callable&#34;)
 
                     # Resolve arguments
-                    func_arg_names = get_func_arg_names(calc_func)
-                    for k in func_arg_names:
-                        if k not in final_kwargs:
-                            if final_kwargs.pop(&#39;resolve_&#39; + k, False):
-                                try:
-                                    arg_out = custom_reself.resolve_attr(
-                                        k,
-                                        cond_kwargs=final_kwargs,
-                                        custom_arg_names=custom_arg_names,
-                                        cache_dct=arg_cache_dct,
-                                        use_caching=use_caching
-                                    )
-                                except AttributeError:
-                                    continue
-                                final_kwargs[k] = arg_out
-                    for k in list(final_kwargs.keys()):
-                        if k in opt_arg_names:
-                            if &#39;pass_&#39; + k in final_kwargs:
-                                if not final_kwargs.get(&#39;pass_&#39; + k):  # first priority
+                    if callable(calc_func):
+                        func_arg_names = get_func_arg_names(calc_func)
+                        for k in func_arg_names:
+                            if k not in final_kwargs:
+                                if final_kwargs.pop(&#39;resolve_&#39; + k, False):
+                                    try:
+                                        arg_out = custom_reself.resolve_attr(
+                                            k,
+                                            cond_kwargs=final_kwargs,
+                                            custom_arg_names=custom_arg_names,
+                                            cache_dct=arg_cache_dct,
+                                            use_caching=use_caching
+                                        )
+                                    except AttributeError:
+                                        continue
+                                    final_kwargs[k] = arg_out
+                        for k in list(final_kwargs.keys()):
+                            if k in opt_arg_names:
+                                if &#39;pass_&#39; + k in final_kwargs:
+                                    if not final_kwargs.get(&#39;pass_&#39; + k):  # first priority
+                                        final_kwargs.pop(k, None)
+                                elif k not in func_arg_names:  # second priority
                                     final_kwargs.pop(k, None)
-                            elif k not in func_arg_names:  # second priority
-                                final_kwargs.pop(k, None)
-                    for k in list(final_kwargs.keys()):
-                        if k.startswith(&#39;pass_&#39;) or k.startswith(&#39;resolve_&#39;):
-                            final_kwargs.pop(k, None)  # cleanup
+                        for k in list(final_kwargs.keys()):
+                            if k.startswith(&#39;pass_&#39;) or k.startswith(&#39;resolve_&#39;):
+                                final_kwargs.pop(k, None)  # cleanup
 
-                    # Call calc_func
-                    out = calc_func(**final_kwargs)
+                        # Call calc_func
+                        out = calc_func(**final_kwargs)
+                    else:
+                        # calc_func is already a result
+                        out = calc_func
                 else:
                     # Do not resolve calc_func
                     out = calc_func(custom_reself, _metric_settings)
@@ -636,6 +644,8 @@ class StatsBuilderMixin(metaclass=MetaStatsBuilderMixin):
         stats_df = pd.DataFrame(stats_dct, index=new_index)
         return stats_df
 
+    # ############# Docs ############# #
+
     @classmethod
     def build_metrics_doc(cls, source_cls: tp.Optional[type] = None) -&gt; str:
         &#34;&#34;&#34;Build metrics documentation.&#34;&#34;&#34;
@@ -644,7 +654,7 @@ class StatsBuilderMixin(metaclass=MetaStatsBuilderMixin):
         return string.Template(
             inspect.cleandoc(get_dict_attr(source_cls, &#39;metrics&#39;).__doc__)
         ).substitute(
-            {&#39;metrics&#39;: cls.metrics.to_doc()}
+            {&#39;metrics&#39;: cls.metrics.to_doc(), &#39;cls_name&#39;: cls.__name__}
         )
 
     @classmethod
@@ -690,7 +700,12 @@ StatsBuilderMixin.override_metrics_doc(__pdoc__)</code></pre>
 </ul>
 <h3 class="section-subtitle">Subclasses</h3>
 <ul class="hlist">
+<li><a title="vectorbt.data.base.MetaData" href="../data/base.html#vectorbt.data.base.MetaData">MetaData</a></li>
+<li><a title="vectorbt.generic.accessors.MetaGenericAccessor" href="accessors.html#vectorbt.generic.accessors.MetaGenericAccessor">MetaGenericAccessor</a></li>
+<li><a title="vectorbt.indicators.factory.MetaIndicatorBase" href="../indicators/factory.html#vectorbt.indicators.factory.MetaIndicatorBase">MetaIndicatorBase</a></li>
 <li><a title="vectorbt.portfolio.base.MetaPortfolio" href="../portfolio/base.html#vectorbt.portfolio.base.MetaPortfolio">MetaPortfolio</a></li>
+<li><a title="vectorbt.records.base.MetaRecords" href="../records/base.html#vectorbt.records.base.MetaRecords">MetaRecords</a></li>
+<li><a title="vectorbt.records.mapped_array.MetaMappedArray" href="../records/mapped_array.html#vectorbt.records.mapped_array.MetaMappedArray">MetaMappedArray</a></li>
 </ul>
 <h3 class="section-subtitle">Instance variables</h3>
 <dl>
@@ -724,8 +739,8 @@ def metrics(cls) -&gt; Config:
 
     Required to be a subclass of `vectorbt.base.array_wrapper.Wrapping`.&#34;&#34;&#34;
 
-    def __init__(self):
-        checks.assert_type(self, Wrapping)
+    def __init__(self) -&gt; None:
+        checks.assert_instance_of(self, Wrapping)
 
         # Copy writeable attrs
         self._metrics = self.__class__._metrics.copy()
@@ -775,17 +790,17 @@ def metrics(cls) -&gt; Config:
 
     @property
     def metrics(self) -&gt; Config:
-        &#34;&#34;&#34;Metrics supported by `StatsBuilderMixin.stats`.
+        &#34;&#34;&#34;Metrics supported by `${cls_name}`.
 
         ```json
         ${metrics}
         ```
 
-        Returns `StatsBuilderMixin._metrics`, which gets (deep) copied upon creation of each instance.
+        Returns `${cls_name}._metrics`, which gets (deep) copied upon creation of each instance.
         Thus, changing this config won&#39;t affect the class.
 
-        To change metrics, you can either change the config in-place, override `StatsBuilderMixin.metrics`,
-        or overwrite the instance variable `StatsBuilderMixin._metrics`.&#34;&#34;&#34;
+        To change metrics, you can either change the config in-place, override this property,
+        or overwrite the instance variable `${cls_name}._metrics`.&#34;&#34;&#34;
         return self._metrics
 
     def stats(self,
@@ -838,8 +853,8 @@ def metrics(cls) -&gt; Config:
                     this argument was found in the function&#39;s signature. Set to False to not pass.
                     If argument to be passed was not found, `pass_{arg}` is removed.
                 * `resolve_path_{arg}`: Whether to resolve an argument that is meant to be an attribute of
-                    this object and is part of the path of `calc_func`. Defaults to True.
-                    See `vectorbt.utils.attr.AttrResolver.resolve_attr`.
+                    this object and is the first part of the path of `calc_func`. Passes only optional arguments.
+                    Defaults to True. See `vectorbt.utils.attr.AttrResolver.resolve_attr`.
                 * `resolve_{arg}`: Whether to resolve an argument that is meant to be an attribute of
                     this object and is present in the function&#39;s signature. Defaults to False.
                     See `vectorbt.utils.attr.AttrResolver.resolve_attr`.
@@ -937,11 +952,11 @@ def metrics(cls) -&gt; Config:
         &#34;&#34;&#34;
         # Resolve defaults
         if silence_warnings is None:
-            silence_warnings = self.stats_defaults[&#39;silence_warnings&#39;]
-        template_mapping = merge_dicts(self.stats_defaults[&#39;template_mapping&#39;], template_mapping)
-        filters = merge_dicts(self.stats_defaults[&#39;filters&#39;], filters)
-        settings = merge_dicts(self.stats_defaults[&#39;settings&#39;], settings)
-        metric_settings = merge_dicts(self.stats_defaults[&#39;metric_settings&#39;], metric_settings)
+            silence_warnings = self.stats_defaults.get(&#39;silence_warnings&#39;, False)
+        template_mapping = merge_dicts(self.stats_defaults.get(&#39;template_mapping&#39;, {}), template_mapping)
+        filters = merge_dicts(self.stats_defaults.get(&#39;filters&#39;, {}), filters)
+        settings = merge_dicts(self.stats_defaults.get(&#39;settings&#39;, {}), settings)
+        metric_settings = merge_dicts(self.stats_defaults.get(&#39;metric_settings&#39;, {}), metric_settings)
 
         # Replace templates globally (not used at metric level)
         if len(template_mapping) &gt; 0:
@@ -958,7 +973,7 @@ def metrics(cls) -&gt; Config:
 
         # Prepare metrics
         if metrics is None:
-            metrics = reself.stats_defaults[&#39;metrics&#39;]
+            metrics = reself.stats_defaults.get(&#39;metrics&#39;, &#39;all&#39;)
         if metrics == &#39;all&#39;:
             metrics = reself.metrics
         if isinstance(metrics, dict):
@@ -968,7 +983,7 @@ def metrics(cls) -&gt; Config:
 
         # Prepare tags
         if tags is None:
-            tags = reself.stats_defaults[&#39;tags&#39;]
+            tags = reself.stats_defaults.get(&#39;tags&#39;, &#39;all&#39;)
         if isinstance(tags, str) and tags == &#39;all&#39;:
             tags = None
         if isinstance(tags, (str, tuple)):
@@ -1098,7 +1113,7 @@ def metrics(cls) -&gt; Config:
         # Any metrics left?
         if len(metrics_dct) == 0:
             if not silence_warnings:
-                warnings.warn(&#34;No metrics left to calculate&#34;, stacklevel=2)
+                warnings.warn(&#34;No metrics to calculate&#34;, stacklevel=2)
             return None
 
         # Compute stats
@@ -1148,9 +1163,12 @@ def metrics(cls) -&gt; Config:
                                           args: tp.ArgsLike = None,
                                           kwargs: tp.KwargsLike = None,
                                           call_attr: bool = True,
+                                          _final_kwargs: tp.Kwargs = final_kwargs,
+                                          _opt_arg_names: tp.Set[str] = opt_arg_names,
                                           _custom_arg_names: tp.Set[str] = custom_arg_names,
-                                          _arg_cache_dct: tp.Kwargs = arg_cache_dct,
-                                          _final_kwargs: tp.Kwargs = final_kwargs) -&gt; tp.Any:
+                                          _arg_cache_dct: tp.Kwargs = arg_cache_dct) -&gt; tp.Any:
+                            if attr in final_kwargs:
+                                return final_kwargs[attr]
                             if args is None:
                                 args = ()
                             if kwargs is None:
@@ -1160,7 +1178,7 @@ def metrics(cls) -&gt; Config:
                                     return custom_reself.resolve_attr(
                                         attr,
                                         args=args,
-                                        cond_kwargs=_final_kwargs,
+                                        cond_kwargs={k: v for k, v in _final_kwargs.items() if k in _opt_arg_names},
                                         kwargs=kwargs,
                                         custom_arg_names=_custom_arg_names,
                                         cache_dct=_arg_cache_dct,
@@ -1182,38 +1200,40 @@ def metrics(cls) -&gt; Config:
                         if &#39;group_by&#39; in passed_kwargs_out:
                             if &#39;pass_group_by&#39; not in final_kwargs:
                                 final_kwargs.pop(&#39;group_by&#39;, None)
-                    if not callable(calc_func):
-                        raise TypeError(&#34;calc_func must be callable&#34;)
 
                     # Resolve arguments
-                    func_arg_names = get_func_arg_names(calc_func)
-                    for k in func_arg_names:
-                        if k not in final_kwargs:
-                            if final_kwargs.pop(&#39;resolve_&#39; + k, False):
-                                try:
-                                    arg_out = custom_reself.resolve_attr(
-                                        k,
-                                        cond_kwargs=final_kwargs,
-                                        custom_arg_names=custom_arg_names,
-                                        cache_dct=arg_cache_dct,
-                                        use_caching=use_caching
-                                    )
-                                except AttributeError:
-                                    continue
-                                final_kwargs[k] = arg_out
-                    for k in list(final_kwargs.keys()):
-                        if k in opt_arg_names:
-                            if &#39;pass_&#39; + k in final_kwargs:
-                                if not final_kwargs.get(&#39;pass_&#39; + k):  # first priority
+                    if callable(calc_func):
+                        func_arg_names = get_func_arg_names(calc_func)
+                        for k in func_arg_names:
+                            if k not in final_kwargs:
+                                if final_kwargs.pop(&#39;resolve_&#39; + k, False):
+                                    try:
+                                        arg_out = custom_reself.resolve_attr(
+                                            k,
+                                            cond_kwargs=final_kwargs,
+                                            custom_arg_names=custom_arg_names,
+                                            cache_dct=arg_cache_dct,
+                                            use_caching=use_caching
+                                        )
+                                    except AttributeError:
+                                        continue
+                                    final_kwargs[k] = arg_out
+                        for k in list(final_kwargs.keys()):
+                            if k in opt_arg_names:
+                                if &#39;pass_&#39; + k in final_kwargs:
+                                    if not final_kwargs.get(&#39;pass_&#39; + k):  # first priority
+                                        final_kwargs.pop(k, None)
+                                elif k not in func_arg_names:  # second priority
                                     final_kwargs.pop(k, None)
-                            elif k not in func_arg_names:  # second priority
-                                final_kwargs.pop(k, None)
-                    for k in list(final_kwargs.keys()):
-                        if k.startswith(&#39;pass_&#39;) or k.startswith(&#39;resolve_&#39;):
-                            final_kwargs.pop(k, None)  # cleanup
+                        for k in list(final_kwargs.keys()):
+                            if k.startswith(&#39;pass_&#39;) or k.startswith(&#39;resolve_&#39;):
+                                final_kwargs.pop(k, None)  # cleanup
 
-                    # Call calc_func
-                    out = calc_func(**final_kwargs)
+                        # Call calc_func
+                        out = calc_func(**final_kwargs)
+                    else:
+                        # calc_func is already a result
+                        out = calc_func
                 else:
                     # Do not resolve calc_func
                     out = calc_func(custom_reself, _metric_settings)
@@ -1284,6 +1304,8 @@ def metrics(cls) -&gt; Config:
         stats_df = pd.DataFrame(stats_dct, index=new_index)
         return stats_df
 
+    # ############# Docs ############# #
+
     @classmethod
     def build_metrics_doc(cls, source_cls: tp.Optional[type] = None) -&gt; str:
         &#34;&#34;&#34;Build metrics documentation.&#34;&#34;&#34;
@@ -1292,7 +1314,7 @@ def metrics(cls) -&gt; Config:
         return string.Template(
             inspect.cleandoc(get_dict_attr(source_cls, &#39;metrics&#39;).__doc__)
         ).substitute(
-            {&#39;metrics&#39;: cls.metrics.to_doc()}
+            {&#39;metrics&#39;: cls.metrics.to_doc(), &#39;cls_name&#39;: cls.__name__}
         )
 
     @classmethod
@@ -1302,6 +1324,7 @@ def metrics(cls) -&gt; Config:
 </details>
 <h3 class="section-subtitle">Subclasses</h3>
 <ul class="hlist">
+<li><a title="vectorbt.data.base.Data" href="../data/base.html#vectorbt.data.base.Data">Data</a></li>
 <li><a title="vectorbt.generic.accessors.GenericAccessor" href="accessors.html#vectorbt.generic.accessors.GenericAccessor">GenericAccessor</a></li>
 <li><a title="vectorbt.indicators.factory.IndicatorBase" href="../indicators/factory.html#vectorbt.indicators.factory.IndicatorBase">IndicatorBase</a></li>
 <li><a title="vectorbt.portfolio.base.Portfolio" href="../portfolio/base.html#vectorbt.portfolio.base.Portfolio">Portfolio</a></li>
@@ -1312,23 +1335,23 @@ def metrics(cls) -&gt; Config:
 <dl>
 <dt id="vectorbt.generic.stats_builder.StatsBuilderMixin.metrics"><code class="name">var <span class="ident child-name">metrics</span></code></dt>
 <dd>
-<div class="desc"><p>Metrics supported by <code><a title="vectorbt.generic.stats_builder.StatsBuilderMixin.stats" href="#vectorbt.generic.stats_builder.StatsBuilderMixin.stats">StatsBuilderMixin.stats()</a></code>.</p>
+<div class="desc"><p>Metrics supported by <code><a title="vectorbt.generic.stats_builder.StatsBuilderMixin" href="#vectorbt.generic.stats_builder.StatsBuilderMixin">StatsBuilderMixin</a></code>.</p>
 <pre><code class="language-json">Config({
     &quot;start&quot;: {
         &quot;title&quot;: &quot;Start&quot;,
-        &quot;calc_func&quot;: &quot;&lt;function StatsBuilderMixin.&lt;lambda&gt; at 0x7fda41c260d0&gt;&quot;,
+        &quot;calc_func&quot;: &quot;&lt;function StatsBuilderMixin.&lt;lambda&gt; at 0x7fcd578c1e18&gt;&quot;,
         &quot;agg_func&quot;: null,
         &quot;tags&quot;: &quot;wrapper&quot;
     },
     &quot;end&quot;: {
         &quot;title&quot;: &quot;End&quot;,
-        &quot;calc_func&quot;: &quot;&lt;function StatsBuilderMixin.&lt;lambda&gt; at 0x7fda41c26158&gt;&quot;,
+        &quot;calc_func&quot;: &quot;&lt;function StatsBuilderMixin.&lt;lambda&gt; at 0x7fcd578c1ea0&gt;&quot;,
         &quot;agg_func&quot;: null,
         &quot;tags&quot;: &quot;wrapper&quot;
     },
     &quot;period&quot;: {
         &quot;title&quot;: &quot;Period&quot;,
-        &quot;calc_func&quot;: &quot;&lt;function StatsBuilderMixin.&lt;lambda&gt; at 0x7fda41c261e0&gt;&quot;,
+        &quot;calc_func&quot;: &quot;&lt;function StatsBuilderMixin.&lt;lambda&gt; at 0x7fcd578c1f28&gt;&quot;,
         &quot;apply_to_timedelta&quot;: true,
         &quot;agg_func&quot;: null,
         &quot;tags&quot;: &quot;wrapper&quot;
@@ -1337,7 +1360,7 @@ def metrics(cls) -&gt; Config:
 </code></pre>
 <p>Returns <code>StatsBuilderMixin._metrics</code>, which gets (deep) copied upon creation of each instance.
 Thus, changing this config won't affect the class.</p>
-<p>To change metrics, you can either change the config in-place, override <code><a title="vectorbt.generic.stats_builder.StatsBuilderMixin.metrics" href="#vectorbt.generic.stats_builder.StatsBuilderMixin.metrics">StatsBuilderMixin.metrics</a></code>,
+<p>To change metrics, you can either change the config in-place, override this property,
 or overwrite the instance variable <code>StatsBuilderMixin._metrics</code>.</p></div>
 </dd>
 </dl>
@@ -1360,7 +1383,7 @@ def build_metrics_doc(cls, source_cls: tp.Optional[type] = None) -&gt; str:
     return string.Template(
         inspect.cleandoc(get_dict_attr(source_cls, &#39;metrics&#39;).__doc__)
     ).substitute(
-        {&#39;metrics&#39;: cls.metrics.to_doc()}
+        {&#39;metrics&#39;: cls.metrics.to_doc(), &#39;cls_name&#39;: cls.__name__}
     )</code></pre>
 </details>
 </dd>
@@ -1464,8 +1487,8 @@ Defaults to False.</li>
 this argument was found in the function's signature. Set to False to not pass.
 If argument to be passed was not found, <code>pass_{arg}</code> is removed.</li>
 <li><code>resolve_path_{arg}</code>: Whether to resolve an argument that is meant to be an attribute of
-this object and is part of the path of <code>calc_func</code>. Defaults to True.
-See <code><a title="vectorbt.utils.attr.AttrResolver.resolve_attr" href="../utils/attr.html#vectorbt.utils.attr.AttrResolver.resolve_attr">AttrResolver.resolve_attr()</a></code>.</li>
+this object and is the first part of the path of <code>calc_func</code>. Passes only optional arguments.
+Defaults to True. See <code><a title="vectorbt.utils.attr.AttrResolver.resolve_attr" href="../utils/attr.html#vectorbt.utils.attr.AttrResolver.resolve_attr">AttrResolver.resolve_attr()</a></code>.</li>
 <li><code>resolve_{arg}</code>: Whether to resolve an argument that is meant to be an attribute of
 this object and is present in the function's signature. Defaults to False.
 See <code><a title="vectorbt.utils.attr.AttrResolver.resolve_attr" href="../utils/attr.html#vectorbt.utils.attr.AttrResolver.resolve_attr">AttrResolver.resolve_attr()</a></code>.</li>
@@ -1629,8 +1652,8 @@ utilize built-in caching (even if global caching is disabled).</p>
                 this argument was found in the function&#39;s signature. Set to False to not pass.
                 If argument to be passed was not found, `pass_{arg}` is removed.
             * `resolve_path_{arg}`: Whether to resolve an argument that is meant to be an attribute of
-                this object and is part of the path of `calc_func`. Defaults to True.
-                See `vectorbt.utils.attr.AttrResolver.resolve_attr`.
+                this object and is the first part of the path of `calc_func`. Passes only optional arguments.
+                Defaults to True. See `vectorbt.utils.attr.AttrResolver.resolve_attr`.
             * `resolve_{arg}`: Whether to resolve an argument that is meant to be an attribute of
                 this object and is present in the function&#39;s signature. Defaults to False.
                 See `vectorbt.utils.attr.AttrResolver.resolve_attr`.
@@ -1728,11 +1751,11 @@ utilize built-in caching (even if global caching is disabled).</p>
     &#34;&#34;&#34;
     # Resolve defaults
     if silence_warnings is None:
-        silence_warnings = self.stats_defaults[&#39;silence_warnings&#39;]
-    template_mapping = merge_dicts(self.stats_defaults[&#39;template_mapping&#39;], template_mapping)
-    filters = merge_dicts(self.stats_defaults[&#39;filters&#39;], filters)
-    settings = merge_dicts(self.stats_defaults[&#39;settings&#39;], settings)
-    metric_settings = merge_dicts(self.stats_defaults[&#39;metric_settings&#39;], metric_settings)
+        silence_warnings = self.stats_defaults.get(&#39;silence_warnings&#39;, False)
+    template_mapping = merge_dicts(self.stats_defaults.get(&#39;template_mapping&#39;, {}), template_mapping)
+    filters = merge_dicts(self.stats_defaults.get(&#39;filters&#39;, {}), filters)
+    settings = merge_dicts(self.stats_defaults.get(&#39;settings&#39;, {}), settings)
+    metric_settings = merge_dicts(self.stats_defaults.get(&#39;metric_settings&#39;, {}), metric_settings)
 
     # Replace templates globally (not used at metric level)
     if len(template_mapping) &gt; 0:
@@ -1749,7 +1772,7 @@ utilize built-in caching (even if global caching is disabled).</p>
 
     # Prepare metrics
     if metrics is None:
-        metrics = reself.stats_defaults[&#39;metrics&#39;]
+        metrics = reself.stats_defaults.get(&#39;metrics&#39;, &#39;all&#39;)
     if metrics == &#39;all&#39;:
         metrics = reself.metrics
     if isinstance(metrics, dict):
@@ -1759,7 +1782,7 @@ utilize built-in caching (even if global caching is disabled).</p>
 
     # Prepare tags
     if tags is None:
-        tags = reself.stats_defaults[&#39;tags&#39;]
+        tags = reself.stats_defaults.get(&#39;tags&#39;, &#39;all&#39;)
     if isinstance(tags, str) and tags == &#39;all&#39;:
         tags = None
     if isinstance(tags, (str, tuple)):
@@ -1889,7 +1912,7 @@ utilize built-in caching (even if global caching is disabled).</p>
     # Any metrics left?
     if len(metrics_dct) == 0:
         if not silence_warnings:
-            warnings.warn(&#34;No metrics left to calculate&#34;, stacklevel=2)
+            warnings.warn(&#34;No metrics to calculate&#34;, stacklevel=2)
         return None
 
     # Compute stats
@@ -1939,9 +1962,12 @@ utilize built-in caching (even if global caching is disabled).</p>
                                       args: tp.ArgsLike = None,
                                       kwargs: tp.KwargsLike = None,
                                       call_attr: bool = True,
+                                      _final_kwargs: tp.Kwargs = final_kwargs,
+                                      _opt_arg_names: tp.Set[str] = opt_arg_names,
                                       _custom_arg_names: tp.Set[str] = custom_arg_names,
-                                      _arg_cache_dct: tp.Kwargs = arg_cache_dct,
-                                      _final_kwargs: tp.Kwargs = final_kwargs) -&gt; tp.Any:
+                                      _arg_cache_dct: tp.Kwargs = arg_cache_dct) -&gt; tp.Any:
+                        if attr in final_kwargs:
+                            return final_kwargs[attr]
                         if args is None:
                             args = ()
                         if kwargs is None:
@@ -1951,7 +1977,7 @@ utilize built-in caching (even if global caching is disabled).</p>
                                 return custom_reself.resolve_attr(
                                     attr,
                                     args=args,
-                                    cond_kwargs=_final_kwargs,
+                                    cond_kwargs={k: v for k, v in _final_kwargs.items() if k in _opt_arg_names},
                                     kwargs=kwargs,
                                     custom_arg_names=_custom_arg_names,
                                     cache_dct=_arg_cache_dct,
@@ -1973,38 +1999,40 @@ utilize built-in caching (even if global caching is disabled).</p>
                     if &#39;group_by&#39; in passed_kwargs_out:
                         if &#39;pass_group_by&#39; not in final_kwargs:
                             final_kwargs.pop(&#39;group_by&#39;, None)
-                if not callable(calc_func):
-                    raise TypeError(&#34;calc_func must be callable&#34;)
 
                 # Resolve arguments
-                func_arg_names = get_func_arg_names(calc_func)
-                for k in func_arg_names:
-                    if k not in final_kwargs:
-                        if final_kwargs.pop(&#39;resolve_&#39; + k, False):
-                            try:
-                                arg_out = custom_reself.resolve_attr(
-                                    k,
-                                    cond_kwargs=final_kwargs,
-                                    custom_arg_names=custom_arg_names,
-                                    cache_dct=arg_cache_dct,
-                                    use_caching=use_caching
-                                )
-                            except AttributeError:
-                                continue
-                            final_kwargs[k] = arg_out
-                for k in list(final_kwargs.keys()):
-                    if k in opt_arg_names:
-                        if &#39;pass_&#39; + k in final_kwargs:
-                            if not final_kwargs.get(&#39;pass_&#39; + k):  # first priority
+                if callable(calc_func):
+                    func_arg_names = get_func_arg_names(calc_func)
+                    for k in func_arg_names:
+                        if k not in final_kwargs:
+                            if final_kwargs.pop(&#39;resolve_&#39; + k, False):
+                                try:
+                                    arg_out = custom_reself.resolve_attr(
+                                        k,
+                                        cond_kwargs=final_kwargs,
+                                        custom_arg_names=custom_arg_names,
+                                        cache_dct=arg_cache_dct,
+                                        use_caching=use_caching
+                                    )
+                                except AttributeError:
+                                    continue
+                                final_kwargs[k] = arg_out
+                    for k in list(final_kwargs.keys()):
+                        if k in opt_arg_names:
+                            if &#39;pass_&#39; + k in final_kwargs:
+                                if not final_kwargs.get(&#39;pass_&#39; + k):  # first priority
+                                    final_kwargs.pop(k, None)
+                            elif k not in func_arg_names:  # second priority
                                 final_kwargs.pop(k, None)
-                        elif k not in func_arg_names:  # second priority
-                            final_kwargs.pop(k, None)
-                for k in list(final_kwargs.keys()):
-                    if k.startswith(&#39;pass_&#39;) or k.startswith(&#39;resolve_&#39;):
-                        final_kwargs.pop(k, None)  # cleanup
+                    for k in list(final_kwargs.keys()):
+                        if k.startswith(&#39;pass_&#39;) or k.startswith(&#39;resolve_&#39;):
+                            final_kwargs.pop(k, None)  # cleanup
 
-                # Call calc_func
-                out = calc_func(**final_kwargs)
+                    # Call calc_func
+                    out = calc_func(**final_kwargs)
+                else:
+                    # calc_func is already a result
+                    out = calc_func
             else:
                 # Do not resolve calc_func
                 out = calc_func(custom_reself, _metric_settings)
@@ -2085,7 +2113,7 @@ utilize built-in caching (even if global caching is disabled).</p>
 <header>
 <a class="homelink" rel="home" title="pdoc Home" href="https://github.com/polakowo/vectorbt">
 <img src="data:image/svg+xml;base64,PD94bWwgdmVyc2lvbj0iMS4wIiBlbmNvZGluZz0idXRmLTgiPz4KPCEtLSBHZW5lcmF0b3I6IEFkb2JlIElsbHVzdHJhdG9yIDI1LjAuMSwgU1ZHIEV4cG9ydCBQbHVnLUluIC4gU1ZHIFZlcnNpb246IDYuMDAgQnVpbGQgMCkgIC0tPgo8c3ZnIHZlcnNpb249IjEuMSIgaWQ9IkNhcGFfMSIgeG1sbnM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDAvc3ZnIiB4bWxuczp4bGluaz0iaHR0cDovL3d3dy53My5vcmcvMTk5OS94bGluayIgeD0iMHB4IiB5PSIwcHgiCgkgdmlld0JveD0iMCAwIDUxMiA1MTIiIHN0eWxlPSJlbmFibGUtYmFja2dyb3VuZDpuZXcgMCAwIDUxMiA1MTI7IiB4bWw6c3BhY2U9InByZXNlcnZlIj4KPHN0eWxlIHR5cGU9InRleHQvY3NzIj4KCS5zdDB7ZmlsbDojRUYwMDAwO30KCS5zdDF7ZmlsbDojRkY5MDAwO30KCS5zdDJ7ZmlsbDojRkZERjAwO30KCS5zdDN7ZmlsbDojMjgyQzM0O30KPC9zdHlsZT4KPGc+Cgk8Zz4KCQk8Zz4KCQkJPHBvbHlnb24gY2xhc3M9InN0MCIgcG9pbnRzPSIxNTUuMywzMDAuMSAyODMuMSwwIDIwOCwwIDExMC44LDAgMzUuOCwwIDEuMiw0NTAuMiA3Ni4zLDQ1MC4yIAkJCSIvPgoJCTwvZz4KCTwvZz4KCTxnPgoJCTxnPgoJCQk8cG9seWdvbiBjbGFzcz0ic3QxIiBwb2ludHM9IjIzMC40LDMwMC4xIDM1OC4xLDAgMjgzLjEsMCAxODUuOCwwIDExMC44LDAgNzYuMyw0NTAuMiAxNTEuMyw0NTAuMiAJCQkiLz4KCQk8L2c+Cgk8L2c+Cgk8Zz4KCQk8Zz4KCQkJPHBvbHlnb24gY2xhc3M9InN0MiIgcG9pbnRzPSIzMDUuNCwzMDAuMSA0MzMuMSwwIDM1OC4xLDAgMzMxLjYsNjIuMyAyNjAuOCwwIDE4NS44LDAgMTUxLjMsNDUwLjIgMjI2LjQsNDUwLjIgCQkJIi8+CgkJPC9nPgoJPC9nPgoJPGc+CgkJPGc+CgkJCTxwb2x5Z29uIGNsYXNzPSJzdDMiIHBvaW50cz0iNTEwLjgsMCA0MzMuMSwwIDMwNS40LDMwMC4xIDMzOC40LDAgMjYwLjgsMCAyMjYuNCw0NTAuMiAzMDQsNDUwLjIgCQkJIi8+CgkJPC9nPgoJPC9nPgo8L2c+Cjwvc3ZnPgo="/>
-vectorbt <span class="version">0.20.0</span></a>
+vectorbt <span class="version">0.21.0</span></a>
 </header>
 <div class="search-container">
 <input

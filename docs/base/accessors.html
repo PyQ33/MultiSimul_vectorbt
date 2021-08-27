@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, minimum-scale=1" />
-<meta name="generator" content="pdoc 0.9.2" />
+<meta name="generator" content="pdoc 0.10.0" />
 <title>vectorbt.base.accessors API documentation</title>
 <meta name="description" content="Custom pandas accessors …" />
 <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/5.12.0-2/css/all.min.css" integrity="sha256-46r060N2LrChLLb5zowXQ72/iKKNiw/lAmygmHExk/o=" crossorigin="anonymous" />
@@ -94,7 +94,10 @@ under the hood, which is mostly much faster than with pandas.</p>
 <summary>
 <span>Expand source code</span>
 </summary>
-<pre><code class="python">&#34;&#34;&#34;Custom pandas accessors.
+<pre><code class="python"># Copyright (c) 2021 Oleg Polakow. All rights reserved.
+# This code is licensed under Apache 2.0 with Commons Clause license (see LICENSE.md for details)
+
+&#34;&#34;&#34;Custom pandas accessors.
 
 Methods can be accessed as follows:
 
@@ -161,7 +164,7 @@ import pandas as pd
 
 from vectorbt import _typing as tp
 from vectorbt.utils import checks
-from vectorbt.utils.decorators import class_or_instancemethod, add_binary_magic_methods, add_unary_magic_methods
+from vectorbt.utils.decorators import class_or_instancemethod, attach_binary_magic_methods, attach_unary_magic_methods
 from vectorbt.utils.config import merge_dicts, get_func_arg_names
 from vectorbt.base import combine_fns, index_fns, reshape_fns
 from vectorbt.base.column_grouper import ColumnGrouper
@@ -170,8 +173,8 @@ from vectorbt.base.array_wrapper import ArrayWrapper, Wrapping
 BaseAccessorT = tp.TypeVar(&#34;BaseAccessorT&#34;, bound=&#34;BaseAccessor&#34;)
 
 
-@add_binary_magic_methods(lambda self, other, np_func: self.combine(other, allow_multiple=False, combine_func=np_func))
-@add_unary_magic_methods(lambda self, np_func: self.apply(apply_func=np_func))
+@attach_binary_magic_methods(lambda self, other, np_func: self.combine(other, allow_multiple=False, combine_func=np_func))
+@attach_unary_magic_methods(lambda self, np_func: self.apply(apply_func=np_func))
 class BaseAccessor(Wrapping):
     &#34;&#34;&#34;Accessor on top of Series and DataFrames.
 
@@ -184,7 +187,7 @@ class BaseAccessor(Wrapping):
     `**kwargs` will be passed to `vectorbt.base.array_wrapper.ArrayWrapper`.&#34;&#34;&#34;
 
     def __init__(self, obj: tp.SeriesFrame, wrapper: tp.Optional[ArrayWrapper] = None, **kwargs) -&gt; None:
-        checks.assert_type(obj, (pd.Series, pd.DataFrame))
+        checks.assert_instance_of(obj, (pd.Series, pd.DataFrame))
 
         self._obj = obj
 
@@ -197,36 +200,36 @@ class BaseAccessor(Wrapping):
         if wrapper is None:
             wrapper = ArrayWrapper.from_obj(obj, **wrapping_kwargs)
         else:
-            wrapper = wrapper.copy(**wrapping_kwargs)
+            wrapper = wrapper.replace(**wrapping_kwargs)
         Wrapping.__init__(self, wrapper, obj=obj, **kwargs)
 
     def __call__(self: BaseAccessorT, **kwargs) -&gt; BaseAccessorT:
         &#34;&#34;&#34;Allows passing arguments to the initializer.&#34;&#34;&#34;
 
-        return self.copy(**kwargs)
+        return self.replace(**kwargs)
 
     @property
-    def sr_accessor_cls(self):
+    def sr_accessor_cls(self) -&gt; tp.Type[&#34;BaseSRAccessor&#34;]:
         &#34;&#34;&#34;Accessor class for `pd.Series`.&#34;&#34;&#34;
         return BaseSRAccessor
 
     @property
-    def df_accessor_cls(self):
+    def df_accessor_cls(self) -&gt; tp.Type[&#34;BaseDFAccessor&#34;]:
         &#34;&#34;&#34;Accessor class for `pd.DataFrame`.&#34;&#34;&#34;
         return BaseDFAccessor
 
     def indexing_func(self: BaseAccessorT, pd_indexing_func: tp.PandasIndexingFunc, **kwargs) -&gt; BaseAccessorT:
-        &#34;&#34;&#34;Perform indexing on `Wrapping`.&#34;&#34;&#34;
+        &#34;&#34;&#34;Perform indexing on `BaseAccessor`.&#34;&#34;&#34;
         new_wrapper, idx_idxs, _, col_idxs = self.wrapper.indexing_func_meta(pd_indexing_func, **kwargs)
         new_obj = new_wrapper.wrap(self.to_2d_array()[idx_idxs, :][:, col_idxs], group_by=False)
         if checks.is_series(new_obj):
-            return self.copy(
-                _class=self.sr_accessor_cls,
+            return self.replace(
+                cls_=self.sr_accessor_cls,
                 obj=new_obj,
                 wrapper=new_wrapper
             )
-        return self.copy(
-            _class=self.df_accessor_cls,
+        return self.replace(
+            cls_=self.df_accessor_cls,
             obj=new_obj,
             wrapper=new_wrapper
         )
@@ -438,7 +441,7 @@ class BaseAccessor(Wrapping):
         y  3  4  3  4
         ```
         &#34;&#34;&#34;
-        checks.assert_type(other, (pd.Series, pd.DataFrame))
+        checks.assert_instance_of(other, (pd.Series, pd.DataFrame))
         obj = reshape_fns.to_2d(self.obj)
         other = reshape_fns.to_2d(other)
 
@@ -807,7 +810,7 @@ class BaseSRAccessor(BaseAccessor):
     Accessible through `pd.Series.vbt` and all child accessors.&#34;&#34;&#34;
 
     def __init__(self, obj: tp.Series, **kwargs) -&gt; None:
-        checks.assert_type(obj, pd.Series)
+        checks.assert_instance_of(obj, pd.Series)
 
         BaseAccessor.__init__(self, obj, **kwargs)
 
@@ -826,7 +829,7 @@ class BaseDFAccessor(BaseAccessor):
     Accessible through `pd.DataFrame.vbt` and all child accessors.&#34;&#34;&#34;
 
     def __init__(self, obj: tp.Frame, **kwargs) -&gt; None:
-        checks.assert_type(obj, pd.DataFrame)
+        checks.assert_instance_of(obj, pd.DataFrame)
 
         BaseAccessor.__init__(self, obj, **kwargs)
 
@@ -875,7 +878,7 @@ by using <code><a title="vectorbt.base.accessors.BaseAccessor.wrapper" href="arr
     `**kwargs` will be passed to `vectorbt.base.array_wrapper.ArrayWrapper`.&#34;&#34;&#34;
 
     def __init__(self, obj: tp.SeriesFrame, wrapper: tp.Optional[ArrayWrapper] = None, **kwargs) -&gt; None:
-        checks.assert_type(obj, (pd.Series, pd.DataFrame))
+        checks.assert_instance_of(obj, (pd.Series, pd.DataFrame))
 
         self._obj = obj
 
@@ -888,36 +891,36 @@ by using <code><a title="vectorbt.base.accessors.BaseAccessor.wrapper" href="arr
         if wrapper is None:
             wrapper = ArrayWrapper.from_obj(obj, **wrapping_kwargs)
         else:
-            wrapper = wrapper.copy(**wrapping_kwargs)
+            wrapper = wrapper.replace(**wrapping_kwargs)
         Wrapping.__init__(self, wrapper, obj=obj, **kwargs)
 
     def __call__(self: BaseAccessorT, **kwargs) -&gt; BaseAccessorT:
         &#34;&#34;&#34;Allows passing arguments to the initializer.&#34;&#34;&#34;
 
-        return self.copy(**kwargs)
+        return self.replace(**kwargs)
 
     @property
-    def sr_accessor_cls(self):
+    def sr_accessor_cls(self) -&gt; tp.Type[&#34;BaseSRAccessor&#34;]:
         &#34;&#34;&#34;Accessor class for `pd.Series`.&#34;&#34;&#34;
         return BaseSRAccessor
 
     @property
-    def df_accessor_cls(self):
+    def df_accessor_cls(self) -&gt; tp.Type[&#34;BaseDFAccessor&#34;]:
         &#34;&#34;&#34;Accessor class for `pd.DataFrame`.&#34;&#34;&#34;
         return BaseDFAccessor
 
     def indexing_func(self: BaseAccessorT, pd_indexing_func: tp.PandasIndexingFunc, **kwargs) -&gt; BaseAccessorT:
-        &#34;&#34;&#34;Perform indexing on `Wrapping`.&#34;&#34;&#34;
+        &#34;&#34;&#34;Perform indexing on `BaseAccessor`.&#34;&#34;&#34;
         new_wrapper, idx_idxs, _, col_idxs = self.wrapper.indexing_func_meta(pd_indexing_func, **kwargs)
         new_obj = new_wrapper.wrap(self.to_2d_array()[idx_idxs, :][:, col_idxs], group_by=False)
         if checks.is_series(new_obj):
-            return self.copy(
-                _class=self.sr_accessor_cls,
+            return self.replace(
+                cls_=self.sr_accessor_cls,
                 obj=new_obj,
                 wrapper=new_wrapper
             )
-        return self.copy(
-            _class=self.df_accessor_cls,
+        return self.replace(
+            cls_=self.df_accessor_cls,
             obj=new_obj,
             wrapper=new_wrapper
         )
@@ -1129,7 +1132,7 @@ by using <code><a title="vectorbt.base.accessors.BaseAccessor.wrapper" href="arr
         y  3  4  3  4
         ```
         &#34;&#34;&#34;
-        checks.assert_type(other, (pd.Series, pd.DataFrame))
+        checks.assert_instance_of(other, (pd.Series, pd.DataFrame))
         obj = reshape_fns.to_2d(self.obj)
         other = reshape_fns.to_2d(other)
 
@@ -1671,7 +1674,7 @@ def is_series(cls_or_self) -&gt; bool:
 <span>Expand source code</span>
 </summary>
 <pre><code class="python">@property
-def df_accessor_cls(self):
+def df_accessor_cls(self) -&gt; tp.Type[&#34;BaseDFAccessor&#34;]:
     &#34;&#34;&#34;Accessor class for `pd.DataFrame`.&#34;&#34;&#34;
     return BaseDFAccessor</code></pre>
 </details>
@@ -1697,7 +1700,7 @@ def obj(self):
 <span>Expand source code</span>
 </summary>
 <pre><code class="python">@property
-def sr_accessor_cls(self):
+def sr_accessor_cls(self) -&gt; tp.Type[&#34;BaseSRAccessor&#34;]:
     &#34;&#34;&#34;Accessor class for `pd.Series`.&#34;&#34;&#34;
     return BaseSRAccessor</code></pre>
 </details>
@@ -1768,7 +1771,7 @@ y  3  4  3  4
     y  3  4  3  4
     ```
     &#34;&#34;&#34;
-    checks.assert_type(other, (pd.Series, pd.DataFrame))
+    checks.assert_instance_of(other, (pd.Series, pd.DataFrame))
     obj = reshape_fns.to_2d(self.obj)
     other = reshape_fns.to_2d(other)
 
@@ -2398,6 +2401,32 @@ y  7  8  12  14
     return self.apply_on_index(apply_func, axis=axis, inplace=inplace)</code></pre>
 </details>
 </dd>
+<dt id="vectorbt.base.accessors.BaseAccessor.indexing_func"><code class="name flex">
+<span>def <span class="ident child-name">indexing_func</span></span>(<span class="params">self, pd_indexing_func, **kwargs)</span><span class="return_type"></span>
+</code></dt>
+<dd>
+<div class="desc"><p>Perform indexing on <code><a title="vectorbt.base.accessors.BaseAccessor" href="#vectorbt.base.accessors.BaseAccessor">BaseAccessor</a></code>.</p></div>
+<details class="source">
+<summary>
+<span>Expand source code</span>
+</summary>
+<pre><code class="python">def indexing_func(self: BaseAccessorT, pd_indexing_func: tp.PandasIndexingFunc, **kwargs) -&gt; BaseAccessorT:
+    &#34;&#34;&#34;Perform indexing on `BaseAccessor`.&#34;&#34;&#34;
+    new_wrapper, idx_idxs, _, col_idxs = self.wrapper.indexing_func_meta(pd_indexing_func, **kwargs)
+    new_obj = new_wrapper.wrap(self.to_2d_array()[idx_idxs, :][:, col_idxs], group_by=False)
+    if checks.is_series(new_obj):
+        return self.replace(
+            cls_=self.sr_accessor_cls,
+            obj=new_obj,
+            wrapper=new_wrapper
+        )
+    return self.replace(
+        cls_=self.df_accessor_cls,
+        obj=new_obj,
+        wrapper=new_wrapper
+    )</code></pre>
+</details>
+</dd>
 <dt id="vectorbt.base.accessors.BaseAccessor.make_symmetric"><code class="name flex">
 <span>def <span class="ident child-name">make_symmetric</span></span>(<span class="params">self)</span><span class="return_type"></span>
 </code></dt>
@@ -2629,7 +2658,6 @@ Use <code>keys</code> as the outermost level.</p></div>
 <li><code><a title="vectorbt.base.array_wrapper.Wrapping.deep_getattr" href="../utils/attr.html#vectorbt.utils.attr.AttrResolver.deep_getattr">deep_getattr</a></code></li>
 <li><code><a title="vectorbt.base.array_wrapper.Wrapping.dumps" href="../utils/config.html#vectorbt.utils.config.Pickleable.dumps">dumps</a></code></li>
 <li><code><a title="vectorbt.base.array_wrapper.Wrapping.iloc" href="indexing.html#vectorbt.base.indexing.PandasIndexer.iloc">iloc</a></code></li>
-<li><code><a title="vectorbt.base.array_wrapper.Wrapping.indexing_func" href="array_wrapper.html#vectorbt.base.array_wrapper.Wrapping.indexing_func">indexing_func</a></code></li>
 <li><code><a title="vectorbt.base.array_wrapper.Wrapping.indexing_kwargs" href="indexing.html#vectorbt.base.indexing.PandasIndexer.indexing_kwargs">indexing_kwargs</a></code></li>
 <li><code><a title="vectorbt.base.array_wrapper.Wrapping.load" href="../utils/config.html#vectorbt.utils.config.Pickleable.load">load</a></code></li>
 <li><code><a title="vectorbt.base.array_wrapper.Wrapping.loads" href="../utils/config.html#vectorbt.utils.config.Pickleable.loads">loads</a></code></li>
@@ -2637,6 +2665,7 @@ Use <code>keys</code> as the outermost level.</p></div>
 <li><code><a title="vectorbt.base.array_wrapper.Wrapping.post_resolve_attr" href="../utils/attr.html#vectorbt.utils.attr.AttrResolver.post_resolve_attr">post_resolve_attr</a></code></li>
 <li><code><a title="vectorbt.base.array_wrapper.Wrapping.pre_resolve_attr" href="../utils/attr.html#vectorbt.utils.attr.AttrResolver.pre_resolve_attr">pre_resolve_attr</a></code></li>
 <li><code><a title="vectorbt.base.array_wrapper.Wrapping.regroup" href="array_wrapper.html#vectorbt.base.array_wrapper.Wrapping.regroup">regroup</a></code></li>
+<li><code><a title="vectorbt.base.array_wrapper.Wrapping.replace" href="../utils/config.html#vectorbt.utils.config.Configured.replace">replace</a></code></li>
 <li><code><a title="vectorbt.base.array_wrapper.Wrapping.resolve_attr" href="../utils/attr.html#vectorbt.utils.attr.AttrResolver.resolve_attr">resolve_attr</a></code></li>
 <li><code><a title="vectorbt.base.array_wrapper.Wrapping.resolve_self" href="array_wrapper.html#vectorbt.base.array_wrapper.Wrapping.resolve_self">resolve_self</a></code></li>
 <li><code><a title="vectorbt.base.array_wrapper.Wrapping.save" href="../utils/config.html#vectorbt.utils.config.Pickleable.save">save</a></code></li>
@@ -2669,7 +2698,7 @@ Use <code>keys</code> as the outermost level.</p></div>
     Accessible through `pd.DataFrame.vbt` and all child accessors.&#34;&#34;&#34;
 
     def __init__(self, obj: tp.Frame, **kwargs) -&gt; None:
-        checks.assert_type(obj, pd.DataFrame)
+        checks.assert_instance_of(obj, pd.DataFrame)
 
         BaseAccessor.__init__(self, obj, **kwargs)
 
@@ -2751,7 +2780,7 @@ def is_series(cls_or_self) -&gt; bool:
 <li><code><a title="vectorbt.base.accessors.BaseAccessor.empty" href="#vectorbt.base.accessors.BaseAccessor.empty">empty</a></code></li>
 <li><code><a title="vectorbt.base.accessors.BaseAccessor.empty_like" href="#vectorbt.base.accessors.BaseAccessor.empty_like">empty_like</a></code></li>
 <li><code><a title="vectorbt.base.accessors.BaseAccessor.iloc" href="indexing.html#vectorbt.base.indexing.PandasIndexer.iloc">iloc</a></code></li>
-<li><code><a title="vectorbt.base.accessors.BaseAccessor.indexing_func" href="array_wrapper.html#vectorbt.base.array_wrapper.Wrapping.indexing_func">indexing_func</a></code></li>
+<li><code><a title="vectorbt.base.accessors.BaseAccessor.indexing_func" href="#vectorbt.base.accessors.BaseAccessor.indexing_func">indexing_func</a></code></li>
 <li><code><a title="vectorbt.base.accessors.BaseAccessor.indexing_kwargs" href="indexing.html#vectorbt.base.indexing.PandasIndexer.indexing_kwargs">indexing_kwargs</a></code></li>
 <li><code><a title="vectorbt.base.accessors.BaseAccessor.load" href="../utils/config.html#vectorbt.utils.config.Pickleable.load">load</a></code></li>
 <li><code><a title="vectorbt.base.accessors.BaseAccessor.loads" href="../utils/config.html#vectorbt.utils.config.Pickleable.loads">loads</a></code></li>
@@ -2763,6 +2792,7 @@ def is_series(cls_or_self) -&gt; bool:
 <li><code><a title="vectorbt.base.accessors.BaseAccessor.regroup" href="array_wrapper.html#vectorbt.base.array_wrapper.Wrapping.regroup">regroup</a></code></li>
 <li><code><a title="vectorbt.base.accessors.BaseAccessor.rename_levels" href="#vectorbt.base.accessors.BaseAccessor.rename_levels">rename_levels</a></code></li>
 <li><code><a title="vectorbt.base.accessors.BaseAccessor.repeat" href="#vectorbt.base.accessors.BaseAccessor.repeat">repeat</a></code></li>
+<li><code><a title="vectorbt.base.accessors.BaseAccessor.replace" href="../utils/config.html#vectorbt.utils.config.Configured.replace">replace</a></code></li>
 <li><code><a title="vectorbt.base.accessors.BaseAccessor.resolve_attr" href="../utils/attr.html#vectorbt.utils.attr.AttrResolver.resolve_attr">resolve_attr</a></code></li>
 <li><code><a title="vectorbt.base.accessors.BaseAccessor.resolve_self" href="array_wrapper.html#vectorbt.base.array_wrapper.Wrapping.resolve_self">resolve_self</a></code></li>
 <li><code><a title="vectorbt.base.accessors.BaseAccessor.save" href="../utils/config.html#vectorbt.utils.config.Pickleable.save">save</a></code></li>
@@ -2804,7 +2834,7 @@ def is_series(cls_or_self) -&gt; bool:
     Accessible through `pd.Series.vbt` and all child accessors.&#34;&#34;&#34;
 
     def __init__(self, obj: tp.Series, **kwargs) -&gt; None:
-        checks.assert_type(obj, pd.Series)
+        checks.assert_instance_of(obj, pd.Series)
 
         BaseAccessor.__init__(self, obj, **kwargs)
 
@@ -2886,7 +2916,7 @@ def is_series(cls_or_self) -&gt; bool:
 <li><code><a title="vectorbt.base.accessors.BaseAccessor.empty" href="#vectorbt.base.accessors.BaseAccessor.empty">empty</a></code></li>
 <li><code><a title="vectorbt.base.accessors.BaseAccessor.empty_like" href="#vectorbt.base.accessors.BaseAccessor.empty_like">empty_like</a></code></li>
 <li><code><a title="vectorbt.base.accessors.BaseAccessor.iloc" href="indexing.html#vectorbt.base.indexing.PandasIndexer.iloc">iloc</a></code></li>
-<li><code><a title="vectorbt.base.accessors.BaseAccessor.indexing_func" href="array_wrapper.html#vectorbt.base.array_wrapper.Wrapping.indexing_func">indexing_func</a></code></li>
+<li><code><a title="vectorbt.base.accessors.BaseAccessor.indexing_func" href="#vectorbt.base.accessors.BaseAccessor.indexing_func">indexing_func</a></code></li>
 <li><code><a title="vectorbt.base.accessors.BaseAccessor.indexing_kwargs" href="indexing.html#vectorbt.base.indexing.PandasIndexer.indexing_kwargs">indexing_kwargs</a></code></li>
 <li><code><a title="vectorbt.base.accessors.BaseAccessor.load" href="../utils/config.html#vectorbt.utils.config.Pickleable.load">load</a></code></li>
 <li><code><a title="vectorbt.base.accessors.BaseAccessor.loads" href="../utils/config.html#vectorbt.utils.config.Pickleable.loads">loads</a></code></li>
@@ -2898,6 +2928,7 @@ def is_series(cls_or_self) -&gt; bool:
 <li><code><a title="vectorbt.base.accessors.BaseAccessor.regroup" href="array_wrapper.html#vectorbt.base.array_wrapper.Wrapping.regroup">regroup</a></code></li>
 <li><code><a title="vectorbt.base.accessors.BaseAccessor.rename_levels" href="#vectorbt.base.accessors.BaseAccessor.rename_levels">rename_levels</a></code></li>
 <li><code><a title="vectorbt.base.accessors.BaseAccessor.repeat" href="#vectorbt.base.accessors.BaseAccessor.repeat">repeat</a></code></li>
+<li><code><a title="vectorbt.base.accessors.BaseAccessor.replace" href="../utils/config.html#vectorbt.utils.config.Configured.replace">replace</a></code></li>
 <li><code><a title="vectorbt.base.accessors.BaseAccessor.resolve_attr" href="../utils/attr.html#vectorbt.utils.attr.AttrResolver.resolve_attr">resolve_attr</a></code></li>
 <li><code><a title="vectorbt.base.accessors.BaseAccessor.resolve_self" href="array_wrapper.html#vectorbt.base.array_wrapper.Wrapping.resolve_self">resolve_self</a></code></li>
 <li><code><a title="vectorbt.base.accessors.BaseAccessor.save" href="../utils/config.html#vectorbt.utils.config.Pickleable.save">save</a></code></li>
@@ -2929,7 +2960,7 @@ def is_series(cls_or_self) -&gt; bool:
 <header>
 <a class="homelink" rel="home" title="pdoc Home" href="https://github.com/polakowo/vectorbt">
 <img src="data:image/svg+xml;base64,PD94bWwgdmVyc2lvbj0iMS4wIiBlbmNvZGluZz0idXRmLTgiPz4KPCEtLSBHZW5lcmF0b3I6IEFkb2JlIElsbHVzdHJhdG9yIDI1LjAuMSwgU1ZHIEV4cG9ydCBQbHVnLUluIC4gU1ZHIFZlcnNpb246IDYuMDAgQnVpbGQgMCkgIC0tPgo8c3ZnIHZlcnNpb249IjEuMSIgaWQ9IkNhcGFfMSIgeG1sbnM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDAvc3ZnIiB4bWxuczp4bGluaz0iaHR0cDovL3d3dy53My5vcmcvMTk5OS94bGluayIgeD0iMHB4IiB5PSIwcHgiCgkgdmlld0JveD0iMCAwIDUxMiA1MTIiIHN0eWxlPSJlbmFibGUtYmFja2dyb3VuZDpuZXcgMCAwIDUxMiA1MTI7IiB4bWw6c3BhY2U9InByZXNlcnZlIj4KPHN0eWxlIHR5cGU9InRleHQvY3NzIj4KCS5zdDB7ZmlsbDojRUYwMDAwO30KCS5zdDF7ZmlsbDojRkY5MDAwO30KCS5zdDJ7ZmlsbDojRkZERjAwO30KCS5zdDN7ZmlsbDojMjgyQzM0O30KPC9zdHlsZT4KPGc+Cgk8Zz4KCQk8Zz4KCQkJPHBvbHlnb24gY2xhc3M9InN0MCIgcG9pbnRzPSIxNTUuMywzMDAuMSAyODMuMSwwIDIwOCwwIDExMC44LDAgMzUuOCwwIDEuMiw0NTAuMiA3Ni4zLDQ1MC4yIAkJCSIvPgoJCTwvZz4KCTwvZz4KCTxnPgoJCTxnPgoJCQk8cG9seWdvbiBjbGFzcz0ic3QxIiBwb2ludHM9IjIzMC40LDMwMC4xIDM1OC4xLDAgMjgzLjEsMCAxODUuOCwwIDExMC44LDAgNzYuMyw0NTAuMiAxNTEuMyw0NTAuMiAJCQkiLz4KCQk8L2c+Cgk8L2c+Cgk8Zz4KCQk8Zz4KCQkJPHBvbHlnb24gY2xhc3M9InN0MiIgcG9pbnRzPSIzMDUuNCwzMDAuMSA0MzMuMSwwIDM1OC4xLDAgMzMxLjYsNjIuMyAyNjAuOCwwIDE4NS44LDAgMTUxLjMsNDUwLjIgMjI2LjQsNDUwLjIgCQkJIi8+CgkJPC9nPgoJPC9nPgoJPGc+CgkJPGc+CgkJCTxwb2x5Z29uIGNsYXNzPSJzdDMiIHBvaW50cz0iNTEwLjgsMCA0MzMuMSwwIDMwNS40LDMwMC4xIDMzOC40LDAgMjYwLjgsMCAyMjYuNCw0NTAuMiAzMDQsNDUwLjIgCQkJIi8+CgkJPC9nPgoJPC9nPgo8L2c+Cjwvc3ZnPgo="/>
-vectorbt <span class="version">0.20.0</span></a>
+vectorbt <span class="version">0.21.0</span></a>
 </header>
 <div class="search-container">
 <input
@@ -2969,6 +3000,7 @@ title="Search"
 <li><code><a title="vectorbt.base.accessors.BaseAccessor.drop_redundant_levels" href="#vectorbt.base.accessors.BaseAccessor.drop_redundant_levels">drop_redundant_levels</a></code></li>
 <li><code><a title="vectorbt.base.accessors.BaseAccessor.empty" href="#vectorbt.base.accessors.BaseAccessor.empty">empty</a></code></li>
 <li><code><a title="vectorbt.base.accessors.BaseAccessor.empty_like" href="#vectorbt.base.accessors.BaseAccessor.empty_like">empty_like</a></code></li>
+<li><code><a title="vectorbt.base.accessors.BaseAccessor.indexing_func" href="#vectorbt.base.accessors.BaseAccessor.indexing_func">indexing_func</a></code></li>
 <li><code><a title="vectorbt.base.accessors.BaseAccessor.is_frame" href="#vectorbt.base.accessors.BaseAccessor.is_frame">is_frame</a></code></li>
 <li><code><a title="vectorbt.base.accessors.BaseAccessor.is_series" href="#vectorbt.base.accessors.BaseAccessor.is_series">is_series</a></code></li>
 <li><code><a title="vectorbt.base.accessors.BaseAccessor.make_symmetric" href="#vectorbt.base.accessors.BaseAccessor.make_symmetric">make_symmetric</a></code></li>

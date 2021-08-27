@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, minimum-scale=1" />
-<meta name="generator" content="pdoc 0.9.2" />
+<meta name="generator" content="pdoc 0.10.0" />
 <title>vectorbt.base.combine_fns API documentation</title>
 <meta name="description" content="Functions for combining arrays …" />
 <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/5.12.0-2/css/all.min.css" integrity="sha256-46r060N2LrChLLb5zowXQ72/iKKNiw/lAmygmHExk/o=" crossorigin="anonymous" />
@@ -48,7 +48,10 @@ a single DataFrame is important. All functions are available in both Python and 
 <summary>
 <span>Expand source code</span>
 </summary>
-<pre><code class="python">&#34;&#34;&#34;Functions for combining arrays.
+<pre><code class="python"># Copyright (c) 2021 Oleg Polakow. All rights reserved.
+# This code is licensed under Apache 2.0 with Commons Clause license (see LICENSE.md for details)
+
+&#34;&#34;&#34;Functions for combining arrays.
 
 Combine functions combine two or more NumPy arrays using a custom function. The emphasis here is
 done upon stacking the results into one NumPy array - since vectorbt is all about brute-forcing
@@ -57,18 +60,24 @@ a single DataFrame is important. All functions are available in both Python and 
 
 import numpy as np
 from numba import njit
-from tqdm import tqdm
+from tqdm.auto import tqdm
 
 from vectorbt import _typing as tp
 from vectorbt.base import reshape_fns
 
 
-def apply_and_concat_none(n: int, apply_func: tp.Callable, *args, show_progress: bool = False, **kwargs) -&gt; None:
+def apply_and_concat_none(n: int,
+                          apply_func: tp.Callable, *args,
+                          show_progress: bool = False,
+                          tqdm_kwargs: tp.KwargsLike = None,
+                          **kwargs) -&gt; None:
     &#34;&#34;&#34;For each value `i` from 0 to `n`, apply `apply_func` with arguments `*args` and `**kwargs`,
     and output nothing. Meant for in-place outputs.
 
     `apply_func` must accept arguments `i`, `*args` and `**kwargs`.&#34;&#34;&#34;
-    for i in tqdm(range(n), disable=not show_progress):
+    if tqdm_kwargs is None:
+        tqdm_kwargs = {}
+    for i in tqdm(range(n), disable=not show_progress, **tqdm_kwargs):
         apply_func(i, *args, **kwargs)
 
 
@@ -85,15 +94,21 @@ def apply_and_concat_none_nb(n: int, apply_func_nb: tp.Callable, *args) -&gt; No
         apply_func_nb(i, *args)
 
 
-def apply_and_concat_one(n: int, apply_func: tp.Callable, *args, show_progress: bool = False, **kwargs) -&gt; tp.Array2d:
+def apply_and_concat_one(n: int,
+                         apply_func: tp.Callable, *args,
+                         show_progress: bool = False,
+                         tqdm_kwargs: tp.KwargsLike = None,
+                         **kwargs) -&gt; tp.Array2d:
     &#34;&#34;&#34;For each value `i` from 0 to `n`, apply `apply_func` with arguments `*args` and `**kwargs`,
     and concat the results along axis 1.
 
     The result of `apply_func` must be a single 1-dim or 2-dim array.
 
     `apply_func` must accept arguments `i`, `*args` and `**kwargs`.&#34;&#34;&#34;
+    if tqdm_kwargs is None:
+        tqdm_kwargs = {}
     outputs = []
-    for i in tqdm(range(n), disable=not show_progress):
+    for i in tqdm(range(n), disable=not show_progress, **tqdm_kwargs):
         outputs.append(reshape_fns.to_2d(apply_func(i, *args, **kwargs)))
     return np.column_stack(outputs)
 
@@ -129,13 +144,18 @@ def apply_and_concat_one_nb(n: int, apply_func_nb: tp.Callable, *args) -&gt; tp.
     return output
 
 
-def apply_and_concat_multiple(n: int, apply_func: tp.Callable, *args,
-                              show_progress: bool = False, **kwargs) -&gt; tp.List[tp.Array2d]:
+def apply_and_concat_multiple(n: int,
+                              apply_func: tp.Callable, *args,
+                              show_progress: bool = False,
+                              tqdm_kwargs: tp.KwargsLike = None,
+                              **kwargs) -&gt; tp.List[tp.Array2d]:
     &#34;&#34;&#34;Identical to `apply_and_concat_one`, except that the result of `apply_func` must be
     multiple 1-dim or 2-dim arrays. Each of these arrays at `i` will be concatenated with the
     array at the same position at `i+1`.&#34;&#34;&#34;
+    if tqdm_kwargs is None:
+        tqdm_kwargs = {}
     outputs = []
-    for i in tqdm(range(n), disable=not show_progress):
+    for i in tqdm(range(n), disable=not show_progress, **tqdm_kwargs):
         outputs.append(tuple(map(reshape_fns.to_2d, apply_func(i, *args, **kwargs))))
     return list(map(np.column_stack, list(zip(*outputs))))
 
@@ -177,14 +197,19 @@ def apply_and_concat_multiple_nb(n: int, apply_func_nb: tp.Callable, *args) -&gt
     return outputs
 
 
-def select_and_combine(i: int, obj: tp.Any, others: tp.Sequence,
-                       combine_func: tp.Callable, *args, **kwargs) -&gt; tp.AnyArray:
+def select_and_combine(i: int,
+                       obj: tp.Any,
+                       others: tp.Sequence,
+                       combine_func: tp.Callable,
+                       *args, **kwargs) -&gt; tp.AnyArray:
     &#34;&#34;&#34;Combine `obj` and an element from `others` at `i` using `combine_func`.&#34;&#34;&#34;
     return combine_func(obj, others[i], *args, **kwargs)
 
 
-def combine_and_concat(obj: tp.Any, others: tp.Sequence,
-                       combine_func: tp.Callable, *args, **kwargs) -&gt; tp.Array2d:
+def combine_and_concat(obj: tp.Any,
+                       others: tp.Sequence,
+                       combine_func: tp.Callable,
+                       *args, **kwargs) -&gt; tp.Array2d:
     &#34;&#34;&#34;Use `apply_and_concat_one` to combine `obj` with each element from `others` using `combine_func`.&#34;&#34;&#34;
     return apply_and_concat_one(len(others), select_and_combine, obj, others, combine_func, *args, **kwargs)
 
@@ -232,9 +257,13 @@ def combine_multiple_nb(objs: tp.Sequence, combine_func_nb: tp.Callable, *args) 
     return result
 
 
-def ray_apply(n: int, apply_func: tp.Callable, *args, ray_force_init: bool = False,
-              ray_func_kwargs: tp.KwargsLike = None, ray_init_kwargs: tp.KwargsLike = None,
-              ray_shutdown: bool = False, **kwargs) -&gt; tp.List[tp.AnyArray]:
+def ray_apply(n: int,
+              apply_func: tp.Callable, *args,
+              ray_force_init: bool = False,
+              ray_func_kwargs: tp.KwargsLike = None,
+              ray_init_kwargs: tp.KwargsLike = None,
+              ray_shutdown: bool = False,
+              **kwargs) -&gt; tp.List[tp.AnyArray]:
     &#34;&#34;&#34;Run `apply_func` in distributed manner.
 
     Set `ray_reinit` to True to terminate the Ray runtime and initialize a new one.
@@ -283,7 +312,10 @@ def apply_and_concat_multiple_ray(*args, **kwargs) -&gt; tp.List[tp.Array2d]:
     return list(map(np.column_stack, list(zip(*results))))
 
 
-def combine_and_concat_ray(obj: tp.Any, others: tp.Sequence, combine_func: tp.Callable, *args, **kwargs) -&gt; tp.Array2d:
+def combine_and_concat_ray(obj: tp.Any,
+                           others: tp.Sequence,
+                           combine_func: tp.Callable,
+                           *args, **kwargs) -&gt; tp.Array2d:
     &#34;&#34;&#34;Distributed version of `combine_and_concat`.&#34;&#34;&#34;
     return apply_and_concat_one_ray(len(others), select_and_combine, obj, others, combine_func, *args, **kwargs)</code></pre>
 </details>
@@ -296,7 +328,7 @@ def combine_and_concat_ray(obj: tp.Any, others: tp.Sequence, combine_func: tp.Ca
 <h2 class="section-title" id="header-functions">Functions</h2>
 <dl>
 <dt id="vectorbt.base.combine_fns.apply_and_concat_multiple"><code class="name flex">
-<span>def <span class="ident parent-name">apply_and_concat_multiple</span></span>(<span class="params">n, apply_func, *args, show_progress=False, **kwargs)</span><span class="return_type"></span>
+<span>def <span class="ident parent-name">apply_and_concat_multiple</span></span>(<span class="params">n, apply_func, *args, show_progress=False, tqdm_kwargs=None, **kwargs)</span><span class="return_type"></span>
 </code></dt>
 <dd>
 <div class="desc"><p>Identical to <code><a title="vectorbt.base.combine_fns.apply_and_concat_one" href="#vectorbt.base.combine_fns.apply_and_concat_one">apply_and_concat_one()</a></code>, except that the result of <code>apply_func</code> must be
@@ -306,13 +338,18 @@ array at the same position at <code>i+1</code>.</p></div>
 <summary>
 <span>Expand source code</span>
 </summary>
-<pre><code class="python">def apply_and_concat_multiple(n: int, apply_func: tp.Callable, *args,
-                              show_progress: bool = False, **kwargs) -&gt; tp.List[tp.Array2d]:
+<pre><code class="python">def apply_and_concat_multiple(n: int,
+                              apply_func: tp.Callable, *args,
+                              show_progress: bool = False,
+                              tqdm_kwargs: tp.KwargsLike = None,
+                              **kwargs) -&gt; tp.List[tp.Array2d]:
     &#34;&#34;&#34;Identical to `apply_and_concat_one`, except that the result of `apply_func` must be
     multiple 1-dim or 2-dim arrays. Each of these arrays at `i` will be concatenated with the
     array at the same position at `i+1`.&#34;&#34;&#34;
+    if tqdm_kwargs is None:
+        tqdm_kwargs = {}
     outputs = []
-    for i in tqdm(range(n), disable=not show_progress):
+    for i in tqdm(range(n), disable=not show_progress, **tqdm_kwargs):
         outputs.append(tuple(map(reshape_fns.to_2d, apply_func(i, *args, **kwargs))))
     return list(map(np.column_stack, list(zip(*outputs))))</code></pre>
 </details>
@@ -375,7 +412,7 @@ def apply_and_concat_multiple_nb(n: int, apply_func_nb: tp.Callable, *args) -&gt
 </details>
 </dd>
 <dt id="vectorbt.base.combine_fns.apply_and_concat_none"><code class="name flex">
-<span>def <span class="ident parent-name">apply_and_concat_none</span></span>(<span class="params">n, apply_func, *args, show_progress=False, **kwargs)</span><span class="return_type"></span>
+<span>def <span class="ident parent-name">apply_and_concat_none</span></span>(<span class="params">n, apply_func, *args, show_progress=False, tqdm_kwargs=None, **kwargs)</span><span class="return_type"></span>
 </code></dt>
 <dd>
 <div class="desc"><p>For each value <code>i</code> from 0 to <code>n</code>, apply <code>apply_func</code> with arguments <code>*args</code> and <code>**kwargs</code>,
@@ -385,12 +422,18 @@ and output nothing. Meant for in-place outputs.</p>
 <summary>
 <span>Expand source code</span>
 </summary>
-<pre><code class="python">def apply_and_concat_none(n: int, apply_func: tp.Callable, *args, show_progress: bool = False, **kwargs) -&gt; None:
+<pre><code class="python">def apply_and_concat_none(n: int,
+                          apply_func: tp.Callable, *args,
+                          show_progress: bool = False,
+                          tqdm_kwargs: tp.KwargsLike = None,
+                          **kwargs) -&gt; None:
     &#34;&#34;&#34;For each value `i` from 0 to `n`, apply `apply_func` with arguments `*args` and `**kwargs`,
     and output nothing. Meant for in-place outputs.
 
     `apply_func` must accept arguments `i`, `*args` and `**kwargs`.&#34;&#34;&#34;
-    for i in tqdm(range(n), disable=not show_progress):
+    if tqdm_kwargs is None:
+        tqdm_kwargs = {}
+    for i in tqdm(range(n), disable=not show_progress, **tqdm_kwargs):
         apply_func(i, *args, **kwargs)</code></pre>
 </details>
 </dd>
@@ -425,7 +468,7 @@ def apply_and_concat_none_nb(n: int, apply_func_nb: tp.Callable, *args) -&gt; No
 </details>
 </dd>
 <dt id="vectorbt.base.combine_fns.apply_and_concat_one"><code class="name flex">
-<span>def <span class="ident parent-name">apply_and_concat_one</span></span>(<span class="params">n, apply_func, *args, show_progress=False, **kwargs)</span><span class="return_type"></span>
+<span>def <span class="ident parent-name">apply_and_concat_one</span></span>(<span class="params">n, apply_func, *args, show_progress=False, tqdm_kwargs=None, **kwargs)</span><span class="return_type"></span>
 </code></dt>
 <dd>
 <div class="desc"><p>For each value <code>i</code> from 0 to <code>n</code>, apply <code>apply_func</code> with arguments <code>*args</code> and <code>**kwargs</code>,
@@ -436,15 +479,21 @@ and concat the results along axis 1.</p>
 <summary>
 <span>Expand source code</span>
 </summary>
-<pre><code class="python">def apply_and_concat_one(n: int, apply_func: tp.Callable, *args, show_progress: bool = False, **kwargs) -&gt; tp.Array2d:
+<pre><code class="python">def apply_and_concat_one(n: int,
+                         apply_func: tp.Callable, *args,
+                         show_progress: bool = False,
+                         tqdm_kwargs: tp.KwargsLike = None,
+                         **kwargs) -&gt; tp.Array2d:
     &#34;&#34;&#34;For each value `i` from 0 to `n`, apply `apply_func` with arguments `*args` and `**kwargs`,
     and concat the results along axis 1.
 
     The result of `apply_func` must be a single 1-dim or 2-dim array.
 
     `apply_func` must accept arguments `i`, `*args` and `**kwargs`.&#34;&#34;&#34;
+    if tqdm_kwargs is None:
+        tqdm_kwargs = {}
     outputs = []
-    for i in tqdm(range(n), disable=not show_progress):
+    for i in tqdm(range(n), disable=not show_progress, **tqdm_kwargs):
         outputs.append(reshape_fns.to_2d(apply_func(i, *args, **kwargs)))
     return np.column_stack(outputs)</code></pre>
 </details>
@@ -510,8 +559,10 @@ def apply_and_concat_one_nb(n: int, apply_func_nb: tp.Callable, *args) -&gt; tp.
 <summary>
 <span>Expand source code</span>
 </summary>
-<pre><code class="python">def combine_and_concat(obj: tp.Any, others: tp.Sequence,
-                       combine_func: tp.Callable, *args, **kwargs) -&gt; tp.Array2d:
+<pre><code class="python">def combine_and_concat(obj: tp.Any,
+                       others: tp.Sequence,
+                       combine_func: tp.Callable,
+                       *args, **kwargs) -&gt; tp.Array2d:
     &#34;&#34;&#34;Use `apply_and_concat_one` to combine `obj` with each element from `others` using `combine_func`.&#34;&#34;&#34;
     return apply_and_concat_one(len(others), select_and_combine, obj, others, combine_func, *args, **kwargs)</code></pre>
 </details>
@@ -540,7 +591,10 @@ def combine_and_concat_nb(obj: tp.Any, others: tp.Sequence, combine_func_nb: tp.
 <summary>
 <span>Expand source code</span>
 </summary>
-<pre><code class="python">def combine_and_concat_ray(obj: tp.Any, others: tp.Sequence, combine_func: tp.Callable, *args, **kwargs) -&gt; tp.Array2d:
+<pre><code class="python">def combine_and_concat_ray(obj: tp.Any,
+                           others: tp.Sequence,
+                           combine_func: tp.Callable,
+                           *args, **kwargs) -&gt; tp.Array2d:
     &#34;&#34;&#34;Distributed version of `combine_and_concat`.&#34;&#34;&#34;
     return apply_and_concat_one_ray(len(others), select_and_combine, obj, others, combine_func, *args, **kwargs)</code></pre>
 </details>
@@ -608,9 +662,13 @@ Set <code>ray_shutdown</code> to True to terminate the Ray runtime upon the job 
 <summary>
 <span>Expand source code</span>
 </summary>
-<pre><code class="python">def ray_apply(n: int, apply_func: tp.Callable, *args, ray_force_init: bool = False,
-              ray_func_kwargs: tp.KwargsLike = None, ray_init_kwargs: tp.KwargsLike = None,
-              ray_shutdown: bool = False, **kwargs) -&gt; tp.List[tp.AnyArray]:
+<pre><code class="python">def ray_apply(n: int,
+              apply_func: tp.Callable, *args,
+              ray_force_init: bool = False,
+              ray_func_kwargs: tp.KwargsLike = None,
+              ray_init_kwargs: tp.KwargsLike = None,
+              ray_shutdown: bool = False,
+              **kwargs) -&gt; tp.List[tp.AnyArray]:
     &#34;&#34;&#34;Run `apply_func` in distributed manner.
 
     Set `ray_reinit` to True to terminate the Ray runtime and initialize a new one.
@@ -656,8 +714,11 @@ Set <code>ray_shutdown</code> to True to terminate the Ray runtime upon the job 
 <summary>
 <span>Expand source code</span>
 </summary>
-<pre><code class="python">def select_and_combine(i: int, obj: tp.Any, others: tp.Sequence,
-                       combine_func: tp.Callable, *args, **kwargs) -&gt; tp.AnyArray:
+<pre><code class="python">def select_and_combine(i: int,
+                       obj: tp.Any,
+                       others: tp.Sequence,
+                       combine_func: tp.Callable,
+                       *args, **kwargs) -&gt; tp.AnyArray:
     &#34;&#34;&#34;Combine `obj` and an element from `others` at `i` using `combine_func`.&#34;&#34;&#34;
     return combine_func(obj, others[i], *args, **kwargs)</code></pre>
 </details>
@@ -756,7 +817,7 @@ def to_2d_one_nb(a: tp.Array) -&gt; tp.Array2d:
 <header>
 <a class="homelink" rel="home" title="pdoc Home" href="https://github.com/polakowo/vectorbt">
 <img src="data:image/svg+xml;base64,PD94bWwgdmVyc2lvbj0iMS4wIiBlbmNvZGluZz0idXRmLTgiPz4KPCEtLSBHZW5lcmF0b3I6IEFkb2JlIElsbHVzdHJhdG9yIDI1LjAuMSwgU1ZHIEV4cG9ydCBQbHVnLUluIC4gU1ZHIFZlcnNpb246IDYuMDAgQnVpbGQgMCkgIC0tPgo8c3ZnIHZlcnNpb249IjEuMSIgaWQ9IkNhcGFfMSIgeG1sbnM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDAvc3ZnIiB4bWxuczp4bGluaz0iaHR0cDovL3d3dy53My5vcmcvMTk5OS94bGluayIgeD0iMHB4IiB5PSIwcHgiCgkgdmlld0JveD0iMCAwIDUxMiA1MTIiIHN0eWxlPSJlbmFibGUtYmFja2dyb3VuZDpuZXcgMCAwIDUxMiA1MTI7IiB4bWw6c3BhY2U9InByZXNlcnZlIj4KPHN0eWxlIHR5cGU9InRleHQvY3NzIj4KCS5zdDB7ZmlsbDojRUYwMDAwO30KCS5zdDF7ZmlsbDojRkY5MDAwO30KCS5zdDJ7ZmlsbDojRkZERjAwO30KCS5zdDN7ZmlsbDojMjgyQzM0O30KPC9zdHlsZT4KPGc+Cgk8Zz4KCQk8Zz4KCQkJPHBvbHlnb24gY2xhc3M9InN0MCIgcG9pbnRzPSIxNTUuMywzMDAuMSAyODMuMSwwIDIwOCwwIDExMC44LDAgMzUuOCwwIDEuMiw0NTAuMiA3Ni4zLDQ1MC4yIAkJCSIvPgoJCTwvZz4KCTwvZz4KCTxnPgoJCTxnPgoJCQk8cG9seWdvbiBjbGFzcz0ic3QxIiBwb2ludHM9IjIzMC40LDMwMC4xIDM1OC4xLDAgMjgzLjEsMCAxODUuOCwwIDExMC44LDAgNzYuMyw0NTAuMiAxNTEuMyw0NTAuMiAJCQkiLz4KCQk8L2c+Cgk8L2c+Cgk8Zz4KCQk8Zz4KCQkJPHBvbHlnb24gY2xhc3M9InN0MiIgcG9pbnRzPSIzMDUuNCwzMDAuMSA0MzMuMSwwIDM1OC4xLDAgMzMxLjYsNjIuMyAyNjAuOCwwIDE4NS44LDAgMTUxLjMsNDUwLjIgMjI2LjQsNDUwLjIgCQkJIi8+CgkJPC9nPgoJPC9nPgoJPGc+CgkJPGc+CgkJCTxwb2x5Z29uIGNsYXNzPSJzdDMiIHBvaW50cz0iNTEwLjgsMCA0MzMuMSwwIDMwNS40LDMwMC4xIDMzOC40LDAgMjYwLjgsMCAyMjYuNCw0NTAuMiAzMDQsNDUwLjIgCQkJIi8+CgkJPC9nPgoJPC9nPgo8L2c+Cjwvc3ZnPgo="/>
-vectorbt <span class="version">0.20.0</span></a>
+vectorbt <span class="version">0.21.0</span></a>
 </header>
 <div class="search-container">
 <input

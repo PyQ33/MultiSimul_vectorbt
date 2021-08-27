@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, minimum-scale=1" />
-<meta name="generator" content="pdoc 0.9.2" />
+<meta name="generator" content="pdoc 0.10.0" />
 <title>vectorbt.records.decorators API documentation</title>
 <meta name="description" content="Class and function decorators." />
 <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/5.12.0-2/css/all.min.css" integrity="sha256-46r060N2LrChLLb5zowXQ72/iKKNiw/lAmygmHExk/o=" crossorigin="anonymous" />
@@ -44,71 +44,207 @@ gtag('config', 'G-4QLCS0J048');
 <summary>
 <span>Expand source code</span>
 </summary>
-<pre><code class="python">&#34;&#34;&#34;Class and function decorators.&#34;&#34;&#34;
+<pre><code class="python"># Copyright (c) 2021 Oleg Polakow. All rights reserved.
+# This code is licensed under Apache 2.0 with Commons Clause license (see LICENSE.md for details)
 
-import numpy as np
+&#34;&#34;&#34;Class and function decorators.&#34;&#34;&#34;
+
+from functools import partial
+import re
+import keyword
 
 from vectorbt import _typing as tp
 from vectorbt.utils import checks
 from vectorbt.utils.config import merge_dicts, Config
 from vectorbt.utils.decorators import cached_property
+from vectorbt.utils.mapping import to_mapping
 from vectorbt.records.mapped_array import MappedArray
 
 WrapperFuncT = tp.Callable[[tp.Type[tp.T]], tp.Type[tp.T]]
 
 
-def add_mapped_fields(dtype: np.dtype, config: tp.Optional[Config], on_conflict: str = &#39;raise&#39;) -&gt; WrapperFuncT:
-    &#34;&#34;&#34;Class decorator to override mapped field properties in a `vectorbt.records.base.Records` class.
+def override_field_config(*args, merge_configs: bool = True) -&gt; tp.Union[WrapperFuncT, tp.Type[tp.T]]:
+    &#34;&#34;&#34;Class decorator to override field configs of all base classes in MRO that subclass
+    `vectorbt.records.base.Records`.
+    
+    Instead of overriding `_field_config` class attribute, you can pass `config` directly to this decorator.
+
+    Disable `merge_configs` to not merge, which will effectively disable field inheritance.&#34;&#34;&#34;
+
+    def wrapper(cls: tp.Type[tp.T], config: tp.DictLike = None) -&gt; tp.Type[tp.T]:
+        checks.assert_subclass_of(cls, &#34;Records&#34;)
+
+        if config is None:
+            config = cls.field_config
+        if not isinstance(config, Config):
+            config = Config(config, readonly=True, as_attrs=False)
+        if merge_configs:
+            configs = []
+            for base_cls in cls.mro()[::-1]:
+                if base_cls is not cls:
+                    if checks.is_subclass_of(base_cls, &#34;Records&#34;):
+                        configs.append(base_cls.field_config)
+            configs.append(config)
+            config = merge_dicts(*configs, to_dict=False)
+
+        setattr(cls, &#34;_field_config&#34;, config)
+        return cls
+
+    if len(args) == 0:
+        return wrapper
+    elif len(args) == 1:
+        if isinstance(args[0], type):
+            return wrapper(args[0])
+        return partial(wrapper, config=args[0])
+    elif len(args) == 2:
+        return wrapper(args[0], config=args[1])
+    raise ValueError(&#34;Either class, config, class and config, or keyword arguments must be passed&#34;)
+
+
+def attach_fields(*args, on_conflict: str = &#39;raise&#39;) -&gt; tp.Union[WrapperFuncT, tp.Type[tp.T]]:
+    &#34;&#34;&#34;Class decorator to attach field properties in a `vectorbt.records.base.Records` class.
+
+    Will extract `dtype` and other relevant information from `vectorbt.records.base.Records.field_config`
+    and map its fields as properties. This behavior can be changed by using `config`.
+
+    !!! note
+        Make sure to run `attach_fields` after `override_field_config`.
 
     `config` should contain fields (keys) and dictionaries (values) with the following keys:
 
-    * `target_name`: Name of the target property. Defaults to the field name. Set to None to disable.
-    * `defaults`: Dictionary with defaults for `vectorbt.records.base.Records.map_field`.
+    * `attach`: Whether to attach the field property. Can be provided as a string to be used
+        as a target attribute name. Defaults to True.
+    * `defaults`: Dictionary with default keyword arguments for `vectorbt.records.base.Records.map_field`.
+        Defaults to an empty dict.
+    * `attach_filters`: Whether to attach filters based on the field&#39;s values. Can be provided as a dict
+        to be used instead of the mapping (filter value -&gt; target filter name). Defaults to False.
+        If True, defaults to `mapping` in `vectorbt.records.base.Records.field_config`.
+    * `filter_defaults`: Dictionary with default keyword arguments for `vectorbt.records.base.Records.apply_mask`.
+        Can be provided by target filter name. Defaults to an empty dict.
+    * `on_conflict`: Overrides global `on_conflict` for both field and filter properties.
 
-    If a field name is not in the config, it will be added automatically.
+    Any potential attribute name is prepared by placing underscores between capital letters and
+    converting to the lower case.
 
-    If an attribute with the same name already exists in the class:
+    If an attribute with the same name already exists in the class but the name is not listed in the field config:
 
     * it will be overridden if `on_conflict` is &#39;override&#39;
     * it will be ignored if `on_conflict` is &#39;ignore&#39;
     * an error will be raised if `on_conflict` is &#39;raise&#39;
     &#34;&#34;&#34;
 
-    def wrapper(cls: tp.Type[tp.T]) -&gt; tp.Type[tp.T]:
-        from vectorbt.records.base import Records
+    def wrapper(cls: tp.Type[tp.T], config: tp.DictLike = None) -&gt; tp.Type[tp.T]:
+        checks.assert_subclass_of(cls, &#34;Records&#34;)
 
-        checks.assert_subclass(cls, Records)
+        dtype = cls.field_config.get(&#39;dtype&#39;, None)
         checks.assert_not_none(dtype.fields)
 
-        for field_name in dtype.names:
-            if field_name in config:
-                settings = config[field_name]
-                target_name = settings.get(&#39;target_name&#39;, field_name)
-                defaults = settings.get(&#39;defaults&#39;, None)
-            else:
-                target_name = field_name
-                defaults = None
-            if hasattr(cls, target_name):
-                if on_conflict.lower() == &#39;raise&#39;:
-                    raise ValueError(f&#34;An attribute with the name &#39;{target_name}&#39; already exists in {cls}&#34;)
-                elif on_conflict.lower() == &#39;ignore&#39;:
-                    continue
-                elif on_conflict.lower() == &#39;override&#39;:
-                    pass
+        if config is None:
+            config = {}
+
+        def _prepare_attr_name(attr_name: str) -&gt; str:
+            checks.assert_instance_of(attr_name, str)
+            attr_name = attr_name.replace(&#39;NaN&#39;, &#39;Nan&#39;)
+            startswith_ = attr_name.startswith(&#39;_&#39;)
+            attr_name = re.sub(r&#34;([A-Z])&#34;, r&#34;_\1&#34;, attr_name)
+            if not startswith_ and attr_name.startswith(&#39;_&#39;):
+                attr_name = attr_name[1:]
+            attr_name = attr_name.lower()
+            if keyword.iskeyword(attr_name):
+                attr_name += &#39;_&#39;
+            return attr_name
+
+        def _check_attr_name(attr_name, _on_conflict: str = on_conflict) -&gt; None:
+            if attr_name not in cls.field_config.get(&#39;settings&#39;, {}):
+                # Consider only attributes that are not listed in the field config
+                if hasattr(cls, attr_name):
+                    if _on_conflict.lower() == &#39;raise&#39;:
+                        raise ValueError(f&#34;An attribute with the name &#39;{attr_name}&#39; already exists in {cls}&#34;)
+                    if _on_conflict.lower() == &#39;ignore&#39;:
+                        return
+                    if _on_conflict.lower() == &#39;override&#39;:
+                        return
+                    raise ValueError(f&#34;Value &#39;{_on_conflict}&#39; is invalid for on_conflict&#34;)
+                if keyword.iskeyword(attr_name):
+                    raise ValueError(f&#34;Name &#39;{attr_name}&#39; is a keyword and cannot be used as an attribute name&#34;)
+
+        if dtype is not None:
+            for field_name in dtype.names:
+                settings = config.get(field_name, {})
+                attach = settings.get(&#39;attach&#39;, True)
+                if not isinstance(attach, bool):
+                    target_name = attach
+                    attach = True
                 else:
-                    raise ValueError(f&#34;Value &#39;{on_conflict}&#39; is invalid for on_conflict&#34;)
-            if not target_name.isidentifier():
-                raise ValueError(f&#34;Name &#39;{target_name}&#39; is not a valid attribute name&#34;)
+                    target_name = field_name
+                defaults = settings.get(&#39;defaults&#39;, None)
+                if defaults is None:
+                    defaults = {}
+                attach_filters = settings.get(&#39;attach_filters&#39;, False)
+                filter_defaults = settings.get(&#39;filter_defaults&#39;, None)
+                if filter_defaults is None:
+                    filter_defaults = {}
+                _on_conflict = settings.get(&#39;on_conflict&#39;, on_conflict)
 
-            def new_prop(self, _field_name: str = field_name, _defaults: tp.KwargsLike = defaults) -&gt; MappedArray:
-                return self.map_field(_field_name, **merge_dicts({}, _defaults))
+                if attach:
+                    target_name = _prepare_attr_name(target_name)
+                    _check_attr_name(target_name, _on_conflict)
 
-            new_prop.__doc__ = f&#34;Mapped array of the field `{field_name}`.&#34;
-            new_prop.__name__ = target_name
-            setattr(cls, target_name, cached_property(new_prop))
+                    def new_prop(self,
+                                 _field_name: str = field_name,
+                                 _defaults: tp.KwargsLike = defaults) -&gt; MappedArray:
+                        return self.get_map_field(_field_name, **_defaults)
+
+                    new_prop.__doc__ = f&#34;Mapped array of the field `{field_name}`.&#34;
+                    new_prop.__name__ = target_name
+                    setattr(cls, target_name, cached_property(new_prop))
+
+                if attach_filters:
+                    if isinstance(attach_filters, bool):
+                        if not attach_filters:
+                            continue
+                        mapping = cls.field_config \
+                            .get(&#39;settings&#39;, {}) \
+                            .get(field_name, {}) \
+                            .get(&#39;mapping&#39;, None)
+                    else:
+                        mapping = attach_filters
+                    if mapping is None:
+                        raise ValueError(f&#34;Field &#39;{field_name}&#39;: Mapping is required to attach filters&#34;)
+                    mapping = to_mapping(mapping)
+
+                    for filter_value, target_filter_name in mapping.items():
+                        if target_filter_name is None:
+                            continue
+                        target_filter_name = _prepare_attr_name(target_filter_name)
+                        _check_attr_name(target_filter_name, _on_conflict)
+                        if target_filter_name in filter_defaults:
+                            __filter_defaults = filter_defaults[target_filter_name]
+                        else:
+                            __filter_defaults = filter_defaults
+
+                        def new_filter_prop(self,
+                                            _field_name: str = field_name,
+                                            _filter_value: tp.Any = filter_value,
+                                            _filter_defaults: tp.KwargsLike = __filter_defaults) -&gt; MappedArray:
+                            filter_mask = self.get_field_arr(_field_name) == _filter_value
+                            return self.apply_mask(filter_mask, **_filter_defaults)
+
+                        new_filter_prop.__doc__ = f&#34;Records filtered by `{field_name} == {filter_value}`.&#34;
+                        new_filter_prop.__name__ = target_filter_name
+                        setattr(cls, target_filter_name, cached_property(new_filter_prop))
+
         return cls
 
-    return wrapper</code></pre>
+    if len(args) == 0:
+        return wrapper
+    elif len(args) == 1:
+        if isinstance(args[0], type):
+            return wrapper(args[0])
+        return partial(wrapper, config=args[0])
+    elif len(args) == 2:
+        return wrapper(args[0], config=args[1])
+    raise ValueError(&#34;Either class, config, class and config, or keyword arguments must be passed&#34;)</code></pre>
 </details>
 </section>
 <section>
@@ -118,18 +254,33 @@ def add_mapped_fields(dtype: np.dtype, config: tp.Optional[Config], on_conflict:
 <section>
 <h2 class="section-title" id="header-functions">Functions</h2>
 <dl>
-<dt id="vectorbt.records.decorators.add_mapped_fields"><code class="name flex">
-<span>def <span class="ident parent-name">add_mapped_fields</span></span>(<span class="params">dtype, config, on_conflict='raise')</span><span class="return_type"></span>
+<dt id="vectorbt.records.decorators.attach_fields"><code class="name flex">
+<span>def <span class="ident parent-name">attach_fields</span></span>(<span class="params">*args, on_conflict='raise')</span><span class="return_type"></span>
 </code></dt>
 <dd>
-<div class="desc"><p>Class decorator to override mapped field properties in a <code><a title="vectorbt.records.base.Records" href="base.html#vectorbt.records.base.Records">Records</a></code> class.</p>
+<div class="desc"><p>Class decorator to attach field properties in a <code><a title="vectorbt.records.base.Records" href="base.html#vectorbt.records.base.Records">Records</a></code> class.</p>
+<p>Will extract <code>dtype</code> and other relevant information from <code><a title="vectorbt.records.base.Records.field_config" href="base.html#vectorbt.records.base.Records.field_config">Records.field_config</a></code>
+and map its fields as properties. This behavior can be changed by using <code>config</code>.</p>
+<div class="admonition note">
+<p class="admonition-title">Note</p>
+<p>Make sure to run <code><a title="vectorbt.records.decorators.attach_fields" href="#vectorbt.records.decorators.attach_fields">attach_fields()</a></code> after <code><a title="vectorbt.records.decorators.override_field_config" href="#vectorbt.records.decorators.override_field_config">override_field_config()</a></code>.</p>
+</div>
 <p><code>config</code> should contain fields (keys) and dictionaries (values) with the following keys:</p>
 <ul>
-<li><code>target_name</code>: Name of the target property. Defaults to the field name. Set to None to disable.</li>
-<li><code>defaults</code>: Dictionary with defaults for <code><a title="vectorbt.records.base.Records.map_field" href="base.html#vectorbt.records.base.Records.map_field">Records.map_field()</a></code>.</li>
+<li><code>attach</code>: Whether to attach the field property. Can be provided as a string to be used
+as a target attribute name. Defaults to True.</li>
+<li><code>defaults</code>: Dictionary with default keyword arguments for <code><a title="vectorbt.records.base.Records.map_field" href="base.html#vectorbt.records.base.Records.map_field">Records.map_field()</a></code>.
+Defaults to an empty dict.</li>
+<li><code>attach_filters</code>: Whether to attach filters based on the field's values. Can be provided as a dict
+to be used instead of the mapping (filter value -&gt; target filter name). Defaults to False.
+If True, defaults to <code>mapping</code> in <code><a title="vectorbt.records.base.Records.field_config" href="base.html#vectorbt.records.base.Records.field_config">Records.field_config</a></code>.</li>
+<li><code>filter_defaults</code>: Dictionary with default keyword arguments for <code><a title="vectorbt.records.base.Records.apply_mask" href="base.html#vectorbt.records.base.Records.apply_mask">Records.apply_mask()</a></code>.
+Can be provided by target filter name. Defaults to an empty dict.</li>
+<li><code>on_conflict</code>: Overrides global <code>on_conflict</code> for both field and filter properties.</li>
 </ul>
-<p>If a field name is not in the config, it will be added automatically.</p>
-<p>If an attribute with the same name already exists in the class:</p>
+<p>Any potential attribute name is prepared by placing underscores between capital letters and
+converting to the lower case.</p>
+<p>If an attribute with the same name already exists in the class but the name is not listed in the field config:</p>
 <ul>
 <li>it will be overridden if <code>on_conflict</code> is 'override'</li>
 <li>it will be ignored if <code>on_conflict</code> is 'ignore'</li>
@@ -139,58 +290,200 @@ def add_mapped_fields(dtype: np.dtype, config: tp.Optional[Config], on_conflict:
 <summary>
 <span>Expand source code</span>
 </summary>
-<pre><code class="python">def add_mapped_fields(dtype: np.dtype, config: tp.Optional[Config], on_conflict: str = &#39;raise&#39;) -&gt; WrapperFuncT:
-    &#34;&#34;&#34;Class decorator to override mapped field properties in a `vectorbt.records.base.Records` class.
+<pre><code class="python">def attach_fields(*args, on_conflict: str = &#39;raise&#39;) -&gt; tp.Union[WrapperFuncT, tp.Type[tp.T]]:
+    &#34;&#34;&#34;Class decorator to attach field properties in a `vectorbt.records.base.Records` class.
+
+    Will extract `dtype` and other relevant information from `vectorbt.records.base.Records.field_config`
+    and map its fields as properties. This behavior can be changed by using `config`.
+
+    !!! note
+        Make sure to run `attach_fields` after `override_field_config`.
 
     `config` should contain fields (keys) and dictionaries (values) with the following keys:
 
-    * `target_name`: Name of the target property. Defaults to the field name. Set to None to disable.
-    * `defaults`: Dictionary with defaults for `vectorbt.records.base.Records.map_field`.
+    * `attach`: Whether to attach the field property. Can be provided as a string to be used
+        as a target attribute name. Defaults to True.
+    * `defaults`: Dictionary with default keyword arguments for `vectorbt.records.base.Records.map_field`.
+        Defaults to an empty dict.
+    * `attach_filters`: Whether to attach filters based on the field&#39;s values. Can be provided as a dict
+        to be used instead of the mapping (filter value -&gt; target filter name). Defaults to False.
+        If True, defaults to `mapping` in `vectorbt.records.base.Records.field_config`.
+    * `filter_defaults`: Dictionary with default keyword arguments for `vectorbt.records.base.Records.apply_mask`.
+        Can be provided by target filter name. Defaults to an empty dict.
+    * `on_conflict`: Overrides global `on_conflict` for both field and filter properties.
 
-    If a field name is not in the config, it will be added automatically.
+    Any potential attribute name is prepared by placing underscores between capital letters and
+    converting to the lower case.
 
-    If an attribute with the same name already exists in the class:
+    If an attribute with the same name already exists in the class but the name is not listed in the field config:
 
     * it will be overridden if `on_conflict` is &#39;override&#39;
     * it will be ignored if `on_conflict` is &#39;ignore&#39;
     * an error will be raised if `on_conflict` is &#39;raise&#39;
     &#34;&#34;&#34;
 
-    def wrapper(cls: tp.Type[tp.T]) -&gt; tp.Type[tp.T]:
-        from vectorbt.records.base import Records
+    def wrapper(cls: tp.Type[tp.T], config: tp.DictLike = None) -&gt; tp.Type[tp.T]:
+        checks.assert_subclass_of(cls, &#34;Records&#34;)
 
-        checks.assert_subclass(cls, Records)
+        dtype = cls.field_config.get(&#39;dtype&#39;, None)
         checks.assert_not_none(dtype.fields)
 
-        for field_name in dtype.names:
-            if field_name in config:
-                settings = config[field_name]
-                target_name = settings.get(&#39;target_name&#39;, field_name)
-                defaults = settings.get(&#39;defaults&#39;, None)
-            else:
-                target_name = field_name
-                defaults = None
-            if hasattr(cls, target_name):
-                if on_conflict.lower() == &#39;raise&#39;:
-                    raise ValueError(f&#34;An attribute with the name &#39;{target_name}&#39; already exists in {cls}&#34;)
-                elif on_conflict.lower() == &#39;ignore&#39;:
-                    continue
-                elif on_conflict.lower() == &#39;override&#39;:
-                    pass
+        if config is None:
+            config = {}
+
+        def _prepare_attr_name(attr_name: str) -&gt; str:
+            checks.assert_instance_of(attr_name, str)
+            attr_name = attr_name.replace(&#39;NaN&#39;, &#39;Nan&#39;)
+            startswith_ = attr_name.startswith(&#39;_&#39;)
+            attr_name = re.sub(r&#34;([A-Z])&#34;, r&#34;_\1&#34;, attr_name)
+            if not startswith_ and attr_name.startswith(&#39;_&#39;):
+                attr_name = attr_name[1:]
+            attr_name = attr_name.lower()
+            if keyword.iskeyword(attr_name):
+                attr_name += &#39;_&#39;
+            return attr_name
+
+        def _check_attr_name(attr_name, _on_conflict: str = on_conflict) -&gt; None:
+            if attr_name not in cls.field_config.get(&#39;settings&#39;, {}):
+                # Consider only attributes that are not listed in the field config
+                if hasattr(cls, attr_name):
+                    if _on_conflict.lower() == &#39;raise&#39;:
+                        raise ValueError(f&#34;An attribute with the name &#39;{attr_name}&#39; already exists in {cls}&#34;)
+                    if _on_conflict.lower() == &#39;ignore&#39;:
+                        return
+                    if _on_conflict.lower() == &#39;override&#39;:
+                        return
+                    raise ValueError(f&#34;Value &#39;{_on_conflict}&#39; is invalid for on_conflict&#34;)
+                if keyword.iskeyword(attr_name):
+                    raise ValueError(f&#34;Name &#39;{attr_name}&#39; is a keyword and cannot be used as an attribute name&#34;)
+
+        if dtype is not None:
+            for field_name in dtype.names:
+                settings = config.get(field_name, {})
+                attach = settings.get(&#39;attach&#39;, True)
+                if not isinstance(attach, bool):
+                    target_name = attach
+                    attach = True
                 else:
-                    raise ValueError(f&#34;Value &#39;{on_conflict}&#39; is invalid for on_conflict&#34;)
-            if not target_name.isidentifier():
-                raise ValueError(f&#34;Name &#39;{target_name}&#39; is not a valid attribute name&#34;)
+                    target_name = field_name
+                defaults = settings.get(&#39;defaults&#39;, None)
+                if defaults is None:
+                    defaults = {}
+                attach_filters = settings.get(&#39;attach_filters&#39;, False)
+                filter_defaults = settings.get(&#39;filter_defaults&#39;, None)
+                if filter_defaults is None:
+                    filter_defaults = {}
+                _on_conflict = settings.get(&#39;on_conflict&#39;, on_conflict)
 
-            def new_prop(self, _field_name: str = field_name, _defaults: tp.KwargsLike = defaults) -&gt; MappedArray:
-                return self.map_field(_field_name, **merge_dicts({}, _defaults))
+                if attach:
+                    target_name = _prepare_attr_name(target_name)
+                    _check_attr_name(target_name, _on_conflict)
 
-            new_prop.__doc__ = f&#34;Mapped array of the field `{field_name}`.&#34;
-            new_prop.__name__ = target_name
-            setattr(cls, target_name, cached_property(new_prop))
+                    def new_prop(self,
+                                 _field_name: str = field_name,
+                                 _defaults: tp.KwargsLike = defaults) -&gt; MappedArray:
+                        return self.get_map_field(_field_name, **_defaults)
+
+                    new_prop.__doc__ = f&#34;Mapped array of the field `{field_name}`.&#34;
+                    new_prop.__name__ = target_name
+                    setattr(cls, target_name, cached_property(new_prop))
+
+                if attach_filters:
+                    if isinstance(attach_filters, bool):
+                        if not attach_filters:
+                            continue
+                        mapping = cls.field_config \
+                            .get(&#39;settings&#39;, {}) \
+                            .get(field_name, {}) \
+                            .get(&#39;mapping&#39;, None)
+                    else:
+                        mapping = attach_filters
+                    if mapping is None:
+                        raise ValueError(f&#34;Field &#39;{field_name}&#39;: Mapping is required to attach filters&#34;)
+                    mapping = to_mapping(mapping)
+
+                    for filter_value, target_filter_name in mapping.items():
+                        if target_filter_name is None:
+                            continue
+                        target_filter_name = _prepare_attr_name(target_filter_name)
+                        _check_attr_name(target_filter_name, _on_conflict)
+                        if target_filter_name in filter_defaults:
+                            __filter_defaults = filter_defaults[target_filter_name]
+                        else:
+                            __filter_defaults = filter_defaults
+
+                        def new_filter_prop(self,
+                                            _field_name: str = field_name,
+                                            _filter_value: tp.Any = filter_value,
+                                            _filter_defaults: tp.KwargsLike = __filter_defaults) -&gt; MappedArray:
+                            filter_mask = self.get_field_arr(_field_name) == _filter_value
+                            return self.apply_mask(filter_mask, **_filter_defaults)
+
+                        new_filter_prop.__doc__ = f&#34;Records filtered by `{field_name} == {filter_value}`.&#34;
+                        new_filter_prop.__name__ = target_filter_name
+                        setattr(cls, target_filter_name, cached_property(new_filter_prop))
+
         return cls
 
-    return wrapper</code></pre>
+    if len(args) == 0:
+        return wrapper
+    elif len(args) == 1:
+        if isinstance(args[0], type):
+            return wrapper(args[0])
+        return partial(wrapper, config=args[0])
+    elif len(args) == 2:
+        return wrapper(args[0], config=args[1])
+    raise ValueError(&#34;Either class, config, class and config, or keyword arguments must be passed&#34;)</code></pre>
+</details>
+</dd>
+<dt id="vectorbt.records.decorators.override_field_config"><code class="name flex">
+<span>def <span class="ident parent-name">override_field_config</span></span>(<span class="params">*args, merge_configs=True)</span><span class="return_type"></span>
+</code></dt>
+<dd>
+<div class="desc"><p>Class decorator to override field configs of all base classes in MRO that subclass
+<code><a title="vectorbt.records.base.Records" href="base.html#vectorbt.records.base.Records">Records</a></code>.</p>
+<p>Instead of overriding <code>_field_config</code> class attribute, you can pass <code>config</code> directly to this decorator.</p>
+<p>Disable <code>merge_configs</code> to not merge, which will effectively disable field inheritance.</p></div>
+<details class="source">
+<summary>
+<span>Expand source code</span>
+</summary>
+<pre><code class="python">def override_field_config(*args, merge_configs: bool = True) -&gt; tp.Union[WrapperFuncT, tp.Type[tp.T]]:
+    &#34;&#34;&#34;Class decorator to override field configs of all base classes in MRO that subclass
+    `vectorbt.records.base.Records`.
+    
+    Instead of overriding `_field_config` class attribute, you can pass `config` directly to this decorator.
+
+    Disable `merge_configs` to not merge, which will effectively disable field inheritance.&#34;&#34;&#34;
+
+    def wrapper(cls: tp.Type[tp.T], config: tp.DictLike = None) -&gt; tp.Type[tp.T]:
+        checks.assert_subclass_of(cls, &#34;Records&#34;)
+
+        if config is None:
+            config = cls.field_config
+        if not isinstance(config, Config):
+            config = Config(config, readonly=True, as_attrs=False)
+        if merge_configs:
+            configs = []
+            for base_cls in cls.mro()[::-1]:
+                if base_cls is not cls:
+                    if checks.is_subclass_of(base_cls, &#34;Records&#34;):
+                        configs.append(base_cls.field_config)
+            configs.append(config)
+            config = merge_dicts(*configs, to_dict=False)
+
+        setattr(cls, &#34;_field_config&#34;, config)
+        return cls
+
+    if len(args) == 0:
+        return wrapper
+    elif len(args) == 1:
+        if isinstance(args[0], type):
+            return wrapper(args[0])
+        return partial(wrapper, config=args[0])
+    elif len(args) == 2:
+        return wrapper(args[0], config=args[1])
+    raise ValueError(&#34;Either class, config, class and config, or keyword arguments must be passed&#34;)</code></pre>
 </details>
 </dd>
 </dl>
@@ -202,7 +495,7 @@ def add_mapped_fields(dtype: np.dtype, config: tp.Optional[Config], on_conflict:
 <header>
 <a class="homelink" rel="home" title="pdoc Home" href="https://github.com/polakowo/vectorbt">
 <img src="data:image/svg+xml;base64,PD94bWwgdmVyc2lvbj0iMS4wIiBlbmNvZGluZz0idXRmLTgiPz4KPCEtLSBHZW5lcmF0b3I6IEFkb2JlIElsbHVzdHJhdG9yIDI1LjAuMSwgU1ZHIEV4cG9ydCBQbHVnLUluIC4gU1ZHIFZlcnNpb246IDYuMDAgQnVpbGQgMCkgIC0tPgo8c3ZnIHZlcnNpb249IjEuMSIgaWQ9IkNhcGFfMSIgeG1sbnM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDAvc3ZnIiB4bWxuczp4bGluaz0iaHR0cDovL3d3dy53My5vcmcvMTk5OS94bGluayIgeD0iMHB4IiB5PSIwcHgiCgkgdmlld0JveD0iMCAwIDUxMiA1MTIiIHN0eWxlPSJlbmFibGUtYmFja2dyb3VuZDpuZXcgMCAwIDUxMiA1MTI7IiB4bWw6c3BhY2U9InByZXNlcnZlIj4KPHN0eWxlIHR5cGU9InRleHQvY3NzIj4KCS5zdDB7ZmlsbDojRUYwMDAwO30KCS5zdDF7ZmlsbDojRkY5MDAwO30KCS5zdDJ7ZmlsbDojRkZERjAwO30KCS5zdDN7ZmlsbDojMjgyQzM0O30KPC9zdHlsZT4KPGc+Cgk8Zz4KCQk8Zz4KCQkJPHBvbHlnb24gY2xhc3M9InN0MCIgcG9pbnRzPSIxNTUuMywzMDAuMSAyODMuMSwwIDIwOCwwIDExMC44LDAgMzUuOCwwIDEuMiw0NTAuMiA3Ni4zLDQ1MC4yIAkJCSIvPgoJCTwvZz4KCTwvZz4KCTxnPgoJCTxnPgoJCQk8cG9seWdvbiBjbGFzcz0ic3QxIiBwb2ludHM9IjIzMC40LDMwMC4xIDM1OC4xLDAgMjgzLjEsMCAxODUuOCwwIDExMC44LDAgNzYuMyw0NTAuMiAxNTEuMyw0NTAuMiAJCQkiLz4KCQk8L2c+Cgk8L2c+Cgk8Zz4KCQk8Zz4KCQkJPHBvbHlnb24gY2xhc3M9InN0MiIgcG9pbnRzPSIzMDUuNCwzMDAuMSA0MzMuMSwwIDM1OC4xLDAgMzMxLjYsNjIuMyAyNjAuOCwwIDE4NS44LDAgMTUxLjMsNDUwLjIgMjI2LjQsNDUwLjIgCQkJIi8+CgkJPC9nPgoJPC9nPgoJPGc+CgkJPGc+CgkJCTxwb2x5Z29uIGNsYXNzPSJzdDMiIHBvaW50cz0iNTEwLjgsMCA0MzMuMSwwIDMwNS40LDMwMC4xIDMzOC40LDAgMjYwLjgsMCAyMjYuNCw0NTAuMiAzMDQsNDUwLjIgCQkJIi8+CgkJPC9nPgoJPC9nPgo8L2c+Cjwvc3ZnPgo="/>
-vectorbt <span class="version">0.20.0</span></a>
+vectorbt <span class="version">0.21.0</span></a>
 </header>
 <div class="search-container">
 <input
@@ -225,7 +518,8 @@ title="Search"
 </li>
 <li><h3><a href="#header-functions">Functions</a></h3>
 <ul class="">
-<li><code><a title="vectorbt.records.decorators.add_mapped_fields" href="#vectorbt.records.decorators.add_mapped_fields">add_mapped_fields</a></code></li>
+<li><code><a title="vectorbt.records.decorators.attach_fields" href="#vectorbt.records.decorators.attach_fields">attach_fields</a></code></li>
+<li><code><a title="vectorbt.records.decorators.override_field_config" href="#vectorbt.records.decorators.override_field_config">override_field_config</a></code></li>
 </ul>
 </li>
 </nav>
