@@ -802,6 +802,173 @@ class CCXTData(Data):
         download_kwargs[&#39;start&#39;] = self.data[symbol].index[-1]
         download_kwargs[&#39;show_progress&#39;] = False
         kwargs = merge_dicts(download_kwargs, kwargs)
+        return self.download_symbol(symbol, **kwargs)
+
+class AlpacaData(Data):
+    &#34;&#34;&#34;`Data` for data coming from `alpaca-trade-api`. 
+    Sign up for Alpaca API keys here: https://app.alpaca.markets/signup
+    
+    ## Example
+
+    Fetch the 1-minute data of the last 2 hours, wait 1 minute, and update:
+
+    ```python-repl
+    &gt;&gt;&gt; import vectorbt as vbt
+
+    &gt;&gt;&gt; alpaca_data = vbt.AlpacaData.download(
+    ...     &#34;AAPL&#34;,
+    ...     start=&#39;2 hours ago UTC&#39;,
+    ...     end=&#39;15 minutes ago UTC&#39;,
+    ...     interval=&#39;1m&#39;
+    ... )
+    &gt;&gt;&gt; alpaca_data.get()
+                                Open      High       Low     Close      Volume
+    timestamp                                                                
+    2021-12-27 14:04:00+00:00  177.0500  177.0500  177.0500  177.0500    1967
+    2021-12-27 14:05:00+00:00  177.0500  177.0500  177.0300  177.0500    3218
+    2021-12-27 14:06:00+00:00  177.0400  177.0400  177.0400  177.0400     873
+    2021-12-27 14:07:00+00:00  177.0399  177.0400  177.0300  177.0400    1100
+    2021-12-27 14:08:00+00:00  177.0400  177.0400  176.9700  176.9900   19943
+    ...                             ...       ...       ...       ...     ...
+    2021-12-27 15:44:00+00:00  178.0000  178.0079  177.9311  177.9710  106395
+    2021-12-27 15:45:00+00:00  177.9700  178.0564  177.9430  177.9600  153325
+    2021-12-27 15:46:00+00:00  177.9500  178.0000  177.8289  177.8850  162778
+    2021-12-27 15:47:00+00:00  177.8810  177.9600  177.8400  177.9515  123284
+    2021-12-27 15:48:00+00:00  177.9600  178.0500  177.9600  178.0100  159700
+
+    [105 rows x 5 columns]
+
+    &gt;&gt;&gt; import time
+    &gt;&gt;&gt; time.sleep(60)
+
+    &gt;&gt;&gt; alpaca_data = alpaca_data.update()
+    &gt;&gt;&gt; alpaca_data.get()
+                                Open      High       Low     Close      Volume
+    timestamp                                                                
+    2021-12-27 14:04:00+00:00  177.0500  177.0500  177.0500  177.0500    1967
+    2021-12-27 14:05:00+00:00  177.0500  177.0500  177.0300  177.0500    3218
+    2021-12-27 14:06:00+00:00  177.0400  177.0400  177.0400  177.0400     873
+    2021-12-27 14:07:00+00:00  177.0399  177.0400  177.0300  177.0400    1100
+    2021-12-27 14:08:00+00:00  177.0400  177.0400  176.9700  176.9900   19943
+    ...                             ...       ...       ...       ...     ...
+    2021-12-27 15:45:00+00:00  177.9700  178.0564  177.9430  177.9600  153325
+    2021-12-27 15:46:00+00:00  177.9500  178.0000  177.8289  177.8850  162778
+    2021-12-27 15:47:00+00:00  177.8810  177.9600  177.8400  177.9515  123284
+    2021-12-27 15:48:00+00:00  177.9600  178.0500  177.9600  178.0100  159700
+    2021-12-27 15:49:00+00:00  178.0100  178.0700  177.9700  178.0650  185037
+
+    [106 rows x 5 columns]
+    ```&#34;&#34;&#34;
+
+    @classmethod
+    def download_symbol(cls,
+                        symbol: str,
+                        timeframe: str = &#39;1d&#39;,
+                        start: tp.DatetimeLike = 0,
+                        end: tp.DatetimeLike = &#39;now UTC&#39;,
+                        adjustment: tp.Optional[str] = &#39;all&#39;,
+                        limit: int = 500,
+                        exchange: tp.Optional[str] = &#39;CBSE&#39;,
+                        **kwargs) -&gt; tp.Frame:
+        &#34;&#34;&#34;Download the symbol.
+
+        Args:
+            symbol (str): Symbol.
+            timeframe (str): Timeframe of data. Must be integer multiple of &#39;m&#39; (minute), &#39;h&#39; (hour) or &#39;d&#39; (day). i.e. &#39;15m&#39; 
+                Note: Data from the latest 15 minutes is not available with a free data plan.
+                See: https://alpaca.markets/data
+
+            start (any): Start datetime.
+
+                See `vectorbt.utils.datetime_.to_tzaware_datetime`.
+            end (any): End datetime.
+
+                See `vectorbt.utils.datetime_.to_tzaware_datetime`.
+            adjustment (str): Specifies the corporate action adjustment for the stocks. 
+                Enum: `raw`, `split`, `dividend` or `all`.
+            limit (int): The maximum number of returned items.
+            exchange (str): For crypto symbols. Which exchange you wish to retrieve data from.
+                Enum: `FTX`, `ERSX`, `CBSE`
+
+        For defaults, see `data.alpaca` in `vectorbt._settings.settings`.
+        &#34;&#34;&#34;
+        from vectorbt._settings import settings
+        from alpaca_trade_api.rest import TimeFrameUnit, TimeFrame, REST
+        
+        alpaca_cfg = settings[&#39;data&#39;][&#39;alpaca&#39;]
+        
+        client_kwargs = dict()
+        for k in get_func_kwargs(REST):
+            if k in kwargs:
+                client_kwargs[k] = kwargs.pop(k)
+
+        client_kwargs = merge_dicts(alpaca_cfg, client_kwargs)
+        
+        client = REST(**client_kwargs)
+
+        _timeframe_units = {&#39;d&#39;: TimeFrameUnit.Day, &#39;h&#39;: TimeFrameUnit.Hour, &#39;m&#39;: TimeFrameUnit.Minute}
+
+        if len(timeframe) &lt; 2:
+            raise ValueError(&#34;invalid timeframe&#34;)
+            
+        amount_str = timeframe[:-1]
+        unit_str = timeframe[-1]
+
+        if not amount_str.isnumeric() or unit_str not in _timeframe_units:
+            raise ValueError(&#34;invalid timeframe&#34;)
+        
+        amount = int(amount_str)
+        unit = _timeframe_units[unit_str]
+
+        _timeframe = TimeFrame(amount, unit)
+
+        start_ts = to_tzaware_datetime(start, tz=get_utc_tz()).isoformat()
+        end_ts = to_tzaware_datetime(end, tz=get_utc_tz()).isoformat()
+
+        
+        def _is_crypto_symbol(symbol):
+            return len(symbol) == 6 and &#34;USD&#34; in symbol
+
+        if _is_crypto_symbol(symbol):
+            df = client.get_crypto_bars(symbol=symbol,
+                                    timeframe=_timeframe,
+                                    start=start_ts,
+                                    end=end_ts,
+                                    limit=limit,
+                                    exchanges=exchange).df
+        else:
+            df = client.get_bars(symbol=symbol, 
+                                timeframe=_timeframe,
+                                start=start_ts,
+                                end=end_ts,
+                                adjustment=adjustment, 
+                                limit=limit).df
+        
+        # filter for OHLCV
+        # remove extra columns
+        df.drop([&#39;trade_count&#39;, &#39;vwap&#39;], axis=1, errors=&#39;ignore&#39;, inplace=True)
+
+        # capitalize
+        df.rename(columns={&#39;open&#39;: &#39;Open&#39;, &#39;high&#39;: &#39;High&#39;, &#39;low&#39;: &#39;Low&#39;, &#39;close&#39;: &#39;Close&#39;, &#39;volume&#39;: &#39;Volume&#39;, &#39;exchange&#39;:&#39;Exchange&#39;}, inplace=True)
+
+        df[&#39;Open&#39;] = df[&#39;Open&#39;].astype(float)
+        df[&#39;High&#39;] = df[&#39;High&#39;].astype(float)
+        df[&#39;Low&#39;] = df[&#39;Low&#39;].astype(float)
+        df[&#39;Close&#39;] = df[&#39;Close&#39;].astype(float)
+        df[&#39;Volume&#39;] = df[&#39;Volume&#39;].astype(float)
+
+        return df
+
+
+
+    def update_symbol(self, symbol: str, **kwargs) -&gt; tp.Frame:
+        &#34;&#34;&#34;Update the symbol.
+
+        `**kwargs` will override keyword arguments passed to `AlpacaData.download_symbol`.&#34;&#34;&#34;
+        download_kwargs = self.select_symbol_kwargs(symbol, self.download_kwargs)
+        download_kwargs[&#39;start&#39;] = self.data[symbol].index[-1]
+        download_kwargs[&#39;show_progress&#39;] = False
+        kwargs = merge_dicts(download_kwargs, kwargs)
         return self.download_symbol(symbol, **kwargs)</code></pre>
 </details>
 </section>
@@ -844,6 +1011,466 @@ class CCXTData(Data):
 <section>
 <h2 class="section-title" id="header-classes">Classes</h2>
 <dl>
+<dt id="vectorbt.data.custom.AlpacaData"><code class="flex name class">
+<span>class <span class="ident parent-name">AlpacaData</span></span>
+(<span class="params">wrapper, data, tz_localize, tz_convert, missing_index, missing_columns, download_kwargs, **kwargs</span>)
+</code></dt>
+<dd>
+<div class="desc"><p><code>Data</code> for data coming from <code>alpaca-trade-api</code>.
+Sign up for Alpaca API keys here: <a href="https://app.alpaca.markets/signup">https://app.alpaca.markets/signup</a></p>
+<h2 id="example">Example</h2>
+<p>Fetch the 1-minute data of the last 2 hours, wait 1 minute, and update:</p>
+<pre><code class="language-python-repl">&gt;&gt;&gt; import vectorbt as vbt
+
+&gt;&gt;&gt; alpaca_data = vbt.AlpacaData.download(
+...     &quot;AAPL&quot;,
+...     start='2 hours ago UTC',
+...     end='15 minutes ago UTC',
+...     interval='1m'
+... )
+&gt;&gt;&gt; alpaca_data.get()
+                            Open      High       Low     Close      Volume
+timestamp                                                                
+2021-12-27 14:04:00+00:00  177.0500  177.0500  177.0500  177.0500    1967
+2021-12-27 14:05:00+00:00  177.0500  177.0500  177.0300  177.0500    3218
+2021-12-27 14:06:00+00:00  177.0400  177.0400  177.0400  177.0400     873
+2021-12-27 14:07:00+00:00  177.0399  177.0400  177.0300  177.0400    1100
+2021-12-27 14:08:00+00:00  177.0400  177.0400  176.9700  176.9900   19943
+...                             ...       ...       ...       ...     ...
+2021-12-27 15:44:00+00:00  178.0000  178.0079  177.9311  177.9710  106395
+2021-12-27 15:45:00+00:00  177.9700  178.0564  177.9430  177.9600  153325
+2021-12-27 15:46:00+00:00  177.9500  178.0000  177.8289  177.8850  162778
+2021-12-27 15:47:00+00:00  177.8810  177.9600  177.8400  177.9515  123284
+2021-12-27 15:48:00+00:00  177.9600  178.0500  177.9600  178.0100  159700
+
+[105 rows x 5 columns]
+
+&gt;&gt;&gt; import time
+&gt;&gt;&gt; time.sleep(60)
+
+&gt;&gt;&gt; alpaca_data = alpaca_data.update()
+&gt;&gt;&gt; alpaca_data.get()
+                            Open      High       Low     Close      Volume
+timestamp                                                                
+2021-12-27 14:04:00+00:00  177.0500  177.0500  177.0500  177.0500    1967
+2021-12-27 14:05:00+00:00  177.0500  177.0500  177.0300  177.0500    3218
+2021-12-27 14:06:00+00:00  177.0400  177.0400  177.0400  177.0400     873
+2021-12-27 14:07:00+00:00  177.0399  177.0400  177.0300  177.0400    1100
+2021-12-27 14:08:00+00:00  177.0400  177.0400  176.9700  176.9900   19943
+...                             ...       ...       ...       ...     ...
+2021-12-27 15:45:00+00:00  177.9700  178.0564  177.9430  177.9600  153325
+2021-12-27 15:46:00+00:00  177.9500  178.0000  177.8289  177.8850  162778
+2021-12-27 15:47:00+00:00  177.8810  177.9600  177.8400  177.9515  123284
+2021-12-27 15:48:00+00:00  177.9600  178.0500  177.9600  178.0100  159700
+2021-12-27 15:49:00+00:00  178.0100  178.0700  177.9700  178.0650  185037
+
+[106 rows x 5 columns]
+</code></pre></div>
+<details class="source">
+<summary>
+<span>Expand source code</span>
+</summary>
+<pre><code class="python">class AlpacaData(Data):
+    &#34;&#34;&#34;`Data` for data coming from `alpaca-trade-api`. 
+    Sign up for Alpaca API keys here: https://app.alpaca.markets/signup
+    
+    ## Example
+
+    Fetch the 1-minute data of the last 2 hours, wait 1 minute, and update:
+
+    ```python-repl
+    &gt;&gt;&gt; import vectorbt as vbt
+
+    &gt;&gt;&gt; alpaca_data = vbt.AlpacaData.download(
+    ...     &#34;AAPL&#34;,
+    ...     start=&#39;2 hours ago UTC&#39;,
+    ...     end=&#39;15 minutes ago UTC&#39;,
+    ...     interval=&#39;1m&#39;
+    ... )
+    &gt;&gt;&gt; alpaca_data.get()
+                                Open      High       Low     Close      Volume
+    timestamp                                                                
+    2021-12-27 14:04:00+00:00  177.0500  177.0500  177.0500  177.0500    1967
+    2021-12-27 14:05:00+00:00  177.0500  177.0500  177.0300  177.0500    3218
+    2021-12-27 14:06:00+00:00  177.0400  177.0400  177.0400  177.0400     873
+    2021-12-27 14:07:00+00:00  177.0399  177.0400  177.0300  177.0400    1100
+    2021-12-27 14:08:00+00:00  177.0400  177.0400  176.9700  176.9900   19943
+    ...                             ...       ...       ...       ...     ...
+    2021-12-27 15:44:00+00:00  178.0000  178.0079  177.9311  177.9710  106395
+    2021-12-27 15:45:00+00:00  177.9700  178.0564  177.9430  177.9600  153325
+    2021-12-27 15:46:00+00:00  177.9500  178.0000  177.8289  177.8850  162778
+    2021-12-27 15:47:00+00:00  177.8810  177.9600  177.8400  177.9515  123284
+    2021-12-27 15:48:00+00:00  177.9600  178.0500  177.9600  178.0100  159700
+
+    [105 rows x 5 columns]
+
+    &gt;&gt;&gt; import time
+    &gt;&gt;&gt; time.sleep(60)
+
+    &gt;&gt;&gt; alpaca_data = alpaca_data.update()
+    &gt;&gt;&gt; alpaca_data.get()
+                                Open      High       Low     Close      Volume
+    timestamp                                                                
+    2021-12-27 14:04:00+00:00  177.0500  177.0500  177.0500  177.0500    1967
+    2021-12-27 14:05:00+00:00  177.0500  177.0500  177.0300  177.0500    3218
+    2021-12-27 14:06:00+00:00  177.0400  177.0400  177.0400  177.0400     873
+    2021-12-27 14:07:00+00:00  177.0399  177.0400  177.0300  177.0400    1100
+    2021-12-27 14:08:00+00:00  177.0400  177.0400  176.9700  176.9900   19943
+    ...                             ...       ...       ...       ...     ...
+    2021-12-27 15:45:00+00:00  177.9700  178.0564  177.9430  177.9600  153325
+    2021-12-27 15:46:00+00:00  177.9500  178.0000  177.8289  177.8850  162778
+    2021-12-27 15:47:00+00:00  177.8810  177.9600  177.8400  177.9515  123284
+    2021-12-27 15:48:00+00:00  177.9600  178.0500  177.9600  178.0100  159700
+    2021-12-27 15:49:00+00:00  178.0100  178.0700  177.9700  178.0650  185037
+
+    [106 rows x 5 columns]
+    ```&#34;&#34;&#34;
+
+    @classmethod
+    def download_symbol(cls,
+                        symbol: str,
+                        timeframe: str = &#39;1d&#39;,
+                        start: tp.DatetimeLike = 0,
+                        end: tp.DatetimeLike = &#39;now UTC&#39;,
+                        adjustment: tp.Optional[str] = &#39;all&#39;,
+                        limit: int = 500,
+                        exchange: tp.Optional[str] = &#39;CBSE&#39;,
+                        **kwargs) -&gt; tp.Frame:
+        &#34;&#34;&#34;Download the symbol.
+
+        Args:
+            symbol (str): Symbol.
+            timeframe (str): Timeframe of data. Must be integer multiple of &#39;m&#39; (minute), &#39;h&#39; (hour) or &#39;d&#39; (day). i.e. &#39;15m&#39; 
+                Note: Data from the latest 15 minutes is not available with a free data plan.
+                See: https://alpaca.markets/data
+
+            start (any): Start datetime.
+
+                See `vectorbt.utils.datetime_.to_tzaware_datetime`.
+            end (any): End datetime.
+
+                See `vectorbt.utils.datetime_.to_tzaware_datetime`.
+            adjustment (str): Specifies the corporate action adjustment for the stocks. 
+                Enum: `raw`, `split`, `dividend` or `all`.
+            limit (int): The maximum number of returned items.
+            exchange (str): For crypto symbols. Which exchange you wish to retrieve data from.
+                Enum: `FTX`, `ERSX`, `CBSE`
+
+        For defaults, see `data.alpaca` in `vectorbt._settings.settings`.
+        &#34;&#34;&#34;
+        from vectorbt._settings import settings
+        from alpaca_trade_api.rest import TimeFrameUnit, TimeFrame, REST
+        
+        alpaca_cfg = settings[&#39;data&#39;][&#39;alpaca&#39;]
+        
+        client_kwargs = dict()
+        for k in get_func_kwargs(REST):
+            if k in kwargs:
+                client_kwargs[k] = kwargs.pop(k)
+
+        client_kwargs = merge_dicts(alpaca_cfg, client_kwargs)
+        
+        client = REST(**client_kwargs)
+
+        _timeframe_units = {&#39;d&#39;: TimeFrameUnit.Day, &#39;h&#39;: TimeFrameUnit.Hour, &#39;m&#39;: TimeFrameUnit.Minute}
+
+        if len(timeframe) &lt; 2:
+            raise ValueError(&#34;invalid timeframe&#34;)
+            
+        amount_str = timeframe[:-1]
+        unit_str = timeframe[-1]
+
+        if not amount_str.isnumeric() or unit_str not in _timeframe_units:
+            raise ValueError(&#34;invalid timeframe&#34;)
+        
+        amount = int(amount_str)
+        unit = _timeframe_units[unit_str]
+
+        _timeframe = TimeFrame(amount, unit)
+
+        start_ts = to_tzaware_datetime(start, tz=get_utc_tz()).isoformat()
+        end_ts = to_tzaware_datetime(end, tz=get_utc_tz()).isoformat()
+
+        
+        def _is_crypto_symbol(symbol):
+            return len(symbol) == 6 and &#34;USD&#34; in symbol
+
+        if _is_crypto_symbol(symbol):
+            df = client.get_crypto_bars(symbol=symbol,
+                                    timeframe=_timeframe,
+                                    start=start_ts,
+                                    end=end_ts,
+                                    limit=limit,
+                                    exchanges=exchange).df
+        else:
+            df = client.get_bars(symbol=symbol, 
+                                timeframe=_timeframe,
+                                start=start_ts,
+                                end=end_ts,
+                                adjustment=adjustment, 
+                                limit=limit).df
+        
+        # filter for OHLCV
+        # remove extra columns
+        df.drop([&#39;trade_count&#39;, &#39;vwap&#39;], axis=1, errors=&#39;ignore&#39;, inplace=True)
+
+        # capitalize
+        df.rename(columns={&#39;open&#39;: &#39;Open&#39;, &#39;high&#39;: &#39;High&#39;, &#39;low&#39;: &#39;Low&#39;, &#39;close&#39;: &#39;Close&#39;, &#39;volume&#39;: &#39;Volume&#39;, &#39;exchange&#39;:&#39;Exchange&#39;}, inplace=True)
+
+        df[&#39;Open&#39;] = df[&#39;Open&#39;].astype(float)
+        df[&#39;High&#39;] = df[&#39;High&#39;].astype(float)
+        df[&#39;Low&#39;] = df[&#39;Low&#39;].astype(float)
+        df[&#39;Close&#39;] = df[&#39;Close&#39;].astype(float)
+        df[&#39;Volume&#39;] = df[&#39;Volume&#39;].astype(float)
+
+        return df
+
+
+
+    def update_symbol(self, symbol: str, **kwargs) -&gt; tp.Frame:
+        &#34;&#34;&#34;Update the symbol.
+
+        `**kwargs` will override keyword arguments passed to `AlpacaData.download_symbol`.&#34;&#34;&#34;
+        download_kwargs = self.select_symbol_kwargs(symbol, self.download_kwargs)
+        download_kwargs[&#39;start&#39;] = self.data[symbol].index[-1]
+        download_kwargs[&#39;show_progress&#39;] = False
+        kwargs = merge_dicts(download_kwargs, kwargs)
+        return self.download_symbol(symbol, **kwargs)</code></pre>
+</details>
+<h3 class="section-subtitle">Ancestors</h3>
+<ul class="hlist">
+<li><a title="vectorbt.data.base.Data" href="base.html#vectorbt.data.base.Data">Data</a></li>
+<li><a title="vectorbt.base.array_wrapper.Wrapping" href="../base/array_wrapper.html#vectorbt.base.array_wrapper.Wrapping">Wrapping</a></li>
+<li><a title="vectorbt.utils.config.Configured" href="../utils/config.html#vectorbt.utils.config.Configured">Configured</a></li>
+<li><a title="vectorbt.utils.config.Pickleable" href="../utils/config.html#vectorbt.utils.config.Pickleable">Pickleable</a></li>
+<li><a title="vectorbt.utils.docs.Documented" href="../utils/docs.html#vectorbt.utils.docs.Documented">Documented</a></li>
+<li><a title="vectorbt.base.indexing.PandasIndexer" href="../base/indexing.html#vectorbt.base.indexing.PandasIndexer">PandasIndexer</a></li>
+<li><a title="vectorbt.base.indexing.IndexingBase" href="../base/indexing.html#vectorbt.base.indexing.IndexingBase">IndexingBase</a></li>
+<li><a title="vectorbt.utils.attr_.AttrResolver" href="../utils/attr_.html#vectorbt.utils.attr_.AttrResolver">AttrResolver</a></li>
+<li><a title="vectorbt.generic.stats_builder.StatsBuilderMixin" href="../generic/stats_builder.html#vectorbt.generic.stats_builder.StatsBuilderMixin">StatsBuilderMixin</a></li>
+<li><a title="vectorbt.generic.plots_builder.PlotsBuilderMixin" href="../generic/plots_builder.html#vectorbt.generic.plots_builder.PlotsBuilderMixin">PlotsBuilderMixin</a></li>
+</ul>
+<h3 class="section-subtitle">Static methods</h3>
+<dl>
+<dt id="vectorbt.data.custom.AlpacaData.download_symbol"><code class="name flex">
+<span>def <span class="ident child-name">download_symbol</span></span>(<span class="params">symbol, timeframe='1d', start=0, end='now UTC', adjustment='all', limit=500, exchange='CBSE', **kwargs)</span><span class="return_type"></span>
+</code></dt>
+<dd>
+<div class="desc"><p>Download the symbol.</p>
+<h2 id="args">Args</h2>
+<dl>
+<dt><strong><code>symbol</code></strong> :&ensp;<code>str</code></dt>
+<dd>Symbol.</dd>
+<dt><strong><code>timeframe</code></strong> :&ensp;<code>str</code></dt>
+<dd>Timeframe of data. Must be integer multiple of 'm' (minute), 'h' (hour) or 'd' (day). i.e. '15m'
+Note: Data from the latest 15 minutes is not available with a free data plan.
+See: <a href="https://alpaca.markets/data">https://alpaca.markets/data</a></dd>
+<dt><strong><code>start</code></strong> :&ensp;<code>any</code></dt>
+<dd>
+<p>Start datetime.</p>
+<p>See <code><a title="vectorbt.utils.datetime_.to_tzaware_datetime" href="../utils/datetime_.html#vectorbt.utils.datetime_.to_tzaware_datetime">to_tzaware_datetime()</a></code>.</p>
+</dd>
+<dt><strong><code>end</code></strong> :&ensp;<code>any</code></dt>
+<dd>
+<p>End datetime.</p>
+<p>See <code><a title="vectorbt.utils.datetime_.to_tzaware_datetime" href="../utils/datetime_.html#vectorbt.utils.datetime_.to_tzaware_datetime">to_tzaware_datetime()</a></code>.</p>
+</dd>
+<dt><strong><code>adjustment</code></strong> :&ensp;<code>str</code></dt>
+<dd>Specifies the corporate action adjustment for the stocks.
+Enum: <code>raw</code>, <code>split</code>, <code>dividend</code> or <code>all</code>.</dd>
+<dt><strong><code>limit</code></strong> :&ensp;<code>int</code></dt>
+<dd>The maximum number of returned items.</dd>
+<dt><strong><code>exchange</code></strong> :&ensp;<code>str</code></dt>
+<dd>For crypto symbols. Which exchange you wish to retrieve data from.
+Enum: <code>FTX</code>, <code>ERSX</code>, <code>CBSE</code></dd>
+</dl>
+<p>For defaults, see <code>data.alpaca</code> in <code><a title="vectorbt._settings.settings" href="../_settings.html#vectorbt._settings.settings">settings</a></code>.</p></div>
+<details class="source">
+<summary>
+<span>Expand source code</span>
+</summary>
+<pre><code class="python">@classmethod
+def download_symbol(cls,
+                    symbol: str,
+                    timeframe: str = &#39;1d&#39;,
+                    start: tp.DatetimeLike = 0,
+                    end: tp.DatetimeLike = &#39;now UTC&#39;,
+                    adjustment: tp.Optional[str] = &#39;all&#39;,
+                    limit: int = 500,
+                    exchange: tp.Optional[str] = &#39;CBSE&#39;,
+                    **kwargs) -&gt; tp.Frame:
+    &#34;&#34;&#34;Download the symbol.
+
+    Args:
+        symbol (str): Symbol.
+        timeframe (str): Timeframe of data. Must be integer multiple of &#39;m&#39; (minute), &#39;h&#39; (hour) or &#39;d&#39; (day). i.e. &#39;15m&#39; 
+            Note: Data from the latest 15 minutes is not available with a free data plan.
+            See: https://alpaca.markets/data
+
+        start (any): Start datetime.
+
+            See `vectorbt.utils.datetime_.to_tzaware_datetime`.
+        end (any): End datetime.
+
+            See `vectorbt.utils.datetime_.to_tzaware_datetime`.
+        adjustment (str): Specifies the corporate action adjustment for the stocks. 
+            Enum: `raw`, `split`, `dividend` or `all`.
+        limit (int): The maximum number of returned items.
+        exchange (str): For crypto symbols. Which exchange you wish to retrieve data from.
+            Enum: `FTX`, `ERSX`, `CBSE`
+
+    For defaults, see `data.alpaca` in `vectorbt._settings.settings`.
+    &#34;&#34;&#34;
+    from vectorbt._settings import settings
+    from alpaca_trade_api.rest import TimeFrameUnit, TimeFrame, REST
+    
+    alpaca_cfg = settings[&#39;data&#39;][&#39;alpaca&#39;]
+    
+    client_kwargs = dict()
+    for k in get_func_kwargs(REST):
+        if k in kwargs:
+            client_kwargs[k] = kwargs.pop(k)
+
+    client_kwargs = merge_dicts(alpaca_cfg, client_kwargs)
+    
+    client = REST(**client_kwargs)
+
+    _timeframe_units = {&#39;d&#39;: TimeFrameUnit.Day, &#39;h&#39;: TimeFrameUnit.Hour, &#39;m&#39;: TimeFrameUnit.Minute}
+
+    if len(timeframe) &lt; 2:
+        raise ValueError(&#34;invalid timeframe&#34;)
+        
+    amount_str = timeframe[:-1]
+    unit_str = timeframe[-1]
+
+    if not amount_str.isnumeric() or unit_str not in _timeframe_units:
+        raise ValueError(&#34;invalid timeframe&#34;)
+    
+    amount = int(amount_str)
+    unit = _timeframe_units[unit_str]
+
+    _timeframe = TimeFrame(amount, unit)
+
+    start_ts = to_tzaware_datetime(start, tz=get_utc_tz()).isoformat()
+    end_ts = to_tzaware_datetime(end, tz=get_utc_tz()).isoformat()
+
+    
+    def _is_crypto_symbol(symbol):
+        return len(symbol) == 6 and &#34;USD&#34; in symbol
+
+    if _is_crypto_symbol(symbol):
+        df = client.get_crypto_bars(symbol=symbol,
+                                timeframe=_timeframe,
+                                start=start_ts,
+                                end=end_ts,
+                                limit=limit,
+                                exchanges=exchange).df
+    else:
+        df = client.get_bars(symbol=symbol, 
+                            timeframe=_timeframe,
+                            start=start_ts,
+                            end=end_ts,
+                            adjustment=adjustment, 
+                            limit=limit).df
+    
+    # filter for OHLCV
+    # remove extra columns
+    df.drop([&#39;trade_count&#39;, &#39;vwap&#39;], axis=1, errors=&#39;ignore&#39;, inplace=True)
+
+    # capitalize
+    df.rename(columns={&#39;open&#39;: &#39;Open&#39;, &#39;high&#39;: &#39;High&#39;, &#39;low&#39;: &#39;Low&#39;, &#39;close&#39;: &#39;Close&#39;, &#39;volume&#39;: &#39;Volume&#39;, &#39;exchange&#39;:&#39;Exchange&#39;}, inplace=True)
+
+    df[&#39;Open&#39;] = df[&#39;Open&#39;].astype(float)
+    df[&#39;High&#39;] = df[&#39;High&#39;].astype(float)
+    df[&#39;Low&#39;] = df[&#39;Low&#39;].astype(float)
+    df[&#39;Close&#39;] = df[&#39;Close&#39;].astype(float)
+    df[&#39;Volume&#39;] = df[&#39;Volume&#39;].astype(float)
+
+    return df</code></pre>
+</details>
+</dd>
+</dl>
+<h3 class="section-subtitle">Methods</h3>
+<dl>
+<dt id="vectorbt.data.custom.AlpacaData.update_symbol"><code class="name flex">
+<span>def <span class="ident child-name">update_symbol</span></span>(<span class="params">self, symbol, **kwargs)</span><span class="return_type"></span>
+</code></dt>
+<dd>
+<div class="desc"><p>Update the symbol.</p>
+<p><code>**kwargs</code> will override keyword arguments passed to <code><a title="vectorbt.data.custom.AlpacaData.download_symbol" href="#vectorbt.data.custom.AlpacaData.download_symbol">AlpacaData.download_symbol()</a></code>.</p></div>
+<details class="source">
+<summary>
+<span>Expand source code</span>
+</summary>
+<pre><code class="python">def update_symbol(self, symbol: str, **kwargs) -&gt; tp.Frame:
+    &#34;&#34;&#34;Update the symbol.
+
+    `**kwargs` will override keyword arguments passed to `AlpacaData.download_symbol`.&#34;&#34;&#34;
+    download_kwargs = self.select_symbol_kwargs(symbol, self.download_kwargs)
+    download_kwargs[&#39;start&#39;] = self.data[symbol].index[-1]
+    download_kwargs[&#39;show_progress&#39;] = False
+    kwargs = merge_dicts(download_kwargs, kwargs)
+    return self.download_symbol(symbol, **kwargs)</code></pre>
+</details>
+</dd>
+</dl>
+<h3 class="section-subtitle">Inherited members</h3>
+<ul class="hlist">
+<li><code><b><a title="vectorbt.data.base.Data" href="base.html#vectorbt.data.base.Data">Data</a></b></code>:
+<ul class="hlist">
+<li><code><a title="vectorbt.data.base.Data.align_columns" href="base.html#vectorbt.data.base.Data.align_columns">align_columns</a></code></li>
+<li><code><a title="vectorbt.data.base.Data.align_index" href="base.html#vectorbt.data.base.Data.align_index">align_index</a></code></li>
+<li><code><a title="vectorbt.data.base.Data.build_metrics_doc" href="../generic/stats_builder.html#vectorbt.generic.stats_builder.StatsBuilderMixin.build_metrics_doc">build_metrics_doc</a></code></li>
+<li><code><a title="vectorbt.data.base.Data.build_subplots_doc" href="../generic/plots_builder.html#vectorbt.generic.plots_builder.PlotsBuilderMixin.build_subplots_doc">build_subplots_doc</a></code></li>
+<li><code><a title="vectorbt.data.base.Data.concat" href="base.html#vectorbt.data.base.Data.concat">concat</a></code></li>
+<li><code><a title="vectorbt.data.base.Data.config" href="../utils/config.html#vectorbt.utils.config.Configured.config">config</a></code></li>
+<li><code><a title="vectorbt.data.base.Data.copy" href="../utils/config.html#vectorbt.utils.config.Configured.copy">copy</a></code></li>
+<li><code><a title="vectorbt.data.base.Data.data" href="base.html#vectorbt.data.base.Data.data">data</a></code></li>
+<li><code><a title="vectorbt.data.base.Data.deep_getattr" href="../utils/attr_.html#vectorbt.utils.attr_.AttrResolver.deep_getattr">deep_getattr</a></code></li>
+<li><code><a title="vectorbt.data.base.Data.download" href="base.html#vectorbt.data.base.Data.download">download</a></code></li>
+<li><code><a title="vectorbt.data.base.Data.download_kwargs" href="base.html#vectorbt.data.base.Data.download_kwargs">download_kwargs</a></code></li>
+<li><code><a title="vectorbt.data.base.Data.dumps" href="../utils/config.html#vectorbt.utils.config.Pickleable.dumps">dumps</a></code></li>
+<li><code><a title="vectorbt.data.base.Data.from_data" href="base.html#vectorbt.data.base.Data.from_data">from_data</a></code></li>
+<li><code><a title="vectorbt.data.base.Data.get" href="base.html#vectorbt.data.base.Data.get">get</a></code></li>
+<li><code><a title="vectorbt.data.base.Data.iloc" href="../base/indexing.html#vectorbt.base.indexing.PandasIndexer.iloc">iloc</a></code></li>
+<li><code><a title="vectorbt.data.base.Data.indexing_func" href="base.html#vectorbt.data.base.Data.indexing_func">indexing_func</a></code></li>
+<li><code><a title="vectorbt.data.base.Data.indexing_kwargs" href="../base/indexing.html#vectorbt.base.indexing.PandasIndexer.indexing_kwargs">indexing_kwargs</a></code></li>
+<li><code><a title="vectorbt.data.base.Data.load" href="../utils/config.html#vectorbt.utils.config.Pickleable.load">load</a></code></li>
+<li><code><a title="vectorbt.data.base.Data.loads" href="../utils/config.html#vectorbt.utils.config.Pickleable.loads">loads</a></code></li>
+<li><code><a title="vectorbt.data.base.Data.loc" href="../base/indexing.html#vectorbt.base.indexing.PandasIndexer.loc">loc</a></code></li>
+<li><code><a title="vectorbt.data.base.Data.missing_columns" href="base.html#vectorbt.data.base.Data.missing_columns">missing_columns</a></code></li>
+<li><code><a title="vectorbt.data.base.Data.missing_index" href="base.html#vectorbt.data.base.Data.missing_index">missing_index</a></code></li>
+<li><code><a title="vectorbt.data.base.Data.override_metrics_doc" href="../generic/stats_builder.html#vectorbt.generic.stats_builder.StatsBuilderMixin.override_metrics_doc">override_metrics_doc</a></code></li>
+<li><code><a title="vectorbt.data.base.Data.override_subplots_doc" href="../generic/plots_builder.html#vectorbt.generic.plots_builder.PlotsBuilderMixin.override_subplots_doc">override_subplots_doc</a></code></li>
+<li><code><a title="vectorbt.data.base.Data.plot" href="base.html#vectorbt.data.base.Data.plot">plot</a></code></li>
+<li><code><a title="vectorbt.data.base.Data.plots" href="../generic/plots_builder.html#vectorbt.generic.plots_builder.PlotsBuilderMixin.plots">plots</a></code></li>
+<li><code><a title="vectorbt.data.base.Data.plots_defaults" href="base.html#vectorbt.data.base.Data.plots_defaults">plots_defaults</a></code></li>
+<li><code><a title="vectorbt.data.base.Data.post_resolve_attr" href="../utils/attr_.html#vectorbt.utils.attr_.AttrResolver.post_resolve_attr">post_resolve_attr</a></code></li>
+<li><code><a title="vectorbt.data.base.Data.pre_resolve_attr" href="../utils/attr_.html#vectorbt.utils.attr_.AttrResolver.pre_resolve_attr">pre_resolve_attr</a></code></li>
+<li><code><a title="vectorbt.data.base.Data.regroup" href="../base/array_wrapper.html#vectorbt.base.array_wrapper.Wrapping.regroup">regroup</a></code></li>
+<li><code><a title="vectorbt.data.base.Data.replace" href="../utils/config.html#vectorbt.utils.config.Configured.replace">replace</a></code></li>
+<li><code><a title="vectorbt.data.base.Data.resolve_attr" href="../utils/attr_.html#vectorbt.utils.attr_.AttrResolver.resolve_attr">resolve_attr</a></code></li>
+<li><code><a title="vectorbt.data.base.Data.resolve_self" href="../base/array_wrapper.html#vectorbt.base.array_wrapper.Wrapping.resolve_self">resolve_self</a></code></li>
+<li><code><a title="vectorbt.data.base.Data.save" href="../utils/config.html#vectorbt.utils.config.Pickleable.save">save</a></code></li>
+<li><code><a title="vectorbt.data.base.Data.select_one" href="../base/array_wrapper.html#vectorbt.base.array_wrapper.Wrapping.select_one">select_one</a></code></li>
+<li><code><a title="vectorbt.data.base.Data.select_one_from_obj" href="../base/array_wrapper.html#vectorbt.base.array_wrapper.Wrapping.select_one_from_obj">select_one_from_obj</a></code></li>
+<li><code><a title="vectorbt.data.base.Data.select_symbol_kwargs" href="base.html#vectorbt.data.base.Data.select_symbol_kwargs">select_symbol_kwargs</a></code></li>
+<li><code><a title="vectorbt.data.base.Data.self_aliases" href="../utils/attr_.html#vectorbt.utils.attr_.AttrResolver.self_aliases">self_aliases</a></code></li>
+<li><code><a title="vectorbt.data.base.Data.stats" href="../generic/stats_builder.html#vectorbt.generic.stats_builder.StatsBuilderMixin.stats">stats</a></code></li>
+<li><code><a title="vectorbt.data.base.Data.stats_defaults" href="base.html#vectorbt.data.base.Data.stats_defaults">stats_defaults</a></code></li>
+<li><code><a title="vectorbt.data.base.Data.symbols" href="base.html#vectorbt.data.base.Data.symbols">symbols</a></code></li>
+<li><code><a title="vectorbt.data.base.Data.to_doc" href="../utils/docs.html#vectorbt.utils.docs.Documented.to_doc">to_doc</a></code></li>
+<li><code><a title="vectorbt.data.base.Data.tz_convert" href="base.html#vectorbt.data.base.Data.tz_convert">tz_convert</a></code></li>
+<li><code><a title="vectorbt.data.base.Data.tz_localize" href="base.html#vectorbt.data.base.Data.tz_localize">tz_localize</a></code></li>
+<li><code><a title="vectorbt.data.base.Data.update" href="base.html#vectorbt.data.base.Data.update">update</a></code></li>
+<li><code><a title="vectorbt.data.base.Data.update_config" href="../utils/config.html#vectorbt.utils.config.Configured.update_config">update_config</a></code></li>
+<li><code><a title="vectorbt.data.base.Data.wrapper" href="../base/array_wrapper.html#vectorbt.base.array_wrapper.Wrapping.wrapper">wrapper</a></code></li>
+<li><code><a title="vectorbt.data.base.Data.writeable_attrs" href="../utils/config.html#vectorbt.utils.config.Configured.writeable_attrs">writeable_attrs</a></code></li>
+<li><code><a title="vectorbt.data.base.Data.xs" href="../base/indexing.html#vectorbt.base.indexing.PandasIndexer.xs">xs</a></code></li>
+</ul>
+</li>
+</ul>
+</dd>
 <dt id="vectorbt.data.custom.BinanceData"><code class="flex name class">
 <span>class <span class="ident parent-name">BinanceData</span></span>
 (<span class="params">wrapper, data, tz_localize, tz_convert, missing_index, missing_columns, download_kwargs, **kwargs</span>)
@@ -2906,7 +3533,7 @@ def download_symbol(cls,
 <header>
 <a class="homelink" rel="home" title="pdoc Home" href="https://github.com/polakowo/vectorbt">
 <img src="data:image/svg+xml;base64,PD94bWwgdmVyc2lvbj0iMS4wIiBlbmNvZGluZz0idXRmLTgiPz4KPCEtLSBHZW5lcmF0b3I6IEFkb2JlIElsbHVzdHJhdG9yIDI1LjAuMSwgU1ZHIEV4cG9ydCBQbHVnLUluIC4gU1ZHIFZlcnNpb246IDYuMDAgQnVpbGQgMCkgIC0tPgo8c3ZnIHZlcnNpb249IjEuMSIgaWQ9IkNhcGFfMSIgeG1sbnM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDAvc3ZnIiB4bWxuczp4bGluaz0iaHR0cDovL3d3dy53My5vcmcvMTk5OS94bGluayIgeD0iMHB4IiB5PSIwcHgiCgkgdmlld0JveD0iMCAwIDUxMiA1MTIiIHN0eWxlPSJlbmFibGUtYmFja2dyb3VuZDpuZXcgMCAwIDUxMiA1MTI7IiB4bWw6c3BhY2U9InByZXNlcnZlIj4KPHN0eWxlIHR5cGU9InRleHQvY3NzIj4KCS5zdDB7ZmlsbDojRUYwMDAwO30KCS5zdDF7ZmlsbDojRkY5MDAwO30KCS5zdDJ7ZmlsbDojRkZERjAwO30KCS5zdDN7ZmlsbDojMjgyQzM0O30KPC9zdHlsZT4KPGc+Cgk8Zz4KCQk8Zz4KCQkJPHBvbHlnb24gY2xhc3M9InN0MCIgcG9pbnRzPSIxNTUuMywzMDAuMSAyODMuMSwwIDIwOCwwIDExMC44LDAgMzUuOCwwIDEuMiw0NTAuMiA3Ni4zLDQ1MC4yIAkJCSIvPgoJCTwvZz4KCTwvZz4KCTxnPgoJCTxnPgoJCQk8cG9seWdvbiBjbGFzcz0ic3QxIiBwb2ludHM9IjIzMC40LDMwMC4xIDM1OC4xLDAgMjgzLjEsMCAxODUuOCwwIDExMC44LDAgNzYuMyw0NTAuMiAxNTEuMyw0NTAuMiAJCQkiLz4KCQk8L2c+Cgk8L2c+Cgk8Zz4KCQk8Zz4KCQkJPHBvbHlnb24gY2xhc3M9InN0MiIgcG9pbnRzPSIzMDUuNCwzMDAuMSA0MzMuMSwwIDM1OC4xLDAgMzMxLjYsNjIuMyAyNjAuOCwwIDE4NS44LDAgMTUxLjMsNDUwLjIgMjI2LjQsNDUwLjIgCQkJIi8+CgkJPC9nPgoJPC9nPgoJPGc+CgkJPGc+CgkJCTxwb2x5Z29uIGNsYXNzPSJzdDMiIHBvaW50cz0iNTEwLjgsMCA0MzMuMSwwIDMwNS40LDMwMC4xIDMzOC40LDAgMjYwLjgsMCAyMjYuNCw0NTAuMiAzMDQsNDUwLjIgCQkJIi8+CgkJPC9nPgoJPC9nPgo8L2c+Cjwvc3ZnPgo="/>
-vectorbt <span class="version">0.22.0</span></a>
+vectorbt <span class="version">0.23.0</span></a>
 </header>
 <div class="search-container" id="docsearch"></div>
 <div class="scrollable-index">
@@ -2927,6 +3554,13 @@ vectorbt <span class="version">0.22.0</span></a>
 </li>
 <li><h3><a href="#header-classes">Classes</a></h3>
 <ul>
+<li>
+<h4><code><a title="vectorbt.data.custom.AlpacaData" href="#vectorbt.data.custom.AlpacaData">AlpacaData</a></code></h4>
+<ul class="">
+<li><code><a title="vectorbt.data.custom.AlpacaData.download_symbol" href="#vectorbt.data.custom.AlpacaData.download_symbol">download_symbol</a></code></li>
+<li><code><a title="vectorbt.data.custom.AlpacaData.update_symbol" href="#vectorbt.data.custom.AlpacaData.update_symbol">update_symbol</a></code></li>
+</ul>
+</li>
 <li>
 <h4><code><a title="vectorbt.data.custom.BinanceData" href="#vectorbt.data.custom.BinanceData">BinanceData</a></code></h4>
 <ul class="">
